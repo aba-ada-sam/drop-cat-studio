@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drop Cat Go Studio</title>
+  <link rel="icon" href="/static/favicon.ico">
+  <link rel="apple-touch-icon" href="/static/logo-192.png">
+  <link rel="stylesheet" href="/static/css/design-system.css">
+  <link rel="stylesheet" href="/static/css/tabs.css">
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SPLASH / LOADING SCREEN                                                -->
+  <!-- Shown while the app boots. Replaced by the main UI once ready.        -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="splash">
+    <div class="splash-inner">
+      <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="splash-logo">
+      <div class="splash-title-block">
+        <p class="splash-andrews">✦ &nbsp; Andrew's &nbsp; ✦</p>
+        <h1 class="splash-title">Drop Cat Go<br>Studio</h1>
+        <p class="splash-sub">✦ &nbsp; AI Video Production &nbsp; ✦</p>
+      </div>
+
+      <div class="splash-checklist" id="splash-checks">
+        <div class="splash-check" id="chk-server">
+          <span class="chk-dot"></span><span class="chk-text">Connecting to server...</span>
+        </div>
+        <div class="splash-check" id="chk-ffmpeg">
+          <span class="chk-dot"></span><span class="chk-text">Checking ffmpeg...</span>
+        </div>
+        <div class="splash-check" id="chk-ollama">
+          <span class="chk-dot"></span><span class="chk-text">Checking Ollama AI...</span>
+        </div>
+        <div class="splash-check" id="chk-forge">
+          <span class="chk-dot"></span><span class="chk-text">Checking Forge SD...</span>
+        </div>
+        <div class="splash-check" id="chk-wangp">
+          <span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span>
+        </div>
+        <div class="splash-check" id="chk-acestep">
+          <span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span>
+        </div>
+      </div>
+
+      <div id="splash-load-anyway" style="display:none; text-align:center; margin-top:20px">
+        <button class="btn btn-primary" id="btn-load-anyway" style="padding:8px 28px; font-size:.85rem; opacity:.85">
+          Load without waiting
+        </button>
+      </div>
+
+      <div id="splash-error" style="display:none">
+        <p class="splash-err-msg"></p>
+        <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MAIN APP (hidden until splash clears)                                  -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="app" style="display:none; flex-direction:column; min-height:100vh">
+
+    <!-- ── Header ──────────────────────────────────────────────────────── -->
+    <header id="app-header">
+      <div class="header-marquee">
+      <div class="header-left">
+        <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="header-logo">
+        <div class="header-title-block">
+          <!--
+            "Andrew's" in a gentle arch — SVG text on a quadratic bezier path.
+            The path M 10,22 Q 100,2 190,22 draws a shallow upward curve.
+            Text-anchor=middle + startOffset=50% centres it on the arch.
+          -->
+          <svg viewBox="0 0 200 28" class="header-andrews-svg" aria-hidden="true">
+            <defs>
+              <path id="andrews-arch" d="M 10,22 Q 100,2 190,22"/>
+            </defs>
+            <text font-family="'Palatino Linotype','Book Antiqua','Georgia',serif"
+                  font-size="11.5" font-style="italic" letter-spacing="3"
+                  fill="#c4a882">
+              <textPath href="#andrews-arch" startOffset="50%" text-anchor="middle">
+                ✦  Andrew's  ✦
+              </textPath>
+            </text>
+          </svg>
+          <span class="header-studio-name">Drop Cat Go Studio</span>
+        </div>
+      </div>
+      <div class="header-center">
+        <div class="service-pills" id="service-pills">
+          <span class="pill" id="pill-wangp" title="WanGP video generation service">
+            <span class="dot"></span> WanGP
+          </span>
+          <span class="pill" id="pill-acestep" title="ACE-Step music generation service">
+            <span class="dot"></span> ACE-Step
+          </span>
+          <span class="pill" id="pill-forge" title="Forge Stable Diffusion — http://127.0.0.1:7861">
+            <span class="dot"></span> Forge SD
+          </span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="btn-icon" id="btn-help" title="Quick start guide">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-settings" title="Settings — configure WanGP, Forge, wildcards">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+      </div>
+      </div><!-- /.header-marquee -->
+    </header>
+
+    <!-- ── Tab Navigation ──────────────────────────────────────────────── -->
+    <nav id="tab-bar">
+      <div class="tab-group primary">
+        <button class="tab active" data-tab="fun-videos">
+          <img src="/static/icon-fun-videos.png" alt="" class="tab-icon"> Fun Videos
+        </button>
+        <button class="tab" data-tab="bridges">
+          <img src="/static/icon-bridges.png" alt="" class="tab-icon"> Video Bridges
+        </button>
+        <button class="tab" data-tab="sd-prompts">
+          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> SD Prompts
+        </button>
+      </div>
+      <div class="tab-group secondary">
+        <div class="dropdown">
+          <button class="tab dropdown-trigger">
+            Tools
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="dropdown-menu">
+            <button class="dropdown-item" data-tab="image2video">
+              <img src="/static/icon-image2video.png" alt="" class="tab-icon-sm"> Image to Video
+            </button>
+            <button class="dropdown-item" data-tab="video-tools">
+              <img src="/static/icon-video-tools.png" alt="" class="tab-icon-sm"> Video Tools
+            </button>
+            <button class="dropdown-item" data-tab="wildcards">
+              <img src="/static/icon-wildcards.png" alt="" class="tab-icon-sm"> Wildcard Manager
+            </button>
+          </div>
+        </div>
+        <button class="tab" data-tab="services">Services</button>
+      </div>
+    </nav>
+
+    <!-- ── Tab Content ─────────────────────────────────────────────────── -->
+    <main id="tab-content">
+      <section class="tab-panel active" id="panel-fun-videos"><!-- tab-fun-videos.js --></section>
+      <section class="tab-panel" id="panel-bridges"><!-- tab-bridges.js --></section>
+      <section class="tab-panel" id="panel-sd-prompts"><!-- tab-sd-prompts.js --></section>
+      <section class="tab-panel" id="panel-image2video"><!-- panel-image2video.js --></section>
+      <section class="tab-panel" id="panel-video-tools"><!-- panel-video-tools.js --></section>
+      <section class="tab-panel" id="panel-wildcards"><!-- panel-wildcards.js --></section>
+      <section class="tab-panel" id="panel-services">
+        <div class="services-grid">
+          <div class="service-card" id="svc-wangp">
+            <div class="service-header">
+              <span class="dot" id="dot-wangp"></span>
+              <h3>WanGP — AI Video Generation</h3>
+            </div>
+            <p class="service-message" id="msg-wangp">Checking...</p>
+            <p class="service-hint">Used by Fun Videos and Video Bridges to generate AI video clips. Needs a GPU with VRAM.</p>
+            <button class="btn btn-sm" id="btn-start-wangp">Start Worker</button>
+          </div>
+          <div class="service-card" id="svc-acestep">
+            <div class="service-header">
+              <span class="dot" id="dot-acestep"></span>
+              <h3>ACE-Step — Music Generation</h3>
+            </div>
+            <p class="service-message" id="msg-acestep">Checking...</p>
+            <p class="service-hint">Generates matching background music for Fun Videos. Optional — you can skip audio.</p>
+            <button class="btn btn-sm" id="btn-start-acestep">Start Server</button>
+          </div>
+          <div class="service-card">
+            <div class="service-header">
+              <span class="dot" id="dot-forge-svc"></span>
+              <h3>Forge SD — Image Generation</h3>
+            </div>
+            <p class="service-message" id="msg-forge-svc">Checking...</p>
+            <p class="service-hint">Stable Diffusion image generation at C:\forge. Start it separately with the <code>--api</code> flag.</p>
+          </div>
+        </div>
+        <div class="card" id="system-info-card">
+          <h3>System</h3>
+          <div id="system-info">Loading...</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Log Panel ───────────────────────────────────────────────────── -->
+    <footer id="log-panel">
+      <button class="log-toggle" id="log-toggle">
+        <span>Server Logs</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log file in new tab" onclick="event.stopPropagation()">&#128196; full log</a>
+      </button>
+      <div class="log-content" id="log-content">
+        <div class="log-entries" id="log-entries"></div>
+      </div>
+    </footer>
+
+  </div><!-- /#app -->
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MODALS                                                                 -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Settings -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="btn-icon modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <h4 class="settings-section-label">AI Video Generation (WanGP)</h4>
+          <div class="form-group">
+            <label>WanGP Path <span class="hint-text">— folder containing wgp.py, e.g. C:\pinokio\api\wan.git\app</span></label>
+            <div style="display:flex; gap:6px">
+              <input type="text" id="cfg-wan2gp_root" placeholder="C:\path\to\Wan2GP" style="flex:1">
+              <button class="btn btn-sm" id="btn-validate-wan">Validate</button>
+            </div>
+            <span class="validation-msg" id="val-wan"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-label">Music Generation (ACE-Step)</h4>
+          <div class="form-group">
+            <label>ACE-Step Path <span class="hint-text">— folder containing the ACE-Step .venv</span></label>
+            <div style="display:flex; gap:6px">
+              <input type="text" id="cfg-acestep_root" placeholder="C:\path\to\ACE-Step" style="flex:1">
+              <button class="btn btn-sm" id="btn-validate-ace">Validate</button>
+            </div>
+            <span class="validation-msg" id="val-ace"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-label">Stable Diffusion Wildcards</h4>
+          <div class="form-group">
+            <label>Wildcards Directory <span class="hint-text">— your sd-dynamic-prompts wildcards folder</span></label>
+            <input type="text" id="cfg-sd_wildcards_dir" placeholder="Z:\Python310\...\wildcards">
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-label">AI Prompt Engine</h4>
+
+          <!-- Big Anthropic on/off toggle -->
+          <div class="ai-provider-card">
+            <div class="provider-side" id="provider-side-ollama">
+              <div class="provider-icon-glyph">🖥</div>
+              <div class="provider-name">OLLAMA</div>
+              <div class="provider-sub">Local &middot; No internet</div>
+            </div>
+
+            <div class="big-toggle-wrap">
+              <input type="checkbox" id="provider-toggle-input" class="big-toggle-input">
+              <label for="provider-toggle-input" class="big-toggle-label" title="Toggle Anthropic Claude API on/off">
+                <span class="big-toggle-thumb"></span>
+              </label>
+            </div>
+
+            <div class="provider-side" id="provider-side-anthropic">
+              <div class="provider-icon-glyph">☁</div>
+              <div class="provider-name">ANTHROPIC</div>
+              <div class="provider-sub">Cloud &middot; Claude API</div>
+            </div>
+          </div>
+
+          <!-- Anthropic key field (shown when toggle is ON) -->
+          <div id="llm-anthropic-section" style="display:none; margin-top:14px">
+            <div class="form-group">
+              <label>Anthropic API Key</label>
+              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)">
+              <span class="hint-text" id="anthropic-key-hint"></span>
+            </div>
+          </div>
+
+          <!-- Ollama settings (shown when toggle is OFF) -->
+          <div id="llm-ollama-section" style="margin-top:14px">
+            <div class="form-group">
+              <label>Ollama URL <span class="hint-text">— default http://localhost:11434</span></label>
+              <input type="text" id="cfg-ollama_host" placeholder="http://localhost:11434">
+            </div>
+            <div class="form-group">
+              <label>Vision model <span class="hint-text">— used for prompt generation</span></label>
+              <select id="cfg-ollama_fast_model" style="width:100%">
+                <option value="">Loading models...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Power model <span class="hint-text">— deep analysis tasks</span></label>
+              <select id="cfg-ollama_power_model" style="width:100%">
+                <option value="">Loading models...</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="btn-save-settings" style="margin-top:8px">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick-start help -->
+  <div class="modal-overlay" id="modal-help">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <h2>Quick Start Guide</h2>
+        <button class="btn-icon modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="help-flow">
+          <div class="help-step">
+            <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
+            <div>
+              <strong>Fun Videos</strong> — Start here. Drop a photo, let AI generate a creative video with matching music. Uses local Ollama — no API keys needed.
+            </div>
+          </div>
+          <div class="help-arrow">↓ generated clips flow automatically</div>
+          <div class="help-step">
+            <img src="/static/icon-bridges.png" alt="" class="help-icon">
+            <div>
+              <strong>Video Bridges</strong> — Got 2+ clips? Drop them here and AI will generate smooth cinematic transitions between them. Clips from Fun Videos appear automatically.
+            </div>
+          </div>
+          <div class="help-arrow">↓ or start with images</div>
+          <div class="help-step">
+            <img src="/static/icon-sd-prompts.png" alt="" class="help-icon">
+            <div>
+              <strong>SD Prompts</strong> — Drop a reference image, get Stable Diffusion prompts in three regional columns (Left / Center / Right) for Forge Couple. Generate the image directly in Forge, then send it to Fun Videos.
+            </div>
+          </div>
+          <div class="help-arrow">↓ Tools dropdown for utilities</div>
+          <div class="help-step">
+            <img src="/static/icon-video-tools.png" alt="" class="help-icon">
+            <div>
+              <strong>Video Tools</strong> — Reverse, mirror, speed up/slow down, upscale, or convert any video. Drop files or paste paths.
+            </div>
+          </div>
+          <div class="help-step">
+            <img src="/static/icon-image2video.png" alt="" class="help-icon">
+            <div>
+              <strong>Image to Video</strong> — Turn a folder of photos into a Ken Burns slideshow with zoom and crossfade effects. No AI needed.
+            </div>
+          </div>
+        </div>
+
+        <div class="help-tips">
+          <h4>Tips</h4>
+          <ul>
+            <li>You can use any single tab standalone — you don't have to follow the full pipeline.</li>
+            <li>Every generated file is tracked in the session and appears as an option in other tabs.</li>
+            <li>In SD Prompts, type <code>__wildcard__</code> or <code>{option1|option2}</code> and Forge will expand it randomly on each generation.</li>
+            <li>Services (WanGP, ACE-Step, Forge) only need to be running for features that use them.</li>
+          </ul>
+        </div>
+
+        <div style="text-align:center; margin-top:16px">
+          <button class="btn btn-primary modal-close" style="padding:10px 32px">Let's Go!</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-wrap"></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

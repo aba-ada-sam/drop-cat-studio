@@ -1,0 +1,85 @@
+/* Drop Cat Go Studio — Circus Tab Navigation */
+
+#tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  /* Subtle gradient for depth */
+  background: linear-gradient(180deg, #180b0b 0%, var(--bg-raised) 100%);
+}
+
+.tab-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tab {
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: .92rem;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  transition: color var(--dur-fast);
+  letter-spacing: .02em;
+}
+.tab:hover { color: var(--text-2); }
+.tab.active { color: var(--accent-2); }
+.tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 6px; right: 6px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--circus-red), var(--accent));
+  border-radius: 1px 1px 0 0;
+}
+
+/* ── Dropdown (Tools) ─────────────────────────────────────────────────────── */
+
+.dropdown { position: relative; }
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dropdown-trigger svg { transition: transform var(--dur-fast); }
+.dropdown:hover .dropdown-trigger svg { transform: rotate(180deg); }
+
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg), 0 0 20px rgba(196,30,58,.1);
+  padding: 4px;
+  z-index: 50;
+}
+.dropdown:hover .dropdown-menu { display: block; }
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: .92rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: all var(--dur-fast);
+}
+.dropdown-item:hover { background: var(--surface-2); color: var(--text); }
+.dropdown-item.active { color: var(--accent); background: var(--accent-bg); }

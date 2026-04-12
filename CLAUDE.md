@@ -1,0 +1,186 @@
+# Drop Cat Go Studio — CLAUDE.md
+
+This file is read automatically at the start of every Claude Code session on this project.
+
+---
+
+## What This Is
+
+**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew.
+It merges 6 separate tools that previously ran as independent apps on different ports into one FastAPI + vanilla JS web app.
+
+**Run it:** `launch.bat` → opens at http://127.0.0.1:7860
+
+---
+
+## Current State (as of 2026-04-09)
+
+Phases 1–3 complete. The app is built and ready for testing.
+
+- **Phase 1** — Core infrastructure (config, logging, LLM router, job queue, services)
+- **Phase 2** — All 5 feature backends with 34 API routes
+- **Phase 3** — Full frontend (6 feature tabs, circus theme, logo, splash screen)
+
+**Known issue at first launch:** `ffmpeg` is not on PATH. Nearly all video features require it. Andrew needs to install ffmpeg and add its `bin` folder to the system PATH.
+
+---
+
+## Architecture
+
+Single FastAPI server on **port 7860**. No separate ports per feature.
+
+```
+app.py                  — FastAPI entry, lifespan, global routes
+core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session)
+services/               — External service management (WanGP, ACE-Step, Forge)
+features/
+  image2video/          — Ken Burns slideshow from images
+  fun_videos/           — Photo → AI video + music pipeline
+  video_bridges/        — AI transition videos between clips
+  sd_prompts/           — SD prompt generation + Forge image generation
+  video_tools/          — Batch reverse/flip/speed/upscale/convert
+static/                 — Vanilla JS frontend (ES modules, no framework)
+  css/design-system.css — Circus theme (dark crimson/gold palette)
+  js/app.js             — Tab routing, splash screen, service polling
+  js/tab-*.js           — One JS module per primary tab
+  js/panel-*.js         — One JS module per tools panel
+```
+
+### Key design decisions
+- **Vanilla JS, ES modules** — no React, no build step, just `<script type="module">`
+- **Single GPU queue** — Fun Videos and Bridges share WanGP; job_manager enforces sequential GPU access
+- **LLM Router** — All AI calls go through `core/llm_router.py` (rate limiting, Anthropic→OpenAI overflow)
+- **Session tracking** — Every generated file is registered via `core/session.py` so outputs appear as inputs in other tabs
+- **SD Prompts conversation state** — Stored server-side in `features/sd_prompts/routes.py:_conv_states` dict keyed by session ID (replaces Gradio state)
+
+---
+
+## External Services
+
+| Service | Port | Purpose | How to start |
+|---------|------|---------|-------------|
+| WanGP | 7899 (worker) | AI video generation | Set path in Settings → app auto-starts |
+| ACE-Step | 8019 | Music generation | Set path in Settings → app auto-starts |
+| Forge SD | 7861 | Stable Diffusion images | `C:\forge` — start with `--api` flag |
+
+**Forge is at `C:\forge`.** The app checks port 7861 on startup and shows status in the header.
+
+---
+
+## Config & Keys
+
+- **Config file:** `config.json` in project root (auto-created, 53 namespaced keys)
+- **API keys:** `keys.json` in project root OR `C:\JSON Credentials\chatbot\config.json`
+- **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, globals shared
+
+Set WanGP/ACE-Step paths in the Settings modal (gear icon in header).
+Set Anthropic/OpenAI keys via the key icon in the header.
+
+---
+
+## Feature Tab Overview
+
+### Fun Videos (`/api/fun/*`)
+Photo → AI video + audio. Step-by-step cards: upload photo → generate prompts → configure audio → generate.
+Uses WanGP (video) + ACE-Step (music). Claude analyzes the photo and generates creative I2V prompts.
+
+### Video Bridges (`/api/bridges/*`)
+Upload 2+ clips → AI generates cinematic transitions between them → compiled final video.
+Uses WanGP for bridge generation, OpenCV morph as fallback.
+
+### SD Prompts (`/api/prompts/*`)
+Drop image → Claude generates LEFT/CENTER/RIGHT regional prompts for Forge Couple.
+**Forge Couple is ON by default** — the 3 columns map to spatial regions.
+Dynamic prompts (`__wildcard__` syntax) are resolved by Forge automatically.
+Has full Forge integration: model switcher, sampler/scheduler live from Forge API, HiRes Fix, ADetailer.
+
+### Image to Video (`/api/i2v/*`)
+Folder of images → Ken Burns slideshow with crossfades. No AI needed.
+
+### Video Tools (`/api/tools/*`)
+Batch transforms: reverse, mirror, flip, speed, upscale, sharpen, format conversion.
+Also has music mixer (blend background music under video).
+
+### Wildcard Manager (`/api/prompts/wildcards`, `/prune`, `/expand`, `/merge`, `/audit`)
+AI-powered curation of SD dynamic-prompts wildcard .txt files.
+
+---
+
+## Frontend Notes
+
+- **Tabs initialize lazily** — JS module for each tab runs once on first visit, never again
+- **Job polling** — `api.js:pollJob()` polls `GET /api/jobs/{id}` every 1.5s
+- **Session picker** — All tabs have a "From Session" button that shows files generated by other tabs
+- **Path input** — All upload zones also accept pasted file/folder paths (calls `/add-paths` endpoints)
+- **Splash screen** — Checks server, ffmpeg, AI keys, Forge, WanGP on boot. Shows help modal on first visit only (localStorage flag)
+
+---
+
+## The Circus Theme
+
+CSS palette in `static/css/design-system.css`:
+- Background: `#0d0606` (near-black, red warmth)
+- Accent: `#d4a017` (antique gold)
+- Red: `#c41e3a` (circus crimson)
+- Text: `#f0e6d0` (old poster cream)
+- Buttons: crimson gradient, not the amber used in earlier versions
+
+Header has "Andrew's" in an SVG arched text path over "DROP CAT GO STUDIO" in Impact.
+Logo assets: `static/logo-512.png`, `static/logo-192.png`, `static/favicon.ico`
+Logo generator: `make_logo.py` — re-run to regenerate if needed.
+
+---
+
+## Display / Monitor
+
+Andrew is upgrading to a **49" ultrawide monitor** (32:9 — either 5120×1440 or 3840×1080).
+
+The layout is fully prepared for this:
+- `< 1100px` — single column (stacked)
+- `1100–1600px` — sidebar (360px) + main area
+- `1600–2560px` — wider sidebar (440px) + main area
+- `> 2560px` — **3-column**: sidebar (460px) + main area + info panel (360px)
+- `> 4000px` — wider columns for 5120×1440
+
+The **info panel** (3rd column) shows session files, service status, and reference info. It's hidden by CSS on normal screens and appears automatically at ultrawide widths — no JS changes needed.
+
+Font sizes also scale: 16px → 17 → 18 → 19 → 20px across breakpoints.
+
+---
+
+## What Still Needs Work / Known Issues
+
+1. **ffmpeg not on PATH** — install it, add `bin` to system PATH
+2. **launch.bat title** — still shows "DropCat Studio", needs updating to "Drop Cat Go Studio"
+3. **launch.bat encoding** — em-dash in the banner causes garbled characters on Windows cp1252 console
+4. **Forge** — must be started separately with `--api` flag before SD Prompts image generation works. The app detects it but cannot start it automatically (Forge's own launcher handles its Python env)
+5. **WanGP first run** — model loading takes 2-3 minutes; the splash screen will show "WanGP not running" until the worker finishes loading. This is normal.
+6. ~~**wangp_worker.py UnboundLocalError** — FIXED. Redundant `import importlib` inside `main()` was shadowing the top-level `import importlib.util`. Removed the local import at line 339.~~
+
+---
+
+## Original Source Apps (for reference, do not delete)
+
+All still intact at `C:\Users\andre\Desktop\AI Editors\`:
+- `DropCat-Image-2-Video\` — Ken Burns (FastAPI)
+- `DropCatGo-Fun-Videos_w_Audio\` — Photo→video+audio (FastAPI)
+- `DropCatGo-SD-Prompts\` — SD prompts (Gradio)
+- `DropCatGo-Video-BRIDGES\` — Transitions (FastAPI)
+- `Github Video Editor\` — Infrastructure donor (LLM router, WanGP runtime, music mixer)
+- `Video Reverser\` — Batch transforms (Tkinter)
+
+---
+
+## Quick Fixes Needed Right Now
+
+```bat
+:: Fix launch.bat title and encoding (replace the header block):
+@echo off
+title Drop Cat Go Studio
+echo ============================================
+echo   Drop Cat Go Studio
+echo   AI Video Production
+echo ============================================
+```
+
+Run `make_shortcut.ps1` if the desktop shortcut ever needs to be recreated.
