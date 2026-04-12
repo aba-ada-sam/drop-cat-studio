@@ -80,8 +80,12 @@ async def upload_video(file: UploadFile = File(...)):
     dest = UPLOADS_DIR / safe_name
     dest.parent.mkdir(exist_ok=True)
 
+    size_limit = 2 * 1024 ** 3  # 2 GB
+    if file.size is not None and file.size > size_limit:
+        raise HTTPException(status_code=413, detail="File too large (max 2 GB)")
+
     content = await file.read()
-    if len(content) > 2 * 1024 ** 3:
+    if len(content) > size_limit:
         raise HTTPException(status_code=413, detail="File too large (max 2 GB)")
     dest.write_bytes(content)
     log.info("VOID upload: %s (%d bytes)", safe_name, len(content))

@@ -21,7 +21,7 @@ TIER_POWER    = "power"     # deep analysis, best model
 DEFAULT_OLLAMA_MODELS = {
     TIER_FAST:     "gemma4:e4b",
     TIER_BALANCED: "gemma4:e4b",
-    TIER_POWER:    "gemma4:27b",
+    TIER_POWER:    "gemma4:26b",
 }
 
 
