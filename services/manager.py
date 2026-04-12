@@ -348,8 +348,9 @@ def start_void_worker() -> tuple[bool, str | None]:
             _set_status("void", state="error", message=msg)
             return False, msg
 
+        import sys
         model_dir = cfg.get("void_model_dir") or ""
-        python_exe = "python"
+        python_exe = sys.executable
 
         _set_status("void", state="starting", message="Starting VOID worker (loading model)...")
         log.info("Starting VOID worker on port %d...", VOID_PORT)

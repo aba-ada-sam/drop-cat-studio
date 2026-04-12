@@ -233,9 +233,12 @@ async def save_ollama_config(request: Request):
     if updates:
         cfg.save(updates)
         if _g["llm_client"]:
-            _g["llm_client"].update_config(**{
-                k.replace("ollama_", ""): v for k, v in updates.items()
-            })
+            _g["llm_client"].update_config(
+                host=updates.get("ollama_host", ""),
+                fast_model=updates.get("ollama_fast_model", ""),
+                balanced_model=updates.get("ollama_balanced_model", ""),
+                power_model=updates.get("ollama_power_model", ""),
+            )
     return keys.status()
 
 

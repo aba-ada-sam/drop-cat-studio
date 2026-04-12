@@ -81,6 +81,8 @@ async def upload_video(file: UploadFile = File(...)):
     dest.parent.mkdir(exist_ok=True)
 
     content = await file.read()
+    if len(content) > 2 * 1024 ** 3:
+        raise HTTPException(status_code=413, detail="File too large (max 2 GB)")
     dest.write_bytes(content)
     log.info("VOID upload: %s (%d bytes)", safe_name, len(content))
 
@@ -147,37 +149,60 @@ async def inpaint(request: Request):
 
     def _run(job):
         if not _void_alive():
-            job.error = "VOID worker not running — start it in the Services tab"
+            job.error = "VOID worker not running -- start it in the Services tab"
             return
 
         output_path = str(job_dir / "inpainted.mp4")
         try:
-            result = _void_post("/inpaint", {
+            _void_post("/inpaint", {
                 "video_path":  str(vid),
                 "mask_b64":    mask_b64,
                 "output_path": output_path,
                 "prompt":      prompt,
                 "steps":       steps,
                 "seed":        seed,
-            }, timeout=600)
-
-            if result.get("ok"):
-                out = result.get("output", output_path)
-                rel = str(Path(out).relative_to(OUTPUT_DIR.parent))
-                session.get_current().add_file(
-                    filename=out,
-                    kind="video",
-                    source="post_processing",
-                    label="VOID inpaint",
-                )
-                job.result = {"url": f"/output/{Path(out).relative_to(OUTPUT_DIR)}", "path": out}
-            else:
-                job.error = result.get("error") or "VOID inpainting failed"
+            }, timeout=30)
         except Exception as e:
             job.error = str(e)
+            return
 
-    job_id = jm.submit("void_inpaint", "VOID Inpaint", _run, str(job_dir))
-    return {"job_id": job_id}
+        # VOID /inpaint fires a background thread and returns immediately.
+        # Poll /status until busy == False before marking the job done.
+        deadline = time.time() + 1800  # 30 min max
+        while time.time() < deadline:
+            if job.stop_event.is_set():
+                job.error = "Cancelled"
+                return
+            try:
+                with urllib.request.urlopen(f"{VOID_WORKER_URL}/status", timeout=5) as r:
+                    s = json.loads(r.read())
+            except Exception:
+                time.sleep(3)
+                continue
+            if not s.get("busy"):
+                if s.get("result"):
+                    out = s["result"]
+                    try:
+                        rel = Path(out).relative_to(OUTPUT_DIR).as_posix()
+                        url = f"/output/{rel}"
+                    except ValueError:
+                        url = f"/output/{Path(out).name}"
+                    session.get_current().add_file(
+                        filename=out,
+                        kind="video",
+                        source="post_processing",
+                        label="VOID inpaint",
+                    )
+                    job.output = {"url": url, "path": out}
+                else:
+                    job.error = s.get("error") or "VOID inpainting failed"
+                return
+            job.message = s.get("progress", "Running...")
+            time.sleep(2)
+        job.error = "Timed out after 30 minutes"
+
+    job = jm.submit("void_inpaint", _run, label="VOID Inpaint")
+    return {"job_id": job.id}
 
 
 @router.get("/status")

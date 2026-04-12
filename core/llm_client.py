@@ -19,9 +19,9 @@ TIER_BALANCED = "balanced"  # all-round quality
 TIER_POWER    = "power"     # deep analysis, best model
 
 DEFAULT_OLLAMA_MODELS = {
-    TIER_FAST:     "qwen3-vl:8b",
-    TIER_BALANCED: "qwen3-vl:8b",
-    TIER_POWER:    "qwen3-vl:30b",
+    TIER_FAST:     "gemma4:e4b",
+    TIER_BALANCED: "gemma4:e4b",
+    TIER_POWER:    "gemma4:27b",
 }
 
 

@@ -125,15 +125,16 @@ def _do_inpaint(params: dict) -> dict:
 
     _update_status(progress="Preparing video...", step=0, total_steps=steps)
 
-    # ── Load video frames ─────────────────────────────────────────────────────
+    import subprocess, shutil as _shutil, json as _json
+
+    frames_dir     = Path(output_path).parent / "frames_in"
+    frames_out_dir = Path(output_path).parent / "frames_out"
+
     try:
-        import subprocess, shutil, tempfile
+        # ── Load video frames ─────────────────────────────────────────────────
+        if not _shutil.which("ffmpeg"):
+            return {"ok": False, "error": "ffmpeg not found -- required for video processing"}
 
-        if not shutil.which("ffmpeg"):
-            return {"ok": False, "error": "ffmpeg not found — required for video processing"}
-
-        # Extract frames from input video
-        frames_dir = Path(output_path).parent / "frames_in"
         frames_dir.mkdir(parents=True, exist_ok=True)
 
         subprocess.run([
@@ -152,24 +153,35 @@ def _do_inpaint(params: dict) -> dict:
         actual_frames = len(frames)
         _update_status(progress=f"Loaded {actual_frames} frames ({w}x{h})")
 
-    except Exception as e:
-        return {"ok": False, "error": f"Video loading failed: {e}"}
+        # ── Probe source fps ──────────────────────────────────────────────────
+        fps = 24  # safe fallback
+        if _shutil.which("ffprobe"):
+            try:
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-print_format", "json",
+                     "-show_streams", video_path],
+                    capture_output=True, text=True,
+                )
+                streams = _json.loads(probe.stdout).get("streams", [])
+                for s in streams:
+                    fps_str = s.get("r_frame_rate", "")
+                    if fps_str and "/" in fps_str:
+                        num, den = map(int, fps_str.split("/"))
+                        if den:
+                            fps = round(num / den)
+                        break
+            except Exception:
+                pass
 
-    # ── Decode and prepare mask ───────────────────────────────────────────────
-    try:
+        # ── Decode and prepare mask ───────────────────────────────────────────
         mask_bytes = base64.b64decode(mask_b64)
         mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
         mask_img = mask_img.resize((w, h), Image.NEAREST)
         mask_arr = np.array(mask_img)
-        # Binary to quadmask: 0=keep, 255=remove
         mask_arr = np.where(mask_arr > 127, 255, 0).astype(np.uint8)
-        # Replicate single frame mask across all video frames
         masks = [Image.fromarray(mask_arr)] * actual_frames
-    except Exception as e:
-        return {"ok": False, "error": f"Mask processing failed: {e}"}
 
-    # ── Run VOID inference ────────────────────────────────────────────────────
-    try:
+        # ── Run VOID inference ────────────────────────────────────────────────
         _update_status(progress="Running VOID inference...", step=0, total_steps=steps)
 
         generator = None
@@ -190,15 +202,10 @@ def _do_inpaint(params: dict) -> dict:
             callback_on_step_end_tensor_inputs=["latents"],
         )
 
-        output_frames = result.frames[0]  # list of PIL images
+        output_frames = result.frames[0]
 
-    except Exception as e:
-        return {"ok": False, "error": f"VOID inference failed: {e}"}
-
-    # ── Reassemble video ──────────────────────────────────────────────────────
-    try:
+        # ── Reassemble video ──────────────────────────────────────────────────
         _update_status(progress="Reassembling output video...")
-        frames_out_dir = Path(output_path).parent / "frames_out"
         frames_out_dir.mkdir(exist_ok=True)
 
         for i, frame in enumerate(output_frames):
@@ -206,19 +213,20 @@ def _do_inpaint(params: dict) -> dict:
 
         subprocess.run([
             "ffmpeg", "-y",
-            "-framerate", "24",
+            "-framerate", str(fps),
             "-i", str(frames_out_dir / "frame_%04d.jpg"),
             "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
             output_path,
         ], capture_output=True, check=True)
 
-        import shutil as _shutil
+        return {"ok": True, "output": output_path}
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    finally:
         _shutil.rmtree(str(frames_dir), ignore_errors=True)
         _shutil.rmtree(str(frames_out_dir), ignore_errors=True)
-
-        return {"ok": True, "output": output_path}
-    except Exception as e:
-        return {"ok": False, "error": f"Video reassembly failed: {e}"}
 
 
 # ── HTTP server ───────────────────────────────────────────────────────────────
@@ -280,7 +288,7 @@ class VoidHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/shutdown":
             self._json({"ok": True})
-            threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0)), daemon=True).start()
+            threading.Thread(target=lambda: (time.sleep(0.5), sys.exit(0)), daemon=True).start()
         else:
             self._json({"error": "Not found"}, 404)
 

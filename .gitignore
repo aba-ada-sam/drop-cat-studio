@@ -2,6 +2,7 @@
 output/
 uploads/
 logs/
+projects/
 
 # Runtime config (may contain API keys / local paths)
 config.json

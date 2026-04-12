@@ -4,3 +4,8 @@ uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 Pillow>=10.0.0
 ollama>=0.4.0
+
+# VOID worker dependencies (services/void_worker.py)
+torch>=2.0.0
+diffusers>=0.28.0
+numpy>=1.24.0

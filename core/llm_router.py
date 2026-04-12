@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 # Model selections per provider
 _ANTHROPIC_MODELS = {
-    TIER_FAST:     "claude-haiku-4-5-20251001",
+    TIER_FAST:     "claude-haiku-4-5",
     TIER_BALANCED: "claude-sonnet-4-6",
     TIER_POWER:    "claude-sonnet-4-6",
 }

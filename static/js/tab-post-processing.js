@@ -133,7 +133,7 @@ function getMaskPNG() {
   for (let i = 0; i < data.length; i += 4) {
     // If pixel has any red paint (alpha > 0 from our red paint)
     const a = data[i + 3];
-    if (a > 30 && data[i] > 100) {  // red channel dominant
+    if (a > 30 && data[i] > 150 && data[i] > data[i+1] * 2 && data[i] > data[i+2] * 2) {  // red clearly dominant
       data[i] = 255; data[i+1] = 255; data[i+2] = 255; data[i+3] = 255;
     } else {
       data[i] = 0; data[i+1] = 0; data[i+2] = 0; data[i+3] = 255;
@@ -205,10 +205,10 @@ async function pollJob(panel) {
 
     if (progressEl) progressEl.textContent = job.progress || job.status || '';
 
-    if (job.status === 'completed' && job.result) {
+    if (job.status === 'done' && job.output) {
       clearInterval(st.pollTimer);
       st.pollTimer = null;
-      const url = job.result.url || '';
+      const url = job.output.url || '';
       if (resultEl && url) {
         resultEl.innerHTML = `
           <p class="pp-done">Inpainting complete!</p>
