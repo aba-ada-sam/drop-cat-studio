@@ -43,10 +43,13 @@ class Session:
         self.created_at = time.time()
         self.files: dict[str, FileEntry] = {}
         self._dir = PROJECTS_DIR / self.id
+        # BUG-10: create the directory eagerly in __init__, not lazily on every
+        # .dir access. The property is now a cheap read-only accessor.
+        self._dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def dir(self) -> Path:
-        self._dir.mkdir(parents=True, exist_ok=True)
+        # BUG-10: no side effects — just return the path.
         return self._dir
 
     def add_file(self, filename: str, kind: str, source: str, **meta):
@@ -122,15 +125,13 @@ class Session:
 
 
 # ── Session manager (singleton) ──────────────────────────────────────────────
-
-_current_session: Session | None = None
+# BUG-09: initialize eagerly at module load to eliminate the check-then-set
+# race condition under asyncio concurrency.
+_current_session: Session = Session()
 
 
 def get_current() -> Session:
-    """Get or create the current session."""
-    global _current_session
-    if _current_session is None:
-        _current_session = Session()
+    """Get the current session."""
     return _current_session
 
 

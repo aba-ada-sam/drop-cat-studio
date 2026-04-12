@@ -18,7 +18,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -69,6 +69,11 @@ UPLOADS_DIR = APP_DIR / "uploads"
 OUTPUT_DIR = APP_DIR / "output"
 STATIC_DIR = APP_DIR / "static"
 
+# BUG-01: create directories at module level so StaticFiles mounts succeed on
+# fresh install (StaticFiles checks directory existence in __init__).
+UPLOADS_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
+
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
@@ -117,6 +122,10 @@ async def lifespan(app: FastAPI):
             if jm:
                 jm.cleanup()
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
+
+    # System tray icon (Windows only, optional — skips silently if pystray missing)
+    from core import tray as _tray
+    _tray.start_tray()
 
     log.info("Drop Cat Go Studio ready on http://127.0.0.1:7860")
 
@@ -286,6 +295,9 @@ async def start_service(name: str):
     elif name == "acestep":
         ok, err = svc.start_acestep()
         return {"ok": ok, "error": err}
+    elif name == "void":
+        ok, err = svc.start_void_worker()
+        return {"ok": ok, "error": err}
     return JSONResponse({"error": f"Unknown service: {name}"}, 404)
 
 
@@ -348,7 +360,20 @@ async def serve_output_file(path: str):
     return FileResponse(str(file_path))
 
 
-_VLC_PATH = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
+def _find_vlc() -> str | None:
+    """Locate VLC executable. FLW-03: use PATH first, then common install locations."""
+    import shutil
+    found = shutil.which("vlc") or shutil.which("vlc.exe")
+    if found:
+        return found
+    candidates = [
+        r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+        r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
 
 
 @app.post("/api/reveal")
@@ -363,11 +388,86 @@ async def reveal_in_explorer(request: Request):
         return JSONResponse({"error": "Forbidden"}, status_code=403)
     if not file_path.exists():
         return JSONResponse({"error": "Not found"}, status_code=404)
-    if action == "vlc" and os.path.isfile(_VLC_PATH):
-        _sp.Popen([_VLC_PATH, str(file_path)])
+    vlc = _find_vlc()
+    if action == "vlc" and vlc:
+        _sp.Popen([vlc, str(file_path)])
     else:
         _sp.Popen(["explorer", "/select,", str(file_path)])
     return {"ok": True}
+
+
+@app.post("/api/tools/extract-frame")
+async def extract_frame_endpoint(request: Request):
+    """Extract a single frame from a video and save it as a JPEG image.
+
+    Body: { path: str, position: float (0.0=first, 1.0=last, default 0.5) }
+    Returns: { path: absolute_path, url: /output/frames/filename.jpg }
+    """
+    import base64, time
+    from core.ffmpeg_utils import extract_frame_b64
+
+    body = await request.json()
+    path = body.get("path", "")
+    position = float(body.get("position", 0.5))
+
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+
+    vid_path = Path(path) if os.path.isabs(path) else OUTPUT_DIR / path
+    if not vid_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    b64 = extract_frame_b64(str(vid_path), position=position)
+    if not b64:
+        raise HTTPException(status_code=500, detail="Frame extraction failed — check ffmpeg")
+
+    frames_dir = OUTPUT_DIR / "frames"
+    frames_dir.mkdir(exist_ok=True)
+
+    ts = int(time.time() * 1000)
+    pos_str = "first" if position < 0.1 else ("last" if position > 0.9 else "mid")
+    out_name = f"frame_{pos_str}_{ts}.jpg"
+    out_path = frames_dir / out_name
+    out_path.write_bytes(base64.b64decode(b64))
+
+    return {"path": str(out_path), "url": f"/output/frames/{out_name}"}
+
+
+@app.post("/api/output/delete")
+async def delete_output(request: Request):
+    """Delete a single output file, or an entire job folder."""
+    import shutil as _shutil
+    body = await request.json()
+    path = body.get("path", "")
+    delete_folder = body.get("folder", False)
+
+    file_path = Path(path).resolve() if os.path.isabs(path) else (OUTPUT_DIR / path).resolve()
+    out_root = OUTPUT_DIR.resolve()
+    if not str(file_path).startswith(str(out_root)):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    if not file_path.exists():
+        return {"ok": True}  # already gone
+
+    try:
+        if delete_folder:
+            # BUG-06: use explicit depth check instead of the old inverted logic.
+            # depth == 2 → output/date/jobfolder/file.mp4  (delete jobfolder)
+            # depth == 1 → output/jobfolder/file.mp4        (delete jobfolder)
+            job_dir = file_path.parent
+            try:
+                depth = len(file_path.relative_to(out_root).parts)
+            except ValueError:
+                return JSONResponse({"error": "Forbidden"}, status_code=403)
+            if depth >= 2 and str(job_dir).startswith(str(out_root)) and job_dir != out_root:
+                _shutil.rmtree(str(job_dir), ignore_errors=True)
+            else:
+                return JSONResponse({"error": "Cannot delete — unexpected depth"}, status_code=400)
+        else:
+            file_path.unlink(missing_ok=True)
+        return {"ok": True}
+    except Exception as e:
+        log.warning("delete_output error: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/api/queue")
@@ -454,12 +554,14 @@ from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
 from features.sd_prompts.routes import router as prompts_router
 from features.video_tools.routes import router as tools_router
+from features.post_processing.routes import router as post_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
+app.include_router(post_router, prefix="/api/post", tags=["Post Processing"])
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

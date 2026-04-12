@@ -23,13 +23,20 @@ log = logging.getLogger(__name__)
 
 _status_lock = threading.Lock()
 _service_status: dict = {
-    "wangp": {"state": "unknown", "message": "", "port": None, "pid": None},
+    "wangp":   {"state": "unknown", "message": "", "port": None, "pid": None},
     "acestep": {"state": "unknown", "message": "", "port": None, "pid": None},
-    "forge": {"state": "unknown", "message": "", "port": 7861, "pid": None},
+    "forge":   {"state": "unknown", "message": "", "port": 7861, "pid": None},
+    "void":    {"state": "unknown", "message": "", "port": 7901, "pid": None},
 }
 
 _wangp_worker_proc: subprocess.Popen | None = None
 _acestep_proc: subprocess.Popen | None = None
+_void_proc: subprocess.Popen | None = None
+
+# BUG-11: guard against two concurrent calls both passing the alive-check and
+# starting duplicate worker processes.
+_wangp_start_lock = threading.Lock()
+_void_start_lock  = threading.Lock()
 
 
 def get_status() -> dict:
@@ -228,87 +235,173 @@ def check_wangp() -> dict:
 
 
 def start_wangp_worker() -> tuple[bool, str | None]:
-    """Start the persistent WanGP worker process."""
+    """Start the persistent WanGP worker process.
+
+    BUG-11: _wangp_start_lock serializes concurrent calls so only one
+    subprocess is ever launched (two rapid UI clicks could otherwise both
+    pass the alive check and each start a worker, leaking the first).
+    """
     global _wangp_worker_proc
 
-    if wangp_worker_alive():
-        _set_status("wangp", state="running", message="WanGP worker already running")
-        return True, None
+    with _wangp_start_lock:
+        if wangp_worker_alive():
+            _set_status("wangp", state="running", message="WanGP worker already running")
+            return True, None
 
-    wan_root = cfg.get("wan2gp_root")
-    if not wan_root:
-        msg = "WanGP path not configured — set it in Settings"
-        _set_status("wangp", state="not_configured", message=msg)
-        return False, msg
+        wan_root = cfg.get("wan2gp_root")
+        if not wan_root:
+            msg = "WanGP path not configured — set it in Settings"
+            _set_status("wangp", state="not_configured", message=msg)
+            return False, msg
 
-    ok, val_msg = cfg.validate_wan2gp(wan_root)
-    if not ok:
-        _set_status("wangp", state="error", message=val_msg)
-        return False, val_msg
+        ok, val_msg = cfg.validate_wan2gp(wan_root)
+        if not ok:
+            _set_status("wangp", state="error", message=val_msg)
+            return False, val_msg
 
-    python_exe = cfg.get("wan2gp_python") or cfg.find_wan_python(wan_root)
-    worker_script = str(Path(__file__).parent / "wangp_worker.py")
+        python_exe = cfg.get("wan2gp_python") or cfg.find_wan_python(wan_root)
+        worker_script = str(Path(__file__).parent / "wangp_worker.py")
 
-    if not Path(worker_script).exists():
-        msg = "wangp_worker.py not found in services/"
-        _set_status("wangp", state="error", message=msg)
-        return False, msg
+        if not Path(worker_script).exists():
+            msg = "wangp_worker.py not found in services/"
+            _set_status("wangp", state="error", message=msg)
+            return False, msg
 
-    _set_status("wangp", state="starting",
-                message="Starting WanGP worker (loading model)...")
-    log.info("Starting WanGP worker — loading model into VRAM...")
+        _set_status("wangp", state="starting",
+                    message="Starting WanGP worker (loading model)...")
+        log.info("Starting WanGP worker -- loading model into VRAM...")
 
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
 
-    try:
-        proc = subprocess.Popen(
-            [python_exe, worker_script,
-             "--wangp-app", wan_root,
-             "--port", str(WANGP_WORKER_PORT)],
-            cwd=wan_root, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-        )
-        _wangp_worker_proc = proc
+        try:
+            proc = subprocess.Popen(
+                [python_exe, worker_script,
+                 "--wangp-app", wan_root,
+                 "--port", str(WANGP_WORKER_PORT)],
+                cwd=wan_root, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            _wangp_worker_proc = proc
 
-        def _drain(p):
-            try:
-                for line in p.stdout:
-                    stripped = line.rstrip()
-                    if stripped:
-                        log.info("[wangp-worker] %s", stripped)
-            except Exception:
-                pass
+            def _drain(p):
+                try:
+                    for line in p.stdout:
+                        stripped = line.rstrip()
+                        if stripped:
+                            log.info("[wangp-worker] %s", stripped)
+                except Exception:
+                    pass
 
-        threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
 
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            if wangp_worker_alive():
-                _set_status("wangp", state="running",
-                            message="WanGP worker running (model loaded in VRAM)",
-                            port=WANGP_WORKER_PORT, pid=proc.pid)
-                log.info("WanGP worker started — model loaded")
-                return True, None
-            if proc.poll() is not None:
-                msg = "WanGP worker exited during startup — check GPU memory"
-                _set_status("wangp", state="error", message=msg)
-                return False, msg
-            time.sleep(3)
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                if wangp_worker_alive():
+                    _set_status("wangp", state="running",
+                                message="WanGP worker running (model loaded in VRAM)",
+                                port=WANGP_WORKER_PORT, pid=proc.pid)
+                    log.info("WanGP worker started -- model loaded")
+                    return True, None
+                if proc.poll() is not None:
+                    msg = "WanGP worker exited during startup -- check GPU memory"
+                    _set_status("wangp", state="error", message=msg)
+                    return False, msg
+                time.sleep(3)
 
-        msg = "WanGP worker did not start within 180s"
-        _set_status("wangp", state="error", message=msg)
-        return False, msg
+            msg = "WanGP worker did not start within 180s"
+            _set_status("wangp", state="error", message=msg)
+            return False, msg
 
-    except FileNotFoundError:
-        msg = f"WanGP Python not found: {python_exe}"
-        _set_status("wangp", state="error", message=msg)
-        return False, msg
-    except Exception as e:
-        msg = f"Failed to start WanGP worker: {e}"
-        _set_status("wangp", state="error", message=msg)
-        return False, msg
+        except FileNotFoundError:
+            msg = f"WanGP Python not found: {python_exe}"
+            _set_status("wangp", state="error", message=msg)
+            return False, msg
+        except Exception as e:
+            msg = f"Failed to start WanGP worker: {e}"
+            _set_status("wangp", state="error", message=msg)
+            return False, msg
+
+
+# ── VOID ──────────────────────────────────────────────────────────────────────
+
+VOID_PORT = 7901
+
+
+def void_worker_alive() -> bool:
+    return check_port("127.0.0.1", VOID_PORT, timeout=2)
+
+
+def start_void_worker() -> tuple[bool, str | None]:
+    """Start the Netflix VOID inpainting worker process."""
+    global _void_proc
+
+    with _void_start_lock:
+        if void_worker_alive():
+            _set_status("void", state="running", message="VOID worker already running")
+            return True, None
+
+        worker_script = str(Path(__file__).parent / "void_worker.py")
+        if not Path(worker_script).exists():
+            msg = "void_worker.py not found in services/"
+            _set_status("void", state="error", message=msg)
+            return False, msg
+
+        model_dir = cfg.get("void_model_dir") or ""
+        python_exe = "python"
+
+        _set_status("void", state="starting", message="Starting VOID worker (loading model)...")
+        log.info("Starting VOID worker on port %d...", VOID_PORT)
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        cmd = [python_exe, worker_script, "--port", str(VOID_PORT)]
+        if model_dir:
+            cmd += ["--model-dir", model_dir]
+
+        try:
+            proc = subprocess.Popen(
+                cmd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+            _void_proc = proc
+
+            def _drain(p):
+                try:
+                    for line in p.stdout:
+                        stripped = line.rstrip()
+                        if stripped:
+                            log.info("[void-worker] %s", stripped)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+
+            deadline = time.time() + 30  # server starts fast; model loads in bg
+            while time.time() < deadline:
+                if void_worker_alive():
+                    _set_status("void", state="starting",
+                                message="VOID worker started (model loading in background...)",
+                                port=VOID_PORT, pid=proc.pid)
+                    log.info("VOID worker HTTP server up on port %d", VOID_PORT)
+                    return True, None
+                if proc.poll() is not None:
+                    msg = "VOID worker process exited unexpectedly"
+                    _set_status("void", state="error", message=msg)
+                    return False, msg
+                time.sleep(1)
+
+            msg = "VOID worker did not start within 30s"
+            _set_status("void", state="error", message=msg)
+            return False, msg
+
+        except Exception as e:
+            msg = f"Failed to start VOID worker: {e}"
+            _set_status("void", state="error", message=msg)
+            return False, msg
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -366,23 +459,23 @@ def startup_all():
         _set_status("forge", state="not_running",
                     message="Forge not detected — start it with --api flag")
 
+    # FLW-10: fire-and-forget -- each _start_* function logs its own completion.
+    # Joining would block the startup thread for up to 5 min (ACE-Step + WanGP).
     for fn in (_start_ace, _start_wan, _check_forge):
-        t = threading.Thread(target=fn, daemon=True)
-        t.start()
-        threads.append(t)
+        threading.Thread(target=fn, daemon=True).start()
 
-    for t in threads:
-        t.join()
-
-    log.info("Service startup complete")
+    log.info("Service startup initiated (background)")
 
 
 def shutdown_all():
     """Cleanly shut down managed services."""
-    global _wangp_worker_proc, _acestep_proc
+    global _wangp_worker_proc, _acestep_proc, _void_proc
     if _wangp_worker_proc and _wangp_worker_proc.poll() is None:
         _wangp_worker_proc.terminate()
         _wangp_worker_proc = None
     if _acestep_proc and _acestep_proc.poll() is None:
         _acestep_proc.terminate()
         _acestep_proc = None
+    if _void_proc and _void_proc.poll() is None:
+        _void_proc.terminate()
+        _void_proc = None

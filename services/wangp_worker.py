@@ -30,31 +30,13 @@ if PROJECT_DIR not in sys.path:
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-# ── Model mapping ────────────────────────────────────────────────────────────
+# ── Model mapping (BUG-02/FLW-04: import from single source of truth) ────────
 
-MODEL_MAP = {
-    "Wan2.1-T2V-1.3B": "t2v_1.3B",
-    "Wan2.1-T2V-14B": "t2v",
-    "Wan2.1-I2V-14B-480P": "i2v",
-    "Wan2.1-I2V-14B-720P": "i2v_720p",
-    "Wan2.1-VACE-1.3B": "vace_1.3B",
-    "LTX-2 Dev19B Distilled": "ltx2_distilled",
-}
-
-
-def resolve_model_name(model_name):
-    if model_name in MODEL_MAP:
-        return MODEL_MAP[model_name]
-    lowered = (model_name or "").lower()
-    if "ltx" in lowered:
-        return "ltx2_distilled" if "distilled" in lowered else "ltx2_19B"
-    if "i2v" in lowered and "720" in lowered:
-        return "i2v_720p"
-    if "i2v" in lowered:
-        return "i2v"
-    if "1.3" in lowered:
-        return "t2v_1.3B"
-    return "t2v"
+try:
+    from core.wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
+except ImportError:
+    # Fallback if run before sys.path is configured — shouldn't happen in practice
+    from wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
 
 
 # ── Global state ─────────────────────────────────────────────────────────────
@@ -102,8 +84,15 @@ def _install_tqdm_hook():
 
 
 def _update_status(**kwargs):
-    global _job_status
-    _job_status.update(kwargs)
+    """Update _job_status under the lock. BUG-04: always hold lock on writes."""
+    with _lock:
+        _job_status.update(kwargs)
+
+
+def _get_status_snapshot() -> dict:
+    """Return a copy of _job_status under the lock. BUG-04: lock on reads too."""
+    with _lock:
+        return dict(_job_status)
 
 
 # ── Generation logic ─────────────────────────────────────────────────────────
@@ -130,23 +119,7 @@ def _do_generate(params: dict) -> dict:
     model_type = resolve_model_name(model_name)
     current_model = model_name
 
-    state = {
-        "active_form": "add",
-        "model_type": model_type,
-        "gen": {
-            "queue": [], "in_progress": False,
-            "file_list": [], "file_settings_list": [],
-            "audio_file_list": [], "audio_file_settings_list": [],
-            "selected": 0, "audio_selected": 0,
-            "prompt_no": 0, "prompts_max": 0,
-            "repeat_no": 0, "total_generation": 1,
-            "window_no": 0, "total_windows": 0,
-            "progress_status": "", "process_status": "process:main",
-        },
-        "loras": [],
-        "last_model_per_family": {},
-        "last_model_per_type": {},
-    }
+    state = _build_state(model_type)
 
     start_images = []
     end_images = []
@@ -172,45 +145,14 @@ def _do_generate(params: dict) -> dict:
         "multi_prompts_gen_type": "",
     })
 
-    _safe = {
-        "image_start": start_images,
-        "image_end": end_images,
-        "image_refs": [],
-        "image_guide": [],
-        "image_mask": [],
-        "video_guide": [],
-        "video_source": [],
-        "video_mask": [],
-        "video_guide_outpainting": [],
-        "audio_source": None,
-        "audio_guide": None,
-        "audio_guide2": None,
-        "custom_guide": None,
-        "audio_prompt_type": "",
-        "MMAudio_setting": 0,
-        "image_prompt_type": "S" if start_images and not end_images else ("SE" if start_images and end_images else ""),
-        "image_mode": 0,  # 0=video output, >0=image output — always want video
-        "model_mode": "",
-        "activated_loras": [],
-        "loras_multipliers": [],
-        "custom_settings": {},
-        "self_refiner_plan": "",
-        "self_refiner_setting": "",
-        "spatial_upsampling": "",
-        "skip_steps_cache_type": "",
-        "speakers_locations": "",
-        "frames_positions": "",
-        "guidance_phases": 0,
-        "motion_amplitude": 0,
-        "denoising_strength": 1.0,
-        "masking_strength": 1.0,
-        "model_switch_phase": 0,
-        "switch_threshold": 0,
-        "switch_threshold2": 0,
-        "keep_frames_video_guide": "",
-        "keep_frames_video_source": "",
-        "force_fps": "",
-    }
+    # BUG-02/FLW-04: use SAFE_DEFAULTS from core/wangp_models (shared single source)
+    _safe = dict(SAFE_DEFAULTS)
+    _safe["image_start"] = start_images
+    _safe["image_end"] = end_images
+    _safe["image_prompt_type"] = (
+        "S"  if start_images and not end_images else
+        "SE" if start_images and end_images else ""
+    )
     defaults.update(_safe)
 
     # server_config alone isn't enough — WanGP copies save_path into module-level
@@ -321,10 +263,12 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        # BUG-04: read _job_status through the lock-protected snapshot helper
         if self.path == "/health":
-            self._send_json({"ok": True, "model": current_model, "busy": _job_status["busy"]})
+            snap = _get_status_snapshot()
+            self._send_json({"ok": True, "model": current_model, "busy": snap["busy"]})
         elif self.path == "/status":
-            self._send_json(_job_status)
+            self._send_json(_get_status_snapshot())
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -338,7 +282,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid JSON"}, 400)
                 return
 
-            if _job_status["busy"]:
+            if _get_status_snapshot()["busy"]:
                 self._send_json({"error": "Worker is busy"}, 409)
                 return
 
@@ -435,7 +379,8 @@ def main():
     except Exception as e:
         print(f"[worker] Warning: could not pre-load model settings: {e}", flush=True)
 
-    server = http.server.HTTPServer(("127.0.0.1", args.port), WorkerHandler)
+    # BUG-03: ThreadingHTTPServer lets /status polls and /generate run concurrently
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkerHandler)
     print(f"[worker] Ready — listening on port {args.port}", flush=True)
 
     try:

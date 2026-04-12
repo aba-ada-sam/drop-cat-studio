@@ -42,6 +42,8 @@
 }
 
 /* ── Dropdown (Tools) ─────────────────────────────────────────────────────── */
+/* GUI-01: click-based, keyboard-accessible dropdown (replaces :hover-only).  */
+/* JS in app.js handles open/close; CSS only provides the visual styles.       */
 
 .dropdown { position: relative; }
 .dropdown-trigger {
@@ -49,8 +51,9 @@
   align-items: center;
   gap: 4px;
 }
+/* Chevron rotates when the menu is open (aria-expanded=true set by JS) */
 .dropdown-trigger svg { transition: transform var(--dur-fast); }
-.dropdown:hover .dropdown-trigger svg { transform: rotate(180deg); }
+.dropdown-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
 
 .dropdown-menu {
   display: none;
@@ -65,7 +68,8 @@
   padding: 4px;
   z-index: 50;
 }
-.dropdown:hover .dropdown-menu { display: block; }
+/* Menu visible only when trigger has aria-expanded=true */
+.dropdown-trigger[aria-expanded="true"] + .dropdown-menu { display: block; }
 
 .dropdown-item {
   display: flex;

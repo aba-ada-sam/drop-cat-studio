@@ -126,8 +126,14 @@ class StdoutTee(io.TextIOBase):
 
 
 def capture_stdout():
-    """Replace sys.stdout and sys.stderr with tees to the log buffer."""
+    """Replace sys.stdout and sys.stderr with tees to the log buffer.
+
+    FLW-09: stderr is captured at 'warn' (not 'error') because most libraries
+    write informational/warning messages there; flagging them all as errors
+    floods the GUI log panel with false-positive red entries.
+    StdoutTee.write() already upgrades individual lines that start with [error].
+    """
     if not isinstance(sys.stdout, StdoutTee):
         sys.stdout = StdoutTee(sys.stdout, "info")
     if not isinstance(sys.stderr, StdoutTee):
-        sys.stderr = StdoutTee(sys.stderr, "error")
+        sys.stderr = StdoutTee(sys.stderr, "warn")

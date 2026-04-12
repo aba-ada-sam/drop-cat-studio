@@ -174,6 +174,13 @@ class LLMRouter:
             except Exception as exc:
                 last_exc = exc
                 self._stats["errors"] += 1
+                # BUG-07: don't retry permanent errors (wrong key, model not found).
+                # These will never succeed — fail immediately instead of wasting 6s.
+                exc_type = type(exc).__name__
+                if any(t in exc_type for t in ("AuthenticationError", "NotFoundError",
+                                               "PermissionDeniedError", "InvalidRequestError")):
+                    log.error("LLM permanent error (will not retry): %s", exc)
+                    raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1
                     wait = 2 ** attempt

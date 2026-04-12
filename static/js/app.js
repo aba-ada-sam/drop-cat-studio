@@ -3,21 +3,28 @@
  * Tab routing, service polling, shared state, modals.
  */
 
-import { init as initFunVideos } from './tab-fun-videos.js';
-import { init as initBridges } from './tab-bridges.js';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js';
+import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js';
 import { init as initSdPrompts } from './tab-sd-prompts.js';
 import { init as initImage2Video } from './panel-image2video.js';
 import { init as initVideoTools } from './panel-video-tools.js';
 import { init as initWildcards } from './panel-wildcards.js';
+import { init as initPostProcessing } from './tab-post-processing.js';
+import { consumeHandoff } from './handoff.js';
 
 // ── Tab module initializers ─────────────────────────────────────────────────
 const TAB_INIT = {
-  'fun-videos': initFunVideos,
-  'bridges': initBridges,
-  'sd-prompts': initSdPrompts,
-  'image2video': initImage2Video,
-  'video-tools': initVideoTools,
-  'wildcards': initWildcards,
+  'fun-videos':       initFunVideos,
+  'bridges':          initBridges,
+  'sd-prompts':       initSdPrompts,
+  'image2video':      initImage2Video,
+  'video-tools':      initVideoTools,
+  'wildcards':        initWildcards,
+  'post-processing':  initPostProcessing,
+};
+const TAB_HANDOFF = {
+  'fun-videos': funHandoff,
+  'bridges': bridgesHandoff,
 };
 const _tabInitialized = new Set();
 
@@ -60,12 +67,25 @@ const SVC_SPLASH_TEXT = {
     error:          'ACE-Step error',
     unknown:        'Checking ACE-Step...',
   },
+  void: {
+    running:        'VOID inpainting ready',
+    starting:       'VOID loading model (~10 GB first download)...',
+    not_configured: 'VOID not configured — will auto-download on first use',
+    not_running:    'VOID not running — start in Services tab',
+    error:          'VOID error',
+    unknown:        'Checking VOID...',
+  },
 };
+
+// GUI-02: safe localStorage wrapper — SecurityError in private/sandboxed contexts
+function safeStorage(fn, fallback = undefined) {
+  try { return fn(); } catch (_) { return fallback; }
+}
 
 async function runSplash() {
   const splash = document.getElementById('splash');
   const app    = document.getElementById('app');
-  const isFirstVisit = !localStorage.getItem('dropcat_visited');
+  const isFirstVisit = safeStorage(() => !localStorage.getItem('dropcat_visited'), true);
 
   function setCheck(id, state, text) {
     const el = document.getElementById(id);
@@ -85,7 +105,7 @@ async function runSplash() {
       app.style.display = 'flex';
     }, 500);
     if (isFirstVisit) {
-      localStorage.setItem('dropcat_visited', '1');
+      safeStorage(() => localStorage.setItem('dropcat_visited', '1'));
       setTimeout(() => openModal('modal-help'), 600);
     }
   }
@@ -110,15 +130,11 @@ async function runSplash() {
     // How long until the entrance animation finishes (may already be done)
     const remaining = Math.max(0, ENTRANCE_MS - (Date.now() - _splashT0));
 
+    // GUI-03: go directly to hat-tip — the logo-pulsing class (3s loop) was
+    // removed after 350ms causing a jarring cut before a single cycle finished.
     setTimeout(() => {
-      // Add pulsing class (defined in CSS — won't be overridden by hat-tip later)
-      logo.classList.add('logo-pulsing');
-      setTimeout(() => {
-        // Hat tip: remove pulse class so hat-tip CSS takes over cleanly
-        logo.classList.remove('logo-pulsing');
-        logo.classList.add('hat-tip');
-        setTimeout(exitSplash, 1700);
-      }, 350);
+      logo.classList.add('hat-tip');
+      setTimeout(exitSplash, 1700);
     }, remaining);
   }
 
@@ -126,7 +142,7 @@ async function runSplash() {
     loadAnywayBtn.addEventListener('click', doExit);
   }
   const loadAnywayTimer = setTimeout(() => {
-    if (!settled && loadAnywayDiv) loadAnywayDiv.style.display = '';
+    if (!settled && loadAnywayDiv) loadAnywayDiv.classList.remove('hidden');
   }, 8000);
 
   try {
@@ -210,7 +226,7 @@ async function runSplash() {
     if (pollInterval) clearInterval(pollInterval);
     const errDiv = document.getElementById('splash-error');
     const errMsg = document.querySelector('.splash-err-msg');
-    if (errDiv) errDiv.style.display = '';
+    if (errDiv) errDiv.classList.remove('hidden');
     if (errMsg) errMsg.textContent =
       'Cannot connect to Drop Cat Go Studio server. Make sure launch.bat is running.';
   }
@@ -219,7 +235,7 @@ async function runSplash() {
 // ── State ────────────────────────────────────────────────────────────────────
 
 const state = {
-  activeTab: 'fun-videos',
+  activeTab: 'sd-prompts',
   logOpen: true,
   logSeq: 0,
   config: {},
@@ -263,6 +279,12 @@ function switchTab(tabId) {
       _tabInitialized.add(tabId);
     }
   }
+
+  // Dispatch any pending handoff to this tab
+  const handoffData = consumeHandoff(tabId);
+  if (handoffData && TAB_HANDOFF[tabId]) {
+    TAB_HANDOFF[tabId](handoffData);
+  }
 }
 
 // ── Service status polling ───────────────────────────────────────────────────
@@ -270,7 +292,7 @@ function switchTab(tabId) {
 // Human-readable messages for service states that need explanation
 const SERVICE_MESSAGES = {
   acestep: {
-    not_configured: 'Not configured — open ⚙ Settings and set the ACE-Step folder path to enable music generation',
+    not_configured: 'Not configured — open Settings and set the ACE-Step folder path to enable music generation',
     not_running:    'Not running — set path in Settings and it will auto-start',
   },
   forge: {
@@ -279,8 +301,13 @@ const SERVICE_MESSAGES = {
     not_configured: 'Not configured — Forge should be at C:\\forge',
   },
   wangp: {
-    not_configured: 'Not configured — open ⚙ Settings and set the WanGP folder path',
+    not_configured: 'Not configured — open Settings and set the WanGP folder path',
     ready:          'Configured — worker will start on first use',
+  },
+  void: {
+    not_configured: 'Will auto-download model from HuggingFace on first use (netflix/void-model, ~10 GB)',
+    not_running:    'Not running — click Start Worker to launch',
+    starting:       'Loading VOID model (may download ~10 GB on first run)...',
   },
 };
 
@@ -294,7 +321,7 @@ async function pollServices() {
       const pillDot = document.querySelector(`#pill-${name} .dot`);
       if (pillDot) { pillDot.className = 'dot'; pillDot.classList.add(dotClass); }
 
-      // Service tab dots (forge uses id 'forge-svc' to avoid conflict)
+      // Service tab dots (forge uses id 'forge-svc' to avoid conflict with header pill)
       const svcId = name === 'forge' ? 'dot-forge-svc' : `dot-${name}`;
       const svcDot = document.getElementById(svcId);
       if (svcDot) { svcDot.className = 'dot'; svcDot.classList.add(dotClass); }
@@ -407,6 +434,7 @@ async function saveSettings() {
     const fields = [
       'wan2gp_root', 'acestep_root', 'sd_wildcards_dir',
       'ollama_host', 'ollama_fast_model', 'ollama_power_model',
+      'void_model_dir',
     ];
     const body = {};
     for (const key of fields) {
@@ -509,6 +537,41 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // GUI-01: click-based dropdown with keyboard support.
+  // CSS drives visibility via aria-expanded; JS sets the attribute.
+  const dropTrigger = document.querySelector('.dropdown-trigger');
+  if (dropTrigger) {
+    dropTrigger.setAttribute('aria-haspopup', 'true');
+    dropTrigger.setAttribute('aria-expanded', 'false');
+    const dropMenu = dropTrigger.nextElementSibling;
+    if (dropMenu) {
+      dropMenu.setAttribute('role', 'menu');
+      dropMenu.querySelectorAll('.dropdown-item').forEach(item => item.setAttribute('role', 'menuitem'));
+    }
+    dropTrigger.addEventListener('click', e => {
+      e.stopPropagation();
+      const open = dropTrigger.getAttribute('aria-expanded') === 'true';
+      dropTrigger.setAttribute('aria-expanded', String(!open));
+    });
+    // Close on outside click or Escape
+    document.addEventListener('click', () => dropTrigger.setAttribute('aria-expanded', 'false'));
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') dropTrigger.setAttribute('aria-expanded', 'false');
+    });
+    // Trap Tab within open menu and close after selection
+    if (dropMenu) {
+      dropMenu.addEventListener('keydown', e => {
+        const items = [...dropMenu.querySelectorAll('.dropdown-item')];
+        const idx = items.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown') { e.preventDefault(); items[(idx + 1) % items.length]?.focus(); }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); items[(idx - 1 + items.length) % items.length]?.focus(); }
+      });
+      dropMenu.querySelectorAll('.dropdown-item').forEach(item => {
+        item.addEventListener('click', () => dropTrigger.setAttribute('aria-expanded', 'false'));
+      });
+    }
+  }
+
   // Log toggle — starts open
   const logToggle = document.getElementById('log-toggle');
   const logContent = document.getElementById('log-content');
@@ -549,9 +612,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Service start buttons
   document.getElementById('btn-start-wangp')?.addEventListener('click', () => startService('wangp'));
   document.getElementById('btn-start-acestep')?.addEventListener('click', () => startService('acestep'));
+  document.getElementById('btn-start-void')?.addEventListener('click', () => startService('void'));
 
   // Initialize default tab
-  switchTab('fun-videos');
+  switchTab('sd-prompts');
 
   // Initial loads
   loadConfig();

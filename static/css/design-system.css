@@ -6,6 +6,9 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* GUI-06: utility class for JS-driven visibility (use classList.toggle instead of style.display) */
+.hidden { display: none !important; }
+
 /*
   Responsive font scaling:
   < 1400px  → 16px  (standard 1080p/1440p)
@@ -1179,6 +1182,143 @@ textarea:focus { border-color: var(--accent); }
 /* Custom lyrics wrap */
 .custom-lyrics-wrap { }
 .custom-lyrics-wrap textarea { min-height: 90px; }
+
+/* ── Soundtrack redesign — section headers & divider ─────────────────────── */
+
+.snd-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.snd-section-title {
+  font-size: .65rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.snd-section-hint {
+  font-size: .68rem;
+  color: var(--text-3);
+  letter-spacing: .04em;
+}
+.snd-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0 6px;
+}
+
+/* Vocals buttons now have a subtitle line */
+.vocals-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.vocals-sub {
+  font-size: .6rem;
+  color: var(--text-3);
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+}
+.vocals-btn.on .vocals-sub { color: var(--accent); opacity: .75; }
+
+/* ── Lyric mood cards (replaces old .tone-chip buttons) ─────────────────── */
+
+.tone-chip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.tone-chip-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 6px 7px;
+  background: var(--surface);
+  border: 2px solid var(--border-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  text-align: center;
+}
+.tone-chip-card:hover { border-color: var(--accent-border); background: var(--surface-2); }
+.tone-chip-card.on {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+.tone-chip-icon  { font-size: 1.4rem; line-height: 1; }
+.tone-chip-label { font-size: .78rem; font-weight: 700; color: var(--text); margin-top: 1px; }
+.tone-chip-desc  { font-size: .62rem; color: var(--text-3); line-height: 1.3; }
+.tone-chip-card.on .tone-chip-label { color: var(--accent); }
+.tone-chip-card.on .tone-chip-desc  { color: var(--accent); opacity: .7; }
+
+/* Combo preview — shows what genre + mood produces */
+.snd-combo-preview {
+  font-size: .75rem;
+  color: var(--accent);
+  font-style: italic;
+  min-height: 1.1em;
+  margin-bottom: 4px;
+  padding: 4px 0;
+  transition: opacity .2s;
+}
+
+/* ── Fun Videos player extras ────────────────────────────────────────────── */
+
+.fun-player-extras {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.player-nav-label {
+  flex: 1;
+  text-align: center;
+  font-size: .85rem;
+  color: var(--text-2);
+}
+
+.player-audio-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.player-ver-btn {
+  border: 2px solid var(--border-2);
+  transition: border-color .15s, background .15s;
+}
+.player-ver-btn.active-ver {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.player-action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.player-delete-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 
 
 /* ── Bridges tab ──────────────────────────────────────────────────────────── */

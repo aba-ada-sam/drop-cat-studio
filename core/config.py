@@ -66,7 +66,7 @@ DEFAULTS: dict = {
     "bridge_auto_analyze": True,
 
     # ── SD Prompts (sd_) ─────────────────────────────────────────────────
-    "sd_wildcards_dir": r"Z:\Python310\stable-diffusion-webui\extensions\sd-dynamic-prompts\wildcards",
+    "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
     "forge_url": "http://127.0.0.1:7861",
     "forge_default_sampler": "DPM++ 2M SDE",
@@ -81,18 +81,27 @@ DEFAULTS: dict = {
     "tools_out_dir": "",
 
     # ── Ollama (local AI — no API keys required) ─────────────────────────
+    # Gemma 4 models for RTX 5080 (16GB VRAM):
+    #   gemma4:e4b  (4B, ~9.6 GB)  -- fast, multimodal vision, fits easily
+    #   gemma4:26b  (MoE, ~18 GB)  -- power; active params ~4B, may need offload
+    # Switch to qwen3-vl:8b / qwen3-vl:30b if Gemma 4 not yet pulled in Ollama.
     "ollama_host":           "http://localhost:11434",
-    "ollama_fast_model":     "qwen3-vl:8b",
-    "ollama_balanced_model": "qwen3-vl:8b",
-    "ollama_power_model":    "qwen3-vl:30b",
+    "ollama_fast_model":     "gemma4:e4b",
+    "ollama_balanced_model": "gemma4:e4b",
+    "ollama_power_model":    "gemma4:26b",
 
     # ── AI model aliases (mapped to Ollama) ───────────────────────────────
-    "ai_model_fast":     "qwen3-vl:8b",
-    "ai_model_balanced": "qwen3-vl:8b",
-    "ai_model_power":    "qwen3-vl:30b",
+    "ai_model_fast":     "gemma4:e4b",
+    "ai_model_balanced": "gemma4:e4b",
+    "ai_model_power":    "gemma4:26b",
+
+    # ── Post Processing / VOID inpainting ─────────────────────────────────
+    # Leave blank to auto-download netflix/void-model from HuggingFace on first use.
+    # Set to a local path if already downloaded.
+    "void_model_dir": "",
 }
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # BUG-05: RLock so load() inside save() doesn't deadlock
 _cache: dict | None = None
 _cache_mtime: float = 0.0
 
@@ -104,27 +113,32 @@ def _invalidate():
 
 
 def load() -> dict:
-    """Load config with file-mtime caching to avoid repeated disk reads."""
+    """Load config with file-mtime caching to avoid repeated disk reads.
+
+    BUG-05: acquire _lock for both the cache check and the cache write to
+    prevent TOCTOU races on concurrent requests.
+    """
     global _cache, _cache_mtime
-    try:
-        mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0.0
-    except OSError:
-        mtime = 0.0
-    if _cache is not None and mtime == _cache_mtime:
-        return dict(_cache)
-    if CONFIG_FILE.exists():
+    with _lock:
         try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            merged = {**DEFAULTS, **data}
-            _cache = merged
-            _cache_mtime = mtime
-            return dict(merged)
-        except Exception:
-            pass
-    result = dict(DEFAULTS)
-    _cache = result
-    _cache_mtime = mtime
-    return dict(result)
+            mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0.0
+        except OSError:
+            mtime = 0.0
+        if _cache is not None and mtime == _cache_mtime:
+            return dict(_cache)
+        if CONFIG_FILE.exists():
+            try:
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                merged = {**DEFAULTS, **data}
+                _cache = merged
+                _cache_mtime = mtime
+                return dict(merged)
+            except Exception:
+                pass
+        result = dict(DEFAULTS)
+        _cache = result
+        _cache_mtime = mtime
+        return dict(result)
 
 
 def save(data: dict):

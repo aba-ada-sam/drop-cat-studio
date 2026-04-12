@@ -1,8 +1,8 @@
 """API key management for Drop Cat Go Studio.
 
 Keys are stored in config.json. On first use we also check the local
-credentials file at C:/JSON Credentials/QB_WC_credentials.json so Andrew
-doesn't have to re-enter keys he already has.
+credentials file at C:/JSON Credentials/QB_WC_credentials.json so keys
+already on this machine don't need to be re-entered.
 """
 import json
 import logging

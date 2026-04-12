@@ -287,15 +287,16 @@ async def forge_status():
     """Return Forge availability plus all live option lists."""
     from services.forge_client import (
         forge_alive, get_models, get_samplers, get_schedulers,
-        get_loras, get_upscalers, get_current_model, FORGE_URL,
+        get_loras, get_upscalers, get_current_model, _forge_url,
     )
     alive = forge_alive()
+    forge_url = _forge_url()
     if not alive:
-        return {"alive": False, "url": FORGE_URL}
+        return {"alive": False, "url": forge_url}
 
     return {
         "alive": True,
-        "url": FORGE_URL,
+        "url": forge_url,
         "current_model": get_current_model(),
         "models": [
             {"title": m.get("title", ""), "name": m.get("model_name", "")}

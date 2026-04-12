@@ -7,6 +7,7 @@ discovery from SD-Prompts (scans .txt files from a configurable directory).
 import os
 import random
 import re
+import threading
 from pathlib import Path
 
 # ── Inline wildcards (from Fun-Videos) ───────────────────────────────────────
@@ -60,7 +61,8 @@ INLINE_WILDCARDS: dict[str, list[str]] = {
 }
 
 # ── Filesystem wildcard discovery (from SD-Prompts) ──────────────────────────
-
+# FLW-06: protect the mutable cache dicts against concurrent read/write.
+_cache_lock = threading.Lock()
 _fs_cache: dict[str, list[str]] = {}
 _fs_cache_mtime: dict[str, float] = {}
 
@@ -82,11 +84,12 @@ def discover_filesystem_wildcards(root_dir: str) -> dict[str, list[str]]:
             stem = str(rel.with_suffix("")).replace(os.sep, "/").replace("/", "_")
             token = f"__{stem}__"
 
-            # Cache with mtime check
+            # FLW-06: hold lock for cache reads and writes
             mtime = txt_file.stat().st_mtime
-            if token in _fs_cache and _fs_cache_mtime.get(token, 0) == mtime:
-                wildcards[token] = _fs_cache[token]
-                continue
+            with _cache_lock:
+                if token in _fs_cache and _fs_cache_mtime.get(token, 0) == mtime:
+                    wildcards[token] = _fs_cache[token]
+                    continue
 
             lines = [
                 line.strip()
@@ -94,9 +97,10 @@ def discover_filesystem_wildcards(root_dir: str) -> dict[str, list[str]]:
                 if line.strip() and not line.strip().startswith("#")
             ]
             if lines:
-                wildcards[token] = lines
-                _fs_cache[token] = lines
-                _fs_cache_mtime[token] = mtime
+                with _cache_lock:
+                    wildcards[token] = lines
+                    _fs_cache[token] = lines
+                    _fs_cache_mtime[token] = mtime
         except Exception:
             continue
 
@@ -140,6 +144,7 @@ def expand(text: str, fs_root: str = "") -> str:
 
 
 def invalidate_cache():
-    """Clear the filesystem wildcard cache (after file edits)."""
-    _fs_cache.clear()
-    _fs_cache_mtime.clear()
+    """Clear the filesystem wildcard cache (after file edits). FLW-06: locked."""
+    with _cache_lock:
+        _fs_cache.clear()
+        _fs_cache_mtime.clear()

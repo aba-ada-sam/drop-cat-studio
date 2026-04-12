@@ -155,24 +155,35 @@ class LLMClient:
 # ── Response parsing helpers ─────────────────────────────────────────────────
 
 def parse_json_response(text: str) -> dict | list | None:
-    """Extract JSON from an LLM response that may contain markdown fences."""
+    """Extract JSON from an LLM response that may contain markdown fences.
+
+    BUG-08: replaced fragile split-on-backtick with a regex that handles
+    ```json\\n{...}\\n``` and nested code fences correctly.
+    """
+    # 1. Try a fenced code block first (handles ```json ... ``` and ``` ... ```)
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Try the raw text (model may have answered without fences)
     cleaned = text.strip()
-    if "```" in cleaned:
-        parts = cleaned.split("```")
-        if len(parts) >= 3:
-            cleaned = parts[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-    cleaned = cleaned.strip()
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        match = re.search(r"[\[{][\s\S]*[\]}]", text)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
+        pass
+
+    # 3. Fallback: find the first {...} or [...] span in the text
+    match = re.search(r"[\[{][\s\S]*[\]}]", text)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+
     return None
 
 

@@ -19,7 +19,6 @@
     <div class="splash-inner">
       <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="splash-logo">
       <div class="splash-title-block">
-        <p class="splash-andrews">✦ &nbsp; Andrew's &nbsp; ✦</p>
         <h1 class="splash-title">Drop Cat Go<br>Studio</h1>
         <p class="splash-sub">✦ &nbsp; AI Video Production &nbsp; ✦</p>
       </div>
@@ -45,13 +44,14 @@
         </div>
       </div>
 
-      <div id="splash-load-anyway" style="display:none; text-align:center; margin-top:20px">
+      <!-- GUI-06: use CSS class for visibility instead of inline style -->
+      <div id="splash-load-anyway" class="hidden" style="text-align:center; margin-top:20px">
         <button class="btn btn-primary" id="btn-load-anyway" style="padding:8px 28px; font-size:.85rem; opacity:.85">
           Load without waiting
         </button>
       </div>
 
-      <div id="splash-error" style="display:none">
+      <div id="splash-error" class="hidden">
         <p class="splash-err-msg"></p>
         <button class="btn btn-primary" onclick="location.reload()">Retry</button>
       </div>
@@ -61,7 +61,8 @@
   <!-- ══════════════════════════════════════════════════════════════════════ -->
   <!-- MAIN APP (hidden until splash clears)                                  -->
   <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <div id="app" style="display:none; flex-direction:column; min-height:100vh">
+  <!-- GUI-08: removed redundant flex-direction and min-height (already in design-system.css) -->
+  <div id="app" style="display:none">
 
     <!-- ── Header ──────────────────────────────────────────────────────── -->
     <header id="app-header">
@@ -100,6 +101,9 @@
           <span class="pill" id="pill-forge" title="Forge Stable Diffusion — http://127.0.0.1:7861">
             <span class="dot"></span> Forge SD
           </span>
+          <span class="pill" id="pill-void" title="Netflix VOID video inpainting service">
+            <span class="dot"></span> VOID
+          </span>
         </div>
       </div>
       <div class="header-right">
@@ -116,14 +120,17 @@
     <!-- ── Tab Navigation ──────────────────────────────────────────────── -->
     <nav id="tab-bar">
       <div class="tab-group primary">
-        <button class="tab active" data-tab="fun-videos">
+        <button class="tab active" data-tab="sd-prompts">
+          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> Image Generation
+        </button>
+        <button class="tab" data-tab="fun-videos">
           <img src="/static/icon-fun-videos.png" alt="" class="tab-icon"> Fun Videos
         </button>
         <button class="tab" data-tab="bridges">
           <img src="/static/icon-bridges.png" alt="" class="tab-icon"> Video Bridges
         </button>
-        <button class="tab" data-tab="sd-prompts">
-          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> SD Prompts
+        <button class="tab" data-tab="post-processing">
+          ✂ Post Processing
         </button>
       </div>
       <div class="tab-group secondary">
@@ -150,12 +157,13 @@
 
     <!-- ── Tab Content ─────────────────────────────────────────────────── -->
     <main id="tab-content">
-      <section class="tab-panel active" id="panel-fun-videos"><!-- tab-fun-videos.js --></section>
+      <section class="tab-panel active" id="panel-sd-prompts"><!-- tab-sd-prompts.js --></section>
+      <section class="tab-panel" id="panel-fun-videos"><!-- tab-fun-videos.js --></section>
       <section class="tab-panel" id="panel-bridges"><!-- tab-bridges.js --></section>
-      <section class="tab-panel" id="panel-sd-prompts"><!-- tab-sd-prompts.js --></section>
       <section class="tab-panel" id="panel-image2video"><!-- panel-image2video.js --></section>
       <section class="tab-panel" id="panel-video-tools"><!-- panel-video-tools.js --></section>
       <section class="tab-panel" id="panel-wildcards"><!-- panel-wildcards.js --></section>
+      <section class="tab-panel" id="panel-post-processing"><!-- tab-post-processing.js --></section>
       <section class="tab-panel" id="panel-services">
         <div class="services-grid">
           <div class="service-card" id="svc-wangp">
@@ -184,6 +192,15 @@
             <p class="service-message" id="msg-forge-svc">Checking...</p>
             <p class="service-hint">Stable Diffusion image generation at C:\forge. Start it separately with the <code>--api</code> flag.</p>
           </div>
+          <div class="service-card" id="svc-void">
+            <div class="service-header">
+              <span class="dot" id="dot-void"></span>
+              <h3>VOID — Video Object Removal</h3>
+            </div>
+            <p class="service-message" id="msg-void">Checking...</p>
+            <p class="service-hint">Netflix VOID (April 2026): physics-aware object removal from video. Downloads <strong>netflix/void-model</strong> (~10 GB) from HuggingFace on first start.</p>
+            <button class="btn btn-sm" id="btn-start-void">Start VOID Worker</button>
+          </div>
         </div>
         <div class="card" id="system-info-card">
           <h3>System</h3>
@@ -194,9 +211,10 @@
 
     <!-- ── Log Panel ───────────────────────────────────────────────────── -->
     <footer id="log-panel">
+      <!-- GUI-04: chevron points DOWN when panel is collapsed (expand affordance) -->
       <button class="log-toggle" id="log-toggle">
         <span>Server Logs</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
         <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log file in new tab" onclick="event.stopPropagation()">&#128196; full log</a>
       </button>
       <div class="log-content" id="log-content">
@@ -223,7 +241,7 @@
           <div class="form-group">
             <label>WanGP Path <span class="hint-text">— folder containing wgp.py, e.g. C:\pinokio\api\wan.git\app</span></label>
             <div style="display:flex; gap:6px">
-              <input type="text" id="cfg-wan2gp_root" placeholder="C:\path\to\Wan2GP" style="flex:1">
+              <input type="text" id="cfg-wan2gp_root" placeholder="C:\path\to\Wan2GP" style="flex:1" autocomplete="off">
               <button class="btn btn-sm" id="btn-validate-wan">Validate</button>
             </div>
             <span class="validation-msg" id="val-wan"></span>
@@ -235,7 +253,7 @@
           <div class="form-group">
             <label>ACE-Step Path <span class="hint-text">— folder containing the ACE-Step .venv</span></label>
             <div style="display:flex; gap:6px">
-              <input type="text" id="cfg-acestep_root" placeholder="C:\path\to\ACE-Step" style="flex:1">
+              <input type="text" id="cfg-acestep_root" placeholder="C:\path\to\ACE-Step" style="flex:1" autocomplete="off">
               <button class="btn btn-sm" id="btn-validate-ace">Validate</button>
             </div>
             <span class="validation-msg" id="val-ace"></span>
@@ -246,7 +264,15 @@
           <h4 class="settings-section-label">Stable Diffusion Wildcards</h4>
           <div class="form-group">
             <label>Wildcards Directory <span class="hint-text">— your sd-dynamic-prompts wildcards folder</span></label>
-            <input type="text" id="cfg-sd_wildcards_dir" placeholder="Z:\Python310\...\wildcards">
+            <input type="text" id="cfg-sd_wildcards_dir" placeholder="(blank = inline wildcards only)" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-label">VOID Video Inpainting (Netflix)</h4>
+          <div class="form-group">
+            <label>VOID Model Directory <span class="hint-text">— blank = auto-download netflix/void-model (~10 GB) from HuggingFace on first use</span></label>
+            <input type="text" id="cfg-void_model_dir" placeholder="(blank = auto-download from HuggingFace)" autocomplete="off">
           </div>
         </div>
 
@@ -279,7 +305,7 @@
           <div id="llm-anthropic-section" style="display:none; margin-top:14px">
             <div class="form-group">
               <label>Anthropic API Key</label>
-              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)">
+              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="new-password">
               <span class="hint-text" id="anthropic-key-hint"></span>
             </div>
           </div>
@@ -291,13 +317,13 @@
               <input type="text" id="cfg-ollama_host" placeholder="http://localhost:11434">
             </div>
             <div class="form-group">
-              <label>Vision model <span class="hint-text">— used for prompt generation</span></label>
+              <label>Vision model <span class="hint-text">— prompt generation &amp; photo analysis. Gemma 4: <code>gemma4:e4b</code> (9.6 GB) or <code>gemma4:26b</code> (18 GB)</span></label>
               <select id="cfg-ollama_fast_model" style="width:100%">
                 <option value="">Loading models...</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Power model <span class="hint-text">— deep analysis tasks</span></label>
+              <label>Power model <span class="hint-text">— deep analysis. Recommended: <code>gemma4:26b</code> for RTX 5080</span></label>
               <select id="cfg-ollama_power_model" style="width:100%">
                 <option value="">Loading models...</option>
               </select>

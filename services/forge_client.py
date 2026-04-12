@@ -13,17 +13,31 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-FORGE_HOST = "127.0.0.1"
+# BUG-12: keep FORGE_PORT as a constant (used by manager.py for status display).
+# The URL is read from config at call time via _forge_url() so that changes to
+# the Settings > Forge URL field actually take effect without a restart.
 FORGE_PORT = 7861
-FORGE_URL = f"http://{FORGE_HOST}:{FORGE_PORT}"
-API_BASE = f"{FORGE_URL}/sdapi/v1"
+_FORGE_DEFAULT = f"http://127.0.0.1:{FORGE_PORT}"
+
+
+def _forge_url() -> str:
+    """Return the current Forge base URL from config (hot-reloads on Settings change)."""
+    try:
+        from core import config as _cfg
+        return (_cfg.get("forge_url") or _FORGE_DEFAULT).rstrip("/")
+    except Exception:
+        return _FORGE_DEFAULT
+
+
+def _api_base() -> str:
+    return f"{_forge_url()}/sdapi/v1"
 
 
 # ── Health / discovery ────────────────────────────────────────────────────────
 
 def forge_alive() -> bool:
     try:
-        with urllib.request.urlopen(f"{API_BASE}/samplers", timeout=3):
+        with urllib.request.urlopen(f"{_api_base()}/samplers", timeout=3):
             return True
     except Exception:
         return False
@@ -32,7 +46,7 @@ def forge_alive() -> bool:
 def get_models() -> list[dict]:
     """Return list of available checkpoint models."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/sd-models", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/sd-models", timeout=5) as r:
             return json.loads(r.read())
     except Exception:
         return []
@@ -41,7 +55,7 @@ def get_models() -> list[dict]:
 def get_samplers() -> list[str]:
     """Return list of available sampler names (live from Forge)."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/samplers", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/samplers", timeout=5) as r:
             return [s["name"] for s in json.loads(r.read())]
     except Exception:
         return ["DPM++ 2M SDE", "Euler", "DPM++ 2M Karras", "DDIM"]
@@ -50,7 +64,7 @@ def get_samplers() -> list[str]:
 def get_schedulers() -> list[str]:
     """Return list of available scheduler/noise schedule names."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/schedulers", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/schedulers", timeout=5) as r:
             return [s["name"] for s in json.loads(r.read())]
     except Exception:
         return ["Karras", "Automatic", "Exponential", "Polyexponential"]
@@ -59,7 +73,7 @@ def get_schedulers() -> list[str]:
 def get_loras() -> list[dict]:
     """Return list of available LoRA models."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/loras", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/loras", timeout=5) as r:
             return json.loads(r.read())
     except Exception:
         return []
@@ -68,7 +82,7 @@ def get_loras() -> list[dict]:
 def get_upscalers() -> list[str]:
     """Return list of available upscaler names."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/upscalers", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/upscalers", timeout=5) as r:
             return [u["name"] for u in json.loads(r.read())]
     except Exception:
         return ["ESRGAN_4x", "Latent", "None"]
@@ -77,7 +91,7 @@ def get_upscalers() -> list[str]:
 def get_current_model() -> str:
     """Return name of the currently loaded checkpoint."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/options", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/options", timeout=5) as r:
             opts = json.loads(r.read())
             return opts.get("sd_model_checkpoint", "")
     except Exception:
@@ -87,7 +101,7 @@ def get_current_model() -> str:
 def get_options() -> dict:
     """Return full Forge options dict."""
     try:
-        with urllib.request.urlopen(f"{API_BASE}/options", timeout=5) as r:
+        with urllib.request.urlopen(f"{_api_base()}/options", timeout=5) as r:
             return json.loads(r.read())
     except Exception:
         return {}
@@ -98,7 +112,7 @@ def set_model(model_name: str) -> bool:
     try:
         payload = json.dumps({"sd_model_checkpoint": model_name}).encode()
         req = urllib.request.Request(
-            f"{API_BASE}/options",
+            f"{_api_base()}/options",
             data=payload,
             method="POST",
             headers={"Content-Type": "application/json"},
@@ -111,7 +125,7 @@ def set_model(model_name: str) -> bool:
 
 def get_progress() -> dict:
     try:
-        with urllib.request.urlopen(f"{API_BASE}/progress", timeout=3) as r:
+        with urllib.request.urlopen(f"{_api_base()}/progress", timeout=3) as r:
             return json.loads(r.read())
     except Exception:
         return {"progress": 0, "state": {"job": ""}}
@@ -119,7 +133,7 @@ def get_progress() -> dict:
 
 def interrupt() -> bool:
     try:
-        req = urllib.request.Request(f"{API_BASE}/interrupt", method="POST")
+        req = urllib.request.Request(f"{_api_base()}/interrupt", method="POST")
         with urllib.request.urlopen(req, timeout=5):
             return True
     except Exception:
@@ -372,7 +386,7 @@ def _call_api(endpoint: str, payload: dict, timeout: int = 300) -> dict:
     try:
         data = json.dumps(payload).encode()
         req = urllib.request.Request(
-            f"{API_BASE}{endpoint}",
+            f"{_api_base()}{endpoint}",
             data=data,
             headers={"Content-Type": "application/json"},
         )
