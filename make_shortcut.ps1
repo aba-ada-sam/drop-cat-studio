@@ -1,9 +1,9 @@
 $ws = New-Object -ComObject WScript.Shell
 $desktop = [System.Environment]::GetFolderPath('Desktop')
 $lnk = $ws.CreateShortcut($desktop + '\Drop Cat Go Studio.lnk')
-$lnk.TargetPath = 'C:\Users\andre\Desktop\AI Editors\DropCat-Studio\launch.bat'
-$lnk.WorkingDirectory = 'C:\Users\andre\Desktop\AI Editors\DropCat-Studio'
-$lnk.IconLocation = 'C:\Users\andre\Desktop\AI Editors\DropCat-Studio\dropcat.ico'
+$lnk.TargetPath = 'C:\DropCat-Studio\launch.bat'
+$lnk.WorkingDirectory = 'C:\DropCat-Studio'
+$lnk.IconLocation = 'C:\DropCat-Studio\dropcat.ico'
 $lnk.Description = 'Drop Cat Go Studio - AI Video Production'
 $lnk.WindowStyle = 1
 $lnk.Save()
