@@ -398,10 +398,10 @@ export function init(panel) {
   mainArea.appendChild(placeholder);
 
   // ── Job Queue panel ───────────────────────────────────────────────────
-  // Appears below the player once the first job is submitted.
+  // Lives in the sidebar below the step-cards so it's always visible.
   // Shows all queued, running, and completed jobs as compact cards.
-  const queuePanel = el('div', { style: 'display:none; margin-top:12px' });
-  mainArea.appendChild(queuePanel);
+  const queuePanel = el('div', { class: 'card', style: 'display:none' });
+  cards.appendChild(queuePanel);
 
   let jobQueue = []; // {id, label, photoUrl, status, progress, message, output, poller}
 
@@ -411,17 +411,16 @@ export function init(panel) {
     queuePanel.innerHTML = '';
 
     const pending = jobQueue.filter(j => j.status === 'queued' || j.status === 'running').length;
-    queuePanel.appendChild(el('div', {
-      style: 'font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-2); margin-bottom:8px',
-      text: `Queue — ${pending} pending, ${jobQueue.length} total`,
+    queuePanel.appendChild(el('h3', {
+      style: 'margin-bottom:10px',
+      text: `Queue  —  ${pending} pending`,
     }));
 
     // Newest first
     for (const j of [...jobQueue].reverse()) {
       const dotClass = { running: 'starting', done: 'running', queued: 'not_configured', error: 'error' }[j.status] || 'unknown';
       const card = el('div', {
-        class: 'card',
-        style: 'display:flex; gap:10px; align-items:center; padding:8px 12px; margin-bottom:6px',
+        style: 'display:flex; gap:10px; align-items:center; padding:6px 0; border-top:1px solid var(--border)',
       });
 
       card.appendChild(el('span', { class: `dot ${dotClass}`, style: 'flex-shrink:0' }));

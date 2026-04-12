@@ -328,9 +328,12 @@ async function pollLogs() {
       container.appendChild(div);
       state.logSeq = Math.max(state.logSeq, entry.seq || 0);
     }
-    // Auto-scroll — scroll the viewport element, not the content div
+    // Auto-scroll — only snap to bottom if the user is already near the bottom
     const logViewport = document.getElementById('log-content');
-    if (logViewport) logViewport.scrollTop = logViewport.scrollHeight;
+    if (logViewport) {
+      const distFromBottom = logViewport.scrollHeight - logViewport.scrollTop - logViewport.clientHeight;
+      if (distFromBottom < 60) logViewport.scrollTop = logViewport.scrollHeight;
+    }
   } catch (e) {}
 }
 
@@ -553,6 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial loads
   loadConfig();
   pollServices();
+  pollLogs();       // populate log immediately, don't wait 2s
   loadSystemInfo();
 
   // Polling intervals
