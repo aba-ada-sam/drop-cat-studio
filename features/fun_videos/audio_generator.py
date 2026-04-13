@@ -94,8 +94,9 @@ def _extract_audio_url(item: dict) -> str | None:
     return None
 
 
-def _poll(task_id: str, stop_event: threading.Event | None = None) -> dict | None:
+def _poll(task_id: str, stop_event: threading.Event | None = None, progress_fn=None) -> dict | None:
     deadline = time.time() + GENERATION_TIMEOUT
+    started = time.time()
     while time.time() < deadline:
         if stop_event and stop_event.is_set():
             return {"status": -1}
@@ -107,6 +108,9 @@ def _poll(task_id: str, stop_event: threading.Event | None = None) -> dict | Non
                 item = data[0] if isinstance(data[0], dict) else {}
                 if item.get("status", 0) != 0:
                     return item
+        elapsed = int(time.time() - started)
+        if progress_fn:
+            progress_fn(elapsed)
         time.sleep(POLL_INTERVAL)
     return None
 
@@ -173,7 +177,7 @@ def generate_audio(
 
     log.info("ACE-Step task submitted: %s", task_id)
 
-    item = _poll(task_id, stop_event=stop_event)
+    item = _poll(task_id, stop_event=stop_event, progress_fn=progress_cb)
     if item is None:
         return None, "ACE-Step generation timed out"
     if item.get("status") == -1:

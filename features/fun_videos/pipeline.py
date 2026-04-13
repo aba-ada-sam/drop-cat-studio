@@ -158,6 +158,10 @@ def run_pipeline(job, photo_path, settings):
     video_dur = probe_duration(video_path)
     audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
 
+    def _audio_progress(elapsed_s):
+        job.update(progress=70 + min(14, elapsed_s // 10),
+                   message=f"Generating audio... {elapsed_s}s elapsed")
+
     audio_path, audio_err = audio_generator.generate_audio(
         prompt=music_prompt,
         duration=audio_dur,
@@ -170,6 +174,7 @@ def run_pipeline(job, photo_path, settings):
         lyrics=lyrics,
         instrumental=instrumental,
         stop_event=job.stop_event,
+        progress_cb=_audio_progress,
     )
 
     if _stopped():

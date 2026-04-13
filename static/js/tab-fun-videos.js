@@ -734,6 +734,55 @@ export function init(panel) {
     }
   }
 
+  // ── Serial job poller — polls one job at a time to avoid flooding ────
+
+  let _activePoller = null;
+
+  function _startNextPoller() {
+    // Already polling something?
+    if (_activePoller) return;
+    // Find the next unfinished job without a poller
+    const next = jobQueue.find(j => !j.poller && (j.status === 'queued' || j.status === 'running'));
+    if (!next) return;
+
+    _activePoller = next;
+    next.poller = pollJob(
+      next.id,
+      job => {
+        next.status = 'running';
+        next.progress = job.progress;
+        next.message = job.message;
+        progress.update(job.progress, job.message);
+        renderJobQueue();
+      },
+      job => {
+        next.status = 'done';
+        next.output = job.output;
+        next.videoOnly = job.meta?.video_path || null;
+        next.audioPath = job.meta?.audio_path || null;
+        next.message = 'Complete!';
+        next.progress = 100;
+        if (job.output) {
+          showJobInPlayer(next);
+          toast(`Done: ${next.label}`, 'success');
+        }
+        renderJobQueue();
+        _activePoller = null;
+        // Poll the next queued job, or hide progress if all done
+        if (!_startNextPoller()) progress.hide();
+      },
+      err => {
+        next.status = 'error';
+        next.message = err;
+        toast(`Failed: ${err}`, 'error');
+        renderJobQueue();
+        _activePoller = null;
+        if (!_startNextPoller()) progress.hide();
+      },
+    );
+    return true;  // started a poller
+  }
+
   // ── Shared submit logic ───────────────────────────────────────────────
 
   // Submit a single video job. Returns the entry or throws.
@@ -781,41 +830,7 @@ export function init(panel) {
       poller: null,
     };
     jobQueue.push(entry);
-
-    entry.poller = pollJob(
-      data.job_id,
-      job => {
-        entry.status = 'running';
-        entry.progress = job.progress;
-        entry.message = job.message;
-        const latestActive = [...jobQueue].reverse().find(j => j.status === 'running' || j.status === 'queued');
-        if (latestActive === entry) progress.update(job.progress, job.message);
-        renderJobQueue();
-      },
-      job => {
-        entry.status = 'done';
-        entry.output = job.output;
-        entry.videoOnly = job.meta?.video_path || null;
-        entry.audioPath = job.meta?.audio_path || null;
-        entry.message = 'Complete!';
-        entry.progress = 100;
-        const stillRunning = jobQueue.some(j => j.status === 'running' || j.status === 'queued');
-        if (!stillRunning) progress.hide();
-        if (job.output) {
-          showJobInPlayer(entry);
-          toast(`Done: ${entry.label}`, 'success');
-        }
-        renderJobQueue();
-      },
-      err => {
-        entry.status = 'error';
-        entry.message = err;
-        const stillRunning = jobQueue.some(j => j.status === 'running' || j.status === 'queued');
-        if (!stillRunning) progress.hide();
-        toast(`Failed: ${err}`, 'error');
-        renderJobQueue();
-      },
-    );
+    _startNextPoller();
 
     return entry;
   }
