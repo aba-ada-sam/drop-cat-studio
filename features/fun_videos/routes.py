@@ -119,13 +119,20 @@ async def generate_prompts(request: Request):
         raise HTTPException(500, "Failed to encode image")
 
     config = cfg.load()
-    return generate_video_prompts(
-        llm_router,
-        b64,
-        user_direction=body.get("user_direction", ""),
-        num_prompts=int(body.get("num_prompts", config.get("fun_num_prompts", 4))),
-        creativity=float(body.get("creativity", config.get("fun_creativity", 8.0))),
-    )
+    try:
+        return generate_video_prompts(
+            llm_router,
+            b64,
+            user_direction=body.get("user_direction", ""),
+            num_prompts=int(body.get("num_prompts", config.get("fun_num_prompts", 4))),
+            creativity=float(body.get("creativity", config.get("fun_creativity", 8.0))),
+        )
+    except RuntimeError as e:
+        msg = str(e)
+        # Detect AI content-policy refusals and return a clean 422 instead of 500
+        if "unparseable" in msg.lower() or "not able to" in msg.lower() or "won't produce" in msg.lower():
+            raise HTTPException(422, f"AI declined to generate prompts for this image. Try a different photo or creative direction.")
+        raise HTTPException(500, msg)
 
 
 @router.post("/make-it")
