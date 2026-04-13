@@ -236,6 +236,9 @@
         <button class="btn-icon modal-close">&times;</button>
       </div>
       <div class="modal-body">
+        <!-- Hidden dummy fields prevent Chrome from treating the API key input as a login form -->
+        <input type="text" name="prevent-autofill" style="display:none" tabindex="-1">
+        <input type="password" name="prevent-autofill-pw" style="display:none" tabindex="-1">
         <div class="settings-section">
           <h4 class="settings-section-label">AI Video Generation (WanGP)</h4>
           <div class="form-group">
@@ -305,7 +308,7 @@
           <div id="llm-anthropic-section" style="display:none; margin-top:14px">
             <div class="form-group">
               <label>Anthropic API Key</label>
-              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="new-password">
+              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
               <span class="hint-text" id="anthropic-key-hint"></span>
             </div>
           </div>
