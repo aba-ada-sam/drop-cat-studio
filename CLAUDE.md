@@ -1,185 +1,131 @@
-# Drop Cat Go Studio — CLAUDE.md
+# CLAUDE.md
 
-This file is read automatically at the start of every Claude Code session on this project.
-
----
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What This Is
 
-**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew.
-It merges 6 separate tools that previously ran as independent apps on different ports into one FastAPI + vanilla JS web app.
+**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 6 separate tools (previously independent apps on different ports) into one FastAPI + vanilla JS web app. Single server on port 7860, no build step.
 
-**Run it:** `launch.bat` → opens at http://127.0.0.1:7860
+**Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860
 
----
-
-## Current State (as of 2026-04-09)
-
-Phases 1–3 complete. The app is built and ready for testing.
-
-- **Phase 1** — Core infrastructure (config, logging, LLM router, job queue, services)
-- **Phase 2** — All 5 feature backends with 34 API routes
-- **Phase 3** — Full frontend (6 feature tabs, circus theme, logo, splash screen)
-
-**Known issue at first launch:** `ffmpeg` is not on PATH. Nearly all video features require it. Andrew needs to install ffmpeg and add its `bin` folder to the system PATH.
+There are no tests, linting, or CI/CD configured. The app is tested manually through the UI.
 
 ---
 
 ## Architecture
 
-Single FastAPI server on **port 7860**. No separate ports per feature.
-
 ```
-app.py                  — FastAPI entry, lifespan, global routes
+app.py                  — FastAPI entry, lifespan, global routes, feature router registration
 core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session)
-services/               — External service management (WanGP, ACE-Step, Forge)
-features/
-  image2video/          — Ken Burns slideshow from images
-  fun_videos/           — Photo → AI video + music pipeline
-  video_bridges/        — AI transition videos between clips
-  sd_prompts/           — SD prompt generation + Forge image generation
-  video_tools/          — Batch reverse/flip/speed/upscale/convert
-static/                 — Vanilla JS frontend (ES modules, no framework)
-  css/design-system.css — Circus theme (dark crimson/gold palette)
-  js/app.js             — Tab routing, splash screen, service polling
-  js/tab-*.js           — One JS module per primary tab
-  js/panel-*.js         — One JS module per tools panel
+services/               — External service lifecycle (WanGP, ACE-Step, Forge, VOID)
+features/               — Feature modules, each with routes.py + domain logic
+  fun_videos/           — Photo → AI video + music (WanGP + ACE-Step)
+  video_bridges/        — AI transition clips between videos (WanGP, OpenCV fallback)
+  sd_prompts/           — SD prompt generation + full Forge integration
+  image2video/          — Ken Burns slideshow (pure ffmpeg, no AI)
+  video_tools/          — Batch transforms + music mixer
+  post_processing/      — Netflix VOID inpainting
+static/                 — Vanilla JS frontend (ES modules, no framework, no build)
 ```
 
-### Key design decisions
-- **Vanilla JS, ES modules** — no React, no build step, just `<script type="module">`
-- **Single GPU queue** — Fun Videos and Bridges share WanGP; job_manager enforces sequential GPU access
-- **LLM Router** — All AI calls go through `core/llm_router.py` (rate limiting, Anthropic→OpenAI overflow)
-- **Session tracking** — Every generated file is registered via `core/session.py` so outputs appear as inputs in other tabs
-- **SD Prompts conversation state** — Stored server-side in `features/sd_prompts/routes.py:_conv_states` dict keyed by session ID (replaces Gradio state)
+### Critical pattern: circular import avoidance
+
+`app.py` imports all feature routers at module level (lines 555-567). Features that need the LLM router or job manager **must use lazy getter functions**, never direct imports:
+
+```python
+# CORRECT — deferred to request time
+from app import get_llm_router
+llm_router = get_llm_router()
+
+# WRONG — circular import at module load
+from app import LLMRouter
+```
+
+The `sys.modules` fix at the top of `app.py` (line 12) ensures `from app import ...` and `from __main__ import ...` resolve to the same module object with shared `_g` globals dict.
+
+### GPU job queue (`core/job_manager.py`)
+
+Fun Videos and Bridges share a single GPU (WanGP). The job manager enforces sequential execution for GPU job types (`JOB_FUN_VIDEO`, `JOB_BRIDGE`) via a background worker thread with a deque. Non-GPU jobs (`JOB_I2V`, `JOB_VIDEO_TOOL`, `JOB_SD_PROMPT`) run immediately in their own threads.
+
+Worker functions receive a `Job` object and must:
+- Update `job.progress` (0-100) and `job.message` periodically
+- Check `job.stop_event.is_set()` for cancellation
+- Set `job.output` on success
+
+GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s).
+
+### LLM routing (`core/llm_router.py`)
+
+All AI calls go through `LLMRouter.route()` or `LLMRouter.route_vision()`. The provider is read from config on each call (hot-switchable via Settings UI):
+- **auto** (default): tries Anthropic key → OpenAI key → Ollama
+- Three tiers: `TIER_FAST`, `TIER_BALANCED`, `TIER_POWER` — mapped to different models per provider
+- Retry with exponential backoff; respects `Retry-After` on 429s; permanent errors fail immediately
+
+### Config system (`core/config.py`)
+
+Single `config.json` with 53+ namespaced keys (prefixes: `i2v_`, `fun_`, `bridge_`, `sd_`, `tools_`). Global keys shared across features. `DEFAULTS` dict is the canonical key registry — only keys present in `DEFAULTS` are accepted via the API.
+
+Thread-safe via `RLock` (allows nested `load()` inside `save()`). File mtime caching avoids repeated disk reads. Type validation runs once on first load.
+
+### Session tracking (`core/session.py`)
+
+Every generated file is registered via `session.add_file()` so outputs from one tab appear in "From Session" pickers in other tabs. Sessions persist to `projects/{id}/session.json`. Capped at 200 files per session.
+
+### Frontend (`static/js/`)
+
+- **ES modules** loaded via `<script type="module">` — no bundler
+- **Tabs initialize lazily** — `app.js` calls each tab's `init(panel)` once on first visit, wrapped in try/catch with error banner
+- **Job polling** — `api.js:pollJob()` polls `GET /api/jobs/{id}` every 1.5s with a max-poll safety cap (400 polls ≈ 10 min)
+- **`session-updated` event** — dispatched by `pollJob` on job completion; session pickers auto-refresh if visible
+- **`components.js`** — shared UI factory (`el()`, `toast()`, `createDropZone()`, `createSlider()`, etc.)
+- **`handoff.js`** — cross-tab data passing (e.g., Fun Videos output → Bridges input)
 
 ---
 
 ## External Services
 
-| Service | Port | Purpose | How to start |
-|---------|------|---------|-------------|
-| WanGP | 7899 (worker) | AI video generation | Set path in Settings → app auto-starts |
-| ACE-Step | 8019 | Music generation | Set path in Settings → app auto-starts |
-| Forge SD | 7861 | Stable Diffusion images | `C:\forge` — start with `--api` flag |
+| Service | Port | Purpose | Startup |
+|---------|------|---------|---------|
+| WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
+| ACE-Step | 8019 | Music generation | Set path in Settings → auto-starts |
+| Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
+| VOID | internal | Netflix inpainting | Auto-downloads model on first use (~10 GB) |
 
-**Forge is at `C:\forge`.** The app checks port 7861 on startup and shows status in the header.
+Forge is at `C:\forge`. The app detects it but cannot start it (Forge manages its own Python env). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging.
 
 ---
 
 ## Config & Keys
 
-- **Config file:** `config.json` in project root (auto-created, 53 namespaced keys)
-- **API keys:** `config.json` in project root (highest priority) OR `C:\JSON Credentials\QB_WC_credentials.json` (fallback)
-- **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, globals shared
-
-Set WanGP/ACE-Step paths in the Settings modal (gear icon in header).
-Set Anthropic/OpenAI keys via the key icon in the header.
+- **Config:** `config.json` in project root (auto-created from `DEFAULTS`)
+- **API keys precedence:** `config.json` (highest) → `C:\JSON Credentials\QB_WC_credentials.json` (fallback)
+- **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, plus globals
 
 ---
 
-## Feature Tab Overview
+## Theme & Layout
 
-### Fun Videos (`/api/fun/*`)
-Photo → AI video + audio. Step-by-step cards: upload photo → generate prompts → configure audio → generate.
-Uses WanGP (video) + ACE-Step (music). Claude analyzes the photo and generates creative I2V prompts.
+**Circus theme** in `static/css/design-system.css`: dark crimson/gold palette (`#0d0606` bg, `#d4a017` gold, `#c41e3a` crimson, `#f0e6d0` cream text).
 
-### Video Bridges (`/api/bridges/*`)
-Upload 2+ clips → AI generates cinematic transitions between them → compiled final video.
-Uses WanGP for bridge generation, OpenCV morph as fallback.
-
-### SD Prompts (`/api/prompts/*`)
-Drop image → Claude generates LEFT/CENTER/RIGHT regional prompts for Forge Couple.
-**Forge Couple is ON by default** — the 3 columns map to spatial regions.
-Dynamic prompts (`__wildcard__` syntax) are resolved by Forge automatically.
-Has full Forge integration: model switcher, sampler/scheduler live from Forge API, HiRes Fix, ADetailer.
-
-### Image to Video (`/api/i2v/*`)
-Folder of images → Ken Burns slideshow with crossfades. No AI needed.
-
-### Video Tools (`/api/tools/*`)
-Batch transforms: reverse, mirror, flip, speed, upscale, sharpen, format conversion.
-Also has music mixer (blend background music under video).
-
-### Wildcard Manager (`/api/prompts/wildcards`, `/prune`, `/expand`, `/merge`, `/audit`)
-AI-powered curation of SD dynamic-prompts wildcard .txt files.
+**Responsive breakpoints** prepared for Andrew's 49" ultrawide (5120x1440):
+- `< 1100px` single column → `1100-1600px` sidebar + main → `> 2560px` 3-column with info panel → `> 4000px` ultrawide widths
 
 ---
 
-## Frontend Notes
+## Known Issues
 
-- **Tabs initialize lazily** — JS module for each tab runs once on first visit, never again
-- **Job polling** — `api.js:pollJob()` polls `GET /api/jobs/{id}` every 1.5s
-- **Session picker** — All tabs have a "From Session" button that shows files generated by other tabs
-- **Path input** — All upload zones also accept pasted file/folder paths (calls `/add-paths` endpoints)
-- **Splash screen** — Checks server, ffmpeg, AI keys, Forge, WanGP on boot. Shows help modal on first visit only (localStorage flag)
+1. **ffmpeg** must be on PATH — nearly all video features require it. The splash screen warns if missing.
+2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works.
+3. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
 
 ---
 
-## The Circus Theme
+## Original Source Apps (reference, do not delete)
 
-CSS palette in `static/css/design-system.css`:
-- Background: `#0d0606` (near-black, red warmth)
-- Accent: `#d4a017` (antique gold)
-- Red: `#c41e3a` (circus crimson)
-- Text: `#f0e6d0` (old poster cream)
-- Buttons: crimson gradient, not the amber used in earlier versions
-
-Header has "Andrew's" in an SVG arched text path over "DROP CAT GO STUDIO" in Impact.
-Logo assets: `static/logo-512.png`, `static/logo-192.png`, `static/favicon.ico`
-Logo generator: `make_logo.py` — re-run to regenerate if needed.
-
----
-
-## Display / Monitor
-
-Andrew is upgrading to a **49" ultrawide monitor** (32:9 — either 5120×1440 or 3840×1080).
-
-The layout is fully prepared for this:
-- `< 1100px` — single column (stacked)
-- `1100–1600px` — sidebar (360px) + main area
-- `1600–2560px` — wider sidebar (440px) + main area
-- `> 2560px` — **3-column**: sidebar (460px) + main area + info panel (360px)
-- `> 4000px` — wider columns for 5120×1440
-
-The **info panel** (3rd column) shows session files, service status, and reference info. It's hidden by CSS on normal screens and appears automatically at ultrawide widths — no JS changes needed.
-
-Font sizes also scale: 16px → 17 → 18 → 19 → 20px across breakpoints.
-
----
-
-## What Still Needs Work / Known Issues
-
-1. **ffmpeg not on PATH** — install it, add `bin` to system PATH
-2. **launch.bat title** — still shows "DropCat Studio", needs updating to "Drop Cat Go Studio"
-3. **launch.bat encoding** — em-dash in the banner causes garbled characters on Windows cp1252 console
-4. **Forge** — must be started separately with `--api` flag before SD Prompts image generation works. The app detects it but cannot start it automatically (Forge's own launcher handles its Python env)
-5. **WanGP first run** — model loading takes 2-3 minutes; the splash screen will show "WanGP not running" until the worker finishes loading. This is normal.
-
----
-
-## Original Source Apps (for reference, do not delete)
-
-All still intact at `C:\Users\andre\Desktop\AI Editors\`:
+All at `C:\Users\andre\Desktop\AI Editors\`:
 - `DropCat-Image-2-Video\` — Ken Burns (FastAPI)
 - `DropCatGo-Fun-Videos_w_Audio\` — Photo→video+audio (FastAPI)
 - `DropCatGo-SD-Prompts\` — SD prompts (Gradio)
 - `DropCatGo-Video-BRIDGES\` — Transitions (FastAPI)
 - `Github Video Editor\` — Infrastructure donor (LLM router, WanGP runtime, music mixer)
 - `Video Reverser\` — Batch transforms (Tkinter)
-
----
-
-## Quick Fixes Needed Right Now
-
-```bat
-:: Fix launch.bat title and encoding (replace the header block):
-@echo off
-title Drop Cat Go Studio
-echo ============================================
-echo   Drop Cat Go Studio
-echo   AI Video Production
-echo ============================================
-```
-
-Run `make_shortcut.ps1` if the desktop shortcut ever needs to be recreated.
