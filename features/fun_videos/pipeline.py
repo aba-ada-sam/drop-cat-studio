@@ -49,8 +49,12 @@ def run_pipeline(job, photo_path, settings):
     skip_audio = settings.get("skip_audio", False)
     user_direction = settings.get("user_direction", "")
 
+    _last_error = [None]
+
     def _log(msg):
         log.info(msg)
+        if "[error]" in msg:
+            _last_error[0] = msg.replace("[error] ", "")
         job.update(message=msg.lstrip("[info] ").lstrip("[error] ").lstrip("[success] "))
 
     def _stopped():
@@ -96,7 +100,8 @@ def run_pipeline(job, photo_path, settings):
     if _stopped():
         return
     if not video_path:
-        raise RuntimeError("Video generation failed")
+        reason = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
+        raise RuntimeError(f"Video generation failed: {reason}")
 
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path
