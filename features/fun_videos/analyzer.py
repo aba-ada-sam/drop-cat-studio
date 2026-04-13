@@ -122,16 +122,19 @@ def generate_video_prompts(
 Generate exactly {num_prompts} prompts, each with different mood, camera work, and action."""
     )
 
-    text = router.route_vision(
-        "\n\n".join(prompt_parts),
-        [image_b64],
-        tier=TIER_BALANCED,
-        system=VIDEO_PROMPT_SYSTEM,
-    )
-    result = parse_json_response(text)
-    if not result:
-        raise RuntimeError("AI returned unparseable response for prompt generation")
-    return result
+    for attempt in range(2):
+        text = router.route_vision(
+            "\n\n".join(prompt_parts),
+            [image_b64],
+            tier=TIER_BALANCED,
+            system=VIDEO_PROMPT_SYSTEM,
+        )
+        result = parse_json_response(text)
+        if result and isinstance(result, dict) and result.get("prompts"):
+            return result
+        log.warning("Prompt generation attempt %d: unparseable response (len=%d): %.300s",
+                    attempt + 1, len(text), text)
+    raise RuntimeError(f"AI returned unparseable response after 2 attempts. Last response: {text[:200]}")
 
 
 def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "", user_direction: str = "") -> str:
