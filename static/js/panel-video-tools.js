@@ -54,29 +54,36 @@ export function init(panel) {
   const sessionPicker = el('div', { style: 'display:none; margin-top:8px' });
   queueCard.appendChild(sessionPicker);
 
+  async function refreshSessionPicker() {
+    try {
+      const data = await api('/api/session/videos');
+      sessionPicker.innerHTML = '';
+      const vids = data.videos || [];
+      if (!vids.length) { sessionPicker.textContent = 'No videos in session yet.'; return; }
+      for (const v of vids) {
+        const row = el('div', { class: 'file-item', style: 'cursor:pointer', onclick() {
+          if (!files.find(f => f.path === v.path)) {
+            files.push({ path: v.path, name: v.filename, source: v.source });
+            renderFiles();
+          }
+          sessionPicker.style.display = 'none';
+        }}, [
+          el('span', { class: 'name', text: v.filename }),
+          el('span', { class: 'meta', text: `from ${v.source}` }),
+        ]);
+        sessionPicker.appendChild(row);
+      }
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
   sessionBtn.addEventListener('click', async () => {
-    sessionPicker.style.display = sessionPicker.style.display === 'none' ? '' : 'none';
-    if (sessionPicker.style.display !== 'none') {
-      try {
-        const data = await api('/api/session/videos');
-        sessionPicker.innerHTML = '';
-        const vids = data.videos || [];
-        if (!vids.length) { sessionPicker.textContent = 'No videos in session yet.'; return; }
-        for (const v of vids) {
-          const row = el('div', { class: 'file-item', style: 'cursor:pointer', onclick() {
-            if (!files.find(f => f.path === v.path)) {
-              files.push({ path: v.path, name: v.filename, source: v.source });
-              renderFiles();
-            }
-            sessionPicker.style.display = 'none';
-          }}, [
-            el('span', { class: 'name', text: v.filename }),
-            el('span', { class: 'meta', text: `from ${v.source}` }),
-          ]);
-          sessionPicker.appendChild(row);
-        }
-      } catch (e) { toast(e.message, 'error'); }
-    }
+    const show = sessionPicker.style.display === 'none';
+    sessionPicker.style.display = show ? '' : 'none';
+    if (show) refreshSessionPicker();
+  });
+
+  window.addEventListener('session-updated', () => {
+    if (sessionPicker.style.display !== 'none') refreshSessionPicker();
   });
 
   const fileList = el('div', { class: 'file-list' });

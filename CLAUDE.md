@@ -70,7 +70,7 @@ static/                 — Vanilla JS frontend (ES modules, no framework)
 ## Config & Keys
 
 - **Config file:** `config.json` in project root (auto-created, 53 namespaced keys)
-- **API keys:** `keys.json` in project root OR `C:\JSON Credentials\chatbot\config.json`
+- **API keys:** `config.json` in project root (highest priority) OR `C:\JSON Credentials\QB_WC_credentials.json` (fallback)
 - **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, globals shared
 
 Set WanGP/ACE-Step paths in the Settings modal (gear icon in header).
@@ -155,7 +155,6 @@ Font sizes also scale: 16px → 17 → 18 → 19 → 20px across breakpoints.
 3. **launch.bat encoding** — em-dash in the banner causes garbled characters on Windows cp1252 console
 4. **Forge** — must be started separately with `--api` flag before SD Prompts image generation works. The app detects it but cannot start it automatically (Forge's own launcher handles its Python env)
 5. **WanGP first run** — model loading takes 2-3 minutes; the splash screen will show "WanGP not running" until the worker finishes loading. This is normal.
-6. ~~**wangp_worker.py UnboundLocalError** — FIXED. Redundant `import importlib` inside `main()` was shadowing the top-level `import importlib.util`. Removed the local import at line 339.~~
 
 ---
 

@@ -124,12 +124,20 @@ async def mix_music(request: Request):
     if not music_path or not os.path.isfile(music_path):
         raise HTTPException(400, "Music file not found")
 
-    def _worker(job, vpath, mpath, settings):
+    # Validate volume dB values — sane range is -60 to +20 dB
+    settings = body.get("settings", {})
+    try:
+        music_vol = max(-60.0, min(20.0, float(settings.get("music_volume_db", -18.0))))
+        dialogue_vol = max(-60.0, min(20.0, float(settings.get("dialogue_volume_db", 0.0))))
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Volume values must be numbers between -60 and +20 dB")
+
+    def _worker(job, vpath, mpath, m_vol, d_vol):
         job.update(progress=10, message="Mixing audio...")
         result = mix_music_under_video(
             vpath, mpath,
-            music_volume_db=float(settings.get("music_volume_db", -18.0)),
-            dialogue_volume_db=float(settings.get("dialogue_volume_db", 0.0)),
+            music_volume_db=m_vol,
+            dialogue_volume_db=d_vol,
         )
         if result["success"]:
             job.output = result["output_path"]
@@ -137,9 +145,8 @@ async def mix_music(request: Request):
         else:
             raise RuntimeError(result["error"])
 
-    settings = body.get("settings", {})
     job = job_manager.submit(
-        JOB_VIDEO_TOOL, _worker, video_path, music_path, settings,
+        JOB_VIDEO_TOOL, _worker, video_path, music_path, music_vol, dialogue_vol,
         label="Music mix",
     )
     return {"job_id": job.id}

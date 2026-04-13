@@ -27,7 +27,8 @@ from features.sd_prompts.wildcard_manager import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# Server-side conversation state keyed by session
+# Server-side conversation state keyed by session (capped to prevent memory leak)
+_MAX_CONV_STATES = 100
 _conv_states: dict[str, dict] = {}
 
 
@@ -93,7 +94,10 @@ async def gen_prompts(request: Request):
         model=model,
     )
 
-    # Store conversation state server-side
+    # Store conversation state server-side (evict oldest if at capacity)
+    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
+        oldest = next(iter(_conv_states))
+        del _conv_states[oldest]
     _conv_states[session_id] = conv_state
 
     return {
@@ -120,6 +124,9 @@ async def refine(request: Request):
         raise HTTPException(400, "Feedback required")
 
     parsed, new_state = refine_prompts(llm_router, conv_state, feedback, model)
+    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
+        oldest = next(iter(_conv_states))
+        del _conv_states[oldest]
     _conv_states[session_id] = new_state
 
     return {
@@ -292,7 +299,11 @@ async def forge_status():
     alive = forge_alive()
     forge_url = _forge_url()
     if not alive:
-        return {"alive": False, "url": forge_url}
+        return {
+            "alive": False,
+            "url": forge_url,
+            "warning": "Forge is not running. Start Forge with the --api flag for SD image generation.",
+        }
 
     return {
         "alive": True,
@@ -376,8 +387,8 @@ async def forge_txt2img(request: Request):
     result = txt2img(
         prompt=prompt,
         negative_prompt=body.get("negative_prompt", ""),
-        width=int(body.get("width", 1024)),
-        height=int(body.get("height", 1024)),
+        width=int(body.get("width", 1440)),
+        height=int(body.get("height", 810)),
         steps=int(body.get("steps", 25)),
         sampler_name=body.get("sampler", "DPM++ 2M SDE"),
         scheduler=body.get("scheduler", "Karras"),
@@ -438,8 +449,8 @@ async def forge_img2img(request: Request):
         prompt=prompt,
         negative_prompt=body.get("negative_prompt", ""),
         denoising_strength=float(body.get("denoising_strength", 0.5)),
-        width=int(body.get("width", 1024)),
-        height=int(body.get("height", 1024)),
+        width=int(body.get("width", 1440)),
+        height=int(body.get("height", 810)),
         steps=int(body.get("steps", 25)),
         sampler_name=body.get("sampler", "DPM++ 2M SDE"),
         scheduler=body.get("scheduler", "Karras"),

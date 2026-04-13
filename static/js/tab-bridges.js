@@ -125,10 +125,7 @@ export function init(panel) {
   const sessionPicker = el('div', { class: 'session-picker', style: 'display:none; margin-top:8px' });
   clipsCard.appendChild(sessionPicker);
 
-  sessionBtn.addEventListener('click', async () => {
-    const show = sessionPicker.style.display === 'none';
-    sessionPicker.style.display = show ? '' : 'none';
-    if (!show) return;
+  async function refreshSessionPicker() {
     try {
       const data = await api('/api/session/videos');
       sessionPicker.innerHTML = '';
@@ -147,6 +144,17 @@ export function init(panel) {
         sessionPicker.appendChild(row);
       }
     } catch (e) { toast(e.message, 'error'); }
+  }
+
+  sessionBtn.addEventListener('click', async () => {
+    const show = sessionPicker.style.display === 'none';
+    sessionPicker.style.display = show ? '' : 'none';
+    if (show) refreshSessionPicker();
+  });
+
+  // Auto-refresh if visible when a job completes elsewhere
+  window.addEventListener('session-updated', () => {
+    if (sessionPicker.style.display !== 'none') refreshSessionPicker();
   });
 
   analyzeBtn.addEventListener('click', async () => {
@@ -306,4 +314,8 @@ export function init(panel) {
   });
 
   player.onStartOver(() => { player.hide(); items = []; renderItems(); });
+}
+
+export function receiveHandoff(_data) {
+  // Reserved for cross-tab handoff (e.g. session file dropped onto this tab)
 }

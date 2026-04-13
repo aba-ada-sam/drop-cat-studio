@@ -35,6 +35,9 @@ class FileEntry:
         }
 
 
+MAX_SESSION_FILES = 200
+
+
 class Session:
     """Tracks files and outputs across a working session."""
 
@@ -53,7 +56,10 @@ class Session:
         return self._dir
 
     def add_file(self, filename: str, kind: str, source: str, **meta):
-        """Register a file (upload or output)."""
+        """Register a file (upload or output). Evicts oldest entries if at capacity."""
+        if len(self.files) >= MAX_SESSION_FILES and filename not in self.files:
+            oldest_key = min(self.files, key=lambda k: self.files[k].added_at)
+            del self.files[oldest_key]
         self.files[filename] = FileEntry(filename, kind, source, **meta)
         self._save()
 

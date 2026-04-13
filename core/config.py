@@ -7,6 +7,7 @@ shared across features; feature-specific keys use prefixes (i2v_, fun_,
 bridge_, sd_, tools_).
 """
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -14,6 +15,8 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS: dict = {
     # ── Global (shared across features) ──────────────────────────────────
+    "debug_mode": False,            # show service terminal windows when True
+    "gpu_job_timeout_seconds": 600, # max seconds before a GPU job is killed
     "wan2gp_root": "",
     "wan2gp_python": "",            # auto-detected if blank
     "wan_model": "LTX-2 Dev19B Distilled",
@@ -29,7 +32,7 @@ DEFAULTS: dict = {
     "i2v_ken_burns_zoom": 5,        # 0-20 %
     "i2v_img_dur": 3.0,
     "i2v_fade_dur": 0.5,
-    "i2v_output_res": "1280x720",
+    "i2v_output_res": "1440x810",
     "i2v_aspect_mode": "auto",      # auto | fixed | source
     "i2v_fit_mode": "contain",      # contain | cover
     "i2v_motion_mode": "random",    # zoom_in | zoom_out | random | still
@@ -72,8 +75,8 @@ DEFAULTS: dict = {
     "forge_default_sampler": "DPM++ 2M SDE",
     "forge_default_steps": 25,
     "forge_default_cfg": 7.0,
-    "forge_default_width": 1024,
-    "forge_default_height": 1024,
+    "forge_default_width": 1440,
+    "forge_default_height": 810,
 
     # ── Video Tools (tools_) ─────────────────────────────────────────────
     "tools_crf": 18,
@@ -104,6 +107,26 @@ DEFAULTS: dict = {
 _lock = threading.RLock()  # BUG-05: RLock so load() inside save() doesn't deadlock
 _cache: dict | None = None
 _cache_mtime: float = 0.0
+_validated = False
+
+_log = logging.getLogger(__name__)
+
+
+def _validate_config(data: dict) -> dict:
+    """Warn on type mismatches vs DEFAULTS and coerce where safe. Returns cleaned dict."""
+    for key, value in list(data.items()):
+        if key not in DEFAULTS:
+            continue
+        expected = type(DEFAULTS[key])
+        if expected == type(value) or value == "" or DEFAULTS[key] == "":
+            continue
+        # int/float are interchangeable
+        if expected in (int, float) and isinstance(value, (int, float)):
+            continue
+        _log.warning("[Config] Key '%s' expected %s, got %s (%r) — using default",
+                     key, expected.__name__, type(value).__name__, value)
+        data[key] = DEFAULTS[key]
+    return data
 
 
 def _invalidate():
@@ -129,6 +152,10 @@ def load() -> dict:
         if CONFIG_FILE.exists():
             try:
                 data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                global _validated
+                if not _validated:
+                    data = _validate_config(data)
+                    _validated = True
                 merged = {**DEFAULTS, **data}
                 _cache = merged
                 _cache_mtime = mtime

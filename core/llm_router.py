@@ -183,7 +183,15 @@ class LLMRouter:
                     raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1
+                    # Respect Retry-After header on rate limit errors
                     wait = 2 ** attempt
+                    if "RateLimitError" in exc_type:
+                        retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("retry-after")
+                        if retry_after:
+                            try:
+                                wait = min(int(retry_after), 120)
+                            except (ValueError, TypeError):
+                                pass
                     log.warning(
                         "LLM call failed (attempt %d/%d), retrying in %ds: %s",
                         attempt + 1, max_attempts, wait, exc,

@@ -11,6 +11,8 @@ import uuid
 from collections import deque
 from typing import Callable
 
+from core import config as cfg
+
 log = logging.getLogger(__name__)
 
 # Job types
@@ -141,6 +143,24 @@ class JobManager:
                 pass
         return True
 
+    def queue_position(self, job_id: str) -> int | None:
+        """Return queue position for a GPU job. 0 = running, 1+ = waiting. None if not queued."""
+        try:
+            idx = list(self._gpu_queue).index(job_id)
+            return idx
+        except ValueError:
+            return None
+
+    def get_job_info(self, job_id: str) -> dict | None:
+        """Get job dict with queue position included."""
+        job = self.get(job_id)
+        if job is None:
+            return None
+        info = job.to_dict()
+        pos = self.queue_position(job_id)
+        info["queue_position"] = pos
+        return info
+
     def list_jobs(self, job_type: str | None = None, limit: int = 50) -> list[dict]:
         """List jobs, optionally filtered by type."""
         with self._lock:
@@ -200,7 +220,19 @@ class JobManager:
                 job.message = "Starting..."
                 log.info("GPU job %s (%s) starting", job.id, job.type)
 
-                self._run_job(job)
+                timeout = cfg.get("gpu_job_timeout_seconds") or 600
+                worker = threading.Thread(
+                    target=self._run_job, args=(job,), daemon=True,
+                )
+                worker.start()
+                worker.join(timeout=timeout)
+                if worker.is_alive():
+                    job.stop_event.set()
+                    job.status = "error"
+                    job.error = f"Job timed out after {timeout} seconds"
+                    job.message = f"Timed out after {timeout}s"
+                    log.error("Job %s timed out after %ds", job.id, timeout)
+
                 self._gpu_queue.popleft()
 
                 # Brief pause between GPU jobs for VRAM cleanup

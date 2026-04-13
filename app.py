@@ -333,10 +333,10 @@ async def get_log_file(lines: int = 200):
 async def get_job(job_id: str):
     if _g["job_manager"] is None:
         return JSONResponse({"error": "Not ready"}, 503)
-    job = _g["job_manager"].get(job_id)
-    if job is None:
+    info = _g["job_manager"].get_job_info(job_id)
+    if info is None:
         return JSONResponse({"error": "Job not found"}, 404)
-    return job.to_dict()
+    return info
 
 
 @app.post("/api/jobs/{job_id}/stop")

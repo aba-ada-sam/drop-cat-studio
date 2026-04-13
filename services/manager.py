@@ -15,9 +15,18 @@ import time
 import urllib.request
 from pathlib import Path
 
+import sys
+
 from core import config as cfg
 
 log = logging.getLogger(__name__)
+
+
+def _popen_flags() -> dict:
+    """Return creationflags to hide console windows on Windows (unless debug mode)."""
+    if sys.platform == "win32" and not cfg.get("debug_mode"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
 
 # ── Status tracking ──────────────────────────────────────────────────────────
 
@@ -132,6 +141,7 @@ def start_acestep() -> tuple[bool, str | None]:
             cmd, cwd=str(acestep_root), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
+            **_popen_flags(),
         )
         _acestep_proc = proc
 
@@ -282,6 +292,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
                 cwd=wan_root, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
+                **_popen_flags(),
             )
             _wangp_worker_proc = proc
 
@@ -367,6 +378,7 @@ def start_void_worker() -> tuple[bool, str | None]:
                 cmd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
+                **_popen_flags(),
             )
             _void_proc = proc
 
@@ -462,8 +474,15 @@ def startup_all():
 
     # FLW-10: fire-and-forget -- each _start_* function logs its own completion.
     # Joining would block the startup thread for up to 5 min (ACE-Step + WanGP).
-    for fn in (_start_ace, _start_wan, _check_forge):
-        threading.Thread(target=fn, daemon=True).start()
+    def _safe_run(name, fn):
+        try:
+            fn()
+        except Exception as e:
+            log.error("[Startup] %s failed to start: %s", name, e)
+            _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
+
+    for label, fn in [("ACE-Step", _start_ace), ("WanGP", _start_wan), ("Forge", _check_forge)]:
+        threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
     log.info("Service startup initiated (background)")
 

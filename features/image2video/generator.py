@@ -141,6 +141,7 @@ def generate_video(
     fit_mode: str,
 ):
     """Core Ken Burns video generator. Updates job.progress/message."""
+    kb_zoom_pct = max(0.0, min(float(kb_zoom_pct), 30.0))  # clamp to 0-30%
     kb_zoom = kb_zoom_pct / 100.0
     fade_dur = min(fade_dur, max(0.0, img_dur - 0.1))
     n = len(image_specs)

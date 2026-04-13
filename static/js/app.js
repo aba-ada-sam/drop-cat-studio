@@ -275,8 +275,14 @@ function switchTab(tabId) {
   if (!_tabInitialized.has(tabId) && TAB_INIT[tabId]) {
     const panel = document.getElementById(`panel-${tabId}`);
     if (panel) {
-      TAB_INIT[tabId](panel);
-      _tabInitialized.add(tabId);
+      try {
+        TAB_INIT[tabId](panel);
+        _tabInitialized.add(tabId);
+      } catch (err) {
+        console.error(`[${tabId}] Init failed:`, err);
+        panel.innerHTML =
+          `<div class="error-banner">This tab failed to load. Refresh the page.<br><small>${escHtml(err.message)}</small></div>`;
+      }
     }
   }
 
@@ -348,18 +354,14 @@ async function pollLogs() {
   try {
     const data = await api(`/api/logs?since=${state.logSeq}`);
     const container = document.getElementById('log-entries');
-    for (const entry of data.logs || []) {
+    // Newest entries at top — prepend each so the last (newest) ends up first
+    const entries = data.logs || [];
+    for (const entry of entries) {
       const div = document.createElement('div');
       div.className = `log-entry ${entry.level}`;
       div.innerHTML = `<span class="time">${entry.time}</span>${escHtml(entry.msg)}`;
-      container.appendChild(div);
+      container.prepend(div);
       state.logSeq = Math.max(state.logSeq, entry.seq || 0);
-    }
-    // Auto-scroll — only snap to bottom if the user is already near the bottom
-    const logViewport = document.getElementById('log-content');
-    if (logViewport) {
-      const distFromBottom = logViewport.scrollHeight - logViewport.scrollTop - logViewport.clientHeight;
-      if (distFromBottom < 60) logViewport.scrollTop = logViewport.scrollHeight;
     }
   } catch (e) {}
 }

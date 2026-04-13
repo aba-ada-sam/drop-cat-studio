@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Drop Cat Go Studio
 echo ============================================
 echo   Drop Cat Go Studio
@@ -6,7 +7,7 @@ echo   AI Video Production
 echo ============================================
 echo.
 
-:: ── Python check ─────────────────────────────────────────────────────────────
+:: -- Python check -------------------------------------------------------------
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python not found on PATH.
@@ -15,7 +16,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── ffmpeg check ─────────────────────────────────────────────────────────────
+:: -- ffmpeg check -------------------------------------------------------------
 ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo WARNING: ffmpeg not found on PATH.
@@ -24,7 +25,7 @@ if errorlevel 1 (
     echo.
 )
 
-:: ── Install/update Python dependencies ───────────────────────────────────────
+:: -- Install/update Python dependencies ---------------------------------------
 echo Checking Python dependencies...
 pip install -q -r "%~dp0requirements.txt"
 if errorlevel 1 (
@@ -33,13 +34,13 @@ if errorlevel 1 (
     echo.
 )
 
-:: ── Auto-launch Forge if not already running ─────────────────────────────────
+:: -- Auto-launch Forge if not already running ---------------------------------
 python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7861/sdapi/v1/samplers', timeout=2)" >nul 2>&1
 if errorlevel 1 (
     echo Forge SD not detected on port 7861.
     if exist "C:\forge\webui-user.bat" (
-        echo   Found Forge at C:\forge -- starting automatically...
-        start "Forge SD" /min cmd /c "cd /d C:\forge && set COMMANDLINE_ARGS=--api --nowebui && webui.bat"
+        echo   Found Forge at C:\forge -- starting hidden (no window)...
+        start "" /b wscript.exe //nologo "%~dp0forge-start-hidden.vbs"
         echo   Forge starting -- SD image generation will be available in ~60s
         echo.
     ) else (
@@ -51,22 +52,37 @@ if errorlevel 1 (
     echo Forge SD: running on port 7861
 )
 
-:: ── Port 7860 check -- handle existing instances ─────────────────────────────
+:: -- Port 7860 check -- handle existing instances -----------------------------
 python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/api/system', timeout=2)" >nul 2>&1
 if not errorlevel 1 (
+    echo.
     echo Drop Cat Go Studio is already running.
-    echo   Opening in Chrome...
-    start chrome http://127.0.0.1:7860
-    exit /b 0
+    echo.
+    echo   1  Open in Chrome  (keep existing server)
+    echo   2  Restart server  (kill it and relaunch)
+    echo   3  Cancel
+    echo.
+    choice /c 123 /n /m "Your choice: "
+    if errorlevel 3 exit /b 0
+    if errorlevel 2 goto :kill_and_restart
+    if errorlevel 1 (
+        start chrome http://127.0.0.1:7860
+        exit /b 0
+    )
 )
 
-:: Port in use but not responding -- find and kill the stale process
+goto :launch_server
+
+:kill_and_restart
+:: Kill whatever is holding port 7860
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":7860 " ^| findstr "LISTENING"') do (
-    echo Stale process %%p is holding port 7860 -- terminating...
+    echo Killing existing instance (PID %%p)...
     taskkill /PID %%p /F >nul 2>&1
 )
+timeout /t 1 /nobreak >nul
 
-:: ── Launch DropCat Studio ─────────────────────────────────────────────────────
+:launch_server
+:: -- Launch DropCat Studio -----------------------------------------------------
 echo.
 echo Starting Drop Cat Go Studio...
 echo   URL: http://127.0.0.1:7860

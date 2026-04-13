@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
 from core import config as cfg
+from core.ffmpeg_utils import ffmpeg_available
 from core.job_manager import JOB_I2V
 from features.image2video.generator import (
     IMAGE_EXTS,
@@ -153,6 +154,13 @@ def _i2v_worker(job, image_specs, settings):
 
 @router.post("/generate")
 async def start_generate(request: Request):
+    if not ffmpeg_available():
+        raise HTTPException(
+            503,
+            "ffmpeg is not installed or not on PATH. "
+            "Install ffmpeg and add its bin folder to your system PATH, then restart the app."
+        )
+
     # Import here to access the global job_manager from app
     from app import get_job_manager; job_manager = get_job_manager()
 

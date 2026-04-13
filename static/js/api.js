@@ -39,17 +39,23 @@ export async function apiUpload(path, files) {
  * @param {number} interval - Poll interval in ms (default 1500)
  * @returns {{ stop: () => void }} - Call stop() to cancel polling
  */
-export function pollJob(jobId, onProgress, onDone, onError, interval = 1500) {
+export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 400) {
   let timer = null;
   let stopped = false;
+  let polls = 0;
 
   async function tick() {
     if (stopped) return;
+    if (++polls > maxPolls) {
+      onError(`Job timed out after ${Math.round(maxPolls * interval / 60000)} minutes of polling.`);
+      return;
+    }
     try {
       const job = await api(`/api/jobs/${jobId}`);
       if (stopped) return;
 
       if (job.status === 'done') {
+        window.dispatchEvent(new CustomEvent('session-updated'));
         onDone(job);
         return;
       }

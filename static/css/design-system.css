@@ -595,6 +595,21 @@ select option { background: var(--surface-2); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
+/* ── Error banner (shown when a tab fails to initialize) ─────────────────── */
+.error-banner {
+  margin: 2rem auto;
+  max-width: 520px;
+  padding: 1.2rem 1.5rem;
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  border-radius: var(--r-md);
+  color: var(--red);
+  text-align: center;
+  font-size: .95rem;
+  line-height: 1.5;
+}
+.error-banner small { opacity: .75; font-size: .8rem; }
+
 /* ── Main content ─────────────────────────────────────────────────────────── */
 
 #tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }

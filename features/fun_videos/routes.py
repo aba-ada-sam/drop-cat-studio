@@ -2,12 +2,14 @@
 
 Photo -> AI video + audio pipeline with wildcard support.
 """
+import io
 import logging
 import os
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from PIL import Image
 
 from core import config as cfg
 from core.job_manager import JOB_FUN_VIDEO
@@ -19,6 +21,21 @@ router = APIRouter()
 
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+MAX_IMAGE_MB = 15
+
+
+def _validate_image(data: bytes, filename: str) -> Image.Image:
+    """Validate image data. Returns the PIL Image on success, raises HTTPException on failure."""
+    if len(data) > MAX_IMAGE_MB * 1024 * 1024:
+        raise HTTPException(422, f"Image '{filename}' exceeds {MAX_IMAGE_MB}MB limit.")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        # Re-open after verify (verify leaves the file in an unusable state)
+        img = Image.open(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(422, f"File '{filename}' is not a valid image.")
+    return img
 
 
 @router.post("/upload")
@@ -28,11 +45,10 @@ async def upload_photo(files: list[UploadFile] = File(...)):
         ext = Path(f.filename or "").suffix.lower()
         if ext not in IMAGE_EXTS:
             continue
-        dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
+        img = _validate_image(data, f.filename or "unknown")
+        dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         dest.write_bytes(data)
-        from PIL import Image
-        img = Image.open(dest)
         saved.append({
             "path": str(dest),
             "name": f.filename,
@@ -78,6 +94,7 @@ async def analyze_photo(request: Request):
     if not image_path or not os.path.isfile(image_path):
         raise HTTPException(400, "Image not found")
 
+    _validate_image(Path(image_path).read_bytes(), Path(image_path).name)
     b64 = encode_image_b64(image_path)
     if not b64:
         raise HTTPException(500, "Failed to encode image")
@@ -96,6 +113,7 @@ async def generate_prompts(request: Request):
     if not image_path or not os.path.isfile(image_path):
         raise HTTPException(400, "Image not found")
 
+    _validate_image(Path(image_path).read_bytes(), Path(image_path).name)
     b64 = encode_image_b64(image_path)
     if not b64:
         raise HTTPException(500, "Failed to encode image")
