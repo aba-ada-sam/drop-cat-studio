@@ -19,7 +19,7 @@ ACESTEP_PORT = 8019
 API_BASE = f"http://{ACESTEP_HOST}:{ACESTEP_PORT}"
 
 MAX_DURATION = 120
-GENERATION_TIMEOUT = 600
+GENERATION_TIMEOUT = 180  # 3 min — if ACE-Step can't finish by then, skip to video-only
 POLL_INTERVAL = 3
 
 
