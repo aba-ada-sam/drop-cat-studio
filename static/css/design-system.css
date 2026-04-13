@@ -1,21 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Drop Cat Go Studio — Circus / Burlesque Design System
+   Drop Cat Go Studio -- Circus / Burlesque Design System
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* GUI-06: utility class for JS-driven visibility (use classList.toggle instead of style.display) */
-.hidden { display: none !important; }
-
 /*
   Responsive font scaling:
-  < 1400px  → 16px  (standard 1080p/1440p)
-  1400–1800 → 17px  (large 1440p/4K)
-  1800–2560 → 18px  (4K / large ultrawide)
-  2560–3840 → 19px  (49" ultrawide 3840×1080)
-  > 3840    → 20px  (49" ultrawide 5120×1440)
+  < 1400px  -> 16px  (standard 1080p/1440p)
+  1400-1800 -> 17px  (large 1440p/4K)
+  1800-2560 -> 18px  (4K / large ultrawide)
+  2560-3840 -> 19px  (49" ultrawide 3840×1080)
+  > 3840    -> 20px  (49" ultrawide 5120×1440)
 */
 html { font-size: 16px; }
 @media (min-width: 1400px) { html { font-size: 17px; } }
@@ -49,7 +46,7 @@ body {
   --border-2:    rgba(212,160,23,.22);
   --border-3:    rgba(212,160,23,.36);
 
-  /* ── Text — warm cream palette ── */
+  /* ── Text -- warm cream palette ── */
   --text:        #f0e6d0;   /* old poster cream */
   --text-2:      #c4a882;   /* warm tan */
   --text-3:      #7a6040;   /* muted gold */
@@ -162,7 +159,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   }
 }
 
-/* The theatrical hat-tip — slow, deliberate, SASSY */
+/* The theatrical hat-tip -- slow, deliberate, SASSY */
 @keyframes hat-tip {
   0%   { transform: scale(1)    rotate(0deg)   translateY(0);    }
   6%   { transform: scale(1.04) rotate(-5deg)  translateY(-8px); }   /* lean back, anticipate */
@@ -189,7 +186,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   animation: splash-text-in .55s .65s ease both;
 }
 
-/* Splash title — circus marquee style */
+/* Splash title -- circus marquee style */
 .splash-andrews {
   font-size: .9rem;
   font-style: italic;
@@ -260,7 +257,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 
 .splash-err-msg { color: var(--red); font-size: .82rem; margin: 14px 0 10px; }
 
-/* ── Header — Circus Marquee ──────────────────────────────────────────────── */
+/* ── Header -- Circus Marquee ──────────────────────────────────────────────── */
 
 #app-header {
   background: linear-gradient(180deg, #1a0808 0%, #0d0606 100%);
@@ -301,7 +298,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   box-shadow: 0 0 14px rgba(196,30,58,.3);
 }
 
-/* The title block — "Andrew's" arched over "DROP CAT GO STUDIO" */
+/* The title block -- "Andrew's" arched over "DROP CAT GO STUDIO" */
 .header-title-block {
   display: flex;
   flex-direction: column;
@@ -595,6 +592,9 @@ select option { background: var(--surface-2); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
 /* ── Error banner (shown when a tab fails to initialize) ─────────────────── */
 .error-banner {
   margin: 2rem auto;
@@ -702,12 +702,12 @@ select option { background: var(--surface-2); }
 /* ── Wide screen app layout ───────────────────────────────────────────────── */
 
 /*
-  Responsive panel layout — adapts from single column to 3-panel ultrawide:
+  Responsive panel layout -- adapts from single column to 3-panel ultrawide:
 
-  < 1100px  → single column (stacked)
-  1100–1600 → sidebar (360px) + main area
-  1600–2560 → wider sidebar (440px) + main area
-  > 2560    → sidebar (460px) + main area + info panel (360px) [3 columns]
+  < 1100px  -> single column (stacked)
+  1100-1600 -> sidebar (360px) + main area
+  1600-2560 -> wider sidebar (440px) + main area
+  > 2560    -> sidebar (460px) + main area + info panel (360px) [3 columns]
               The third column shows session files, queue status, service health
 
   49" ultrawide (3840×1080 or 5120×1440) gets full 3-column treatment.
@@ -786,14 +786,44 @@ select option { background: var(--surface-2); }
   border: 2px solid var(--border);
   border-radius: var(--r-md);
   cursor: pointer;
-  transition: all var(--dur-fast);
+  transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 .prompt-card:hover { border-color: var(--border-3); }
 .prompt-card.selected { border-color: var(--accent); background: var(--accent-bg); }
-.prompt-card .label { font-weight: 600; font-size: .95rem; color: var(--text); margin-bottom: 5px; }
+.prompt-card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 5px; gap: 8px; }
+.prompt-card .label { font-weight: 600; font-size: .95rem; color: var(--text); }
+.prompt-check {
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  border: 2px solid var(--border-3);
+  border-radius: 4px;
+  background: var(--surface-3);
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+  position: relative;
+  margin-top: 1px;
+}
+.prompt-card.selected .prompt-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.prompt-card.selected .prompt-check::after {
+  content: 'x';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+}
 .prompt-card .text  { font-size: .88rem; color: var(--text-2); line-height: 1.45; }
 .prompt-card .tags  { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
 .prompt-card .tag   { font-size: .78rem; padding: 2px 7px; border-radius: 4px; background: var(--surface-3); color: var(--text-3); }
+.prompts-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.prompts-header h3 { margin: 0; flex: 1; }
 
 /* ── Audio tabs ───────────────────────────────────────────────────────────── */
 
@@ -814,7 +844,7 @@ select option { background: var(--surface-2); }
 
 /* ── Two-panel layout ─────────────────────────────────────────────────────── */
 
-/* Adapts: equal halves → sidebar+wide → stacked */
+/* Adapts: equal halves -> sidebar+wide -> stacked */
 .two-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1198,7 +1228,7 @@ textarea:focus { border-color: var(--accent); }
 .custom-lyrics-wrap { }
 .custom-lyrics-wrap textarea { min-height: 90px; }
 
-/* ── Soundtrack redesign — section headers & divider ─────────────────────── */
+/* ── Soundtrack redesign -- section headers & divider ─────────────────────── */
 
 .snd-section-header {
   display: flex;
@@ -1274,7 +1304,7 @@ textarea:focus { border-color: var(--accent); }
 .tone-chip-card.on .tone-chip-label { color: var(--accent); }
 .tone-chip-card.on .tone-chip-desc  { color: var(--accent); opacity: .7; }
 
-/* Combo preview — shows what genre + mood produces */
+/* Combo preview -- shows what genre + mood produces */
 .snd-combo-preview {
   font-size: .75rem;
   color: var(--accent);

@@ -484,6 +484,13 @@ def startup_all():
     for label, fn in [("ACE-Step", _start_ace), ("WanGP", _start_wan), ("Forge", _check_forge)]:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
+    # VOID: set initial status (not auto-started — user launches from Post Processing tab)
+    if void_worker_alive():
+        _set_status("void", state="running", message="VOID worker already running")
+    else:
+        _set_status("void", state="not_running",
+                    message="VOID not running — start from Post Processing tab when needed")
+
     log.info("Service startup initiated (background)")
 
 
