@@ -137,14 +137,16 @@ def main():
     })
 
     # BUG-02/FLW-04: use SAFE_DEFAULTS from core/wangp_models (shared single source)
-    _safe = dict(SAFE_DEFAULTS)
-    _safe["image_start"] = start_images
-    _safe["image_end"] = end_images
-    _safe["image_prompt_type"] = (
+    # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
+    for k, v in SAFE_DEFAULTS.items():
+        defaults.setdefault(k, v)
+    # Image settings must always override
+    defaults["image_start"] = start_images
+    defaults["image_end"] = end_images
+    defaults["image_prompt_type"] = (
         "S"  if start_images and not end_images else
         "SE" if start_images and end_images else ""
     )
-    defaults.update(_safe)
 
     wgp.server_config["save_path"] = output_dir
     wgp.server_config["image_save_path"] = output_dir
