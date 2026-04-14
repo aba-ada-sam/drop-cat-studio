@@ -204,7 +204,12 @@ export function init(panel) {
   analyzeBtn.addEventListener('click', async () => {
     if (!state.photoPath) { toast('Upload a photo first', 'error'); return; }
     analyzeBtn.disabled = true;
-    analyzeBtn.textContent = 'Generating...';
+    analyzeBtn.innerHTML = '<span class="spinner"></span> Analyzing image...';
+    const t0 = Date.now();
+    const ticker = setInterval(() => {
+      const secs = Math.round((Date.now() - t0) / 1000);
+      analyzeBtn.innerHTML = `<span class="spinner"></span> Generating prompts... ${secs}s`;
+    }, 1000);
     try {
       const data = await api('/api/fun/generate-prompts', {
         method: 'POST',
@@ -219,6 +224,7 @@ export function init(panel) {
       state.prompts = data.prompts;
       renderPrompts();
     } catch (e) { toast(e.message, 'error'); }
+    clearInterval(ticker);
     analyzeBtn.disabled = false;
     analyzeBtn.textContent = 'Generate Prompts';
   });
@@ -482,6 +488,60 @@ export function init(panel) {
   const stepsSlider = createSlider(card4, { label: 'Steps', min: 4, max: 50, step: 1, value: 30 });
   const guidanceSlider = createSlider(card4, { label: 'Guidance', min: 1, max: 20, step: 0.5, value: 7.5 });
 
+  // ── LoRA selector ─────────────────────────────────────────────────────
+  const loraSection = el('div', { style: 'margin-top:12px' });
+  card4.appendChild(loraSection);
+
+  const loraHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:6px' }, [
+    el('label', { text: 'LoRAs', style: 'font-size:.82rem; color:var(--text-3); font-weight:600' }),
+    el('span', { id: 'lora-count', style: 'font-size:.72rem; color:var(--text-3)' }),
+  ]);
+  loraSection.appendChild(loraHeader);
+  const loraList = el('div', { style: 'display:flex; flex-direction:column; gap:6px' });
+  loraSection.appendChild(loraList);
+
+  let _loadedLoraModel = '';
+
+  async function loadLoras(model) {
+    if (model === _loadedLoraModel) return;
+    _loadedLoraModel = model;
+    loraList.innerHTML = '';
+    document.getElementById('lora-count').textContent = '';
+    try {
+      const data = await api(`/api/fun/loras?model=${encodeURIComponent(model)}`);
+      const loras = data.loras || [];
+      document.getElementById('lora-count').textContent = loras.length ? `(${loras.length} available)` : '(none in this model\'s directory)';
+      for (const lora of loras) {
+        const chk = el('input', { type: 'checkbox', style: 'flex-shrink:0' });
+        const multIn = el('input', { type: 'number', value: '1.0', min: '0.1', max: '2', step: '0.05',
+          style: 'width:58px; text-align:center; padding:3px 5px; font-size:.78rem',
+          title: 'Multiplier (strength)', disabled: true });
+        chk.addEventListener('change', () => { multIn.disabled = !chk.checked; });
+        loraList.appendChild(el('div', {
+          style: 'display:flex; align-items:center; gap:8px; padding:5px 8px; background:var(--surface-2); border-radius:var(--r-sm)',
+          dataset: { loraPath: lora.path },
+        }, [
+          chk,
+          el('span', { text: lora.name, style: 'flex:1; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap', title: lora.name }),
+          multIn,
+        ]));
+      }
+    } catch (_) {}
+  }
+
+  function getSelectedLoras() {
+    return [...loraList.querySelectorAll('div[data-lora-path]')]
+      .filter(row => row.querySelector('input[type="checkbox"]').checked)
+      .map(row => ({
+        path: row.dataset.loraPath,
+        multiplier: parseFloat(row.querySelector('input[type="number"]').value) || 1.0,
+      }));
+  }
+
+  modelSelect.addEventListener('change', () => loadLoras(modelSelect.value));
+  // Load on init
+  setTimeout(() => loadLoras(modelSelect.value), 0);
+
   const makeItBtn = el('button', { class: 'btn btn-primary', text: '★  Make It!', style: 'margin-top:14px; font-size:1.2rem; padding:14px 36px; width:100%' });
   card4.appendChild(makeItBtn);
 
@@ -542,7 +602,6 @@ export function init(panel) {
         currentJob.output = null;
         player.hide();
         playerExtras.style.display = 'none';
-        placeholder.style.display = '';
         renderJobQueue();
         toast('Video deleted', 'success');
       } catch (e) { toast('Delete failed: ' + e.message, 'error'); }
@@ -557,7 +616,6 @@ export function init(panel) {
         currentJob.output = null; currentJob.videoOnly = null; currentJob.audioPath = null;
         player.hide();
         playerExtras.style.display = 'none';
-        placeholder.style.display = '';
         renderJobQueue();
         toast('Folder deleted', 'success');
       } catch (e) { toast('Delete failed: ' + e.message, 'error'); }
@@ -637,24 +695,26 @@ export function init(panel) {
     toast('Video sent to Bridges -- add more clips there', 'info');
   }
 
-  // Placeholder shown before anything is generated
-  const placeholder = el('div', { class: 'card', style: 'text-align:center; padding:60px 20px; color:var(--text-3)' }, [
-    el('div', { style: 'font-size:4rem; margin-bottom:16px', text: '🎬' }),
-    el('p', { style: 'font-size:1.1rem', text: 'Your video will appear here' }),
-    el('p', { style: 'font-size:.9rem; margin-top:8px', text: 'Upload a photo, pick a prompt, then hit Make It!' }),
-  ]);
+  // Lightweight placeholder -- hidden as soon as any job is submitted
+  const placeholder = el('div', {
+    style: 'text-align:center; padding:14px 10px; color:var(--text-3); font-size:.85rem',
+    text: 'Upload a photo and generate prompts to get started.',
+  });
   mainArea.appendChild(placeholder);
 
   // ── Job Queue panel ───────────────────────────────────────────────────
-  const queuePanel = el('div', { class: 'card', style: 'display:none' });
+  const queuePanel = el('div', { class: 'card' });
   mainArea.insertBefore(queuePanel, progress.el);
 
   let jobQueue = []; // {id, label, photoUrl, status, progress, message, output, videoOnly, audioPath, prompt, settings, poller}
 
   function renderJobQueue() {
-    if (!jobQueue.length) { queuePanel.style.display = 'none'; return; }
-    queuePanel.style.display = '';
     queuePanel.innerHTML = '';
+    if (!jobQueue.length) {
+      queuePanel.appendChild(el('h3', { style: 'margin-bottom:6px', text: 'Queue' }));
+      queuePanel.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-3); padding:6px 0', text: 'No jobs yet. Select prompts and hit Make It!' }));
+      return;
+    }
 
     const pending = jobQueue.filter(j => j.status === 'queued' || j.status === 'running').length;
     queuePanel.appendChild(el('h3', {
@@ -804,6 +864,7 @@ export function init(panel) {
       lyrics: snd.vocals === 'custom' ? lyricsInput.value : '',
       user_direction: [directionInput.value, snd.vocals === 'ai' ? buildToneHint() : ''].filter(Boolean).join(' -- '),
       bpm: null,
+      loras: getSelectedLoras(),
     };
 
     const data = await api('/api/fun/make-it', { method: 'POST', body: JSON.stringify(body) });
@@ -902,10 +963,14 @@ export function init(panel) {
   makeItBtn.addEventListener('click', () => submitJob(makeItBtn));
   makeItTopBtn.addEventListener('click', () => submitJob(makeItTopBtn));
 
+  // Render initial empty queue state
+  renderJobQueue();
+
   player.onStartOver(() => {
     player.hide();
     playerExtras.style.display = 'none';
     currentJob = null;
+    placeholder.style.display = 'none';
     resetPhoto();
   });
 }

@@ -2,6 +2,7 @@
 
 Photo -> AI video + audio pipeline with wildcard support.
 """
+import asyncio
 import io
 import logging
 import os
@@ -14,6 +15,7 @@ from PIL import Image
 from core import config as cfg
 from core.job_manager import JOB_FUN_VIDEO
 from core.llm_client import encode_image_b64
+from core.wangp_models import resolve_model_name
 from features.fun_videos.video_generator import MODELS
 
 log = logging.getLogger(__name__)
@@ -36,6 +38,32 @@ def _validate_image(data: bytes, filename: str) -> Image.Image:
     except Exception:
         raise HTTPException(422, f"File '{filename}' is not a valid image.")
     return img
+
+
+_LORA_DIR_MAP = {
+    "i2v":            "wan_i2v",
+    "i2v_720p":       "wan_i2v",
+    "t2v":            "wan",
+    "t2v_1.3B":       "wan_1.3B",
+    "ltx2_distilled": "ltx2",
+    "vace_1.3B":      "wan_5B",
+}
+
+
+@router.get("/loras")
+async def list_loras(model: str = ""):
+    """Return available LoRA .safetensors files for the given model."""
+    wan_root = cfg.get("wan2gp_root") or ""
+    if not wan_root:
+        return {"loras": [], "directory": ""}
+    model_type = resolve_model_name(model) if model else "i2v"
+    subdir = _LORA_DIR_MAP.get(model_type, "wan")
+    lora_dir = Path(wan_root) / "loras" / subdir
+    loras = []
+    if lora_dir.exists():
+        for f in sorted(lora_dir.glob("*.safetensors")):
+            loras.append({"name": f.stem, "path": str(f)})
+    return {"loras": loras, "directory": str(lora_dir)}
 
 
 @router.post("/upload")
@@ -64,14 +92,32 @@ def _require_ai():
     from core import config as cfg
     from core.keys import get_key, status as ollama_status, get_ollama_models
     provider = cfg.get("llm_provider") or "auto"
-    if provider == "anthropic" or (provider == "auto" and get_key("anthropic")):
+    if provider in ("anthropic", "openai"):
+        if not get_key(provider):
+            raise HTTPException(503, f"{provider.title()} selected but no API key configured")
         return
-    if provider == "openai" or (provider == "auto" and get_key("openai")):
+    if provider == "ollama":
+        # Soft check: if Ollama is reachable, verify the model is installed.
+        # If Ollama is temporarily unreachable (GPU pressure, etc.), don't
+        # pre-fail — let the actual LLM call handle retries.
+        st = ollama_status()
+        if st.get("available"):
+            needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
+            installed = get_ollama_models()
+            if installed and not any(m.startswith(needed.split(":")[0]) for m in installed):
+                raise HTTPException(
+                    503,
+                    f"Vision model '{needed}' not found in Ollama. "
+                    f"Installed: {', '.join(installed)}. "
+                    f"Run: ollama pull {needed}"
+                )
+        return
+    # auto mode: need at least one working provider
+    if get_key("anthropic") or get_key("openai"):
         return
     st = ollama_status()
     if not st.get("available"):
         raise HTTPException(503, "No AI provider available — add an Anthropic/OpenAI key or start Ollama")
-    # Check that the vision model is actually installed (not just Ollama running)
     needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
     installed = get_ollama_models()
     if installed and not any(m.startswith(needed.split(":")[0]) for m in installed):
@@ -99,7 +145,7 @@ async def analyze_photo(request: Request):
     if not b64:
         raise HTTPException(500, "Failed to encode image")
 
-    return _analyze(llm_router, b64)
+    return await asyncio.to_thread(_analyze, llm_router, b64)
 
 
 @router.post("/generate-prompts")
@@ -120,7 +166,8 @@ async def generate_prompts(request: Request):
 
     config = cfg.load()
     try:
-        return generate_video_prompts(
+        return await asyncio.to_thread(
+            generate_video_prompts,
             llm_router,
             b64,
             user_direction=body.get("user_direction", ""),
@@ -168,6 +215,7 @@ async def make_it(request: Request):
         "bpm": body.get("bpm"),
         "skip_audio": body.get("skip_audio", False),
         "end_photo_path": body.get("end_photo_path"),
+        "loras": body.get("loras", []),
     }
 
     if photo_path:

@@ -53,6 +53,7 @@ def generate_video(
     guidance: float = 7.5,
     seed: int = -1,
     end_image_path: str | None = None,
+    loras: list | None = None,
     stop_check=None,
     log_fn=None,
     progress_fn=None,
@@ -77,7 +78,7 @@ def generate_video(
         return _generate_via_worker(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,
-            stop_check, log_fn, progress_fn,
+            loras or [], stop_check, log_fn, progress_fn,
         )
 
     # Fallback to subprocess
@@ -91,7 +92,7 @@ def generate_video(
 def _generate_via_worker(
     image_path, prompt, out_path, num_frames, width, height,
     steps, guidance, seed, model_name, end_image_path,
-    stop_check, log_fn, progress_fn=None,
+    loras, stop_check, log_fn, progress_fn=None,
 ) -> str | None:
     """Generate via persistent worker on port 7899."""
     payload = {
@@ -109,6 +110,9 @@ def _generate_via_worker(
         payload["start_image"] = os.path.abspath(image_path)
     if end_image_path:
         payload["end_image"] = os.path.abspath(end_image_path)
+    if loras:
+        payload["activated_loras"] = [l["path"] for l in loras]
+        payload["loras_multipliers"] = " ".join(str(l.get("multiplier", 1.0)) for l in loras)
 
     if log_fn:
         log_fn(f"[info] Sending to WanGP worker (port {WANGP_WORKER_PORT})...")

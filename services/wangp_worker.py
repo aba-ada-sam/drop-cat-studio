@@ -111,6 +111,8 @@ def _do_generate(params: dict) -> dict:
     seed = int(params.get("seed", -1))
     start_image = params.get("start_image")
     end_image = params.get("end_image")
+    activated_loras = params.get("activated_loras", [])
+    loras_multipliers = params.get("loras_multipliers", "")
 
     output_dir = os.path.dirname(output_path) or os.getcwd()
     output_stem = os.path.splitext(os.path.basename(output_path))[0]
@@ -149,6 +151,10 @@ def _do_generate(params: dict) -> dict:
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
+    # LoRA settings override defaults when provided
+    if activated_loras:
+        defaults["activated_loras"] = activated_loras
+        defaults["loras_multipliers"] = loras_multipliers
     # Image settings must always override
     defaults["image_start"] = start_images
     defaults["image_end"] = end_images
@@ -288,17 +294,18 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "Worker is busy"}, 409)
                 return
 
+            _update_status(busy=True, progress="Starting...", result=None, error=None)
+
             def _run():
-                with _lock:
-                    _update_status(busy=True, progress="Starting...", result=None, error=None)
-                    try:
-                        result = _do_generate(params)
-                        _update_status(busy=False, result=result.get("output"),
-                                       error=result.get("error"),
-                                       progress="Done" if result["ok"] else "Failed")
-                    except Exception as e:
-                        _update_status(busy=False, error=str(e), progress="Error")
-                        traceback.print_exc()
+                try:
+                    result = _do_generate(params)
+                    _update_status(busy=False, result=result.get("output"),
+                                   error=result.get("error"),
+                                   progress="Done" if result["ok"] else "Failed")
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    _update_status(busy=False, error=f"{e}\n{tb}", progress="Error")
+                    print(tb, flush=True)
 
             threading.Thread(target=_run, daemon=True).start()
             self._send_json({"ok": True, "message": "Generation started"})
@@ -320,6 +327,54 @@ def main():
     parser.add_argument("--port", type=int, default=7899, help="Worker HTTP port")
     parser.add_argument("--model", default="i2v", help="Initial model type to load")
     args = parser.parse_args()
+
+    # BUG-13: WanGP's print() calls crash with [Errno 22] when worker runs
+    # hidden (no console window). Wrap stdout/stderr so print() never raises.
+    import io
+
+    class _SafeWriter:
+        """Swallows write errors from broken pipes / no-console contexts."""
+        def __init__(self, stream):
+            self._stream = stream
+            self.name = getattr(stream, 'name', '<safe-stdout>')
+            self.encoding = getattr(stream, 'encoding', 'utf-8')
+            self.errors = getattr(stream, 'errors', 'replace')
+            self.mode = getattr(stream, 'mode', 'w')
+            self.newlines = getattr(stream, 'newlines', None)
+        def write(self, s):
+            try:
+                if self._stream and not self._stream.closed:
+                    return self._stream.write(s)
+            except (OSError, ValueError):
+                pass
+            return len(s) if s else 0
+        def flush(self):
+            try:
+                if self._stream and not self._stream.closed:
+                    self._stream.flush()
+            except (OSError, ValueError):
+                pass
+        def fileno(self):
+            try:
+                return self._stream.fileno() if self._stream else -1
+            except (OSError, ValueError):
+                return -1
+        def isatty(self):
+            return False
+        def writable(self):
+            return True
+        def readable(self):
+            return False
+        def seekable(self):
+            return False
+        @property
+        def closed(self):
+            return self._stream.closed if self._stream else True
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+
+    sys.stdout = _SafeWriter(sys.stdout)
+    sys.stderr = _SafeWriter(sys.stderr)
 
     app_path = args.wangp_app
     print(f"[worker] Loading WanGP from {app_path}...", flush=True)
