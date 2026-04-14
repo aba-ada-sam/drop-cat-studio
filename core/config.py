@@ -73,8 +73,9 @@ DEFAULTS: dict = {
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
     "forge_url": "http://127.0.0.1:7861",
     "forge_default_sampler": "DPM++ 2M SDE",
-    "forge_default_steps": 25,
-    "forge_default_cfg": 7.0,
+    "forge_default_scheduler": "Karras",
+    "forge_default_steps": 30,
+    "forge_default_cfg": 2.5,
     "forge_default_width": 1440,
     "forge_default_height": 810,
 
@@ -98,10 +99,6 @@ DEFAULTS: dict = {
     "ai_model_balanced": "gemma4:e4b",
     "ai_model_power":    "gemma4:26b",
 
-    # ── Post Processing / VOID inpainting ─────────────────────────────────
-    # Leave blank to auto-download netflix/void-model from HuggingFace on first use.
-    # Set to a local path if already downloaded.
-    "void_model_dir": "",
 }
 
 _lock = threading.RLock()  # BUG-05: RLock so load() inside save() doesn't deadlock

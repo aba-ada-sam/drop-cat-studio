@@ -292,16 +292,30 @@ async def services_status():
 
 @app.post("/api/services/start/{name}")
 async def start_service(name: str):
-    if name == "wangp":
-        ok, err = svc.start_wangp_worker()
-        return {"ok": ok, "error": err}
-    elif name == "acestep":
-        ok, err = svc.start_acestep()
-        return {"ok": ok, "error": err}
-    elif name == "void":
-        ok, err = svc.start_void_worker()
-        return {"ok": ok, "error": err}
-    return JSONResponse({"error": f"Unknown service: {name}"}, 404)
+    starters = {
+        "wangp": svc.start_wangp_worker,
+        "acestep": svc.start_acestep,
+        "forge": svc.start_forge,
+        "ollama": svc.start_ollama,
+    }
+    fn = starters.get(name)
+    if not fn:
+        return JSONResponse({"error": f"Unknown service: {name}"}, 404)
+    # Run in background thread -- services can take minutes to start
+    threading.Thread(target=fn, daemon=True).start()
+    return {"ok": True, "message": f"Starting {name}..."}
+
+
+@app.post("/api/services/stop/{name}")
+async def stop_service_route(name: str):
+    ok, err = svc.stop_service(name)
+    return {"ok": ok, "error": err}
+
+
+@app.post("/api/services/restart/{name}")
+async def restart_service_route(name: str):
+    threading.Thread(target=svc.restart_service, args=(name,), daemon=True).start()
+    return {"ok": True, "message": f"Restarting {name}..."}
 
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
@@ -557,14 +571,12 @@ from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
 from features.sd_prompts.routes import router as prompts_router
 from features.video_tools.routes import router as tools_router
-from features.post_processing.routes import router as post_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
-app.include_router(post_router, prefix="/api/post", tags=["Post Processing"])
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

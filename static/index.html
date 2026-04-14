@@ -17,10 +17,15 @@
   <!-- ══════════════════════════════════════════════════════════════════════ -->
   <div id="splash">
     <div class="splash-inner">
-      <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="splash-logo">
-      <div class="splash-title-block">
-        <h1 class="splash-title">Drop Cat Go<br>Studio</h1>
-        <p class="splash-sub">✦ &nbsp; AI Video Production &nbsp; ✦</p>
+      <div class="splash-logo-wrap">
+        <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="splash-logo">
+        <!-- Hat fills bottom-to-top as each service checks in -->
+        <div class="hat-fill-track"><div class="hat-fill-bar" id="hat-fill-bar"></div></div>
+        <!-- Eye blink overlays -->
+        <div class="eye-lid eye-left"  id="eye-left"></div>
+        <div class="eye-lid eye-right" id="eye-right"></div>
+        <!-- Cheshire grin -->
+        <div class="cheshire-smile" id="cheshire-smile"></div>
       </div>
 
       <div class="splash-checklist" id="splash-checks">
@@ -68,20 +73,19 @@
     <header id="app-header">
       <div class="header-marquee">
       <div class="header-left">
-        <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="header-logo">
         <div class="header-title-block">
           <!--
             "Andrew's" in a gentle arch — SVG text on a quadratic bezier path.
             The path M 10,22 Q 100,2 190,22 draws a shallow upward curve.
             Text-anchor=middle + startOffset=50% centres it on the arch.
           -->
-          <svg viewBox="0 0 200 28" class="header-andrews-svg" aria-hidden="true">
+          <svg viewBox="0 0 200 40" class="header-andrews-svg" aria-hidden="true">
             <defs>
-              <path id="andrews-arch" d="M 10,22 Q 100,2 190,22"/>
+              <path id="andrews-arch" d="M 8,34 Q 100,4 192,34"/>
             </defs>
             <text font-family="'Palatino Linotype','Book Antiqua','Georgia',serif"
-                  font-size="11.5" font-style="italic" letter-spacing="3"
-                  fill="#c4a882">
+                  font-size="20" font-style="italic" font-weight="600" letter-spacing="3.5"
+                  fill="#d4a017">
               <textPath href="#andrews-arch" startOffset="50%" text-anchor="middle">
                 ✦  Andrew's  ✦
               </textPath>
@@ -101,8 +105,8 @@
           <span class="pill" id="pill-forge" title="Forge Stable Diffusion — http://127.0.0.1:7861">
             <span class="dot"></span> Forge SD
           </span>
-          <span class="pill" id="pill-void" title="Netflix VOID video inpainting service">
-            <span class="dot"></span> VOID
+          <span class="pill" id="pill-ollama" title="Ollama local AI models">
+            <span class="dot"></span> Ollama
           </span>
         </div>
       </div>
@@ -121,16 +125,13 @@
     <nav id="tab-bar">
       <div class="tab-group primary">
         <button class="tab active" data-tab="sd-prompts">
-          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> Image Generation
+          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> SD Prompts
         </button>
         <button class="tab" data-tab="fun-videos">
-          <img src="/static/icon-fun-videos.png" alt="" class="tab-icon"> Fun Videos
+          <img src="/static/icon-fun-videos.png" alt="" class="tab-icon"> Make Videos
         </button>
         <button class="tab" data-tab="bridges">
           <img src="/static/icon-bridges.png" alt="" class="tab-icon"> Video Bridges
-        </button>
-        <button class="tab" data-tab="post-processing">
-          ✂ Post Processing
         </button>
       </div>
       <div class="tab-group secondary">
@@ -163,43 +164,59 @@
       <section class="tab-panel" id="panel-image2video"><!-- panel-image2video.js --></section>
       <section class="tab-panel" id="panel-video-tools"><!-- panel-video-tools.js --></section>
       <section class="tab-panel" id="panel-wildcards"><!-- panel-wildcards.js --></section>
-      <section class="tab-panel" id="panel-post-processing"><!-- tab-post-processing.js --></section>
       <section class="tab-panel" id="panel-services">
         <div class="services-grid">
-          <div class="service-card" id="svc-wangp">
+          <div class="service-card" data-svc="wangp">
             <div class="service-header">
               <span class="dot" id="dot-wangp"></span>
-              <h3>WanGP — AI Video Generation</h3>
+              <h3>WanGP -- AI Video Generation</h3>
             </div>
             <p class="service-message" id="msg-wangp">Checking...</p>
-            <p class="service-hint">Used by Fun Videos and Video Bridges to generate AI video clips. Needs a GPU with VRAM.</p>
-            <button class="btn btn-sm" id="btn-start-wangp">Start Worker</button>
+            <p class="service-hint">Used by Fun Videos and Video Bridges. Needs GPU VRAM.</p>
+            <div class="svc-btn-row">
+              <button class="btn btn-sm svc-start" data-svc="wangp">Start</button>
+              <button class="btn btn-sm svc-stop" data-svc="wangp">Stop</button>
+              <button class="btn btn-sm svc-restart" data-svc="wangp">Restart</button>
+            </div>
           </div>
-          <div class="service-card" id="svc-acestep">
+          <div class="service-card" data-svc="acestep">
             <div class="service-header">
               <span class="dot" id="dot-acestep"></span>
-              <h3>ACE-Step — Music Generation</h3>
+              <h3>ACE-Step -- Music Generation</h3>
             </div>
             <p class="service-message" id="msg-acestep">Checking...</p>
-            <p class="service-hint">Generates matching background music for Fun Videos. Optional — you can skip audio.</p>
-            <button class="btn btn-sm" id="btn-start-acestep">Start Server</button>
+            <p class="service-hint">Background music for Fun Videos. Optional -- you can skip audio.</p>
+            <div class="svc-btn-row">
+              <button class="btn btn-sm svc-start" data-svc="acestep">Start</button>
+              <button class="btn btn-sm svc-stop" data-svc="acestep">Stop</button>
+              <button class="btn btn-sm svc-restart" data-svc="acestep">Restart</button>
+            </div>
           </div>
-          <div class="service-card">
+          <div class="service-card" data-svc="forge">
             <div class="service-header">
               <span class="dot" id="dot-forge-svc"></span>
-              <h3>Forge SD — Image Generation</h3>
+              <h3>Forge SD -- Image Generation</h3>
             </div>
             <p class="service-message" id="msg-forge-svc">Checking...</p>
-            <p class="service-hint">Stable Diffusion image generation at C:\forge. Start it separately with the <code>--api</code> flag.</p>
-          </div>
-          <div class="service-card" id="svc-void">
-            <div class="service-header">
-              <span class="dot" id="dot-void"></span>
-              <h3>VOID — Video Object Removal</h3>
+            <p class="service-hint">Stable Diffusion at C:\forge. Auto-started with --api flag.</p>
+            <div class="svc-btn-row">
+              <button class="btn btn-sm svc-start" data-svc="forge">Start</button>
+              <button class="btn btn-sm svc-stop" data-svc="forge">Stop</button>
+              <button class="btn btn-sm svc-restart" data-svc="forge">Restart</button>
             </div>
-            <p class="service-message" id="msg-void">Checking...</p>
-            <p class="service-hint">Netflix VOID (April 2026): physics-aware object removal from video. Downloads <strong>netflix/void-model</strong> (~10 GB) from HuggingFace on first start.</p>
-            <button class="btn btn-sm" id="btn-start-void">Start VOID Worker</button>
+          </div>
+          <div class="service-card" data-svc="ollama">
+            <div class="service-header">
+              <span class="dot" id="dot-ollama"></span>
+              <h3>Ollama -- Local AI Models</h3>
+            </div>
+            <p class="service-message" id="msg-ollama">Checking...</p>
+            <p class="service-hint">Local LLM for prompt generation and image analysis.</p>
+            <div class="svc-btn-row">
+              <button class="btn btn-sm svc-start" data-svc="ollama">Start</button>
+              <button class="btn btn-sm svc-stop" data-svc="ollama">Stop</button>
+              <button class="btn btn-sm svc-restart" data-svc="ollama">Restart</button>
+            </div>
           </div>
         </div>
         <div class="card" id="system-info-card">
@@ -235,10 +252,7 @@
         <h2>Settings</h2>
         <button class="btn-icon modal-close">&times;</button>
       </div>
-      <div class="modal-body">
-        <!-- Hidden dummy fields prevent Chrome from treating the API key input as a login form -->
-        <input type="text" name="prevent-autofill" style="display:none" tabindex="-1">
-        <input type="password" name="prevent-autofill-pw" style="display:none" tabindex="-1">
+      <form class="modal-body" autocomplete="off" onsubmit="return false">
         <div class="settings-section">
           <h4 class="settings-section-label">AI Video Generation (WanGP)</h4>
           <div class="form-group">
@@ -272,14 +286,6 @@
         </div>
 
         <div class="settings-section">
-          <h4 class="settings-section-label">VOID Video Inpainting (Netflix)</h4>
-          <div class="form-group">
-            <label>VOID Model Directory <span class="hint-text">— blank = auto-download netflix/void-model (~10 GB) from HuggingFace on first use</span></label>
-            <input type="text" id="cfg-void_model_dir" placeholder="(blank = auto-download from HuggingFace)" autocomplete="off">
-          </div>
-        </div>
-
-        <div class="settings-section">
           <h4 class="settings-section-label">AI Prompt Engine</h4>
 
           <!-- Big Anthropic on/off toggle -->
@@ -308,7 +314,7 @@
           <div id="llm-anthropic-section" style="display:none; margin-top:14px">
             <div class="form-group">
               <label>Anthropic API Key</label>
-              <input type="password" id="cfg-anthropic_key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
+              <input type="text" id="cfg-anthropic_key" class="masked-key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other">
               <span class="hint-text" id="anthropic-key-hint"></span>
             </div>
           </div>
@@ -335,7 +341,7 @@
         </div>
 
         <button class="btn btn-primary" id="btn-save-settings" style="margin-top:8px">Save Settings</button>
-      </div>
+      </form>
     </div>
   </div>
 
@@ -349,23 +355,23 @@
       <div class="modal-body">
         <div class="help-flow">
           <div class="help-step">
-            <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
+            <img src="/static/icon-sd-prompts.png" alt="" class="help-icon">
             <div>
-              <strong>Fun Videos</strong> — Start here. Drop a photo, let AI generate a creative video with matching music. Uses local Ollama — no API keys needed.
+              <strong>SD Prompts</strong> — Start here. Drop a reference image, generate AI prompts, toggle Forge Couple for regional prompting, then generate images directly. Send images to Make Videos when ready.
             </div>
           </div>
-          <div class="help-arrow">↓ generated clips flow automatically</div>
+          <div class="help-arrow">↓ images flow to Make Videos</div>
+          <div class="help-step">
+            <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
+            <div>
+              <strong>Make Videos</strong> — Drop a photo or use a generated image, let AI create a creative video with matching music. Clips flow automatically into Video Bridges.
+            </div>
+          </div>
+          <div class="help-arrow">↓ clips flow to Video Bridges</div>
           <div class="help-step">
             <img src="/static/icon-bridges.png" alt="" class="help-icon">
             <div>
-              <strong>Video Bridges</strong> — Got 2+ clips? Drop them here and AI will generate smooth cinematic transitions between them. Clips from Fun Videos appear automatically.
-            </div>
-          </div>
-          <div class="help-arrow">↓ or start with images</div>
-          <div class="help-step">
-            <img src="/static/icon-sd-prompts.png" alt="" class="help-icon">
-            <div>
-              <strong>SD Prompts</strong> — Drop a reference image, get Stable Diffusion prompts in three regional columns (Left / Center / Right) for Forge Couple. Generate the image directly in Forge, then send it to Fun Videos.
+              <strong>Video Bridges</strong> — Got 2+ clips? AI generates smooth cinematic transitions between them. Send the result to Post Processing.
             </div>
           </div>
           <div class="help-arrow">↓ Tools dropdown for utilities</div>

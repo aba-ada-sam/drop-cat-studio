@@ -35,17 +35,15 @@ _service_status: dict = {
     "wangp":   {"state": "unknown", "message": "", "port": None, "pid": None},
     "acestep": {"state": "unknown", "message": "", "port": None, "pid": None},
     "forge":   {"state": "unknown", "message": "", "port": 7861, "pid": None},
-    "void":    {"state": "unknown", "message": "", "port": 7901, "pid": None},
+    "ollama":  {"state": "unknown", "message": "", "port": 11434, "pid": None},
 }
 
 _wangp_worker_proc: subprocess.Popen | None = None
 _acestep_proc: subprocess.Popen | None = None
-_void_proc: subprocess.Popen | None = None
 
 # BUG-11: guard against two concurrent calls both passing the alive-check and
 # starting duplicate worker processes.
 _wangp_start_lock = threading.Lock()
-_void_start_lock  = threading.Lock()
 
 
 def get_status() -> dict:
@@ -335,88 +333,6 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             return False, msg
 
 
-# ── VOID ──────────────────────────────────────────────────────────────────────
-
-VOID_PORT = 7901
-
-
-def void_worker_alive() -> bool:
-    return check_port("127.0.0.1", VOID_PORT, timeout=2)
-
-
-def start_void_worker() -> tuple[bool, str | None]:
-    """Start the Netflix VOID inpainting worker process."""
-    global _void_proc
-
-    with _void_start_lock:
-        if void_worker_alive():
-            _set_status("void", state="running", message="VOID worker already running")
-            return True, None
-
-        worker_script = str(Path(__file__).parent / "void_worker.py")
-        if not Path(worker_script).exists():
-            msg = "void_worker.py not found in services/"
-            _set_status("void", state="error", message=msg)
-            return False, msg
-
-        import sys
-        model_dir = cfg.get("void_model_dir") or ""
-        python_exe = sys.executable
-
-        _set_status("void", state="starting", message="Starting VOID worker (loading model)...")
-        log.info("Starting VOID worker on port %d...", VOID_PORT)
-
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        cmd = [python_exe, worker_script, "--port", str(VOID_PORT)]
-        if model_dir:
-            cmd += ["--model-dir", model_dir]
-
-        try:
-            proc = subprocess.Popen(
-                cmd, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
-                **_popen_flags(),
-            )
-            _void_proc = proc
-
-            def _drain(p):
-                try:
-                    for line in p.stdout:
-                        stripped = line.rstrip()
-                        if stripped:
-                            log.info("[void-worker] %s", stripped)
-                except Exception:
-                    pass
-
-            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
-
-            deadline = time.time() + 30  # server starts fast; model loads in bg
-            while time.time() < deadline:
-                if void_worker_alive():
-                    _set_status("void", state="starting",
-                                message="VOID worker started (model loading in background...)",
-                                port=VOID_PORT, pid=proc.pid)
-                    log.info("VOID worker HTTP server up on port %d", VOID_PORT)
-                    return True, None
-                if proc.poll() is not None:
-                    msg = "VOID worker process exited unexpectedly"
-                    _set_status("void", state="error", message=msg)
-                    return False, msg
-                time.sleep(1)
-
-            msg = "VOID worker did not start within 30s"
-            _set_status("void", state="error", message=msg)
-            return False, msg
-
-        except Exception as e:
-            msg = f"Failed to start VOID worker: {e}"
-            _set_status("void", state="error", message=msg)
-            return False, msg
-
-
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 def startup_all():
@@ -447,31 +363,6 @@ def startup_all():
         elif wangp_status["state"] == "not_configured":
             log.info("WanGP path not configured")
 
-    def _check_forge():
-        from services.forge_client import forge_alive, FORGE_PORT
-        # Quick check first
-        if forge_alive():
-            _set_status("forge", state="running",
-                        message="Forge WebUI running (SD image generation ready)",
-                        port=FORGE_PORT)
-            log.info("Forge WebUI detected on port %d", FORGE_PORT)
-            return
-        # Not up yet — mark as starting and retry for 90s (Forge takes ~60s to boot)
-        _set_status("forge", state="starting",
-                    message="Forge starting up, please wait (~60s)...")
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            time.sleep(5)
-            if forge_alive():
-                _set_status("forge", state="running",
-                            message="Forge WebUI running (SD image generation ready)",
-                            port=FORGE_PORT)
-                log.info("Forge WebUI ready on port %d", FORGE_PORT)
-                return
-        # Gave up after 90s
-        _set_status("forge", state="not_running",
-                    message="Forge not detected — start it with --api flag")
-
     # FLW-10: fire-and-forget -- each _start_* function logs its own completion.
     # Joining would block the startup thread for up to 5 min (ACE-Step + WanGP).
     def _safe_run(name, fn):
@@ -481,28 +372,309 @@ def startup_all():
             log.error("[Startup] %s failed to start: %s", name, e)
             _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
 
-    for label, fn in [("ACE-Step", _start_ace), ("WanGP", _start_wan), ("Forge", _check_forge)]:
+    def _check_forge():
+        from services.forge_client import forge_alive, FORGE_PORT
+        if forge_alive():
+            _set_status("forge", state="running",
+                        message="Forge WebUI running (SD image generation ready)",
+                        port=FORGE_PORT)
+            log.info("Forge WebUI detected on port %d", FORGE_PORT)
+            return
+        # Try to auto-start Forge
+        ok, err = start_forge()
+        if not ok and err:
+            _set_status("forge", state="not_running",
+                        message="Forge not running -- use Services tab to start")
+
+    def _ensure_ollama():
+        ok, err = start_ollama()
+        if ok:
+            _set_status("ollama", state="running",
+                        message="Ollama running on port 11434", port=11434)
+        else:
+            _set_status("ollama", state="not_running",
+                        message=err or "Ollama not available")
+
+    for label, fn in [("WanGP", _start_wan), ("Forge", _check_forge), ("Ollama", _ensure_ollama)]:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
-    # VOID: set initial status (not auto-started — user launches from Post Processing tab)
-    if void_worker_alive():
-        _set_status("void", state="running", message="VOID worker already running")
+    # ACE-Step: deferred -- only started when music generation is needed.
+    # Keeps VRAM free for Ollama vision models during prompt generation.
+    if acestep_alive():
+        _set_status("acestep", state="running",
+                    message="ACE-Step already running", port=ACESTEP_PORT)
     else:
-        _set_status("void", state="not_running",
-                    message="VOID not running — start from Post Processing tab when needed")
+        _set_status("acestep", state="not_running",
+                    message="ACE-Step will start when music generation is needed")
+
+    # Start the health watchdog
+    start_watchdog()
 
     log.info("Service startup initiated (background)")
 
 
+def _kill_proc(proc: subprocess.Popen | None, label: str) -> bool:
+    """Terminate a managed process. Kill forcefully if it doesn't exit in 5s."""
+    if proc is None or proc.poll() is not None:
+        return False
+    log.info("Stopping %s (pid %d)...", label, proc.pid)
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        log.warning("%s did not exit gracefully -- killing", label)
+        proc.kill()
+        proc.wait(timeout=3)
+    return True
+
+
+def _kill_by_port(port: int, label: str):
+    """Kill any process occupying a port (for frozen processes we didn't spawn)."""
+    if sys.platform != "win32":
+        return
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = int(parts[-1])
+                if pid > 0:
+                    log.info("Killing frozen %s on port %d (pid %d)", label, port, pid)
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True, timeout=5)
+    except Exception as e:
+        log.warning("Failed to kill process on port %d: %s", port, e)
+
+
+def stop_service(name: str) -> tuple[bool, str | None]:
+    """Stop a single managed service."""
+    global _wangp_worker_proc, _acestep_proc
+
+    if name == "wangp":
+        killed = _kill_proc(_wangp_worker_proc, "WanGP")
+        if not killed:
+            _kill_by_port(WANGP_WORKER_PORT, "WanGP")
+        _wangp_worker_proc = None
+        _set_status("wangp", state="not_running", message="WanGP stopped", pid=None)
+        return True, None
+
+    if name == "acestep":
+        killed = _kill_proc(_acestep_proc, "ACE-Step")
+        if not killed:
+            _kill_by_port(ACESTEP_PORT, "ACE-Step")
+        _acestep_proc = None
+        _set_status("acestep", state="not_running", message="ACE-Step stopped", pid=None)
+        return True, None
+
+    if name == "forge":
+        _kill_by_port(7861, "Forge")
+        time.sleep(1)
+        from services.forge_client import forge_alive
+        if forge_alive():
+            _set_status("forge", state="running", message="Forge still running (external)")
+            return False, "Could not kill Forge -- it may be running externally"
+        _set_status("forge", state="not_running", message="Forge stopped")
+        return True, None
+
+    if name == "ollama":
+        _kill_by_port(11434, "Ollama")
+        time.sleep(1)
+        _set_status("ollama", state="not_running", message="Ollama stopped")
+        return True, None
+
+    return False, f"Unknown service: {name}"
+
+
+def restart_service(name: str) -> tuple[bool, str | None]:
+    """Stop then start a service."""
+    stop_service(name)
+    time.sleep(2)  # let ports release
+
+    if name == "wangp":
+        return start_wangp_worker()
+    if name == "acestep":
+        return start_acestep()
+    if name == "forge":
+        return start_forge()
+    if name == "ollama":
+        return start_ollama()
+    return False, f"Unknown service: {name}"
+
+
+# ── Forge auto-start ─────────────────────────────────────────────────────────
+
+_forge_proc: subprocess.Popen | None = None
+
+def start_forge() -> tuple[bool, str | None]:
+    """Start Forge SD WebUI with --api flag."""
+    global _forge_proc
+    from services.forge_client import forge_alive, FORGE_PORT
+
+    if forge_alive():
+        _set_status("forge", state="running",
+                    message="Forge already running", port=FORGE_PORT)
+        return True, None
+
+    forge_root = cfg.get("forge_root") or r"C:\forge"
+    webui_bat = Path(forge_root) / "webui-user.bat"
+    if not webui_bat.exists():
+        webui_bat = Path(forge_root) / "webui.bat"
+    if not webui_bat.exists():
+        msg = f"Forge launch script not found in {forge_root}"
+        _set_status("forge", state="error", message=msg)
+        return False, msg
+
+    _set_status("forge", state="starting",
+                message="Starting Forge SD (~60s to load)...")
+    log.info("Starting Forge SD from %s...", forge_root)
+
+    env = os.environ.copy()
+    env["COMMANDLINE_ARGS"] = env.get("COMMANDLINE_ARGS", "") + " --api"
+
+    try:
+        proc = subprocess.Popen(
+            ["cmd", "/c", f"cd /d {forge_root} && {webui_bat.name}"],
+            cwd=str(forge_root), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            **_popen_flags(),
+        )
+        _forge_proc = proc
+
+        def _drain(p):
+            try:
+                for line in p.stdout:
+                    stripped = line.rstrip()
+                    if stripped:
+                        log.info("[forge] %s", stripped)
+            except Exception:
+                pass
+
+        threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if forge_alive():
+                _set_status("forge", state="running",
+                            message="Forge WebUI running (SD image generation ready)",
+                            port=FORGE_PORT, pid=proc.pid)
+                log.info("Forge started on port %d", FORGE_PORT)
+                return True, None
+            if proc.poll() is not None:
+                msg = "Forge process exited before becoming ready"
+                _set_status("forge", state="error", message=msg)
+                return False, msg
+            time.sleep(3)
+
+        msg = "Forge did not start within 120s"
+        _set_status("forge", state="error", message=msg)
+        return False, msg
+
+    except Exception as e:
+        msg = f"Failed to start Forge: {e}"
+        _set_status("forge", state="error", message=msg)
+        return False, msg
+
+
+# ── Ollama auto-start ────────────────────────────────────────────────────────
+
+def _find_ollama() -> str | None:
+    import shutil
+    found = shutil.which("ollama") or shutil.which("ollama.exe")
+    if found:
+        return found
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe"),
+        r"C:\Program Files\Ollama\ollama.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def ollama_alive() -> bool:
+    return check_port("127.0.0.1", 11434, timeout=2)
+
+
+def start_ollama() -> tuple[bool, str | None]:
+    """Ensure Ollama is running. Start it if not."""
+    if ollama_alive():
+        return True, None
+
+    exe = _find_ollama()
+    if not exe:
+        return False, "Ollama executable not found"
+
+    log.info("Starting Ollama serve...")
+    try:
+        subprocess.Popen(
+            [exe, "serve"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **_popen_flags(),
+        )
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if ollama_alive():
+                log.info("Ollama is ready on port 11434")
+                return True, None
+            time.sleep(1)
+        return False, "Ollama did not start within 15s"
+    except Exception as e:
+        return False, f"Failed to start Ollama: {e}"
+
+
+# ── Health watchdog ──────────────────────────────────────────────────────────
+
+def _watchdog_loop():
+    """Periodically check managed services and restart crashed ones."""
+    while True:
+        time.sleep(30)
+        try:
+            status = get_status()
+
+            # Check WanGP worker -- restart if we launched it but it died
+            if _wangp_worker_proc and _wangp_worker_proc.poll() is not None:
+                log.warning("[watchdog] WanGP worker died -- restarting")
+                _set_status("wangp", state="error", message="Worker crashed -- restarting...")
+                start_wangp_worker()
+
+            # Check ACE-Step
+            if _acestep_proc and _acestep_proc.poll() is not None:
+                log.warning("[watchdog] ACE-Step died -- restarting")
+                _set_status("acestep", state="error", message="Server crashed -- restarting...")
+                start_acestep()
+
+            # Check Forge -- if we started it and it died
+            if _forge_proc and _forge_proc.poll() is not None:
+                log.warning("[watchdog] Forge died -- restarting")
+                _set_status("forge", state="error", message="Forge crashed -- restarting...")
+                start_forge()
+
+            # Ensure Ollama stays up (lightweight check)
+            if not ollama_alive():
+                start_ollama()
+
+        except Exception as e:
+            log.debug("[watchdog] Error: %s", e)
+
+
+def start_watchdog():
+    """Launch the health watchdog in a background thread."""
+    threading.Thread(target=_watchdog_loop, daemon=True, name="svc-watchdog").start()
+    log.info("Service health watchdog started (30s interval)")
+
+
+# ── Lifecycle ────────────────────────────────────────────────────────────────
+
 def shutdown_all():
     """Cleanly shut down managed services."""
-    global _wangp_worker_proc, _acestep_proc, _void_proc
-    if _wangp_worker_proc and _wangp_worker_proc.poll() is None:
-        _wangp_worker_proc.terminate()
-        _wangp_worker_proc = None
-    if _acestep_proc and _acestep_proc.poll() is None:
-        _acestep_proc.terminate()
-        _acestep_proc = None
-    if _void_proc and _void_proc.poll() is None:
-        _void_proc.terminate()
-        _void_proc = None
+    global _wangp_worker_proc, _acestep_proc, _forge_proc
+    for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc),
+                        ("Forge", _forge_proc)]:
+        _kill_proc(proc, label)
+    _wangp_worker_proc = None
+    _acestep_proc = None
+    _forge_proc = None

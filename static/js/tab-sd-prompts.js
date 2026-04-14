@@ -1,584 +1,786 @@
 /**
- * Drop Cat Go Studio — SD Prompts tab.
- * Image → SD prompt generation with Forge integration for the full creative loop.
- * Generate prompts → Send to Forge → Get image → Feed to Fun Videos pipeline.
+ * Drop Cat Go Studio -- SD Studio
+ * Layout: prompts (left) | settings + chat (right) | output | gallery
  */
 import { api, apiUpload } from './api.js';
-import { toast, createDropZone, createSlider, createSelect, el } from './components.js';
+import { toast, createDropZone, createSlider, el } from './components.js';
+import { handoff } from './handoff.js';
 
-let sessionId = 'default';
-let chatHistory = [];
-let forgeStatus = null;
+// ── State ───────────────────────────────────────────────────────────────────
+let sessionId        = 'default';
+let sessionActive    = false;   // true after first AI generate
+let forgeStatus      = null;
+let generatedImages  = [];
+let currentIdx       = -1;
+let lastFocusedTA    = null;
+let refImagePath     = null;    // image to analyse when chatting
+let fcRows = 1, fcCols = 3;    // Forge Couple grid
+let fcDirection = 'Horizontal';
+let fcEnabled = false;
+let fcQuickToggle = null;        // quick-access button near Generate
 
+let _pendingHandoff = null;
+let _applyHandoff   = null;
+
+export function receiveHandoff(data) {
+  if (data.type === 'image' && data.path) {
+    if (_applyHandoff) _applyHandoff(data.path);
+    else _pendingHandoff = data.path;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
 export function init(panel) {
   panel.innerHTML = '';
-  const layout = el('div', { style: 'max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:16px' });
-  panel.appendChild(layout);
+  const outer = el('div', { style: 'display:flex; flex-direction:column; gap:14px;' });
+  panel.appendChild(outer);
 
-  // ── Forge Status Banner ───────────────────────────────────────────────
-  const forgeBanner = el('div', { class: 'card', style: 'padding:12px; display:flex; align-items:center; gap:10px' }, [
-    el('span', { class: 'dot', id: 'forge-dot' }),
-    el('span', { id: 'forge-msg', text: 'Checking Forge...' }),
+  // ── Status bar + model ────────────────────────────────────────────────────
+  const statusBar = el('div', { class: 'card', style: 'padding:10px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;' });
+  outer.appendChild(statusBar);
+  const forgeDot = el('span', { class: 'dot' });
+  const forgeMsg = el('span', { style: 'font-size:.85rem; flex-shrink:0', text: 'Checking Forge...' });
+  statusBar.appendChild(forgeDot);
+  statusBar.appendChild(forgeMsg);
+  statusBar.appendChild(el('div', { style: 'width:1px; height:18px; background:var(--border-2); flex-shrink:0' }));
+  statusBar.appendChild(el('label', { text: 'Checkpoint', style: 'font-size:.8rem; color:var(--text-3); flex-shrink:0' }));
+  const modelSel = el('select', { style: 'flex:1; min-width:180px' });
+  modelSel.appendChild(el('option', { text: 'Forge not connected', value: '' }));
+  statusBar.appendChild(modelSel);
+  modelSel.addEventListener('change', async () => {
+    try { await api('/api/prompts/forge/set-model', { method: 'POST', body: JSON.stringify({ model: modelSel.value }) }); toast(`Loading: ${modelSel.value}`, 'info'); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+
+  // ── Main two-column grid ───────────────────────────────────────────────────
+  const mainGrid = el('div', { class: 'sd-top-grid' });
+  outer.appendChild(mainGrid);
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // LEFT COLUMN: Prompts + Forge Couple
+  // ════════════════════════════════════════════════════════════════════════════
+  const leftCol = el('div', { style: 'display:flex; flex-direction:column; gap:14px;' });
+  mainGrid.appendChild(leftCol);
+
+  // ── Positive Prompt card ──────────────────────────────────────────────────
+  const posCard = el('div', { class: 'card' });
+  leftCol.appendChild(posCard);
+
+  posCard.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:8px' }, [
+    el('h3', { text: 'Positive Prompt', style: 'flex:1; margin:0' }),
+    el('button', { class: 'btn btn-sm', text: '__ Wildcards', style: 'font-size:.72rem; opacity:.8',
+      onclick() { wcStrip.style.display = wcStrip.style.display === 'none' ? '' : 'none'; if (wcStrip.style.display !== 'none' && !wcLoaded) loadWildcards(); },
+    }),
+    el('button', { class: 'btn btn-sm', text: 'Copy', style: 'font-size:.72rem',
+      onclick() { navigator.clipboard.writeText(buildFullPrompt()); toast('Copied', 'success'); },
+    }),
+  ]));
+
+  const baseTA = el('textarea', { rows: '7', style: 'width:100%; resize:vertical',
+    placeholder: 'Write your prompt here — or chat with the AI on the right to generate one.\nTips: masterpiece, cinematic, neon city, rain, dramatic lighting...' });
+  baseTA.addEventListener('focus', () => lastFocusedTA = baseTA);
+  posCard.appendChild(baseTA);
+
+  // Suffix
+  const suffixRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px' });
+  posCard.appendChild(suffixRow);
+  suffixRow.appendChild(el('label', { text: 'Suffix', style: 'font-size:.78rem; color:var(--text-3); flex-shrink:0', title: 'Appended to prompt on every generation' }));
+  const suffixIn = el('input', { type: 'text', value: '(depth blur)', style: 'flex:1', title: 'Appended to every generation' });
+  suffixRow.appendChild(suffixIn);
+
+  // Wildcard chips
+  const wcStrip = el('div', { class: 'wc-strip', style: 'display:none' });
+  posCard.appendChild(wcStrip);
+  let wcLoaded = false;
+
+  async function loadWildcards() {
+    wcLoaded = true;
+    wcStrip.innerHTML = '<span style="font-size:.75rem;color:var(--text-3)">Loading...</span>';
+    try {
+      const data = await api('/api/prompts/wildcards');
+      wcStrip.innerHTML = '';
+      for (const f of (data.files || [])) {
+        const chip = el('button', { class: 'wc-chip', text: f.token.replace(/__/g, ''), title: f.samples?.slice(0, 3).join(', ') || '',
+          onclick() {
+            const ta = lastFocusedTA || baseTA;
+            const pos = ta.selectionStart;
+            ta.value = ta.value.slice(0, pos) + f.token + ta.value.slice(ta.selectionEnd);
+            ta.selectionStart = ta.selectionEnd = pos + f.token.length;
+            ta.focus();
+          },
+        });
+        wcStrip.appendChild(chip);
+      }
+      if (!data.files?.length) wcStrip.textContent = 'No wildcards — configure wildcards directory in Settings.';
+    } catch (e) { wcStrip.textContent = e.message; }
+  }
+
+  // ── Negative Prompt card ──────────────────────────────────────────────────
+  const negCard = el('div', { class: 'card' });
+  leftCol.appendChild(negCard);
+  negCard.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:8px' }, [
+    el('h3', { text: 'Negative Prompt', style: 'flex:1; margin:0' }),
+    el('button', { class: 'btn btn-sm', text: 'Copy', style: 'font-size:.72rem',
+      onclick() { navigator.clipboard.writeText(negTA.value); toast('Copied', 'success'); },
+    }),
+  ]));
+  const negTA = el('textarea', { rows: '3', style: 'width:100%; resize:vertical',
+    value: 'blurry, low quality, watermark, text, logo, ugly, deformed, bad anatomy' });
+  negTA.addEventListener('focus', () => lastFocusedTA = negTA);
+  negCard.appendChild(negTA);
+
+  // ── Forge Couple card ──────────────────────────────────────────────────────
+  const fcCard = el('div', { class: 'card' });
+  leftCol.appendChild(fcCard);
+
+  // Header row
+  const fcHeaderRow = el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap' });
+  fcCard.appendChild(fcHeaderRow);
+  fcHeaderRow.appendChild(el('h3', { text: 'Forge Couple — Regional Prompting', style: 'flex:1; margin:0; white-space:nowrap' }));
+
+  const fcPill = el('button', { class: 'fc-pill off', text: 'OFF', onclick() { toggleFC(!fcEnabled); } });
+  fcHeaderRow.appendChild(fcPill);
+
+  function toggleFC(on) {
+    fcEnabled = on;
+    fcPill.textContent = on ? 'ON' : 'OFF';
+    fcPill.className = `fc-pill ${on ? 'on' : 'off'}`;
+    if (fcQuickToggle) { fcQuickToggle.textContent = on ? 'FC ●' : 'FC ○'; fcQuickToggle.style.color = on ? 'var(--accent)' : ''; }
+    fcConfigRow.style.display = on ? '' : 'none';
+    fcGridWrap.style.display  = on ? '' : 'none';
+    fcBgRow.style.display     = on ? '' : 'none';
+    fcExplain.style.display   = on ? 'none' : '';
+    if (on) renderFCGrid();
+  }
+
+  const fcExplain = el('p', { style: 'font-size:.8rem; color:var(--text-3); margin-top:8px',
+    text: 'Splits the image into independent regions — each with its own prompt. Toggle ON to configure.' });
+  fcCard.appendChild(fcExplain);
+
+  // Config row (rows × cols + direction)
+  const fcConfigRow = el('div', { style: 'display:none; align-items:center; gap:12px; flex-wrap:wrap; margin-top:10px' });
+  fcCard.appendChild(fcConfigRow);
+
+  function numInput(value, min, max, onChange) {
+    const inp = el('input', { type: 'number', value: String(value), min: String(min), max: String(max), step: '1',
+      style: 'width:52px; text-align:center; padding:4px 6px' });
+    inp.addEventListener('change', () => { const v = Math.max(min, Math.min(max, parseInt(inp.value) || min)); inp.value = v; onChange(v); });
+    return inp;
+  }
+
+  fcConfigRow.appendChild(el('label', { text: 'Rows', style: 'font-size:.8rem; color:var(--text-3)' }));
+  const fcRowsIn = numInput(fcRows, 1, 4, v => { fcRows = v; renderFCGrid(); });
+  fcConfigRow.appendChild(fcRowsIn);
+  fcConfigRow.appendChild(el('span', { text: '×', style: 'font-size:.9rem; color:var(--text-3)' }));
+  fcConfigRow.appendChild(el('label', { text: 'Cols', style: 'font-size:.8rem; color:var(--text-3)' }));
+  const fcColsIn = numInput(fcCols, 1, 4, v => { fcCols = v; renderFCGrid(); });
+  fcConfigRow.appendChild(fcColsIn);
+
+  fcConfigRow.appendChild(el('div', { style: 'width:1px; height:18px; background:var(--border); flex-shrink:0' }));
+  fcConfigRow.appendChild(el('label', { text: 'Direction', style: 'font-size:.8rem; color:var(--text-3)' }));
+
+  function dirBtn(label, dir) {
+    const b = el('button', { class: `btn btn-sm ${dir === fcDirection ? 'active' : ''}`, text: label,
+      style: dir === fcDirection ? 'border-color:var(--accent); color:var(--accent)' : '',
+      onclick() {
+        fcDirection = dir;
+        [hBtn, vBtn].forEach(x => { x.style.borderColor = ''; x.style.color = ''; });
+        b.style.borderColor = 'var(--accent)'; b.style.color = 'var(--accent)';
+      },
+    });
+    return b;
+  }
+  const hBtn = dirBtn('Horizontal', 'Horizontal');
+  const vBtn = dirBtn('Vertical', 'Vertical');
+  fcConfigRow.appendChild(hBtn);
+  fcConfigRow.appendChild(vBtn);
+
+  fcConfigRow.appendChild(el('div', { style: 'width:1px; height:18px; background:var(--border); flex-shrink:0' }));
+  fcConfigRow.appendChild(el('button', { class: 'btn btn-sm', text: 'Copy all (FC format)',
+    onclick() {
+      navigator.clipboard.writeText(buildFullPromptWithFC());
+      toast('Copied in Forge Couple newline format', 'success');
+    },
+  }));
+
+  // FC grid of textareas
+  const fcGridWrap = el('div', { class: 'fc-grid-wrap', style: 'display:none' });
+  fcCard.appendChild(fcGridWrap);
+  let fcCells = []; // textareas
+
+  function renderFCGrid() {
+    const prevValues = fcCells.map(ta => ta?.value || '');
+    fcGridWrap.style.gridTemplateColumns = `repeat(${fcCols}, 1fr)`;
+    fcGridWrap.innerHTML = '';
+    fcCells = [];
+    const total = fcRows * fcCols;
+    for (let r = 0; r < fcRows; r++) {
+      for (let c = 0; c < fcCols; c++) {
+        const idx = r * fcCols + c;
+        const regionLabel = total === 1 ? 'Region' :
+          fcRows === 1 ? (['Left', 'Center', 'Right', 'Far Right'][c] || `Col ${c+1}`) :
+          fcCols === 1 ? (['Top', 'Middle', 'Bottom', 'Bottom'][r] || `Row ${r+1}`) :
+          `R${r+1} C${c+1}`;
+        const ta = el('textarea', { rows: '3', style: 'width:100%; resize:vertical; font-size:.8rem',
+          placeholder: `${regionLabel} region...` });
+        ta.addEventListener('focus', () => lastFocusedTA = ta);
+        if (prevValues[idx]) ta.value = prevValues[idx];
+        const cell = el('div', { class: 'fc-cell' }, [
+          el('label', { text: regionLabel }),
+          ta,
+        ]);
+        fcGridWrap.appendChild(cell);
+        fcCells[idx] = ta;
+      }
+    }
+  }
+
+  // Background weight
+  const fcBgRow = el('div', { style: 'display:none; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap' });
+  fcCard.appendChild(fcBgRow);
+  fcBgRow.appendChild(el('label', { text: 'Background weight', style: 'font-size:.78rem; color:var(--text-3); white-space:nowrap' }));
+  const fcBgLabel  = el('span', { text: '0.5', style: 'font-size:.78rem; color:var(--accent); min-width:26px' });
+  const fcBgSlider = el('input', { type: 'range', min: '0.1', max: '1', step: '0.05', value: '0.5', style: 'flex:1; min-width:120px' });
+  fcBgSlider.addEventListener('input', () => { fcBgLabel.textContent = fcBgSlider.value; });
+  fcBgRow.appendChild(fcBgSlider);
+  fcBgRow.appendChild(fcBgLabel);
+
+  // Prompt preview
+  let previewOpen = false;
+  const previewToggle = el('button', { class: 'btn btn-sm', text: '\u25b6 Preview constructed prompt', style: 'margin-top:6px; font-size:.75rem; opacity:.7',
+    onclick() {
+      previewOpen = !previewOpen;
+      previewWrap.style.display = previewOpen ? '' : 'none';
+      previewToggle.textContent = (previewOpen ? '\u25bc' : '\u25b6') + ' Preview constructed prompt';
+      previewToggle.style.opacity = previewOpen ? '1' : '.7';
+      if (previewOpen) updatePreview();
+    }
+  });
+  leftCol.appendChild(previewToggle);
+
+  const previewWrap = el('div', { class: 'card', style: 'display:none' });
+  leftCol.appendChild(previewWrap);
+  const previewNote = el('span', { style: 'font-size:.72rem; color:var(--text-3)' });
+  previewWrap.appendChild(el('div', { style: 'display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px' }, [
+    el('strong', { text: 'What Forge will receive', style: 'font-size:.82rem' }),
+    previewNote,
+  ]));
+  const previewTA = el('textarea', { rows: '7', style: 'width:100%; font-family:monospace; font-size:.76rem; color:var(--text-2); background:var(--surface-2); resize:vertical' });
+  previewTA.readOnly = true;
+  previewWrap.appendChild(previewTA);
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RIGHT COLUMN: Settings + Generate + Chat
+  // ════════════════════════════════════════════════════════════════════════════
+  const rightCol = el('div', { style: 'display:flex; flex-direction:column; gap:14px;' });
+  mainGrid.appendChild(rightCol);
+
+  // ── Settings card ─────────────────────────────────────────────────────────
+  const settingsCard = el('div', { class: 'card' });
+  rightCol.appendChild(settingsCard);
+  settingsCard.appendChild(el('h3', { text: 'Settings', style: 'margin-bottom:12px' }));
+
+  const samplerSel = el('select', { style: 'width:100%' });
+  const schedSel   = el('select', { style: 'width:100%' });
+  settingsCard.appendChild(el('div', { class: 'settings-2col' }, [
+    el('div', { class: 'form-group' }, [el('label', { text: 'Sampler' }), samplerSel]),
+    el('div', { class: 'form-group' }, [el('label', { text: 'Scheduler' }), schedSel]),
+  ]));
+
+  const wIn = el('input', { type: 'number', value: '1440', min: '64', max: '5120', step: '8', style: 'width:100%' });
+  const hIn = el('input', { type: 'number', value: '810',  min: '64', max: '5120', step: '8', style: 'width:100%' });
+  settingsCard.appendChild(el('div', { class: 'settings-2col' }, [
+    el('div', { class: 'form-group' }, [el('label', { text: 'Width' }),  wIn]),
+    el('div', { class: 'form-group' }, [el('label', { text: 'Height' }), hIn]),
+  ]));
+
+  const presetsWrap = el('div', { style: 'display:flex; flex-wrap:wrap; gap:3px; margin-bottom:10px' });
+  settingsCard.appendChild(presetsWrap);
+  [{ l:'1:1',w:1024,h:1024},{ l:'4:3',w:1440,h:1080},{ l:'3:2',w:1440,h:960},
+   { l:'16:9',w:1440,h:810},{ l:'9:16',w:810,h:1440},{ l:'1080p',w:1920,h:1080}].forEach(p => {
+    presetsWrap.appendChild(el('button', { class: 'btn btn-sm', text: p.l,
+      style: 'font-size:.68rem; padding:2px 7px; opacity:.8',
+      onclick() { wIn.value = p.w; hIn.value = p.h; },
+    }));
+  });
+  presetsWrap.appendChild(el('button', { class: 'btn btn-sm', text: 'W\u2194H',
+    style: 'font-size:.68rem; padding:2px 7px; opacity:.8',
+    onclick() { const t = wIn.value; wIn.value = hIn.value; hIn.value = t; },
+  }));
+
+  const stepsSlider = createSlider(settingsCard, { label: 'Steps', min: 1, max: 60, step: 1, value: 28 });
+  const cfgSlider   = createSlider(settingsCard, { label: 'CFG Scale', min: 1, max: 20, step: 0.5, value: 7 });
+
+  const seedIn = el('input', { type: 'number', value: '-1', style: 'flex:1' });
+  settingsCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:flex-end; margin-bottom:8px' }, [
+    el('div', { class: 'form-group', style: 'flex:1' }, [el('label', { text: 'Seed (-1 = random)' }), seedIn]),
+    el('button', { class: 'btn btn-sm', text: 'Rnd', style: 'margin-bottom:8px', onclick() { seedIn.value = '-1'; } }),
+  ]));
+
+  const batchCntIn  = el('input', { type: 'number', value: '1', min: '1', max: '8', step: '1', style: 'width:100%' });
+  const batchSizeIn = el('input', { type: 'number', value: '1', min: '1', max: '8', step: '1', style: 'width:100%' });
+  settingsCard.appendChild(el('div', { class: 'settings-2col' }, [
+    el('div', { class: 'form-group' }, [el('label', { text: 'Batch Count' }), batchCntIn]),
+    el('div', { class: 'form-group' }, [el('label', { text: 'Batch Size' }), batchSizeIn]),
+  ]));
+
+  // Enhancements accordion (tabbed)
+  const enhBody = el('div', { style: 'display:none; padding-top:12px; border-top:1px solid var(--border); margin-top:6px' });
+  settingsCard.appendChild(el('button', { class: 'btn btn-sm', style: 'width:100%; text-align:left; margin-top:6px',
+    text: '\u25b6 HiRes Fix  \u00b7  ADetailer  \u00b7  img2img',
+    onclick(e) {
+      const open = enhBody.style.display !== 'none';
+      enhBody.style.display = open ? 'none' : '';
+      e.target.textContent = (open ? '\u25b6' : '\u25bc') + ' HiRes Fix  \u00b7  ADetailer  \u00b7  img2img';
+    },
+  }));
+  settingsCard.appendChild(enhBody);
+
+  const enhTabs  = el('div', { class: 'enh-tabs' });
+  const paneHR   = el('div', { class: 'enh-pane active' });
+  const paneAD   = el('div', { class: 'enh-pane' });
+  const paneI2I  = el('div', { class: 'enh-pane' });
+  enhBody.appendChild(enhTabs);
+  [paneHR, paneAD, paneI2I].forEach(p => enhBody.appendChild(p));
+  ['HiRes Fix', 'ADetailer', 'img2img'].forEach((name, i) => {
+    const tab = el('button', { class: `enh-tab${i===0?' active':''}`, text: name,
+      onclick() {
+        enhTabs.querySelectorAll('.enh-tab').forEach((t,j) => t.classList.toggle('active', j===i));
+        [paneHR, paneAD, paneI2I].forEach((p,j) => p.classList.toggle('active', j===i));
+      },
+    });
+    enhTabs.appendChild(tab);
+  });
+
+  const hrEnabled = el('input', { type: 'checkbox', id: 'sd-hr' });
+  paneHR.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; margin-bottom:8px' }, [hrEnabled, el('label', { for: 'sd-hr', text: 'Enable HiRes Fix', style: 'cursor:pointer; font-weight:600' })]));
+  const hrScale   = createSlider(paneHR, { label: 'Scale',   min: 1, max: 4, step: 0.25, value: 2 });
+  const hrSteps   = createSlider(paneHR, { label: 'Steps',   min: 0, max: 40, step: 1, value: 10 });
+  const hrDenoise = createSlider(paneHR, { label: 'Denoise', min: 0.1, max: 1, step: 0.05, value: 0.35 });
+  const hrUpSel   = el('select', { style: 'width:100%' });
+  hrUpSel.appendChild(el('option', { value: 'ESRGAN_4x', text: 'ESRGAN_4x' }));
+  paneHR.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Upscaler' }), hrUpSel]));
+
+  const adEnabled = el('input', { type: 'checkbox', id: 'sd-ad' });
+  const adDetect  = el('select', { style: 'width:100%; margin-bottom:6px' });
+  ['face_yolov8n.pt', 'hand_yolov8n.pt', 'person_yolov8n-seg.pt'].forEach(v => adDetect.appendChild(el('option', { value: v, text: v })));
+  const adDenoise = createSlider(paneAD, { label: 'Fix strength', min: 0.1, max: 0.8, step: 0.05, value: 0.4 });
+  const rfEnabled = el('input', { type: 'checkbox', id: 'sd-rf' });
+  paneAD.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; margin-bottom:8px' }, [adEnabled, el('label', { for: 'sd-ad', text: 'Enable ADetailer', style: 'cursor:pointer; font-weight:600' })]));
+  paneAD.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Detect' }), adDetect]));
+  paneAD.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; margin-top:8px' }, [rfEnabled, el('label', { for: 'sd-rf', text: 'Restore Faces (GFPGAN)', style: 'cursor:pointer' })]));
+
+  const i2iPathIn   = el('input', { type: 'text', placeholder: 'Image path (auto-filled after generation)' });
+  const i2iPromptIn = el('textarea', { rows: '2', placeholder: 'Prompt (blank = use positive prompt)' });
+  const i2iDenoise  = createSlider(paneI2I, { label: 'Denoise strength', min: 0.05, max: 1, step: 0.05, value: 0.5 });
+  paneI2I.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Input Image Path' }), i2iPathIn]));
+  paneI2I.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Prompt' }), i2iPromptIn]));
+  const i2iBtn = el('button', { class: 'btn btn-primary', text: 'Run img2img', style: 'margin-top:6px; width:100%' });
+  paneI2I.appendChild(i2iBtn);
+
+  // ── Generate button ───────────────────────────────────────────────────────
+  const genRow = el('div', { style: 'display:flex; gap:8px' });
+  rightCol.appendChild(genRow);
+  const genBtn = el('button', { class: 'btn btn-primary btn-generate', text: 'Generate Image' });
+  const stopBtn = el('button', { class: 'btn', text: '\u25a0 Stop', style: 'padding:14px 16px; font-size:1rem; flex-shrink:0',
+    async onclick() { await api('/api/prompts/forge/interrupt', { method: 'POST' }).catch(() => {}); toast('Stop requested', 'info'); },
+  });
+  fcQuickToggle = el('button', { class: 'btn btn-sm', text: 'FC \u25cb',
+    title: 'Toggle Forge Couple regional prompting (shortcut -- full controls below)',
+    style: 'padding:14px 10px; font-size:.8rem; flex-shrink:0',
+    onclick() { toggleFC(!fcEnabled); },
+  });
+  genRow.appendChild(genBtn);
+  genRow.appendChild(fcQuickToggle);
+  genRow.appendChild(stopBtn);
+  const progressEl = el('div', { style: 'display:none; padding:8px 14px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); font-size:.85rem; color:var(--accent); text-align:center' });
+  rightCol.appendChild(progressEl);
+
+  // ── AI Chat card ──────────────────────────────────────────────────────────
+  const chatCard = el('div', { class: 'card', style: 'display:flex; flex-direction:column; gap:0' });
+  rightCol.appendChild(chatCard);
+
+  chatCard.appendChild(el('div', { style: 'margin-bottom:8px' }, [
+    el('h3', { text: '\u2736 Chat with AI', style: 'margin-bottom:4px' }),
+    el('p', { style: 'font-size:.78rem; color:var(--text-3); line-height:1.5',
+      text: 'Describe what you want and the AI will write or refine the prompts for you. Drop a reference image below to analyse it.' }),
+  ]));
+
+  // Reference image (small, in chat card)
+  const refImgEl  = el('img', { style: 'max-height:70px; border-radius:4px; object-fit:cover' });
+  const refWrap   = el('div', { style: 'display:none; align-items:center; gap:8px; margin-bottom:8px; padding:6px; background:var(--surface-2); border-radius:var(--r-sm)' }, [
+    refImgEl,
+    el('div', { style: 'flex:1; min-width:0' }, [
+      el('div', { style: 'font-size:.75rem; color:var(--text-2)', id: 'ref-img-name' }),
+      el('button', { class: 'btn btn-sm', text: 'Remove', style: 'margin-top:4px', onclick() { refImagePath = null; refWrap.style.display = 'none'; } }),
+    ]),
   ]);
-  layout.appendChild(forgeBanner);
-  checkForge();
+  chatCard.appendChild(refWrap);
 
-  // ── Image Input ───────────────────────────────────────────────────────
-  const inputCard = el('div', { class: 'card' });
-  layout.appendChild(inputCard);
-  inputCard.appendChild(el('h3', { text: 'Reference Image + Concept' }));
+  _applyHandoff = (path) => {
+    refImagePath = path;
+    refImgEl.src = `/output/${path.split(/[\\/]/).pop()}`;
+    document.getElementById('ref-img-name').textContent = path.split(/[\\/]/).pop();
+    refWrap.style.display = 'flex';
+    addMsg('assistant', 'Image received. Tell me what kind of prompt you want for it, or just say "generate prompts" and I\'ll analyse it.');
+  };
+  if (_pendingHandoff) { _applyHandoff(_pendingHandoff); _pendingHandoff = null; }
 
-  let imagePath = null;
-  const previewWrap = el('div', { style: 'display:none; margin:8px 0' }, [
-    el('img', { class: 'image-preview', id: 'sd-preview' }),
-    el('button', { class: 'btn btn-sm', text: 'Remove', style: 'margin-left:10px', onclick() { imagePath = null; previewWrap.style.display = 'none'; } }),
-  ]);
-  inputCard.appendChild(previewWrap);
-
-  createDropZone(inputCard, {
-    accept: 'image/*',
-    multiple: false,
-    label: 'Drop a reference image (optional)',
+  createDropZone(chatCard, {
+    accept: 'image/*', multiple: false, label: 'Drop image to analyse (optional)',
     async onFiles(files) {
       try {
-        const data = await apiUpload('/api/fun/upload', files);
-        const f = data.files?.[0];
+        const d = await apiUpload('/api/fun/upload', files);
+        const f = d.files?.[0];
         if (f) {
-          imagePath = f.path;
-          previewWrap.style.display = 'flex';
-          previewWrap.querySelector('img').src = f.url || `/uploads/${f.name}`;
+          refImagePath = f.path;
+          refImgEl.src = f.url || `/uploads/${f.name}`;
+          document.getElementById('ref-img-name').textContent = f.name || f.path.split(/[\\/]/).pop();
+          refWrap.style.display = 'flex';
+          addMsg('assistant', `Got it — I can see ${f.name || 'the image'}. Tell me what you want, or ask me to "generate prompts for this image".`);
         }
       } catch (e) { toast(e.message, 'error'); }
     },
   });
 
-  const conceptInput = el('textarea', { rows: '2', placeholder: 'Describe your concept (e.g. "cyberpunk city at night")' });
-  inputCard.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Concept' }), conceptInput]));
+  // AI model select (small, in chat card)
+  const aiModelSel = el('select', { style: 'width:100%; margin-top:8px; font-size:.8rem' });
+  aiModelSel.appendChild(el('option', { value: 'ollama', text: 'Loading...' }));
+  chatCard.appendChild(el('div', { style: 'margin-top:6px' }, [el('label', { style: 'font-size:.72rem; color:var(--text-3)', text: 'AI Model' }), aiModelSel]));
+  api('/api/prompts/models').then(d => {
+    const ms = d.models?.length ? d.models : ['ollama'];
+    aiModelSel.innerHTML = ms.map(m => `<option value="${m}">${m}</option>`).join('');
+  }).catch(() => { aiModelSel.innerHTML = '<option value="ollama">ollama</option>'; });
 
-  const extraInput = el('textarea', { rows: '2', placeholder: 'Extra instructions for the AI prompt engineer...' });
-  inputCard.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Extra Instructions' }), extraInput]));
+  // Chat messages area
+  const chatMessages = el('div', { class: 'chat-messages', style: 'min-height:260px; max-height:420px; margin-top:12px; margin-bottom:4px' });
+  chatCard.appendChild(chatMessages);
 
-  const modelSelect = createSelect(inputCard, {
-    label: 'AI Model',
-    options: ['Loading...'],
-    value: 'Loading...',
-  });
-  // Populate with live Ollama models
-  api('/api/prompts/models').then(data => {
-    const sel = modelSelect.el.querySelector('select');
-    const models = data.models?.length ? data.models : ['ollama'];
-    sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
-  }).catch(() => {
-    const sel = modelSelect.el.querySelector('select');
-    sel.innerHTML = '<option value="ollama">ollama (default)</option>';
-  });
+  // Initial greeting
+  addMsg('assistant', 'Hello! I\'m your prompt engineer. You can:\n• Describe what you want to generate\n• Ask me to analyze a reference image\n• Say things like "make it more cinematic" or "add fog"\n\nOr write your own prompt on the left and generate directly.');
 
-  const genBtn = el('button', { class: 'btn btn-primary', text: 'Generate Prompts' });
-  inputCard.appendChild(genBtn);
+  // Chat input
+  const chatInput = el('textarea', { rows: '3', placeholder: 'e.g. "a gothic cathedral at dusk with a mysterious robed figure"', style: 'width:100%; resize:none' });
+  const chatInputArea = el('div', { class: 'chat-input-area' });
+  chatInputArea.appendChild(chatInput);
+  const sendBtn = el('button', { class: 'btn btn-primary chat-send-btn', text: 'Send', onclick: sendMessage });
+  chatInputArea.appendChild(sendBtn);
+  chatCard.appendChild(chatInputArea);
 
-  // ── Prompt Output ─────────────────────────────────────────────────────
-  const outputCard = el('div', { class: 'card', style: 'display:none' });
-  layout.appendChild(outputCard);
-  outputCard.appendChild(el('h3', { text: 'Generated Prompts' }));
-
-  const basePromptEl = el('div', { class: 'prompt-output', id: 'sd-base-prompt' });
-  outputCard.appendChild(el('div', { class: 'form-group' }, [
-    el('div', { style: 'display:flex; justify-content:space-between; align-items:center' }, [
-      el('label', { text: 'Base Prompt' }),
-      el('button', { class: 'btn btn-sm', text: 'Copy', onclick() { copyText(basePromptEl.textContent); } }),
-    ]),
-    basePromptEl,
-  ]));
-
-  outputCard.appendChild(el('p', {
-    style: 'font-size:.78rem; color:var(--text-2); margin-bottom:8px',
-    text: 'These three columns define LEFT / CENTER / RIGHT regions when using Forge Couple. Edit them freely before generating.',
-  }));
-
-  const colContainer = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px' });
-  // Use textareas so user can edit the AI output before generating
-  const col1 = el('textarea', { class: 'prompt-output', rows: '4', style: 'resize:vertical' });
-  const col2 = el('textarea', { class: 'prompt-output', rows: '4', style: 'resize:vertical' });
-  const col3 = el('textarea', { class: 'prompt-output', rows: '4', style: 'resize:vertical' });
-  colContainer.appendChild(el('div', { class: 'form-group' }, [
-    el('div', { style: 'display:flex; justify-content:space-between' }, [
-      el('label', { html: '◀ Left region' }),
-      el('button', { class: 'btn btn-sm', text: 'Copy', onclick() { copyText(col1.value); } }),
-    ]),
-    col1,
-  ]));
-  colContainer.appendChild(el('div', { class: 'form-group' }, [
-    el('div', { style: 'display:flex; justify-content:space-between' }, [
-      el('label', { html: '● Center region' }),
-      el('button', { class: 'btn btn-sm', text: 'Copy', onclick() { copyText(col2.value); } }),
-    ]),
-    col2,
-  ]));
-  colContainer.appendChild(el('div', { class: 'form-group' }, [
-    el('div', { style: 'display:flex; justify-content:space-between' }, [
-      el('label', { html: 'Right region ▶' }),
-      el('button', { class: 'btn btn-sm', text: 'Copy', onclick() { copyText(col3.value); } }),
-    ]),
-    col3,
-  ]));
-  outputCard.appendChild(colContainer);
-
-  const combineBtn = el('button', { class: 'btn', text: 'Copy All (with BREAK — for manual paste into Forge)', onclick() {
-    const parts = [basePromptEl.textContent, col1.value, col2.value, col3.value].filter(x => x.trim());
-    copyText(parts.join('\nBREAK\n'));
-  }});
-  outputCard.appendChild(combineBtn);
-
-  // ── Forge Generate Panel ─────────────────────────────────────────────
-  const forgeCard = el('div', { class: 'card', style: 'display:none' });
-  layout.appendChild(forgeCard);
-
-  forgeCard.appendChild(el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom:4px' }, [
-    el('h3', { text: 'Generate Image in Forge' }),
-    el('button', { class: 'btn btn-sm btn-cancel', text: '■ Stop', async onclick() {
-      await api('/api/prompts/forge/interrupt', { method: 'POST' });
-      toast('Generation interrupted', 'info');
-    }}),
-  ]));
-
-  // ── Model (top — most important choice) ───────────────────────────────
-  const modelSelectEl = el('select');
-  forgeCard.appendChild(el('div', { class: 'form-group' }, [
-    el('label', { text: 'Checkpoint Model' }),
-    modelSelectEl,
-  ]));
-
-  // ── FORGE COUPLE — prominent, not hidden ──────────────────────────────
-  // This is the regional prompting feature. We surface it front-and-center
-  // because it directly drives the LEFT/CENTER/RIGHT columns above.
-  const forgeCoupleSection = el('div', {
-    style: 'border:2px solid var(--accent-border); border-radius:var(--r-md); padding:12px; margin-bottom:12px; background:var(--accent-bg)'
-  });
-  forgeCard.appendChild(forgeCoupleSection);
-
-  const forgeCoupleHeader = el('div', { style: 'display:flex; align-items:center; gap:10px; margin-bottom:6px' });
-  const forgeCoupleEnabledCb = el('input', { type: 'checkbox', id: 'forge-couple-enabled', checked: 'true' });
-  forgeCoupleHeader.appendChild(forgeCoupleEnabledCb);
-  forgeCoupleHeader.appendChild(el('div', {}, [
-    el('strong', { text: 'Regional Prompting (Forge Couple)' }),
-    el('span', { text: ' — ON by default', style: 'color:var(--accent); font-size:.8rem' }),
-  ]));
-  forgeCoupleSection.appendChild(forgeCoupleHeader);
-  forgeCoupleSection.appendChild(el('p', {
-    style: 'font-size:.78rem; color:var(--text-2); margin-bottom:8px; line-height:1.5',
-    text: 'Splits your image into Left / Center / Right regions and applies a different prompt to each area. ' +
-          'The LEFT, CENTER, RIGHT columns above each control one region. ' +
-          'Disable this if you want a single unified prompt instead.',
-  }));
-
-  const forgeCoupleDetail = el('div');
-  const forgeCouplebgWeight = createSlider(forgeCoupleDetail, {
-    label: 'Background weight (how strongly the Base Prompt affects the whole image)',
-    min: 0.1, max: 1, step: 0.1, value: 0.5,
-  });
-  forgeCoupleSection.appendChild(forgeCoupleDetail);
-  forgeCoupleEnabledCb.addEventListener('change', () => {
-    forgeCoupleDetail.style.opacity = forgeCoupleEnabledCb.checked ? '1' : '0.4';
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
 
-  // ── Dynamic prompts note ──────────────────────────────────────────────
-  forgeCard.appendChild(el('div', {
-    style: 'font-size:.78rem; color:var(--text-2); background:var(--surface-2); border-radius:var(--r-sm); padding:8px 12px; margin-bottom:10px; line-height:1.5',
-    html: '<strong style="color:var(--text)">Dynamic Prompts are active.</strong> ' +
-          'You can type <code style="color:var(--green)">__wildcard__</code> or ' +
-          '<code style="color:var(--green)">{option1|option2|option3}</code> anywhere in your prompts — ' +
-          'Forge will expand them randomly on each generation. ' +
-          'Wildcards from your configured directory work too.',
-  }));
+  function addMsg(role, text) {
+    const div = el('div', { class: `chat-msg ${role}`, text });
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return div;
+  }
 
-  // ── Core generation settings ──────────────────────────────────────────
-  const coreGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px' });
-  forgeCard.appendChild(coreGrid);
+  function addThinking() {
+    const div = el('div', { class: 'chat-msg assistant thinking', text: 'Thinking' });
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return div;
+  }
 
-  const samplerSelectEl = el('select');
-  const schedulerSelectEl = el('select');
-  coreGrid.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Sampler' }), samplerSelectEl]));
-  coreGrid.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Scheduler' }), schedulerSelectEl]));
+  async function sendMessage() {
+    const msg = chatInput.value.trim();
+    if (!msg) return;
+    chatInput.value = '';
+    sendBtn.disabled = true;
+    addMsg('user', msg);
+    const thinkEl = addThinking();
 
-  const cfgSlider = createSlider(coreGrid, { label: 'CFG Scale — how literally Forge follows the prompt (7 is balanced)', min: 1, max: 20, step: 0.5, value: 7 });
-  const stepsSlider = createSlider(coreGrid, { label: 'Steps — more = better quality, slower (25 is good)', min: 4, max: 60, step: 1, value: 25 });
-
-  const sizeGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px' });
-  forgeCard.appendChild(sizeGrid);
-  const widthSelect = createSelect(sizeGrid, { label: 'Width', options: ['512', '768', '832', '1024', '1216', '1472'], value: '1024' });
-  const heightSelect = createSelect(sizeGrid, { label: 'Height', options: ['512', '768', '832', '1024', '1216', '1472'], value: '1024' });
-
-  const forgeNeg = el('textarea', { rows: '1', placeholder: 'Negative prompt — what to avoid...', value: 'blurry, low quality, deformed, ugly' });
-  forgeCard.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Negative Prompt' }), forgeNeg]));
-
-  const seedRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:12px' }, [
-    el('label', { text: 'Seed', style: 'font-size:.8rem; color:var(--text-2); min-width:40px' }),
-    el('input', { type: 'number', id: 'forge-seed', value: '-1', style: 'width:150px; font-family:monospace' }),
-    el('span', { text: '(-1 = random)', style: 'font-size:.75rem; color:var(--text-3)' }),
-    el('button', { class: 'btn btn-sm', text: '🎲', onclick() { document.getElementById('forge-seed').value = '-1'; } }),
-  ]);
-  forgeCard.appendChild(seedRow);
-
-  // ── Optional extensions (accordion — OK to hide these) ───────────────
-  const extToggle = el('button', { class: 'btn btn-sm', text: '▶ Optional Enhancements', style: 'margin-bottom:8px', onclick() {
-    extContent.style.display = extContent.style.display === 'none' ? '' : 'none';
-    extToggle.textContent = extContent.style.display === 'none' ? '▶ Optional Enhancements' : '▼ Optional Enhancements';
-  }});
-  forgeCard.appendChild(extToggle);
-
-  const extContent = el('div', { style: 'display:none; background:var(--surface-2); border-radius:var(--r-md); padding:14px; margin-bottom:12px' });
-  forgeCard.appendChild(extContent);
-
-  // ADetailer — faces/hands
-  const adetailerEnabledCb = el('input', { type: 'checkbox', id: 'adetailer-enabled' });
-  extContent.appendChild(el('div', { class: 'checkbox-group', style: 'margin-bottom:4px' }, [
-    adetailerEnabledCb,
-    el('label', { for: 'adetailer-enabled', html: '<strong>ADetailer</strong> — automatically fixes faces and hands after generation' }),
-  ]));
-  extContent.appendChild(el('p', { style: 'font-size:.75rem; color:var(--text-3); padding-left:24px; margin-bottom:8px',
-    text: 'Only enable if your image contains faces or hands that look wrong.' }));
-  const adetailerDetail = el('div', { style: 'padding-left:24px; display:none' });
-  const adetailerDenoise = createSlider(adetailerDetail, { label: 'Fix Strength', min: 0.1, max: 0.8, step: 0.05, value: 0.4 });
-  const adetailerModel = createSelect(adetailerDetail, { label: 'Detect', options: ['face_yolov8n.pt', 'hand_yolov8n.pt', 'person_yolov8n-seg.pt'], value: 'face_yolov8n.pt' });
-  extContent.appendChild(adetailerDetail);
-  adetailerEnabledCb.addEventListener('change', () => {
-    adetailerDetail.style.display = adetailerEnabledCb.checked ? '' : 'none';
-  });
-
-  // HiRes Fix
-  const hrEnabledCb = el('input', { type: 'checkbox', id: 'hires-enabled' });
-  extContent.appendChild(el('div', { class: 'checkbox-group', style: 'margin-bottom:4px' }, [
-    hrEnabledCb,
-    el('label', { for: 'hires-enabled', html: '<strong>HiRes Fix</strong> — generate small then upscale (better detail, 2x slower)' }),
-  ]));
-  const hrDetail = el('div', { style: 'padding-left:24px; display:none' });
-  const hrScale = createSlider(hrDetail, { label: 'Scale (2 = double the size)', min: 1.25, max: 4, step: 0.25, value: 2 });
-  const hrDenoise = createSlider(hrDetail, { label: 'Creativity on upscale pass (0.3 = add detail, keep composition)', min: 0.1, max: 0.8, step: 0.05, value: 0.3 });
-  const hrSteps = createSlider(hrDetail, { label: 'Extra steps for upscale pass', min: 0, max: 30, step: 1, value: 10 });
-  const hrUpscalerSelect = el('select');
-  hrDetail.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Upscaler' }), hrUpscalerSelect]));
-  extContent.appendChild(hrDetail);
-  hrEnabledCb.addEventListener('change', () => {
-    hrDetail.style.display = hrEnabledCb.checked ? '' : 'none';
-  });
-
-  const restoreFacesCb = el('input', { type: 'checkbox', id: 'restore-faces' });
-  extContent.appendChild(el('div', { class: 'checkbox-group', style: 'margin-top:8px' }, [
-    restoreFacesCb,
-    el('label', { for: 'restore-faces', html: '<strong>Restore Faces</strong> — GFPGAN face correction (older method, try ADetailer first)' }),
-  ]));
-
-  // ── Generate button + result ──────────────────────────────────────────
-  const forgeGenBtn = el('button', { class: 'btn btn-primary', text: 'Generate in Forge', style: 'font-size:1.05rem; padding:10px 28px' });
-  forgeCard.appendChild(forgeGenBtn);
-
-  const forgeProgress = el('div', { style: 'display:none; margin-top:10px; font-size:.85rem; color:var(--text-2)' });
-  forgeCard.appendChild(forgeProgress);
-
-  const forgeResult = el('div', { style: 'display:none; margin-top:12px' });
-  const forgeImg = el('img', { style: 'max-width:100%; border-radius:var(--r-md); background:#000' });
-  const seedDisplay = el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-top:6px; font-family:monospace' });
-  const forgeActions = el('div', { style: 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap' }, [
-    el('button', { class: 'btn', text: 'Send to Fun Videos →', async onclick() {
-      if (lastForgeImagePath) {
-        window._dropcat_forge_image = lastForgeImagePath;
-        document.querySelector('[data-tab="fun-videos"]')?.click();
-        toast('Image queued for Fun Videos', 'success');
+    try {
+      let data;
+      if (!sessionActive) {
+        data = await api('/api/prompts/generate', {
+          method: 'POST',
+          body: JSON.stringify({
+            concept: msg, image_path: refImagePath,
+            model: aiModelSel.value, session_id: sessionId,
+          }),
+        });
+        sessionActive = true;
+      } else {
+        data = await api('/api/prompts/refine', {
+          method: 'POST',
+          body: JSON.stringify({ feedback: msg, model: aiModelSel.value, session_id: sessionId }),
+        });
       }
-    }}),
-    el('button', { class: 'btn', text: 'Lock Seed 🔒', onclick() {
-      const s = forgeResult.dataset.seed;
-      if (s) document.getElementById('forge-seed').value = s;
-    }}),
-    el('button', { class: 'btn', text: 'img2img Iterate →', onclick() { switchToImg2Img(); } }),
-  ]);
-  forgeResult.appendChild(forgeImg);
-  forgeResult.appendChild(seedDisplay);
-  forgeResult.appendChild(forgeActions);
-  forgeCard.appendChild(forgeResult);
+      thinkEl.remove();
+      const reply = data.chat_reply || 'Prompts updated — check the fields on the left.';
+      addMsg('assistant', reply);
+      applyPrompts(data);
+      if (data.create_wildcard?.name) {
+        const wc = data.create_wildcard;
+        try {
+          await api('/api/prompts/wildcards/create', {
+            method: 'POST',
+            body: JSON.stringify({ name: wc.name, entries: wc.entries || [] }),
+          });
+          addMsg('assistant', `Wildcard __${wc.name}__ saved (${(wc.entries||[]).length} entries). Click \u201c__ Wildcards\u201d to use it.`);
+          wcLoaded = false;
+          loadWildcards();
+        } catch (wcErr) {
+          addMsg('assistant', `Couldn\u2019t save wildcard: ${wcErr.message}. Check that Wildcards directory is set in Settings.`);
+        }
+      }
+    } catch (e) {
+      thinkEl.remove();
+      addMsg('assistant', `Error: ${e.message}`);
+    }
+    sendBtn.disabled = false;
+    chatInput.focus();
+  }
 
-  let lastForgeImagePath = null;
+  // ════════════════════════════════════════════════════════════════════════════
+  // OUTPUT (full width)
+  // ════════════════════════════════════════════════════════════════════════════
+  const outputCard = el('div', { class: 'card', style: 'display:none' });
+  outer.appendChild(outputCard);
+
+  const resultImg = el('img', { style: 'max-width:100%; border-radius:var(--r-sm); display:block; cursor:pointer', title: 'Click for full size' });
+  resultImg.addEventListener('click', () => { if (resultImg.src) window.open(resultImg.src, '_blank'); });
+  outputCard.appendChild(resultImg);
+
+  const resultInfo = el('div', { style: 'font-size:.78rem; color:var(--text-2); margin-top:6px; font-family:monospace' });
+  outputCard.appendChild(resultInfo);
+
+  const actRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap; margin-top:8px' });
+  outputCard.appendChild(actRow);
+  actRow.appendChild(el('button', { class: 'btn btn-sm', text: 'Lock Seed', onclick() {
+    if (generatedImages[currentIdx]) { seedIn.value = generatedImages[currentIdx].seed; toast('Seed locked', 'success'); }
+  }}));
+  actRow.appendChild(el('button', { class: 'btn btn-sm', text: 'Variation (seed+1)', onclick() {
+    if (generatedImages[currentIdx]) { seedIn.value = generatedImages[currentIdx].seed + 1; genBtn.click(); }
+  }}));
+  actRow.appendChild(el('button', { class: 'btn btn-sm', text: 'img2img Iterate', onclick() {
+    const img = generatedImages[currentIdx]; if (!img) return;
+    i2iPathIn.value = img.path || '';
+    enhTabs.querySelectorAll('.enh-tab').forEach((t,j) => t.classList.toggle('active', j===2));
+    [paneHR, paneAD, paneI2I].forEach((p,j) => p.classList.toggle('active', j===2));
+    settingsCard.querySelector('button').click(); // open enhancements
+  }}));
+  actRow.appendChild(el('button', { class: 'btn btn-sm', text: '\u2192 Make Videos', onclick() {
+    const img = generatedImages[currentIdx]; if (!img?.path) return;
+    handoff('fun-videos', { type: 'image', path: img.path });
+    document.querySelector('[data-tab="fun-videos"]')?.click();
+    toast('Image sent to Make Videos', 'info');
+  }}));
+
+  const navRow = el('div', { style: 'display:none; justify-content:center; align-items:center; gap:10px; margin-top:8px' });
+  const navLabel = el('span', { style: 'font-size:.82rem; color:var(--text-2)' });
+  navRow.appendChild(el('button', { class: 'btn btn-sm', text: '\u25c4 Prev', onclick() { showImage(currentIdx - 1); } }));
+  navRow.appendChild(navLabel);
+  navRow.appendChild(el('button', { class: 'btn btn-sm', text: 'Next \u25ba', onclick() { showImage(currentIdx + 1); } }));
+  outputCard.appendChild(navRow);
+
+  // ── Gallery (full width) ──────────────────────────────────────────────────
+  const galleryCard = el('div', { class: 'card' });
+  outer.appendChild(galleryCard);
+  galleryCard.appendChild(el('h3', { style: 'margin-bottom:10px', text: 'Gallery' }));
+  const galleryGrid  = el('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:6px' });
+  const galleryEmpty = el('p', { style: 'font-size:.82rem; color:var(--text-3)', text: 'Generated images appear here.' });
+  galleryCard.appendChild(galleryEmpty);
+  galleryCard.appendChild(galleryGrid);
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // FUNCTIONS
+  // ════════════════════════════════════════════════════════════════════════════
+
+  function buildFullPrompt() {
+    const base = baseTA.value.trim();
+    const sfx  = suffixIn.value.trim();
+    return base + (sfx ? ', ' + sfx : '');
+  }
+
+  function buildFullPromptWithFC() {
+    const full = buildFullPrompt();
+    const cellValues = fcCells.map(ta => ta?.value?.trim() || '').filter(Boolean);
+    if (!fcEnabled || !cellValues.length) return full;
+    // Forge Couple: base prompt as background (first line), then each region newline-separated
+    return [full, ...cellValues].join('\n');
+  }
+
+  function updatePreview() {
+    if (!previewOpen) return;
+    const prompt = buildFullPromptWithFC();
+    previewNote.textContent = fcEnabled
+      ? `Forge Couple ON \u2014 ${fcRows}\u00d7${fcCols} grid, ${fcDirection}`
+      : 'Forge Couple OFF';
+    previewTA.value = prompt;
+  }
+
+  function applyPrompts(data) {
+    if (data.base_prompt) baseTA.value = data.base_prompt;
+    const cols = data.columns || [];
+    if (cols.length && fcEnabled && fcCells.length) {
+      // Fill FC grid cells, expanding/contracting to fit
+      fcCells.forEach((ta, i) => { if (ta) ta.value = cols[i] || ''; });
+    }
+    updatePreview();
+  }
+
+  function showImage(idx) {
+    if (idx < 0 || idx >= generatedImages.length) return;
+    currentIdx = idx;
+    const img = generatedImages[idx];
+    resultImg.src = img.src;
+    resultInfo.textContent = `Seed: ${img.seed}  \u2502  ${img.info}`;
+    outputCard.style.display = '';
+    navRow.style.display = generatedImages.length > 1 ? 'flex' : 'none';
+    navLabel.textContent = `${idx + 1} / ${generatedImages.length}`;
+    galleryGrid.querySelectorAll('.sd-thumb').forEach((t, i) => { t.style.outline = i === idx ? '2px solid var(--accent)' : 'none'; });
+  }
+
+  function addToGallery(entry) {
+    galleryEmpty.style.display = 'none';
+    galleryGrid.appendChild(el('img', {
+      class: 'sd-thumb',
+      src: entry.src,
+      style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:var(--r-sm); cursor:pointer',
+      title: `Seed: ${entry.seed}`,
+      onclick() { showImage(generatedImages.indexOf(entry)); },
+    }));
+  }
+
+  // ── Forge status ──────────────────────────────────────────────────────────
+  let _retryTimer = null;
+  async function checkForge() {
+    try {
+      forgeStatus = await api('/api/prompts/forge/status');
+      if (forgeStatus.alive) {
+        if (_retryTimer) { clearInterval(_retryTimer); _retryTimer = null; }
+        forgeDot.className = 'dot running';
+        forgeMsg.textContent = `Forge SD \u2014 ${forgeStatus.current_model || 'ready'}`;
+        genBtn.disabled = false;
+        modelSel.innerHTML = (forgeStatus.models || [])
+          .map(m => `<option value="${m.title||m.name}"${(m.title||m.name).includes(forgeStatus.current_model||'') ? ' selected' : ''}>${m.title||m.name}</option>`).join('');
+        const ds = forgeStatus.default_sampler || 'DPM++ 2M SDE';
+        samplerSel.innerHTML = (forgeStatus.samplers || ['DPM++ 2M SDE','Euler','DDIM'])
+          .map(s => `<option value="${s}"${s===ds?' selected':''}>${s}</option>`).join('');
+        const dsc = forgeStatus.default_scheduler || 'Karras';
+        schedSel.innerHTML = (forgeStatus.schedulers || ['Karras','Automatic'])
+          .map(s => `<option value="${s}"${s===dsc?' selected':''}>${s}</option>`).join('');
+        hrUpSel.innerHTML = (forgeStatus.upscalers || ['ESRGAN_4x','Latent','None'])
+          .map(u => `<option value="${u}">${u}</option>`).join('');
+      } else {
+        forgeDot.className = 'dot not_configured';
+        forgeMsg.textContent = 'Forge not running \u2014 start with --api flag';
+        genBtn.disabled = true;
+        if (!_retryTimer) _retryTimer = setInterval(checkForge, 10000);
+      }
+    } catch (_) {
+      forgeDot.className = 'dot error';
+      forgeMsg.textContent = 'Cannot reach Forge';
+      genBtn.disabled = true;
+      if (!_retryTimer) _retryTimer = setInterval(checkForge, 10000);
+    }
+  }
+
+  // ── Generate ──────────────────────────────────────────────────────────────
   let progressTimer = null;
+  genBtn.addEventListener('click', async () => {
+    if (!forgeStatus?.alive) { toast('Forge is not running', 'error'); return; }
+    const prompt = buildFullPromptWithFC();
+    if (!prompt.trim()) { toast('Enter a prompt', 'error'); return; }
 
-  forgeGenBtn.addEventListener('click', async () => {
-    const prompt = basePromptEl.textContent.trim();
-    if (!prompt) { toast('Generate prompts first', 'error'); return; }
-
-    forgeGenBtn.disabled = true;
-    forgeGenBtn.textContent = 'Generating...';
-    forgeProgress.style.display = '';
-    forgeProgress.textContent = 'Submitting to Forge...';
-    forgeResult.style.display = 'none';
-
-    // Poll Forge's /progress endpoint while generating
+    genBtn.disabled = true; genBtn.textContent = 'Generating...';
+    progressEl.style.display = ''; progressEl.textContent = 'Submitting...';
     progressTimer = setInterval(async () => {
-      try {
-        const p = await api('/api/prompts/forge/progress');
-        const pct = Math.round((p.progress || 0) * 100);
-        forgeProgress.textContent = pct > 0 ? `Generating... ${pct}%` : 'Generating...';
-      } catch (_) {}
+      try { const p = await api('/api/prompts/forge/progress'); const pct = Math.round((p.progress||0)*100); progressEl.textContent = pct > 0 ? `Generating... ${pct}%` : 'Generating...'; } catch (_) {}
     }, 1000);
 
     try {
       const data = await api('/api/prompts/forge/txt2img', {
         method: 'POST',
         body: JSON.stringify({
-          // Pass base prompt + columns separately — backend handles joining
-          prompt: prompt,
-          columns: [col1.value, col2.value, col3.value],
-          use_forge_couple: forgeCoupleEnabledCb.checked,
-          forge_couple_bg_weight: forgeCouplebgWeight.value,
-          // Core
-          negative_prompt: forgeNeg.value,
-          steps: stepsSlider.value,
-          cfg_scale: cfgSlider.value,
-          sampler: samplerSelectEl.value,
-          scheduler: schedulerSelectEl.value,
-          width: parseInt(widthSelect.value),
-          height: parseInt(heightSelect.value),
-          seed: parseInt(document.getElementById('forge-seed').value),
-          // Extensions
-          adetailer: adetailerEnabledCb.checked,
-          adetailer_model: adetailerModel.value,
-          adetailer_denoise: adetailerDenoise.value,
-          enable_hr: hrEnabledCb.checked,
-          hr_scale: hrScale.value,
-          hr_upscaler: hrUpscalerSelect.value || 'ESRGAN_4x',
-          hr_steps: hrSteps.value,
-          hr_denoise: hrDenoise.value,
-          restore_faces: restoreFacesCb.checked,
+          prompt:                 buildFullPrompt(),   // base+suffix only; backend joins FC columns
+          columns:                fcEnabled ? fcCells.map(ta => ta?.value || '') : [],
+          use_forge_couple:       fcEnabled,
+          forge_couple_direction: fcDirection,
+          forge_couple_bg_weight: parseFloat(fcBgSlider.value),
+          forge_couple_background: 'First Line',
+          negative_prompt:        negTA.value,
+          steps:                  stepsSlider.value,
+          cfg_scale:              cfgSlider.value,
+          sampler:                samplerSel.value,
+          scheduler:              schedSel.value,
+          width:                  parseInt(wIn.value),
+          height:                 parseInt(hIn.value),
+          seed:                   parseInt(seedIn.value),
+          n_iter:                 parseInt(batchCntIn.value),
+          batch_size:             parseInt(batchSizeIn.value),
+          enable_hr:              hrEnabled.checked,
+          hr_scale:               hrScale.value,
+          hr_upscaler:            hrUpSel.value || 'ESRGAN_4x',
+          hr_second_pass_steps:   hrSteps.value,
+          hr_denoising_strength:  hrDenoise.value,
+          adetailer:              adEnabled.checked,
+          adetailer_model:        adDetect.value,
+          adetailer_denoise:      adDenoise.value,
+          restore_faces:          rfEnabled.checked,
         }),
       });
-
       if (data.images?.length) {
-        forgeImg.src = `data:image/png;base64,${data.images[0]}`;
-        forgeResult.dataset.seed = data.seed;
-        seedDisplay.textContent = `Seed: ${data.seed}  |  ${samplerSelectEl.value}  |  CFG ${cfgSlider.value}  |  Steps ${stepsSlider.value}`;
-        lastForgeImagePath = data.saved_paths?.[0] || null;
-        forgeResult.style.display = '';
-        toast(`Image generated! Seed: ${data.seed}`, 'success');
+        const info = `${samplerSel.value} \u2502 CFG ${cfgSlider.value} \u2502 ${stepsSlider.value} steps`;
+        for (const b64 of data.images) {
+          const entry = { src: `data:image/png;base64,${b64}`, seed: data.seed||−1, prompt, path: data.saved_paths?.[0]||null, info };
+          generatedImages.push(entry); addToGallery(entry);
+        }
+        showImage(generatedImages.length - 1);
+        toast(`Done! Seed: ${data.seed}`, 'success');
       }
     } catch (e) { toast(e.message, 'error'); }
-
     clearInterval(progressTimer);
-    forgeProgress.style.display = 'none';
-    forgeGenBtn.disabled = false;
-    forgeGenBtn.textContent = 'Generate in Forge';
+    progressEl.style.display = 'none'; genBtn.disabled = false; genBtn.textContent = 'Generate Image';
   });
 
-  function switchToImg2Img() {
-    if (!lastForgeImagePath) return;
-    // img2img panel toggle (inline below result)
-    img2imgPanel.style.display = img2imgPanel.style.display === 'none' ? '' : 'none';
-    if (img2imgPanel.style.display !== 'none') {
-      img2imgPathEl.value = lastForgeImagePath;
-      img2imgPromptEl.value = basePromptEl.textContent + (col1.value ? '\nBREAK\n' + col1.value : '');
-    }
-  }
+  [baseTA, negTA].forEach(ta => ta.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); genBtn.click(); } }));
 
-  // ── img2img refinement (shown after generation) ───────────────────────
-  const img2imgPanel = el('div', { class: 'card', style: 'display:none; margin-top:10px; background:var(--surface-2)' });
-  forgeCard.appendChild(img2imgPanel);
-  img2imgPanel.appendChild(el('h3', { text: 'Refine with img2img' }));
-
-  const img2imgPathEl = el('input', { type: 'text', placeholder: 'Image path (auto-filled from last generation)' });
-  img2imgPanel.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Input Image Path' }), img2imgPathEl]));
-
-  const img2imgPromptEl = el('textarea', { rows: '2', placeholder: 'Prompt for refinement...' });
-  img2imgPanel.appendChild(el('div', { class: 'form-group' }, [el('label', { text: 'Prompt' }), img2imgPromptEl]));
-
-  const img2imgDenoise = createSlider(img2imgPanel, { label: 'Denoising Strength', min: 0.05, max: 1, step: 0.05, value: 0.5 });
-  const img2imgBtn = el('button', { class: 'btn btn-primary', text: 'Run img2img' });
-  img2imgPanel.appendChild(img2imgBtn);
-
-  img2imgBtn.addEventListener('click', async () => {
-    const inputPath = img2imgPathEl.value.trim();
-    if (!inputPath) { toast('Image path required', 'error'); return; }
-    img2imgBtn.disabled = true;
-    img2imgBtn.textContent = 'Processing...';
+  // ── img2img ───────────────────────────────────────────────────────────────
+  i2iBtn.addEventListener('click', async () => {
+    const path = i2iPathIn.value.trim(); if (!path) { toast('Image path required', 'error'); return; }
+    i2iBtn.disabled = true; i2iBtn.textContent = 'Processing...';
     try {
-      // Load image as base64
-      const imgRes = await fetch(`/output/${inputPath.split(/[\\/]/).pop()}`);
-      const blob = await imgRes.blob();
-      const b64 = await new Promise(resolve => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result.split(',')[1]);
-        r.readAsDataURL(blob);
-      });
-
-      const data = await api('/api/prompts/forge/img2img', {
-        method: 'POST',
-        body: JSON.stringify({
-          init_image: b64,
-          prompt: img2imgPromptEl.value,
-          negative_prompt: forgeNeg.value,
-          denoising_strength: img2imgDenoise.value,
-          steps: stepsSlider.value,
-          cfg_scale: cfgSlider.value,
-          sampler: samplerSelectEl.value,
-          scheduler: schedulerSelectEl.value,
-          width: parseInt(widthSelect.value),
-          height: parseInt(heightSelect.value),
-          seed: parseInt(document.getElementById('forge-seed').value),
-          adetailer: adetailerEnabledCb.checked,
-        }),
-      });
+      const res = await fetch(`/output/${path.split(/[\\/]/).pop()}`);
+      const blob = await res.blob();
+      const b64 = await new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result.split(',')[1]); r.readAsDataURL(blob); });
+      const data = await api('/api/prompts/forge/img2img', { method: 'POST', body: JSON.stringify({
+        init_image: b64, prompt: i2iPromptIn.value.trim() || buildFullPromptWithFC(),
+        negative_prompt: negTA.value, denoising_strength: i2iDenoise.value,
+        steps: stepsSlider.value, cfg_scale: cfgSlider.value,
+        sampler: samplerSel.value, scheduler: schedSel.value,
+        width: parseInt(wIn.value), height: parseInt(hIn.value), seed: parseInt(seedIn.value),
+        adetailer: adEnabled.checked, adetailer_model: adDetect.value,
+      })});
       if (data.images?.length) {
-        forgeImg.src = `data:image/png;base64,${data.images[0]}`;
-        lastForgeImagePath = data.saved_paths?.[0] || null;
-        forgeResult.style.display = '';
-        seedDisplay.textContent = `Seed: ${data.seed}  |  img2img denoise ${img2imgDenoise.value}`;
+        const entry = { src: `data:image/png;base64,${data.images[0]}`, seed: data.seed, prompt: i2iPromptIn.value, path: data.saved_paths?.[0]||null, info: `img2img \u2502 denoise ${i2iDenoise.value}` };
+        generatedImages.push(entry); addToGallery(entry); showImage(generatedImages.length - 1);
         toast(`img2img done! Seed: ${data.seed}`, 'success');
       }
     } catch (e) { toast(e.message, 'error'); }
-    img2imgBtn.disabled = false;
-    img2imgBtn.textContent = 'Run img2img';
+    i2iBtn.disabled = false; i2iBtn.textContent = 'Run img2img';
   });
 
-  // ── Chat Refinement ───────────────────────────────────────────────────
-  const chatCard = el('div', { class: 'card', style: 'display:none' });
-  layout.appendChild(chatCard);
-  chatCard.appendChild(el('h3', { text: 'Refine Prompts' }));
-
-  const chatMessages = el('div', { class: 'chat-messages' });
-  chatCard.appendChild(chatMessages);
-
-  const feedbackInput = el('textarea', { rows: '2', placeholder: 'Tell the AI how to improve the prompts...' });
-  chatCard.appendChild(feedbackInput);
-
-  const refineBtn = el('button', { class: 'btn', text: 'Refine', style: 'margin-top:8px' });
-  chatCard.appendChild(refineBtn);
-
-  // ── Event handlers ────────────────────────────────────────────────────
-
-  genBtn.addEventListener('click', async () => {
-    genBtn.disabled = true;
-    genBtn.textContent = 'Generating...';
+  // ── Defaults ──────────────────────────────────────────────────────────────
+  async function loadDefaults() {
     try {
-      const data = await api('/api/prompts/generate', {
-        method: 'POST',
-        body: JSON.stringify({
-          image_path: imagePath,
-          concept: conceptInput.value,
-          extra_instructions: extraInput.value,
-          model: modelSelect.value,
-          session_id: sessionId,
-        }),
-      });
-      displayPrompts(data);
-      outputCard.style.display = '';
-      chatCard.style.display = '';
-      if (forgeStatus?.alive) forgeCard.style.display = '';
-      chatHistory = [];
-      chatMessages.innerHTML = '';
-    } catch (e) { toast(e.message, 'error'); }
-    genBtn.disabled = false;
-    genBtn.textContent = 'Generate Prompts';
-  });
-
-  refineBtn.addEventListener('click', async () => {
-    const feedback = feedbackInput.value.trim();
-    if (!feedback) return;
-    refineBtn.disabled = true;
-
-    chatHistory.push({ role: 'user', text: feedback });
-    renderChat();
-    feedbackInput.value = '';
-
-    try {
-      const data = await api('/api/prompts/refine', {
-        method: 'POST',
-        body: JSON.stringify({ feedback, session_id: sessionId, model: modelSelect.value }),
-      });
-      displayPrompts(data);
-      chatHistory.push({ role: 'assistant', text: 'Prompts updated based on your feedback.' });
-      renderChat();
-    } catch (e) { toast(e.message, 'error'); }
-    refineBtn.disabled = false;
-  });
-
-  function displayPrompts(data) {
-    basePromptEl.textContent = data.base_prompt || '';
-    const cols = data.columns || ['', '', ''];
-    col1.value = cols[0] || '';
-    col2.value = cols[1] || '';
-    col3.value = cols[2] || '';
+      const cfg = await api('/api/config');
+      if (cfg.forge_default_width)   wIn.value = cfg.forge_default_width;
+      if (cfg.forge_default_height)  hIn.value = cfg.forge_default_height;
+      if (cfg.forge_default_steps)   stepsSlider.value = cfg.forge_default_steps;
+      if (cfg.forge_default_cfg != null) cfgSlider.value = cfg.forge_default_cfg;
+    } catch (_) {}
   }
 
-  function renderChat() {
-    chatMessages.innerHTML = '';
-    for (const msg of chatHistory) {
-      chatMessages.appendChild(el('div', { class: `chat-msg ${msg.role}`, text: msg.text }));
-    }
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
+  // Also pass direction+background to the API call
+  // (routes.py currently uses use_forge_couple + forge_couple_bg_weight;
+  //  we pass direction via forge_couple_direction — need routes.py to forward it)
 
-  function copyText(text) {
-    navigator.clipboard.writeText(text).then(
-      () => toast('Copied to clipboard', 'success'),
-      () => toast('Copy failed', 'error'),
-    );
-  }
-
-  async function checkForge() {
-    try {
-      forgeStatus = await api('/api/prompts/forge/status');
-      const dot = document.getElementById('forge-dot');
-      const msg = document.getElementById('forge-msg');
-
-      if (forgeStatus.alive) {
-        dot.className = 'dot running';
-        msg.textContent = `Forge running — ${forgeStatus.models?.length || 0} models  |  current: ${forgeStatus.current_model || '?'}`;
-
-        // Populate model dropdown
-        modelSelectEl.innerHTML = '';
-        for (const m of forgeStatus.models || []) {
-          const opt = el('option', { value: m.title || m.name, text: m.title || m.name });
-          if ((m.title || m.name).includes(forgeStatus.current_model || '')) opt.selected = true;
-          modelSelectEl.appendChild(opt);
-        }
-
-        // Populate sampler dropdown
-        samplerSelectEl.innerHTML = '';
-        for (const s of forgeStatus.samplers || ['DPM++ 2M SDE', 'Euler', 'DDIM']) {
-          const opt = el('option', { value: s, text: s });
-          if (s === 'DPM++ 2M SDE') opt.selected = true;
-          samplerSelectEl.appendChild(opt);
-        }
-
-        // Populate scheduler dropdown
-        schedulerSelectEl.innerHTML = '';
-        for (const s of forgeStatus.schedulers || ['Karras', 'Automatic']) {
-          const opt = el('option', { value: s, text: s });
-          if (s === 'Karras') opt.selected = true;
-          schedulerSelectEl.appendChild(opt);
-        }
-
-        // Populate HiRes upscaler dropdown
-        hrUpscalerSelect.innerHTML = '';
-        for (const u of forgeStatus.upscalers || ['ESRGAN_4x', 'Latent', 'None']) {
-          const opt = el('option', { value: u, text: u });
-          if (u === 'ESRGAN_4x') opt.selected = true;
-          hrUpscalerSelect.appendChild(opt);
-        }
-
-      } else {
-        dot.className = 'dot not_configured';
-        msg.textContent = 'Forge not running — start it with --api flag for image generation';
-      }
-    } catch (e) {
-      forgeStatus = { alive: false };
-    }
-  }
-
-  // Switch model when selected
-  modelSelectEl.addEventListener('change', async () => {
-    try {
-      await api('/api/prompts/forge/set-model', {
-        method: 'POST',
-        body: JSON.stringify({ model: modelSelectEl.value }),
-      });
-      toast(`Loading model: ${modelSelectEl.value}`, 'info');
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  loadDefaults();
+  checkForge();
 }

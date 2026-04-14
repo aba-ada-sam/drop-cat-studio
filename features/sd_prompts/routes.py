@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from core import config as cfg
-from core.wildcards import discover_filesystem_wildcards, invalidate_cache
+from core.wildcards import discover_filesystem_wildcards, expand as wc_expand, invalidate_cache
 from features.sd_prompts.prompt_engine import AVAILABLE_MODELS, generate_prompts, refine_prompts
 from features.sd_prompts.wildcard_manager import (
     _read_file_lines,
@@ -26,6 +26,14 @@ from features.sd_prompts.wildcard_manager import (
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _store_conv_state(session_id: str, state: dict):
+    """Save conversation state, evicting the oldest entry when at capacity."""
+    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
+        del _conv_states[next(iter(_conv_states))]
+    _conv_states[session_id] = state
+
 
 # Server-side conversation state keyed by session (capped to prevent memory leak)
 _MAX_CONV_STATES = 100
@@ -94,15 +102,13 @@ async def gen_prompts(request: Request):
         model=model,
     )
 
-    # Store conversation state server-side (evict oldest if at capacity)
-    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
-        oldest = next(iter(_conv_states))
-        del _conv_states[oldest]
-    _conv_states[session_id] = conv_state
+    _store_conv_state(session_id, conv_state)
 
     return {
         "base_prompt": parsed.get("base_prompt", ""),
         "columns": parsed.get("columns", ["", "", ""]),
+        "chat_reply": parsed.get("chat_reply", ""),
+        "create_wildcard": parsed.get("create_wildcard"),
         "raw": parsed.get("raw", ""),
         "session_id": session_id,
     }
@@ -124,14 +130,13 @@ async def refine(request: Request):
         raise HTTPException(400, "Feedback required")
 
     parsed, new_state = refine_prompts(llm_router, conv_state, feedback, model)
-    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
-        oldest = next(iter(_conv_states))
-        del _conv_states[oldest]
-    _conv_states[session_id] = new_state
+    _store_conv_state(session_id, new_state)
 
     return {
         "base_prompt": parsed.get("base_prompt", ""),
         "columns": parsed.get("columns", ["", "", ""]),
+        "chat_reply": parsed.get("chat_reply", ""),
+        "create_wildcard": parsed.get("create_wildcard"),
         "raw": parsed.get("raw", ""),
         "session_id": session_id,
     }
@@ -148,14 +153,53 @@ async def list_models():
 
 @router.get("/wildcards")
 async def list_wildcard_files():
+    from core.wildcards import INLINE_WILDCARDS
+    wc_dir = _get_wildcards_dir()
+    files = []
+
+    # Inline wildcards (built-in, no file path)
+    for token, values in sorted(INLINE_WILDCARDS.items()):
+        files.append({"token": token, "count": len(values), "samples": values[:5],
+                      "path": None, "source": "inline"})
+
+    # Filesystem wildcards (user's directory)
+    if wc_dir:
+        root = Path(wc_dir)
+        if root.exists():
+            for txt_file in sorted(root.rglob("*.txt")):
+                try:
+                    rel = txt_file.relative_to(root)
+                    stem = str(rel.with_suffix("")).replace(os.sep, "/").replace("/", "_")
+                    token = f"__{stem}__"
+                    lines = [
+                        ln.strip()
+                        for ln in txt_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if ln.strip() and not ln.strip().startswith("#")
+                    ]
+                    files.append({"token": token, "count": len(lines), "samples": lines[:5],
+                                  "path": str(txt_file), "source": "filesystem"})
+                except Exception:
+                    pass
+
+    return {"files": files, "directory": wc_dir or ""}
+
+
+@router.post("/wildcards/create")
+async def create_wildcard(request: Request):
+    """Save a new wildcard .txt file to the configured wildcards directory."""
+    body = await request.json()
+    name = body.get("name", "").strip().lower().replace(" ", "_").strip("_")
+    entries = [e.strip() for e in body.get("entries", []) if str(e).strip()]
+    if not name:
+        raise HTTPException(400, "Wildcard name required")
     wc_dir = _get_wildcards_dir()
     if not wc_dir:
-        return {"files": [], "error": "Wildcards directory not configured"}
-    wildcards = discover_filesystem_wildcards(wc_dir)
-    files = []
-    for token, values in sorted(wildcards.items()):
-        files.append({"token": token, "count": len(values), "samples": values[:5]})
-    return {"files": files, "directory": wc_dir}
+        raise HTTPException(400, "Wildcards directory not configured in Settings")
+    path = Path(wc_dir) / f"{name}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_entries(str(path), entries)
+    invalidate_cache()
+    return {"ok": True, "token": f"__{name}__", "path": str(path), "count": len(entries)}
 
 
 @router.post("/prune")
@@ -305,6 +349,7 @@ async def forge_status():
             "warning": "Forge is not running. Start Forge with the --api flag for SD image generation.",
         }
 
+    from core.config import get as cfg_get
     return {
         "alive": True,
         "url": forge_url,
@@ -315,7 +360,9 @@ async def forge_status():
         ],
         "samplers": get_samplers(),
         "schedulers": get_schedulers(),
-        "loras": [{"name": l.get("name", ""), "alias": l.get("alias", "")} for l in get_loras()],
+        "default_sampler": cfg_get("forge_default_sampler"),
+        "default_scheduler": cfg_get("forge_default_scheduler"),
+        "loras": [{"name": lora.get("name", ""), "alias": lora.get("alias", "")} for lora in get_loras()],
         "upscalers": get_upscalers(),
     }
 
@@ -372,6 +419,11 @@ async def forge_txt2img(request: Request):
     if not prompt:
         raise HTTPException(400, "Prompt required")
 
+    # Expand __wildcard__ tokens before sending to Forge
+    wc_dir = _get_wildcards_dir()
+    prompt = wc_expand(prompt, wc_dir)
+    negative_prompt = wc_expand(body.get("negative_prompt", ""), wc_dir)
+
     # Build extension args
     adetailer_args = build_adetailer_args(
         enabled=body.get("adetailer", False),
@@ -381,12 +433,14 @@ async def forge_txt2img(request: Request):
 
     forge_couple_args = build_forge_couple_args(
         enabled=use_forge_couple,
+        direction=body.get("forge_couple_direction", "Horizontal"),
+        background=body.get("forge_couple_background", "First Line"),
         background_weight=float(body.get("forge_couple_bg_weight", 0.5)),
     ) if use_forge_couple else None
 
     result = txt2img(
         prompt=prompt,
-        negative_prompt=body.get("negative_prompt", ""),
+        negative_prompt=negative_prompt,
         width=int(body.get("width", 1440)),
         height=int(body.get("height", 810)),
         steps=int(body.get("steps", 25)),

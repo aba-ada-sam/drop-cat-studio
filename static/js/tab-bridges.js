@@ -4,6 +4,7 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js';
 import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el, formatDuration } from './components.js';
+import { handoff } from './handoff.js';
 
 let items = [];   // {path, name, kind, duration, analysis}
 let activeMode = 'cinematic';
@@ -264,6 +265,12 @@ export function init(panel) {
   // ── Main area ─────────────────────────────────────────────────────────
   const progress = createProgressCard(mainArea);
   const player   = createVideoPlayer(mainArea);
+  let lastOutputPath = null;
+
+  // "Send to Post Processing" -- shown after generation completes
+  const sendCard = el('div', { class: 'card', style: 'display:none; text-align:center; padding:14px 20px' }, [
+  ]);
+  mainArea.appendChild(sendCard);
 
   const placeholder = el('div', { class: 'card', style: 'text-align:center; padding:60px 20px; color:var(--text-3)' }, [
     el('div', { style: 'font-size:5rem; margin-bottom:16px', text: '🎞️' }),
@@ -304,7 +311,9 @@ export function init(panel) {
           progress.hide();
           genBtn.disabled = false;
           if (job.output) {
+            lastOutputPath = job.output;
             player.show(outputPathToUrl(job.output));
+            sendCard.style.display = '';
             toast('Bridges generated!', 'success');
           }
         },
@@ -313,7 +322,7 @@ export function init(panel) {
     } catch (e) { progress.hide(); genBtn.disabled = false; toast(e.message, 'error'); }
   });
 
-  player.onStartOver(() => { player.hide(); items = []; renderItems(); });
+  player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; lastOutputPath = null; items = []; renderItems(); });
 }
 
 export function receiveHandoff(_data) {

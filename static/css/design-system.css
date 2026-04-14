@@ -137,18 +137,91 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   to   { opacity: 1; transform: none; }
 }
 
-.splash-logo {
+/* Wrapper animates and casts glow — image inside is static */
+.splash-logo-wrap {
+  position: relative;
   width: 300px; height: 300px;
   border-radius: 40px;
+  margin-bottom: 24px;
   box-shadow:
     0 0 60px  rgba(196,30,58,.45),
     0 0 140px rgba(212,160,23,.22),
     0 30px 80px rgba(0,0,0,.6);
-  margin-bottom: 24px;
   animation: cat-entrance .9s cubic-bezier(.22,1.5,.36,1) both;
   transform-origin: center bottom;
   will-change: transform;
 }
+
+.splash-logo {
+  width: 300px; height: 300px;
+  border-radius: 40px;
+  display: block;
+}
+
+/* Hat fill progress bar — covers the dark hat cylinder interior */
+/* Coordinates from 512px source: x=193-285, y=96-183 → 300px: left=113,top=56,w=54,h=51 */
+.hat-fill-track {
+  position: absolute;
+  top: 56px; left: 113px;
+  width: 54px; height: 51px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.hat-fill-bar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 0%;
+  background: linear-gradient(to top, #c41e3a, #e83258);
+  mix-blend-mode: screen;
+  transition: height 0.5s cubic-bezier(.22,1,.36,1);
+}
+
+/* Eye blink overlays — golden fur color sweeps over each eye */
+/* Eye centers (300px): left=(97,163), right=(145,163), r≈17px */
+.eye-lid {
+  position: absolute;
+  border-radius: 50%;
+  background: #c08820;
+  pointer-events: none;
+  transform: scaleY(0);
+  transform-origin: top center;
+}
+.eye-left  { width: 34px; height: 34px; left:  80px; top: 146px; }
+.eye-right { width: 34px; height: 34px; left: 128px; top: 146px; }
+
+@keyframes cat-blink {
+  0%       { transform: scaleY(0); }
+  30%, 65% { transform: scaleY(1); }
+  100%     { transform: scaleY(0); }
+}
+.eye-lid.blinking { animation: cat-blink 0.55s ease-in-out both; }
+
+/* Cheshire grin — white teeth appear below the nose */
+.cheshire-smile {
+  position: absolute;
+  top: 183px;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: center top;
+  width: 78px; height: 20px;
+  background: #f0e8e0;
+  clip-path: polygon(
+    0% 0%, 100% 0%,
+    100% 40%, 90% 100%, 80% 40%,
+    70% 100%, 60% 40%,
+    50% 100%, 40% 40%,
+    30% 100%, 20% 40%,
+    10% 100%, 0% 40%
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+@keyframes cheshire-in {
+  0%   { transform: translateX(-50%) scaleX(0);   opacity: 0; }
+  60%  { transform: translateX(-50%) scaleX(1.1); opacity: 1; }
+  100% { transform: translateX(-50%) scaleX(1);   opacity: 0.92; }
+}
+.cheshire-smile.smiling { animation: cheshire-in 0.35s ease-out forwards; }
 
 @keyframes logo-pulse {
   0%,100% {
@@ -174,11 +247,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   100% { transform: scale(1)    rotate(0deg)   translateY(0);    }
 }
 
-.splash-logo.logo-pulsing {
+.splash-logo-wrap.logo-pulsing {
   animation: logo-pulse 3s ease-in-out infinite;
-}
-.splash-logo.hat-tip {
-  animation: hat-tip 1.6s cubic-bezier(.34,1.3,.64,1) forwards;
 }
 
 /* Title + subtitle animate in after the cat */
@@ -302,21 +372,21 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .header-title-block {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 0;
 }
 
 .header-andrews-svg {
-  width: 200px;
-  height: 28px;
+  width: 260px;
+  height: 44px;
   display: block;
-  margin-bottom: -4px;   /* tucks under the arch nicely */
+  margin-bottom: -6px;
   margin-left: 2px;
 }
 
 .header-studio-name {
   font-family: 'Impact', 'Arial Black', 'Franklin Gothic Heavy', sans-serif;
-  font-size: 1.55rem;
+  font-size: 1.2rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: .06em;
@@ -430,6 +500,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .service-header .dot { width: 9px; height: 9px; }
 .service-message { color: var(--text-2); font-size: .8rem; margin-bottom: 6px; }
 .service-hint { font-size: .73rem; color: var(--text-3); margin-bottom: 10px; line-height: 1.4; }
+.svc-btn-row { display: flex; gap: 6px; }
+.svc-btn-row .btn { font-size: .75rem; padding: 4px 12px; }
 #system-info-card { margin: 0 18px 18px; }
 #system-info-card h3 { margin-bottom: 10px; }
 #system-info { font-size: .8rem; color: var(--text-2); }
@@ -463,6 +535,20 @@ select option { background: var(--surface-2); }
 .validation-msg.ok  { color: var(--green); }
 .validation-msg.err { color: var(--red); }
 .hint-text { font-size: .82rem; color: var(--text-3); font-weight: 400; }
+.masked-key { -webkit-text-security: disc; -moz-text-security: disc; text-security: disc; }
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--text-3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
 
 /* ── Modals ───────────────────────────────────────────────────────────────── */
 
@@ -615,6 +701,104 @@ select option { background: var(--surface-2); }
 #tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+
+/* ── SD Studio Layout ────────────────────────────────────────────────────── */
+
+/* Two-column: prompts (flex:1) + settings+chat (fixed) */
+.sd-top-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 14px;
+  align-items: start;
+}
+/* Two-column: output (flex:1) + AI panel (fixed) */
+.sd-out-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 14px;
+  align-items: start;
+}
+/* Three-column for Forge Couple L/C/R */
+.sd-fc-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+/* Forge Couple ON/OFF pill */
+.fc-pill {
+  padding: 5px 18px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: .82rem;
+  cursor: pointer;
+  border: 2px solid;
+  transition: all .18s;
+  letter-spacing: .04em;
+}
+.fc-pill.on  { background: var(--accent); color: #000; border-color: var(--accent); }
+.fc-pill.off { background: transparent;   color: var(--text-3); border-color: var(--border-2); }
+
+/* Generate button */
+.btn-generate {
+  flex: 1;
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 14px 0;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* Collapsible AI Workshop inline */
+.ai-workshop {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 10px;
+  display: none;
+}
+.ai-workshop.open { display: block; }
+
+/* Prompt preview collapsible */
+.prompt-preview-wrap { display: none; }
+.prompt-preview-wrap.open { display: block; }
+
+/* Two-column settings rows */
+.settings-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Enhancements tabs */
+.enh-tabs  { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.enh-tab   { padding: 6px 16px; background: transparent; border: none; color: var(--text-3); cursor: pointer; font-size: .88rem; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.enh-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.enh-pane  { display: none; }
+.enh-pane.active { display: block; }
+
+/* Wildcard chips strip */
+.wc-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.wc-chip {
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: .72rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all .15s;
+}
+.wc-chip:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+@media (max-width: 1000px) {
+  .sd-top-grid, .sd-out-grid { grid-template-columns: 1fr; }
+}
 
 /* ── Drop Zone ────────────────────────────────────────────────────────────── */
 
@@ -921,19 +1105,96 @@ textarea:focus { border-color: var(--accent); }
 
 /* ── Chat messages ────────────────────────────────────────────────────────── */
 
-.chat-messages { display: flex; flex-direction: column; gap: 7px; margin: 10px 0; max-height: 280px; overflow-y: auto; }
-.chat-msg { padding: 9px 12px; border-radius: var(--r-md); font-size: .8rem; max-width: 85%; }
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  flex: 1;
+  min-height: 200px;
+}
+.chat-msg {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-size: .84rem;
+  line-height: 1.55;
+  max-width: 88%;
+  word-break: break-word;
+}
 .chat-msg.user {
-  background: var(--accent-bg);
+  background: linear-gradient(135deg, rgba(212,160,23,.18) 0%, rgba(212,160,23,.08) 100%);
   border: 1px solid var(--accent-border);
   align-self: flex-end;
   color: var(--text);
+  border-bottom-right-radius: 4px;
 }
 .chat-msg.assistant {
   background: var(--surface-2);
   border: 1px solid var(--border);
   align-self: flex-start;
   color: var(--text-2);
+  border-bottom-left-radius: 4px;
+  white-space: pre-wrap;
+}
+.chat-msg.thinking {
+  opacity: .6;
+  font-style: italic;
+}
+@keyframes thinking-dots {
+  0%,100% { content: '.'; }
+  33%      { content: '..'; }
+  66%      { content: '...'; }
+}
+.chat-msg.thinking::after {
+  content: '.';
+  animation: thinking-dots 1.2s infinite;
+}
+
+/* Chat input area */
+.chat-input-area {
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+.chat-input-area textarea {
+  flex: 1;
+  resize: none;
+  font-size: .88rem;
+  min-height: 64px;
+  max-height: 140px;
+}
+.chat-send-btn {
+  flex-shrink: 0;
+  align-self: flex-end;
+  padding: 10px 18px;
+  font-size: .9rem;
+  font-weight: 600;
+}
+
+/* Forge Couple grid */
+.fc-grid-wrap {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.fc-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fc-cell label {
+  font-size: .72rem;
+  color: var(--text-3);
+  font-weight: 600;
+  text-align: center;
+}
+.fc-cell textarea {
+  resize: vertical;
+  font-size: .8rem;
+  min-height: 60px;
 }
 
 /* ── Tab icons ────────────────────────────────────────────────────────────── */

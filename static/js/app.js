@@ -5,11 +5,10 @@
 
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js';
 import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js';
-import { init as initSdPrompts } from './tab-sd-prompts.js';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js';
 import { init as initImage2Video } from './panel-image2video.js';
 import { init as initVideoTools } from './panel-video-tools.js';
 import { init as initWildcards } from './panel-wildcards.js';
-import { init as initPostProcessing } from './tab-post-processing.js';
 import { consumeHandoff } from './handoff.js';
 
 // ── Tab module initializers ─────────────────────────────────────────────────
@@ -20,11 +19,11 @@ const TAB_INIT = {
   'image2video':      initImage2Video,
   'video-tools':      initVideoTools,
   'wildcards':        initWildcards,
-  'post-processing':  initPostProcessing,
 };
 const TAB_HANDOFF = {
-  'fun-videos': funHandoff,
-  'bridges': bridgesHandoff,
+  'fun-videos':      funHandoff,
+  'bridges':         bridgesHandoff,
+  'sd-prompts':      sdPromptsHandoff,
 };
 const _tabInitialized = new Set();
 
@@ -67,14 +66,6 @@ const SVC_SPLASH_TEXT = {
     error:          'ACE-Step error',
     unknown:        'Checking ACE-Step...',
   },
-  void: {
-    running:        'VOID inpainting ready',
-    starting:       'VOID loading model (~10 GB first download)...',
-    not_configured: 'VOID not configured — will auto-download on first use',
-    not_running:    'VOID not running — start in Services tab',
-    error:          'VOID error',
-    unknown:        'Checking VOID...',
-  },
 };
 
 // GUI-02: safe localStorage wrapper — SecurityError in private/sandboxed contexts
@@ -110,32 +101,48 @@ async function runSplash() {
     }
   }
 
-  // "Load anyway" button — appears after 8s
+  // "Load anyway" button — appears after 5s
   const loadAnywayDiv = document.getElementById('splash-load-anyway');
   const loadAnywayBtn = document.getElementById('btn-load-anyway');
   let pollInterval = null;
   let settled = false;
 
+  // Hat fill: one segment per service check (6 total)
+  const _hatAdvanced = new Set();
+  const HAT_TOTAL = 6;
+  function advanceHatOnce(key) {
+    if (_hatAdvanced.has(key)) return;
+    _hatAdvanced.add(key);
+    const bar = document.getElementById('hat-fill-bar');
+    if (bar) bar.style.height = Math.round(_hatAdvanced.size / HAT_TOTAL * 100) + '%';
+  }
+
   // Track when cat entrance animation completes so doExit knows whether to wait
   const _splashT0 = Date.now();
-  const ENTRANCE_MS = 950; // matches cat-entrance duration in CSS
+  const ENTRANCE_MS = 900; // matches cat-entrance .9s in CSS
 
   function doExit() {
     if (settled) return;
     settled = true;
     if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-    const logo = document.querySelector('.splash-logo');
-    if (!logo) { exitSplash(); return; }
 
-    // How long until the entrance animation finishes (may already be done)
+    // Ensure hat is 100% filled before the exit sequence
+    const bar = document.getElementById('hat-fill-bar');
+    if (bar) bar.style.height = '100%';
+
+    if (!document.querySelector('.splash-logo-wrap')) { exitSplash(); return; }
+
     const remaining = Math.max(0, ENTRANCE_MS - (Date.now() - _splashT0));
 
-    // GUI-03: go directly to hat-tip — the logo-pulsing class (3s loop) was
-    // removed after 350ms causing a jarring cut before a single cycle finished.
+    // Wait for entrance to finish, then: blink → smile → fade
     setTimeout(() => {
-      logo.classList.add('hat-tip');
-      setTimeout(exitSplash, 1700);
-    }, remaining);
+      document.getElementById('eye-left')?.classList.add('blinking');
+      document.getElementById('eye-right')?.classList.add('blinking');
+      setTimeout(() => {
+        document.getElementById('cheshire-smile')?.classList.add('smiling');
+        setTimeout(exitSplash, 750);
+      }, 600);
+    }, remaining + 200);
   }
 
   if (loadAnywayBtn) {
@@ -143,7 +150,10 @@ async function runSplash() {
   }
   const loadAnywayTimer = setTimeout(() => {
     if (!settled && loadAnywayDiv) loadAnywayDiv.classList.remove('hidden');
-  }, 8000);
+  }, 5000);
+
+  // Hard failsafe: exit after 12s no matter what
+  setTimeout(() => { if (!settled) doExit(); }, 12000);
 
   try {
     // Mark all as loading
@@ -158,12 +168,14 @@ async function runSplash() {
     setCheck('chk-server', 'loading', 'Connecting...');
     const sys = await fetch('/api/system').then(r => r.json());
     setCheck('chk-server', 'ok', 'Server running');
+    advanceHatOnce('server');
 
     // 2. ffmpeg
     setCheck('chk-ffmpeg',
       sys.ffmpeg ? 'ok' : 'warn',
       sys.ffmpeg ? 'ffmpeg ready' : 'ffmpeg not found — install and add to PATH'
     );
+    advanceHatOnce('ffmpeg');
 
     // 3. Ollama
     const ol = sys.ollama || {};
@@ -173,6 +185,7 @@ async function runSplash() {
     } else {
       setCheck('chk-ollama', 'err', 'Ollama not running — start Ollama first');
     }
+    advanceHatOnce('ollama');
 
     // 4-6. Services — poll until settled
     function updateServiceChecks(svcs) {
@@ -187,6 +200,8 @@ async function runSplash() {
         const texts = SVC_SPLASH_TEXT[name] || {};
         const text  = texts[state] || info.message || state;
         setCheck(id, svcStateToCheck(state), text);
+        // Advance hat segment when this service is no longer in a loading state
+        if (!SPLASH_LOADING_STATES.has(state)) advanceHatOnce(name);
       }
     }
 
@@ -235,7 +250,7 @@ async function runSplash() {
 // ── State ────────────────────────────────────────────────────────────────────
 
 const state = {
-  activeTab: 'sd-prompts',
+  activeTab: 'sd-prompts', // default tab (SD Studio = combined prompts + image gen)
   logOpen: true,
   logSeq: 0,
   config: {},
@@ -309,11 +324,6 @@ const SERVICE_MESSAGES = {
   wangp: {
     not_configured: 'Not configured — open Settings and set the WanGP folder path',
     ready:          'Configured — worker will start on first use',
-  },
-  void: {
-    not_configured: 'Will auto-download model from HuggingFace on first use (netflix/void-model, ~10 GB)',
-    not_running:    'Not running — click Start Worker to launch',
-    starting:       'Loading VOID model (may download ~10 GB on first run)...',
   },
 };
 
@@ -436,7 +446,6 @@ async function saveSettings() {
     const fields = [
       'wan2gp_root', 'acestep_root', 'sd_wildcards_dir',
       'ollama_host', 'ollama_fast_model', 'ollama_power_model',
-      'void_model_dir',
     ];
     const body = {};
     for (const key of fields) {
@@ -499,15 +508,15 @@ async function validatePath(type) {
 
 // ── Service start buttons ────────────────────────────────────────────────────
 
-async function startService(name) {
-  toast(`Starting ${name}...`, 'info');
-  const data = await api(`/api/services/start/${name}`, { method: 'POST' });
+async function svcAction(action, name) {
+  toast(`${action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting'} ${name}...`, 'info');
+  const data = await api(`/api/services/${action}/${name}`, { method: 'POST' });
   if (data.ok) {
-    toast(`${name} started`, 'success');
+    toast(data.message || `${name} ${action} initiated`, 'success');
   } else {
-    toast(data.error || `Failed to start ${name}`, 'error');
+    toast(data.error || `Failed to ${action} ${name}`, 'error');
   }
-  pollServices();
+  setTimeout(pollServices, 1000);
 }
 
 // ── Toast ────────────────────────────────────────────────────────────────────
@@ -611,10 +620,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
-  // Service start buttons
-  document.getElementById('btn-start-wangp')?.addEventListener('click', () => startService('wangp'));
-  document.getElementById('btn-start-acestep')?.addEventListener('click', () => startService('acestep'));
-  document.getElementById('btn-start-void')?.addEventListener('click', () => startService('void'));
+  // Service start/stop/restart buttons
+  document.querySelectorAll('.svc-start').forEach(btn =>
+    btn.addEventListener('click', () => svcAction('start', btn.dataset.svc)));
+  document.querySelectorAll('.svc-stop').forEach(btn =>
+    btn.addEventListener('click', () => svcAction('stop', btn.dataset.svc)));
+  document.querySelectorAll('.svc-restart').forEach(btn =>
+    btn.addEventListener('click', () => svcAction('restart', btn.dataset.svc)));
 
   // Initialize default tab
   switchTab('sd-prompts');

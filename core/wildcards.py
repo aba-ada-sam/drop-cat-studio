@@ -131,6 +131,8 @@ def get_tokens(fs_root: str = "") -> list[dict]:
 
 def expand(text: str, fs_root: str = "") -> str:
     """Expand all __wildcard__ tokens in text with random selections."""
+    if "__" not in text:
+        return text
     all_wc = get_all(fs_root)
 
     def _replace(match):
