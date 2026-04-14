@@ -147,6 +147,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """Prevent browsers from caching JS/CSS so stale files never break the app."""
+    response = await call_next(request)
+    path = str(request.url.path)
+    if path.startswith("/static/js/") or path.startswith("/static/css/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 # Mount static files and media directories (before routes for correct priority)
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

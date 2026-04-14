@@ -158,6 +158,24 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   display: block;
 }
 
+/* Andrew's ribbon overlay — covers the baked-in PNG text with a bigger version */
+.splash-andrews-overlay {
+  position: absolute;
+  top: 21px; left: 61px;
+  width: 180px; height: 26px;
+  background: #7e2438;
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  font-style: italic;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: #f5e2c8;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.6);
+}
+
 /* Hat fill progress bar — covers the dark hat cylinder interior */
 /* Coordinates from 512px source: x=193-285, y=96-183 → 300px: left=113,top=56,w=54,h=51 */
 .hat-fill-track {
