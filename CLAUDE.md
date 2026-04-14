@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 6 separate tools (previously independent apps on different ports) into one FastAPI + vanilla JS web app. Single server on port 7860, no build step.
+**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 5 separate tools (previously independent apps on different ports) into one FastAPI + vanilla JS web app. Single server on port 7860, no build step.
 
 **Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860
 
@@ -17,14 +17,13 @@ There are no tests, linting, or CI/CD configured. The app is tested manually thr
 ```
 app.py                  — FastAPI entry, lifespan, global routes, feature router registration
 core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session)
-services/               — External service lifecycle (WanGP, ACE-Step, Forge, VOID)
+services/               — External service lifecycle (WanGP, ACE-Step, Forge, Ollama)
 features/               — Feature modules, each with routes.py + domain logic
   fun_videos/           — Photo → AI video + music (WanGP + ACE-Step)
   video_bridges/        — AI transition clips between videos (WanGP, OpenCV fallback)
-  sd_prompts/           — SD prompt generation + full Forge integration
+  sd_prompts/           — SD prompt generation + Forge integration + AI wildcard chat
   image2video/          — Ken Burns slideshow (pure ffmpeg, no AI)
   video_tools/          — Batch transforms + music mixer
-  post_processing/      — Netflix VOID inpainting
 static/                 — Vanilla JS frontend (ES modules, no framework, no build)
 ```
 
@@ -89,9 +88,9 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 | WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
 | ACE-Step | 8019 | Music generation | Set path in Settings → auto-starts |
 | Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
-| VOID | internal | Netflix inpainting | Auto-downloads model on first use (~10 GB) |
+| Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
 
-Forge is at `C:\forge`. The app detects it but cannot start it (Forge manages its own Python env). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging.
+Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging.
 
 ---
 
