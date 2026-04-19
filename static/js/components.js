@@ -262,6 +262,28 @@ export function createSlider(container, opts = {}) {
   };
 }
 
+// ── Number Input ────────────────────────────────────────────────────────────
+
+export function createNumberInput(container, opts = {}) {
+  const { label, min = 0, max = 9999, step = 1, value = '', onChange } = opts;
+  const id = `num-${Math.random().toString(36).slice(2, 8)}`;
+
+  const group = el('div', { class: 'form-group' }, [
+    el('label', { for: id, text: label || '' }),
+    el('input', { type: 'number', id, min: String(min), max: String(max), step: String(step), value: String(value), style: 'width:100%' }),
+  ]);
+  container.appendChild(group);
+
+  const input = group.querySelector('input');
+  if (onChange) input.addEventListener('change', () => onChange(parseInt(input.value)));
+
+  return {
+    el: group,
+    get value() { return input.value; },
+    set value(v) { input.value = v; },
+  };
+}
+
 // ── Select Input ─────────────────────────────────────────────────────────────
 
 export function createSelect(container, opts = {}) {

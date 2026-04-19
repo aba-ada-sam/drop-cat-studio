@@ -11,7 +11,12 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from core import config as cfg
 from core.wildcards import discover_filesystem_wildcards, expand as wc_expand, invalidate_cache
-from features.sd_prompts.prompt_engine import AVAILABLE_MODELS, generate_prompts, refine_prompts
+from features.sd_prompts.prompt_engine import (
+    AVAILABLE_MODELS,
+    enhance_idea,
+    generate_prompts,
+    refine_prompts,
+)
 from features.sd_prompts.wildcard_manager import (
     _read_file_lines,
     _write_entries,
@@ -379,6 +384,80 @@ async def forge_set_model(request: Request):
     return {"ok": ok}
 
 
+@router.post("/enhance")
+async def enhance_prompt(request: Request):
+    """Turn a vague idea into a ready-to-generate SD prompt.
+
+    Request body:
+      {
+        "idea":         str,            # required
+        "regional":     bool,           # default False
+        "regions_n":    int,            # default 3, clamped to [1, 4]
+        "suffix":       str,            # default "(depth blur)"
+        "provider":     "local"|"cloud",# default "local" (Ollama)
+        "allow_rrated": bool            # only meaningful when provider="cloud"
+      }
+
+    provider="cloud" routes through Anthropic (with the built-in euphemism
+    sanitizer) or OpenAI, whichever key is configured first. provider="local"
+    always uses Ollama.
+
+    allow_rrated is currently informational — the Anthropic/OpenAI pathway
+    already round-trips through nsfw_sanitizer.sanitize/desanitize in
+    core.llm_router. Future versions may gate cloud providers when this is
+    False; for now it just tags the response so the UI can surface it.
+    """
+    body = await request.json()
+    idea = (body.get("idea") or "").strip()
+    if not idea:
+        raise HTTPException(400, "idea required")
+
+    regional = bool(body.get("regional", False))
+    regions_n = int(body.get("regions_n", 3) or 3)
+    suffix = body.get("suffix")
+    if suffix is None:
+        suffix = cfg.get("sd_step1_default_suffix") or "(depth blur)"
+
+    provider = (body.get("provider") or "local").strip().lower()
+    allow_rrated = bool(body.get("allow_rrated", False))
+
+    force: str | None = None
+    if provider == "cloud":
+        from core.keys import get_key
+        if get_key("anthropic"):
+            force = "anthropic"
+        elif get_key("openai"):
+            force = "openai"
+        else:
+            raise HTTPException(
+                400,
+                "Cloud provider requested but no Anthropic/OpenAI key configured — set one in Settings or switch to Local.",
+            )
+    elif provider == "local":
+        force = "ollama"
+    else:
+        raise HTTPException(400, f"unknown provider: {provider!r}")
+
+    llm_router = _get_llm_router()
+    try:
+        result = enhance_idea(
+            llm_router,
+            idea=idea,
+            regional=regional,
+            regions_n=regions_n,
+            suffix=suffix,
+            force_provider=force,
+        )
+    except ValueError as ve:
+        raise HTTPException(400, str(ve))
+    except Exception as e:
+        log.exception("enhance_prompt failed")
+        raise HTTPException(500, f"enhance failed: {e}")
+
+    result["allow_rrated"] = allow_rrated
+    return result
+
+
 @router.post("/forge/txt2img")
 async def forge_txt2img(request: Request):
     """Generate image(s) via Forge txt2img.
@@ -425,11 +504,17 @@ async def forge_txt2img(request: Request):
     negative_prompt = wc_expand(body.get("negative_prompt", ""), wc_dir)
 
     # Build extension args
-    adetailer_args = build_adetailer_args(
-        enabled=body.get("adetailer", False),
-        model=body.get("adetailer_model", "face_yolov8n.pt"),
-        denoising_strength=float(body.get("adetailer_denoise", 0.4)),
-    ) if body.get("adetailer") else None
+    ad_sweeps = body.get("adetailer_sweeps")
+    if ad_sweeps and isinstance(ad_sweeps, list):
+        adetailer_args = build_adetailer_args(enabled=True, sweeps=ad_sweeps)
+    elif body.get("adetailer"):
+        adetailer_args = build_adetailer_args(
+            enabled=True,
+            model=body.get("adetailer_model", "face_yolov8n.pt"),
+            denoising_strength=float(body.get("adetailer_denoise", 0.4)),
+        )
+    else:
+        adetailer_args = None
 
     forge_couple_args = build_forge_couple_args(
         enabled=use_forge_couple,
@@ -492,11 +577,17 @@ async def forge_img2img(request: Request):
     if not prompt:
         raise HTTPException(400, "Prompt required")
 
-    adetailer_args = build_adetailer_args(
-        enabled=body.get("adetailer", False),
-        model=body.get("adetailer_model", "face_yolov8n.pt"),
-        denoising_strength=float(body.get("adetailer_denoise", 0.4)),
-    ) if body.get("adetailer") else None
+    ad_sweeps = body.get("adetailer_sweeps")
+    if ad_sweeps and isinstance(ad_sweeps, list):
+        adetailer_args = build_adetailer_args(enabled=True, sweeps=ad_sweeps)
+    elif body.get("adetailer"):
+        adetailer_args = build_adetailer_args(
+            enabled=True,
+            model=body.get("adetailer_model", "face_yolov8n.pt"),
+            denoising_strength=float(body.get("adetailer_denoise", 0.4)),
+        )
+    else:
+        adetailer_args = None
 
     result = img2img(
         init_image_b64=init_image,

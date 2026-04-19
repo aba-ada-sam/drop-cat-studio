@@ -1,0 +1,243 @@
+/**
+ * Drop Cat Go Studio -- Persistent generation gallery (WS2).
+ * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
+ */
+
+import { apiFetch, toast } from './toast.js?v=20260416d';
+
+let _items = [];
+let _filters = { tab: '', search: '' };
+let _containerEl = null;
+let _detailItem = null;
+
+export function init(containerEl) {
+  _containerEl = containerEl;
+  _render();
+  _load();
+}
+
+export async function addItem(item) {
+  try {
+    const saved = await apiFetch('/api/gallery', {
+      method: 'POST',
+      body: JSON.stringify(item),
+      context: 'gallery.save',
+    });
+    _items.unshift(saved);
+    _renderGrid();
+  } catch (_) {}
+}
+
+async function _load() {
+  try {
+    const data = await apiFetch('/api/gallery', { context: 'gallery.load' });
+    _items = data.items || [];
+    _renderGrid();
+  } catch (_) {}
+}
+
+function _render() {
+  _containerEl.innerHTML = `
+    <div class="gallery-toolbar">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border)">
+        <input type="search" id="gallery-search" placeholder="Search generations..." style="flex:1;min-width:120px;font-size:.82rem">
+        <select id="gallery-tab-filter" style="font-size:.82rem">
+          <option value="">All tabs</option>
+          <option value="sd-prompts">SD Prompts</option>
+          <option value="image-gen">Image Gen</option>
+          <option value="fun-videos">Videos</option>
+          <option value="bridges">Bridges</option>
+        </select>
+      </div>
+    </div>
+    <div class="gallery-grid" id="gallery-grid"></div>`;
+
+  _containerEl.querySelector('#gallery-search')?.addEventListener('input', e => {
+    _filters.search = e.target.value;
+    _renderGrid();
+  });
+  _containerEl.querySelector('#gallery-tab-filter')?.addEventListener('change', e => {
+    _filters.tab = e.target.value;
+    _renderGrid();
+  });
+}
+
+function _filtered() {
+  return _items.filter(item => {
+    if (_filters.tab && item.tab !== _filters.tab) return false;
+    if (_filters.search) {
+      const q = _filters.search.toLowerCase();
+      return (item.prompt || '').toLowerCase().includes(q) ||
+             (item.model  || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+}
+
+function _renderGrid() {
+  const grid = _containerEl?.querySelector('#gallery-grid');
+  if (!grid) return;
+  const items = _filtered();
+
+  if (!items.length) {
+    grid.innerHTML = `<div class="gallery-empty" style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.2;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      <p>No generations yet.<br>Create something to see it here.</p>
+    </div>`;
+    return;
+  }
+
+  grid.innerHTML = '';
+  for (const item of items) {
+    grid.appendChild(_makeCard(item));
+  }
+}
+
+function _makeCard(item) {
+  const card = document.createElement('div');
+  card.className = 'gallery-item';
+  card.setAttribute('tabindex', '0');
+  card.setAttribute('role', 'button');
+  card.setAttribute('aria-label', `Open ${item.tab} generation from ${item.created_at || ''}`);
+
+  const TAB_LABELS = {
+    'sd-prompts': 'SD', 'image-gen': 'IMG', 'fun-videos': 'VID', 'bridges': 'BRG',
+  };
+  const badge = TAB_LABELS[item.tab] || item.tab?.toUpperCase() || '?';
+
+  const isVideo = /\.(mp4|webm|mov)$/i.test(item.url || '');
+  const isAudio = /\.(mp3|wav|ogg|flac)$/i.test(item.url || '');
+
+  let mediaEl;
+  if (isVideo) {
+    mediaEl = document.createElement('video');
+    mediaEl.src = item.url;
+    mediaEl.preload = 'none';
+    mediaEl.poster = item.thumbnail || '';
+    mediaEl.style.cssText = 'width:100%;height:100%;object-fit:cover';
+    mediaEl.muted = true;
+    card.addEventListener('mouseenter', () => mediaEl.play().catch(() => {}));
+    card.addEventListener('mouseleave', () => { mediaEl.pause(); mediaEl.currentTime = 0; });
+  } else if (isAudio) {
+    mediaEl = document.createElement('div');
+    mediaEl.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:2rem';
+    mediaEl.textContent = '\u266B';
+  } else {
+    mediaEl = document.createElement('img');
+    mediaEl.src = item.url;
+    mediaEl.alt = item.prompt || '';
+    mediaEl.loading = 'lazy';
+    mediaEl.style.cssText = 'width:100%;height:100%;object-fit:cover';
+  }
+  card.appendChild(mediaEl);
+
+  const badgeEl = document.createElement('div');
+  badgeEl.className = 'gallery-item-badge';
+  badgeEl.textContent = badge;
+  card.appendChild(badgeEl);
+
+  const actions = document.createElement('div');
+  actions.className = 'gallery-item-actions';
+  actions.innerHTML = `
+    <button class="gallery-fav${item.favorite ? ' on' : ''}" title="Favorite" aria-label="Toggle favorite">\u2605</button>
+    <span style="flex:1"></span>
+    <button class="btn-icon-xs remove" title="Delete" aria-label="Delete">&#128465;</button>`;
+
+  actions.querySelector('.gallery-fav').addEventListener('click', async e => {
+    e.stopPropagation();
+    item.favorite = !item.favorite;
+    e.currentTarget.classList.toggle('on', item.favorite);
+    await apiFetch(`/api/gallery/${item.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ favorite: item.favorite }),
+      context: 'gallery.favorite',
+    }).catch(() => {});
+  });
+
+  actions.querySelector('.remove').addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!confirm('Delete this generation?')) return;
+    await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {});
+    _items = _items.filter(i => i.id !== item.id);
+    _renderGrid();
+  });
+
+  card.appendChild(actions);
+
+  card.addEventListener('click', () => _openDetail(item));
+  card.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openDetail(item); }
+  });
+
+  return card;
+}
+
+function _openDetail(item) {
+  _detailItem = item;
+  let overlay = document.getElementById('gallery-detail-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'gallery-detail-overlay';
+    overlay.className = 'gallery-detail-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) overlay.classList.remove('open');
+    });
+  }
+
+  const isVideo = /\.(mp4|webm|mov)$/i.test(item.url || '');
+  const meta = item.metadata || {};
+
+  overlay.innerHTML = `
+    <div class="gallery-detail">
+      <div class="gallery-detail-media">
+        ${isVideo
+          ? `<video src="${item.url}" controls autoplay style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
+          : `<img src="${item.url}" alt="${item.prompt || ''}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
+      </div>
+      <div class="gallery-detail-sidebar">
+        <button class="btn-icon modal-close" style="align-self:flex-end" aria-label="Close">&times;</button>
+        <div class="gallery-meta-block">
+          <strong>Prompt</strong><span>${_esc(item.prompt || '')}</span>
+        </div>
+        ${meta.model ? `<div class="gallery-meta-block"><strong>Model</strong><span>${_esc(meta.model)}</span></div>` : ''}
+        ${meta.seed  ? `<div class="gallery-meta-block"><strong>Seed</strong><span>${meta.seed}</span></div>` : ''}
+        ${item.created_at ? `<div class="gallery-meta-block"><strong>Created</strong><span>${new Date(item.created_at).toLocaleString()}</span></div>` : ''}
+        ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          <a href="${item.url}" download class="btn btn-sm">Download</a>
+          <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
+          <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
+        </div>
+      </div>
+    </div>`;
+
+  overlay.querySelector('.modal-close').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.querySelector('#gd-load-settings')?.addEventListener('click', () => {
+    _loadItemSettings(item);
+    overlay.classList.remove('open');
+    toast('Settings loaded from gallery item', 'success');
+  });
+  overlay.querySelector('#gd-branch')?.addEventListener('click', () => {
+    _loadItemSettings(item);
+    overlay.classList.remove('open');
+    toast('Branched: settings loaded, tweak and re-generate', 'info');
+  });
+
+  overlay.classList.add('open');
+}
+
+function _loadItemSettings(item) {
+  if (!item.metadata?.settings) return;
+  window._shellApi?.activeTab && window._shellApi?.applySettingsToTab(item.tab, item.metadata.settings);
+}
+
+function _esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+export function refresh() { _load(); }

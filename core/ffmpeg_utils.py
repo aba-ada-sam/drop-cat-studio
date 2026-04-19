@@ -225,7 +225,10 @@ def parse_resolution(value: str) -> tuple[int, int]:
         "480p":  (854, 480),
         "580p":  (1032, 580),
         "720p":  (1280, 720),
+        "810p":  (1440, 810),
         "1080p": (1920, 1080),
+        "1440p": (2560, 1440),
+        "2160p": (3840, 2160),
     }
     value = value.strip().lower()
     if value in presets:

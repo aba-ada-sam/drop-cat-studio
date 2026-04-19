@@ -206,7 +206,7 @@ def start_acestep() -> tuple[bool, str | None]:
 
 # ── WanGP ────────────────────────────────────────────────────────────────────
 
-WANGP_GRADIO_PORTS = [7860, 7861, 7862, 7863]
+WANGP_GRADIO_PORTS = [7862, 7863, 7864]  # 7860=DropCat, 7861=Forge
 WANGP_WORKER_PORT = 7899
 
 
@@ -335,8 +335,63 @@ def start_wangp_worker() -> tuple[bool, str | None]:
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
+def quick_detect():
+    """Fast synchronous snapshot of which services are already running.
+
+    Called in the lifespan before the server starts accepting requests so the
+    very first /api/system response returns real states instead of 'unknown'.
+    Each check is just a socket connect — completes in <50ms if the service
+    is up, or fails fast (connection refused) if it's down.
+    """
+    if wangp_worker_alive():
+        _set_status("wangp", state="running",
+                    message="WanGP worker running (model loaded)",
+                    port=WANGP_WORKER_PORT)
+    else:
+        wan_root = cfg.get("wan2gp_root")
+        if wan_root:
+            _set_status("wangp", state="ready",
+                        message="WanGP configured — starting worker...")
+        else:
+            _set_status("wangp", state="not_configured",
+                        message="WanGP path not configured")
+
+    try:
+        from services.forge_client import forge_alive as _fa, FORGE_PORT
+        if _fa():
+            _set_status("forge", state="running",
+                        message="Forge WebUI running (SD image generation ready)",
+                        port=FORGE_PORT)
+        else:
+            _set_status("forge", state="not_running",
+                        message="Forge not running — use Services tab to start")
+    except Exception:
+        _set_status("forge", state="not_running", message="Forge not detected")
+
+    if ollama_alive():
+        _set_status("ollama", state="running",
+                    message="Ollama running on port 11434", port=11434)
+    else:
+        _set_status("ollama", state="not_running", message="Ollama not detected")
+
+    if acestep_alive():
+        _set_status("acestep", state="running",
+                    message="ACE-Step already running", port=ACESTEP_PORT)
+    else:
+        acestep_root = cfg.get("acestep_root")
+        if acestep_root:
+            _set_status("acestep", state="ready",
+                        message="ACE-Step ready — starts automatically when you generate music")
+        else:
+            _set_status("acestep", state="not_configured",
+                        message="ACE-Step not configured — set path in Settings")
+
+    log.info("Quick service detect complete")
+
+
 def startup_all():
     """Detect and start services concurrently on app startup."""
+    quick_detect()
     log.info("Checking services...")
     threads = []
 
@@ -380,11 +435,9 @@ def startup_all():
                         port=FORGE_PORT)
             log.info("Forge WebUI detected on port %d", FORGE_PORT)
             return
-        # Try to auto-start Forge
-        ok, err = start_forge()
-        if not ok and err:
-            _set_status("forge", state="not_running",
-                        message="Forge not running -- use Services tab to start")
+        # Auto-start Forge on app launch
+        log.info("Forge not detected — starting automatically...")
+        start_forge()
 
     def _ensure_ollama():
         ok, err = start_ollama()
@@ -404,8 +457,13 @@ def startup_all():
         _set_status("acestep", state="running",
                     message="ACE-Step already running", port=ACESTEP_PORT)
     else:
-        _set_status("acestep", state="not_running",
-                    message="ACE-Step will start when music generation is needed")
+        acestep_root = cfg.get("acestep_root")
+        if acestep_root:
+            _set_status("acestep", state="ready",
+                        message="ACE-Step ready — starts automatically when you generate music")
+        else:
+            _set_status("acestep", state="not_configured",
+                        message="ACE-Step not configured — set path in Settings for music generation")
 
     # Start the health watchdog
     start_watchdog()
@@ -507,74 +565,104 @@ def restart_service(name: str) -> tuple[bool, str | None]:
 
 _forge_proc: subprocess.Popen | None = None
 
+def _forge_port_open(port: int = 7861) -> bool:
+    """True if something is already listening on the Forge port (even mid-startup)."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        s.connect(("127.0.0.1", port))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 def start_forge() -> tuple[bool, str | None]:
-    """Start Forge SD WebUI with --api flag."""
+    """Start Forge SD WebUI as a fully detached process.
+
+    Forge is launched via PowerShell Start-Process so it runs independently
+    of Drop Cat Go Studio — it survives app restarts and closing the app.
+
+    If Forge's port is already open (model still loading), we skip the launch
+    and just wait for the API to become ready — prevents killing a loading Forge.
+    """
     global _forge_proc
     from services.forge_client import forge_alive, FORGE_PORT
 
     if forge_alive():
         _set_status("forge", state="running",
-                    message="Forge already running", port=FORGE_PORT)
+                    message="Forge WebUI running (SD image generation ready)",
+                    port=FORGE_PORT)
+        _forge_proc = None
         return True, None
 
-    forge_root = cfg.get("forge_root") or r"C:\forge"
-    webui_bat = Path(forge_root) / "webui-user.bat"
-    if not webui_bat.exists():
-        webui_bat = Path(forge_root) / "webui.bat"
-    if not webui_bat.exists():
-        msg = f"Forge launch script not found in {forge_root}"
-        _set_status("forge", state="error", message=msg)
-        return False, msg
-
-    _set_status("forge", state="starting",
-                message="Starting Forge SD (~60s to load)...")
-    log.info("Starting Forge SD from %s...", forge_root)
-
-    env = os.environ.copy()
-    env["COMMANDLINE_ARGS"] = env.get("COMMANDLINE_ARGS", "") + " --api"
+    # Port open but API not yet ready = Forge is mid-startup; don't kill it
+    if _forge_port_open(FORGE_PORT):
+        log.info("Forge port %d is open — model still loading, waiting...", FORGE_PORT)
+        _set_status("forge", state="starting",
+                    message="Forge loading model, please wait (~90s)...")
+        # Fall through to the poll loop below without launching a new process
+        forge_root = cfg.get("forge_root") or r"C:\forge"
+        webui_bat = None   # signal: skip the launch step
+    else:
+        forge_root = cfg.get("forge_root") or r"C:\forge"
+        webui_bat = Path(forge_root) / "webui-user.bat"
+        if not webui_bat.exists():
+            webui_bat = Path(forge_root) / "webui.bat"
+        if not webui_bat.exists():
+            msg = f"Forge launch script not found in {forge_root}"
+            _set_status("forge", state="error", message=msg)
+            return False, msg
 
     try:
-        proc = subprocess.Popen(
-            ["cmd", "/c", f"cd /d {forge_root} && {webui_bat.name}"],
-            cwd=str(forge_root), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            **_popen_flags(),
-        )
-        _forge_proc = proc
+        if webui_bat is not None:
+            # Fresh launch — Forge isn't running at all
+            _set_status("forge", state="starting",
+                        message="Starting Forge SD — loading model, please wait (~90s)...")
+            log.info("Starting Forge SD from %s (detached)...", forge_root)
 
-        def _drain(p):
-            try:
-                for line in p.stdout:
-                    stripped = line.rstrip()
-                    if stripped:
-                        log.info("[forge] %s", stripped)
-            except Exception:
-                pass
+            ps_args = (
+                f"Start-Process -FilePath 'cmd.exe'"
+                f" -ArgumentList '/c \"{webui_bat}\"'"
+                f" -WorkingDirectory '{forge_root}'"
+                f" -WindowStyle Hidden"
+            )
+            subprocess.Popen(
+                ["powershell", "-WindowStyle", "Hidden", "-NonInteractive",
+                 "-Command", ps_args],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                close_fds=True,
+            )
+        _forge_proc = None  # detached — no handle to track
 
-        threading.Thread(target=_drain, args=(proc,), daemon=True).start()
-
-        deadline = time.time() + 120
+        # Poll until Forge API responds (up to 5 minutes for large models)
+        deadline = time.time() + 300
+        last_log = time.time()
         while time.time() < deadline:
             if forge_alive():
                 _set_status("forge", state="running",
                             message="Forge WebUI running (SD image generation ready)",
-                            port=FORGE_PORT, pid=proc.pid)
-                log.info("Forge started on port %d", FORGE_PORT)
+                            port=FORGE_PORT)
+                log.info("Forge ready on port %d", FORGE_PORT)
                 return True, None
-            if proc.poll() is not None:
-                msg = "Forge process exited before becoming ready"
-                _set_status("forge", state="error", message=msg)
-                return False, msg
-            time.sleep(3)
+            if time.time() - last_log >= 15:
+                elapsed = int(time.time() - (deadline - 300))
+                _set_status("forge", state="starting",
+                            message=f"Forge loading... ({elapsed}s elapsed, up to 5min for large models)")
+                log.info("Forge still loading... (%ds elapsed)", elapsed)
+                last_log = time.time()
+            time.sleep(5)
 
-        msg = "Forge did not start within 120s"
+        msg = "Forge did not respond within 5 minutes — check C:\\forge\\webui-user.bat"
         _set_status("forge", state="error", message=msg)
+        log.error(msg)
         return False, msg
 
     except Exception as e:
-        msg = f"Failed to start Forge: {e}"
+        msg = f"Failed to launch Forge: {e}"
         _set_status("forge", state="error", message=msg)
+        log.error(msg)
         return False, msg
 
 
@@ -647,11 +735,25 @@ def _watchdog_loop():
                 _set_status("acestep", state="error", message="Server crashed -- restarting...")
                 start_acestep()
 
-            # Check Forge -- if we started it and it died
+            # Check Forge -- restart if we launched it and it died
             if _forge_proc and _forge_proc.poll() is not None:
                 log.warning("[watchdog] Forge died -- restarting")
                 _set_status("forge", state="error", message="Forge crashed -- restarting...")
                 start_forge()
+
+            # Re-check externally-managed Forge every cycle so it goes green
+            # when the user launches it separately (e.g. via desktop shortcut)
+            from services.forge_client import forge_alive as _forge_alive
+            forge_state = status.get("forge", {}).get("state", "unknown")
+            if forge_state in ("not_running", "unknown", "error") and not _forge_proc:
+                if _forge_alive():
+                    _set_status("forge", state="running",
+                                message="Forge WebUI running (SD image generation ready)",
+                                port=7861)
+            elif forge_state == "running" and not _forge_proc:
+                if not _forge_alive():
+                    _set_status("forge", state="not_running",
+                                message="Forge stopped — use Services tab to restart")
 
             # Ensure Ollama stays up (lightweight check)
             if not ollama_alive():

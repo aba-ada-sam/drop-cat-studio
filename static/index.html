@@ -6,58 +6,32 @@
   <title>Drop Cat Go Studio</title>
   <link rel="icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" href="/static/logo-192.png">
-  <link rel="stylesheet" href="/static/css/design-system.css">
-  <link rel="stylesheet" href="/static/css/tabs.css">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260418d">
+  <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
 </head>
 <body>
 
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <!-- SPLASH / LOADING SCREEN                                                -->
-  <!-- Shown while the app boots. Replaced by the main UI once ready.        -->
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SPLASH -->
   <div id="splash">
     <div class="splash-inner">
       <div class="splash-logo-wrap">
         <img src="/static/logo-512.png" alt="Drop Cat Go Studio" class="splash-logo">
-        <!-- Andrews overlay — covers the baked-in ribbon text with a bigger version -->
         <div class="splash-andrews-overlay">Andrew's</div>
-        <!-- Hat fills bottom-to-top as each service checks in -->
-        <div class="hat-fill-track"><div class="hat-fill-bar" id="hat-fill-bar"></div></div>
-        <!-- Eye blink overlays -->
-        <div class="eye-lid eye-left"  id="eye-left"></div>
+<div class="eye-lid eye-left"  id="eye-left"></div>
         <div class="eye-lid eye-right" id="eye-right"></div>
-        <!-- Cheshire grin -->
         <div class="cheshire-smile" id="cheshire-smile"></div>
       </div>
-
       <div class="splash-checklist" id="splash-checks">
-        <div class="splash-check" id="chk-server">
-          <span class="chk-dot"></span><span class="chk-text">Connecting to server...</span>
-        </div>
-        <div class="splash-check" id="chk-ffmpeg">
-          <span class="chk-dot"></span><span class="chk-text">Checking ffmpeg...</span>
-        </div>
-        <div class="splash-check" id="chk-ollama">
-          <span class="chk-dot"></span><span class="chk-text">Checking Ollama AI...</span>
-        </div>
-        <div class="splash-check" id="chk-forge">
-          <span class="chk-dot"></span><span class="chk-text">Checking Forge SD...</span>
-        </div>
-        <div class="splash-check" id="chk-wangp">
-          <span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span>
-        </div>
-        <div class="splash-check" id="chk-acestep">
-          <span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span>
-        </div>
+        <div class="splash-check loading" id="chk-server"><span class="chk-dot"></span><span class="chk-text">Connecting to server...</span></div>
+        <div class="splash-check loading" id="chk-ffmpeg"><span class="chk-dot"></span><span class="chk-text">Checking ffmpeg...</span></div>
+        <div class="splash-check loading" id="chk-ollama"><span class="chk-dot"></span><span class="chk-text">Checking Ollama AI...</span></div>
+        <div class="splash-check loading" id="chk-forge"><span class="chk-dot"></span><span class="chk-text">Checking Forge SD...</span></div>
+        <div class="splash-check loading" id="chk-wangp"><span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span></div>
+        <div class="splash-check loading" id="chk-acestep"><span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span></div>
       </div>
-
-      <!-- GUI-06: use CSS class for visibility instead of inline style -->
-      <div id="splash-load-anyway" class="hidden" style="text-align:center; margin-top:20px">
-        <button class="btn btn-primary" id="btn-load-anyway" style="padding:8px 28px; font-size:.85rem; opacity:.85">
-          Load without waiting
-        </button>
+      <div id="splash-load-anyway" class="hidden" style="text-align:center;margin-top:20px">
+        <button class="btn btn-primary" id="btn-load-anyway" style="padding:8px 28px;font-size:.85rem;opacity:.85">Load without waiting</button>
       </div>
-
       <div id="splash-error" class="hidden">
         <p class="splash-err-msg"></p>
         <button class="btn btn-primary" onclick="location.reload()">Retry</button>
@@ -65,351 +39,369 @@
     </div>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <!-- MAIN APP (hidden until splash clears)                                  -->
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <!-- GUI-08: removed redundant flex-direction and min-height (already in design-system.css) -->
+  <!-- MAIN APP -->
   <div id="app" style="display:none">
 
-    <!-- ── Header ──────────────────────────────────────────────────────── -->
+    <!-- Header -->
     <header id="app-header">
       <div class="header-marquee">
-      <div class="header-left">
-        <div class="header-title-block">
-          <!--
-            "Andrew's" in a gentle arch — SVG text on a quadratic bezier path.
-            The path M 10,22 Q 100,2 190,22 draws a shallow upward curve.
-            Text-anchor=middle + startOffset=50% centres it on the arch.
-          -->
-          <svg viewBox="0 0 200 40" class="header-andrews-svg" aria-hidden="true">
-            <defs>
-              <path id="andrews-arch" d="M 8,34 Q 100,4 192,34"/>
-            </defs>
-            <text font-family="'Palatino Linotype','Book Antiqua','Georgia',serif"
-                  font-size="20" font-style="italic" font-weight="600" letter-spacing="3.5"
-                  fill="#d4a017">
-              <textPath href="#andrews-arch" startOffset="50%" text-anchor="middle">
-                ✦  Andrew's  ✦
-              </textPath>
-            </text>
-          </svg>
-          <span class="header-studio-name">Drop Cat Go Studio</span>
+        <div class="header-left">
+          <button id="rail-toggle" class="btn-icon" title="Collapse/expand navigation" aria-label="Toggle navigation rail">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div class="header-title-block">
+            <span class="header-studio-name">Drop Cat Go Studio</span>
+          </div>
+        </div>
+
+        <div class="header-center">
+          <!-- Service cluster hidden — moved to sidebar/rail context -->
+          <button id="service-cluster-btn" class="service-pills" aria-label="Service status — click for details" title="Services now in sidebar" style="display:none;">
+            <span class="pill" id="pill-wangp"><span class="dot" aria-hidden="true"></span> WanGP</span>
+            <span class="pill" id="pill-acestep"><span class="dot" aria-hidden="true"></span> ACE-Step</span>
+            <span class="pill" id="pill-forge"><span class="dot" aria-hidden="true"></span> Forge SD</span>
+            <span class="pill" id="pill-ollama"><span class="dot" aria-hidden="true"></span> Ollama</span>
+          </button>
+        </div>
+
+        <div class="header-right">
+          <!-- Gallery toggle -->
+          <button class="btn-icon header-btn" id="btn-gallery-toggle" title="Toggle gallery panel (shows generated images/videos)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            <span>Gallery</span>
+          </button>
+          <!-- Error log bell -->
+          <button class="btn-icon header-btn" id="btn-error-log" title="Show error log (Ctrl+Shift+E) — see what went wrong" aria-label="Error log">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+            <span>Errors</span>
+            <span class="error-badge" aria-live="polite"></span>
+          </button>
+          <!-- Command palette -->
+          <button class="btn-icon header-btn" id="btn-cmd-palette" title="Search tabs and actions (Ctrl+K)" aria-label="Command palette">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+          </button>
+          <button class="btn-icon header-btn" id="btn-help" title="Keyboard shortcuts and help (press ?)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>Help</span>
+          </button>
+          <button class="btn-icon header-btn" id="btn-settings" title="Settings and configuration">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            <span>Settings</span>
+          </button>
         </div>
       </div>
-      <div class="header-center">
-        <div class="service-pills" id="service-pills">
-          <span class="pill" id="pill-wangp" title="WanGP video generation service">
-            <span class="dot"></span> WanGP
-          </span>
-          <span class="pill" id="pill-acestep" title="ACE-Step music generation service">
-            <span class="dot"></span> ACE-Step
-          </span>
-          <span class="pill" id="pill-forge" title="Forge Stable Diffusion — http://127.0.0.1:7861">
-            <span class="dot"></span> Forge SD
-          </span>
-          <span class="pill" id="pill-ollama" title="Ollama local AI models">
-            <span class="dot"></span> Ollama
-          </span>
-        </div>
-      </div>
-      <div class="header-right">
-        <button class="btn-icon" id="btn-help" title="Quick start guide">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        </button>
-        <button class="btn-icon" id="btn-settings" title="Settings — configure WanGP, Forge, wildcards">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        </button>
-      </div>
-      </div><!-- /.header-marquee -->
     </header>
 
-    <!-- ── Tab Navigation ──────────────────────────────────────────────── -->
-    <nav id="tab-bar">
-      <div class="tab-group primary">
-        <button class="tab active" data-tab="sd-prompts">
-          <img src="/static/icon-sd-prompts.png" alt="" class="tab-icon"> SD Prompts
-        </button>
-        <button class="tab" data-tab="fun-videos">
-          <img src="/static/icon-fun-videos.png" alt="" class="tab-icon"> Make Videos
-        </button>
-        <button class="tab" data-tab="bridges">
-          <img src="/static/icon-bridges.png" alt="" class="tab-icon"> Video Bridges
-        </button>
-      </div>
-      <div class="tab-group secondary">
-        <div class="dropdown">
-          <button class="tab dropdown-trigger">
-            Tools
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
-          <div class="dropdown-menu">
-            <button class="dropdown-item" data-tab="image2video">
-              <img src="/static/icon-image2video.png" alt="" class="tab-icon-sm"> Image to Video
-            </button>
-            <button class="dropdown-item" data-tab="video-tools">
-              <img src="/static/icon-video-tools.png" alt="" class="tab-icon-sm"> Video Tools
-            </button>
-            <button class="dropdown-item" data-tab="wildcards">
-              <img src="/static/icon-wildcards.png" alt="" class="tab-icon-sm"> Wildcard Manager
-            </button>
-          </div>
-        </div>
-        <button class="tab" data-tab="services">Services</button>
-      </div>
-    </nav>
+    <!-- App body: rail + main -->
+    <div id="app-body">
 
-    <!-- ── Tab Content ─────────────────────────────────────────────────── -->
-    <main id="tab-content">
-      <section class="tab-panel active" id="panel-sd-prompts"><!-- tab-sd-prompts.js --></section>
-      <section class="tab-panel" id="panel-fun-videos"><!-- tab-fun-videos.js --></section>
-      <section class="tab-panel" id="panel-bridges"><!-- tab-bridges.js --></section>
-      <section class="tab-panel" id="panel-image2video"><!-- panel-image2video.js --></section>
-      <section class="tab-panel" id="panel-video-tools"><!-- panel-video-tools.js --></section>
-      <section class="tab-panel" id="panel-wildcards"><!-- panel-wildcards.js --></section>
-      <section class="tab-panel" id="panel-services">
-        <div class="services-grid">
-          <div class="service-card" data-svc="wangp">
-            <div class="service-header">
-              <span class="dot" id="dot-wangp"></span>
-              <h3>WanGP -- AI Video Generation</h3>
-            </div>
-            <p class="service-message" id="msg-wangp">Checking...</p>
-            <p class="service-hint">Used by Fun Videos and Video Bridges. Needs GPU VRAM.</p>
-            <div class="svc-btn-row">
-              <button class="btn btn-sm svc-start" data-svc="wangp">Start</button>
-              <button class="btn btn-sm svc-stop" data-svc="wangp">Stop</button>
-              <button class="btn btn-sm svc-restart" data-svc="wangp">Restart</button>
-            </div>
-          </div>
-          <div class="service-card" data-svc="acestep">
-            <div class="service-header">
-              <span class="dot" id="dot-acestep"></span>
-              <h3>ACE-Step -- Music Generation</h3>
-            </div>
-            <p class="service-message" id="msg-acestep">Checking...</p>
-            <p class="service-hint">Background music for Fun Videos. Optional -- you can skip audio.</p>
-            <div class="svc-btn-row">
-              <button class="btn btn-sm svc-start" data-svc="acestep">Start</button>
-              <button class="btn btn-sm svc-stop" data-svc="acestep">Stop</button>
-              <button class="btn btn-sm svc-restart" data-svc="acestep">Restart</button>
-            </div>
-          </div>
-          <div class="service-card" data-svc="forge">
-            <div class="service-header">
-              <span class="dot" id="dot-forge-svc"></span>
-              <h3>Forge SD -- Image Generation</h3>
-            </div>
-            <p class="service-message" id="msg-forge-svc">Checking...</p>
-            <p class="service-hint">Stable Diffusion at C:\forge. Auto-started with --api flag.</p>
-            <div class="svc-btn-row">
-              <button class="btn btn-sm svc-start" data-svc="forge">Start</button>
-              <button class="btn btn-sm svc-stop" data-svc="forge">Stop</button>
-              <button class="btn btn-sm svc-restart" data-svc="forge">Restart</button>
-            </div>
-          </div>
-          <div class="service-card" data-svc="ollama">
-            <div class="service-header">
-              <span class="dot" id="dot-ollama"></span>
-              <h3>Ollama -- Local AI Models</h3>
-            </div>
-            <p class="service-message" id="msg-ollama">Checking...</p>
-            <p class="service-hint">Local LLM for prompt generation and image analysis.</p>
-            <div class="svc-btn-row">
-              <button class="btn btn-sm svc-start" data-svc="ollama">Start</button>
-              <button class="btn btn-sm svc-stop" data-svc="ollama">Stop</button>
-              <button class="btn btn-sm svc-restart" data-svc="ollama">Restart</button>
-            </div>
-          </div>
-        </div>
-        <div class="card" id="system-info-card">
-          <h3>System</h3>
-          <div id="system-info">Loading...</div>
-        </div>
-      </section>
-    </main>
+      <!-- Left rail: Creative Pipeline Navigator -->
+      <nav id="app-rail" aria-label="Creative Pipeline">
 
-    <!-- ── Log Panel ───────────────────────────────────────────────────── -->
+        <!-- Project Management -->
+        <div class="rail-section-label">Project</div>
+        <button class="rail-tab" data-tab="imports" title="Load existing images, videos, prompts, or projects">
+          <span style="font-size:1.2rem">📥</span><span>Import Assets</span>
+        </button>
+
+        <!-- Creative Pipeline Stages -->
+        <div class="rail-section-label" style="margin-top:12px">Pipeline</div>
+
+        <button class="rail-tab active" data-tab="sd-prompts" aria-current="page" title="Step 1: Create images from prompts using AI">
+          <span style="font-size:1rem">🎨</span><span>Generate Images</span>
+          <span class="rail-tab-hint">Prompts → Images</span>
+        </button>
+
+        <button class="rail-tab" data-tab="fun-videos" title="Step 2: Turn images into videos with AI music">
+          <span style="font-size:1rem">🎬</span><span>Create Videos</span>
+          <span class="rail-tab-hint">Images → Videos</span>
+        </button>
+
+        <button class="rail-tab" data-tab="bridges" title="Step 3: Create transitions between video clips">
+          <span style="font-size:1rem">🌉</span><span>Add Transitions</span>
+          <span class="rail-tab-hint">Connect clips</span>
+        </button>
+
+        <button class="rail-tab" data-tab="video-tools" title="Step 4: Mix audio and export final video">
+          <span style="font-size:1rem">🎵</span><span>Audio & Export</span>
+          <span class="rail-tab-hint">Final output</span>
+        </button>
+
+        <!-- Creative Tools -->
+        <div class="rail-section-label" style="margin-top:12px">Creative Tools</div>
+
+        <button class="rail-tab" data-tab="wildcards" title="Generate & manage wildcard sets for creative prompting">
+          <span style="font-size:1rem">✨</span><span>Wildcard Studio</span>
+          <span class="rail-tab-hint">AI-generated tags</span>
+        </button>
+
+        <button class="rail-tab" data-tab="image2video" title="Create Ken Burns effect from static images">
+          <span style="font-size:1rem">🖼️</span><span>Image to Video</span>
+          <span class="rail-tab-hint">Slideshow tool</span>
+        </button>
+
+        <!-- System -->
+        <div class="rail-section-label" style="margin-top:12px">System</div>
+        <button class="rail-tab" data-tab="services" title="Manage AI services and system status">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+          <span>Services</span>
+        </button>
+
+      </nav>
+
+      <!-- Main area -->
+      <div id="app-main">
+
+        <!-- Split pane: controls + gallery -->
+        <div id="split-pane">
+          <div id="split-controls" role="main">
+            <!-- Tab panels -->
+            <section class="tab-panel" id="panel-imports" aria-label="Import Assets"></section>
+            <section class="tab-panel active" id="panel-sd-prompts" aria-label="SD Prompts"></section>
+            <section class="tab-panel" id="panel-fun-videos" aria-label="Make Videos"></section>
+            <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
+            <section class="tab-panel" id="panel-image2video" aria-label="Image to Video"></section>
+            <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
+            <section class="tab-panel" id="panel-wildcards" aria-label="Wildcard Manager"></section>
+            <section class="tab-panel" id="panel-services" aria-label="Services">
+              <div class="services-grid">
+                <div class="service-card" data-svc="wangp">
+                  <div class="service-header"><span class="dot" id="dot-wangp" aria-hidden="true"></span><h3>WanGP -- AI Video Generation</h3></div>
+                  <p class="service-message" id="msg-wangp">Checking...</p>
+                  <p class="service-hint">Used by Fun Videos and Video Bridges. Needs GPU VRAM.</p>
+                  <div class="svc-btn-row">
+                    <button class="btn btn-sm svc-start" data-svc="wangp">Start</button>
+                    <button class="btn btn-sm svc-stop" data-svc="wangp">Stop</button>
+                    <button class="btn btn-sm svc-restart" data-svc="wangp">Restart</button>
+                  </div>
+                </div>
+                <div class="service-card" data-svc="acestep">
+                  <div class="service-header"><span class="dot" id="dot-acestep" aria-hidden="true"></span><h3>ACE-Step -- Music Generation</h3></div>
+                  <p class="service-message" id="msg-acestep">Checking...</p>
+                  <p class="service-hint">Background music for Fun Videos.</p>
+                  <div class="svc-btn-row">
+                    <button class="btn btn-sm svc-start" data-svc="acestep">Start</button>
+                    <button class="btn btn-sm svc-stop" data-svc="acestep">Stop</button>
+                    <button class="btn btn-sm svc-restart" data-svc="acestep">Restart</button>
+                  </div>
+                </div>
+                <div class="service-card" data-svc="forge">
+                  <div class="service-header"><span class="dot" id="dot-forge-svc" aria-hidden="true"></span><h3>Forge SD -- Image Generation</h3></div>
+                  <p class="service-message" id="msg-forge-svc">Checking...</p>
+                  <p class="service-hint">Stable Diffusion at C:\forge. Auto-started with --api flag.</p>
+                  <div class="svc-btn-row">
+                    <button class="btn btn-sm svc-start" data-svc="forge">Start</button>
+                    <button class="btn btn-sm svc-stop" data-svc="forge">Stop</button>
+                    <button class="btn btn-sm svc-restart" data-svc="forge">Restart</button>
+                  </div>
+                </div>
+                <div class="service-card" data-svc="ollama">
+                  <div class="service-header"><span class="dot" id="dot-ollama" aria-hidden="true"></span><h3>Ollama -- Local AI Models</h3></div>
+                  <p class="service-message" id="msg-ollama">Checking...</p>
+                  <p class="service-hint">Local LLM for prompt generation and image analysis.</p>
+                  <div class="svc-btn-row">
+                    <button class="btn btn-sm svc-start" data-svc="ollama">Start</button>
+                    <button class="btn btn-sm svc-stop" data-svc="ollama">Stop</button>
+                    <button class="btn btn-sm svc-restart" data-svc="ollama">Restart</button>
+                  </div>
+                </div>
+              </div>
+              <div class="card" id="system-info-card"><h3>System</h3><div id="system-info">Loading...</div></div>
+            </section>
+          </div>
+
+          <!-- Draggable divider -->
+          <div id="split-divider" role="separator" aria-label="Resize panels" tabindex="0"></div>
+
+          <!-- Gallery pane -->
+          <div id="split-gallery" role="complementary" aria-label="Generation gallery"></div>
+        </div>
+
+      </div><!-- /#app-main -->
+    </div><!-- /#app-body -->
+
+    <!-- Log panel footer -->
     <footer id="log-panel">
-      <!-- GUI-04: chevron points DOWN when panel is collapsed (expand affordance) -->
-      <button class="log-toggle" id="log-toggle">
+      <button class="log-toggle" id="log-toggle" aria-expanded="true" aria-controls="log-content">
         <span>Server Logs</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log file in new tab" onclick="event.stopPropagation()">&#128196; full log</a>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log" onclick="event.stopPropagation()">&#128196; full log</a>
       </button>
       <div class="log-content" id="log-content">
-        <div class="log-entries" id="log-entries"></div>
+        <div class="log-entries" id="log-entries" aria-live="polite" aria-atomic="false"></div>
       </div>
     </footer>
 
   </div><!-- /#app -->
 
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <!-- MODALS                                                                 -->
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ── OVERLAYS ──────────────────────────────────────────────────────────── -->
 
-  <!-- Settings -->
-  <div class="modal-overlay" id="modal-settings">
+  <!-- Command palette -->
+  <div id="cmd-palette-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div id="cmd-palette">
+      <div class="palette-input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="palette-input" placeholder="Type to search tabs, actions, presets..." autocomplete="off" aria-label="Command palette search">
+      </div>
+      <div class="palette-results" id="palette-results" role="listbox" aria-label="Results"></div>
+      <div class="palette-footer">
+        <span class="palette-key"><kbd>&#8593;</kbd><kbd>&#8595;</kbd> navigate</span>
+        <span class="palette-key"><kbd>Enter</kbd> select</span>
+        <span class="palette-key"><kbd>Esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Service slide-over panel -->
+  <div id="service-panel-overlay" aria-modal="true" role="dialog" aria-label="Service health dashboard">
+    <div id="service-panel">
+      <div class="svc-panel-header">
+        <h2>Service Health</h2>
+        <button class="btn-icon modal-close" id="btn-close-svc-panel" aria-label="Close">&times;</button>
+      </div>
+      <div class="svc-panel-body" id="svc-panel-body">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Error log -->
+  <div id="error-log-overlay" role="dialog" aria-modal="true" aria-label="Error log">
+    <div id="error-log-panel">
+      <div class="error-log-header">
+        <h3>Error Log</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" id="btn-clear-errors">Clear</button>
+          <button class="btn-icon modal-close" id="btn-close-error-log" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div class="error-log-entries" id="error-log-entries" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div class="modal-overlay" id="modal-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <div class="modal">
       <div class="modal-header">
-        <h2>Settings</h2>
-        <button class="btn-icon modal-close">&times;</button>
+        <h2 id="settings-title">Settings</h2>
+        <button class="btn-icon modal-close" aria-label="Close">&times;</button>
       </div>
       <form class="modal-body" autocomplete="off" onsubmit="return false">
         <div class="settings-section">
           <h4 class="settings-section-label">AI Video Generation (WanGP)</h4>
           <div class="form-group">
-            <label>WanGP Path <span class="hint-text">— folder containing wgp.py, e.g. C:\pinokio\api\wan.git\app</span></label>
-            <div style="display:flex; gap:6px">
+            <label for="cfg-wan2gp_root">WanGP Path <span class="hint-text">-- e.g. C:\pinokio\api\wan.git\app</span></label>
+            <div style="display:flex;gap:6px">
               <input type="text" id="cfg-wan2gp_root" placeholder="C:\path\to\Wan2GP" style="flex:1" autocomplete="off">
-              <button class="btn btn-sm" id="btn-validate-wan">Validate</button>
+              <button class="btn btn-sm" id="btn-validate-wan" type="button">Validate</button>
             </div>
             <span class="validation-msg" id="val-wan"></span>
           </div>
         </div>
-
         <div class="settings-section">
           <h4 class="settings-section-label">Music Generation (ACE-Step)</h4>
           <div class="form-group">
-            <label>ACE-Step Path <span class="hint-text">— folder containing the ACE-Step .venv</span></label>
-            <div style="display:flex; gap:6px">
+            <label for="cfg-acestep_root">ACE-Step Path <span class="hint-text">-- folder containing the ACE-Step .venv</span></label>
+            <div style="display:flex;gap:6px">
               <input type="text" id="cfg-acestep_root" placeholder="C:\path\to\ACE-Step" style="flex:1" autocomplete="off">
-              <button class="btn btn-sm" id="btn-validate-ace">Validate</button>
+              <button class="btn btn-sm" id="btn-validate-ace" type="button">Validate</button>
             </div>
             <span class="validation-msg" id="val-ace"></span>
           </div>
         </div>
-
         <div class="settings-section">
           <h4 class="settings-section-label">Stable Diffusion Wildcards</h4>
           <div class="form-group">
-            <label>Wildcards Directory <span class="hint-text">— your sd-dynamic-prompts wildcards folder</span></label>
+            <label for="cfg-sd_wildcards_dir">Wildcards Directory <span class="hint-text">-- your sd-dynamic-prompts wildcards folder</span></label>
             <input type="text" id="cfg-sd_wildcards_dir" placeholder="(blank = inline wildcards only)" autocomplete="off">
           </div>
         </div>
-
         <div class="settings-section">
           <h4 class="settings-section-label">AI Prompt Engine</h4>
-
-          <!-- Big Anthropic on/off toggle -->
           <div class="ai-provider-card">
             <div class="provider-side" id="provider-side-ollama">
-              <div class="provider-icon-glyph">🖥</div>
+              <div class="provider-icon-glyph">&#128421;</div>
               <div class="provider-name">OLLAMA</div>
               <div class="provider-sub">Local &middot; No internet</div>
             </div>
-
             <div class="big-toggle-wrap">
               <input type="checkbox" id="provider-toggle-input" class="big-toggle-input">
-              <label for="provider-toggle-input" class="big-toggle-label" title="Toggle Anthropic Claude API on/off">
+              <label for="provider-toggle-input" class="big-toggle-label" title="Toggle Anthropic Claude API">
                 <span class="big-toggle-thumb"></span>
               </label>
             </div>
-
             <div class="provider-side" id="provider-side-anthropic">
-              <div class="provider-icon-glyph">☁</div>
+              <div class="provider-icon-glyph">&#9729;</div>
               <div class="provider-name">ANTHROPIC</div>
               <div class="provider-sub">Cloud &middot; Claude API</div>
             </div>
           </div>
-
-          <!-- Anthropic key field (shown when toggle is ON) -->
-          <div id="llm-anthropic-section" style="display:none; margin-top:14px">
+          <div id="llm-anthropic-section" style="display:none;margin-top:14px">
             <div class="form-group">
-              <label>Anthropic API Key</label>
-              <input type="text" id="cfg-anthropic_key" class="masked-key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true" data-form-type="other">
+              <label for="cfg-anthropic_key">Anthropic API Key</label>
+              <input type="text" id="cfg-anthropic_key" class="masked-key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
               <span class="hint-text" id="anthropic-key-hint"></span>
             </div>
           </div>
-
-          <!-- Ollama settings (shown when toggle is OFF) -->
           <div id="llm-ollama-section" style="margin-top:14px">
             <div class="form-group">
-              <label>Ollama URL <span class="hint-text">— default http://localhost:11434</span></label>
+              <label for="cfg-ollama_host">Ollama URL <span class="hint-text">-- default http://localhost:11434</span></label>
               <input type="text" id="cfg-ollama_host" placeholder="http://localhost:11434">
             </div>
             <div class="form-group">
-              <label>Vision model <span class="hint-text">— prompt generation &amp; photo analysis. Gemma 4: <code>gemma4:e4b</code> (9.6 GB) or <code>gemma4:26b</code> (18 GB)</span></label>
-              <select id="cfg-ollama_fast_model" style="width:100%">
-                <option value="">Loading models...</option>
-              </select>
+              <label for="cfg-ollama_fast_model">Vision model <span class="hint-text">-- prompt generation &amp; photo analysis</span></label>
+              <select id="cfg-ollama_fast_model"><option value="">Loading...</option></select>
             </div>
             <div class="form-group">
-              <label>Power model <span class="hint-text">— deep analysis. Recommended: <code>gemma4:26b</code> for RTX 5080</span></label>
-              <select id="cfg-ollama_power_model" style="width:100%">
-                <option value="">Loading models...</option>
-              </select>
+              <label for="cfg-ollama_power_model">Power model <span class="hint-text">-- deep analysis</span></label>
+              <select id="cfg-ollama_power_model"><option value="">Loading...</option></select>
             </div>
           </div>
         </div>
-
-        <button class="btn btn-primary" id="btn-save-settings" style="margin-top:8px">Save Settings</button>
+        <button class="btn btn-primary" id="btn-save-settings" type="button" style="margin-top:8px">Save Settings</button>
       </form>
     </div>
   </div>
 
-  <!-- Quick-start help -->
-  <div class="modal-overlay" id="modal-help">
+  <!-- Help / Shortcuts modal -->
+  <div class="modal-overlay" id="modal-help" role="dialog" aria-modal="true" aria-labelledby="help-title">
     <div class="modal" style="max-width:600px">
       <div class="modal-header">
-        <h2>Quick Start Guide</h2>
-        <button class="btn-icon modal-close">&times;</button>
+        <h2 id="help-title">Keyboard Shortcuts &amp; Quick Start</h2>
+        <button class="btn-icon modal-close" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
+        <h3 style="margin-bottom:12px;font-size:.85rem">Shortcuts</h3>
+        <div class="shortcuts-grid" id="shortcuts-display"></div>
+
+        <h3 style="margin:18px 0 10px;font-size:.85rem">Quick Start</h3>
         <div class="help-flow">
           <div class="help-step">
             <img src="/static/icon-sd-prompts.png" alt="" class="help-icon">
-            <div>
-              <strong>SD Prompts</strong> — Start here. Drop a reference image, generate AI prompts, toggle Forge Couple for regional prompting, then generate images directly. Send images to Make Videos when ready.
-            </div>
+            <div><strong>SD Prompts</strong> -- Drop a reference image, generate AI prompts, toggle Forge Couple for regional prompting, generate images.</div>
           </div>
-          <div class="help-arrow">↓ images flow to Make Videos</div>
+          <div class="help-arrow">&#8595; images flow to Make Videos</div>
           <div class="help-step">
             <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
-            <div>
-              <strong>Make Videos</strong> — Drop a photo or use a generated image, let AI create a creative video with matching music. Clips flow automatically into Video Bridges.
-            </div>
+            <div><strong>Make Videos</strong> -- Drop a photo or use a generated image, let AI create a video with matching music.</div>
           </div>
-          <div class="help-arrow">↓ clips flow to Video Bridges</div>
+          <div class="help-arrow">&#8595; clips flow to Video Bridges</div>
           <div class="help-step">
             <img src="/static/icon-bridges.png" alt="" class="help-icon">
-            <div>
-              <strong>Video Bridges</strong> — Got 2+ clips? AI generates smooth cinematic transitions between them. Send the result to Post Processing.
-            </div>
-          </div>
-          <div class="help-arrow">↓ Tools dropdown for utilities</div>
-          <div class="help-step">
-            <img src="/static/icon-video-tools.png" alt="" class="help-icon">
-            <div>
-              <strong>Video Tools</strong> — Reverse, mirror, speed up/slow down, upscale, or convert any video. Drop files or paste paths.
-            </div>
-          </div>
-          <div class="help-step">
-            <img src="/static/icon-image2video.png" alt="" class="help-icon">
-            <div>
-              <strong>Image to Video</strong> — Turn a folder of photos into a Ken Burns slideshow with zoom and crossfade effects. No AI needed.
-            </div>
+            <div><strong>Video Bridges</strong> -- Got 2+ clips? AI generates smooth cinematic transitions between them.</div>
           </div>
         </div>
-
-        <div class="help-tips">
-          <h4>Tips</h4>
-          <ul>
-            <li>You can use any single tab standalone — you don't have to follow the full pipeline.</li>
-            <li>Every generated file is tracked in the session and appears as an option in other tabs.</li>
-            <li>In SD Prompts, type <code>__wildcard__</code> or <code>{option1|option2}</code> and Forge will expand it randomly on each generation.</li>
-            <li>Services (WanGP, ACE-Step, Forge) only need to be running for features that use them.</li>
-          </ul>
-        </div>
-
-        <div style="text-align:center; margin-top:16px">
+        <div style="text-align:center;margin-top:16px">
           <button class="btn btn-primary modal-close" style="padding:10px 32px">Let's Go!</button>
         </div>
       </div>
     </div>
   </div>
 
-  <div id="toast-wrap"></div>
+  <!-- Toast region -->
+  <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260413"></script>
+  <script type="module" src="/static/js/app.js?v=20260417c"></script>
 </body>
 </html>

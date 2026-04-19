@@ -2,8 +2,8 @@
  * Drop Cat Go Studio — Video Tools panel.
  * Batch video transforms: reverse, mirror, flip, speed, upscale, sharpen.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js';
-import { toast, createDropZone, createPathInput, createProgressCard, createSlider, createSelect, createCheckbox, el, formatDuration } from './components.js';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
+import { toast, createDropZone, createPathInput, createProgressCard, createSlider, createSelect, createCheckbox, el, formatDuration } from './components.js?v=20260414';
 
 let files = [];
 

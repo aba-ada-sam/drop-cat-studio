@@ -132,7 +132,17 @@ def generate_audio(
 ) -> tuple[str | None, str | None]:
     """Generate audio via ACE-Step. Returns (file_path, error)."""
     if not _acestep_alive():
-        return None, "ACE-Step server not running (port 8019)"
+        # Lazy-start: ACE-Step is deferred to keep VRAM free for Ollama.
+        # Start it now and wait for it to be ready.
+        from services.manager import start_acestep
+        log.info("ACE-Step not running — starting on demand for audio generation...")
+        if progress_cb:
+            progress_cb(-1)  # signal "starting service"
+        ok, err = start_acestep()
+        if not ok:
+            return None, f"Failed to start ACE-Step: {err}"
+        if not _acestep_alive():
+            return None, "ACE-Step started but not responding"
 
     out_dir = Path(output_dir) if output_dir else Path(__file__).resolve().parent.parent.parent / "output"
     out_dir.mkdir(parents=True, exist_ok=True)

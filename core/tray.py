@@ -14,8 +14,10 @@ import threading
 import webbrowser
 from pathlib import Path
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-OUTPUT_DIR  = Path(__file__).resolve().parent.parent / "output"
+ROOT_DIR    = Path(__file__).resolve().parent.parent
+STATIC_DIR  = ROOT_DIR / "static"
+OUTPUT_DIR  = ROOT_DIR / "output"
+ICO_PATH    = ROOT_DIR / "dropcat.ico"
 APP_URL     = "http://127.0.0.1:7860"
 
 try:
@@ -27,38 +29,33 @@ except ImportError:
 
 
 def _build_icon_image() -> "Image.Image":
-    """
-    Use the existing logo-192.png if it exists; otherwise draw a
-    crisp 64×64 'DCG' badge in the app's circus colours.
-    """
-    logo = STATIC_DIR / "logo-192.png"
-    if logo.is_file():
+    """Load dropcat.ico for the system tray (falls back to a DCG badge if missing)."""
+    if ICO_PATH.is_file():
         try:
-            img = Image.open(logo).convert("RGBA").resize((64, 64), Image.LANCZOS)
+            img = Image.open(ICO_PATH)
+            # Pick the 32×32 frame if the .ico has multiple sizes; else resize
+            img = img.convert("RGBA")
+            if img.size != (32, 32):
+                img = img.resize((32, 32), Image.LANCZOS)
             return img
         except Exception:
             pass
 
-    # Fallback: hand-drawn badge
-    size = 64
+    # Fallback: hand-drawn DCG badge
+    size = 32
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-
-    # Background disc — circus crimson
     draw.ellipse([0, 0, size - 1, size - 1], fill=(196, 30, 58, 255))
-
-    # Gold text "DCG"
     gold = (212, 160, 23, 255)
     font = None
     for name in ("arialbd.ttf", "arial.ttf", "calibrib.ttf"):
         try:
-            font = ImageFont.truetype(name, 20)
+            font = ImageFont.truetype(name, 12)
             break
         except Exception:
             continue
     if font is None:
         font = ImageFont.load_default()
-
     draw.text((size // 2, size // 2), "DCG", fill=gold, font=font, anchor="mm")
     return img
 

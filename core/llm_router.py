@@ -41,7 +41,9 @@ class LLMRouter:
         self._client = client
         self._stats = {"ok": 0, "errors": 0, "retries": 0}
 
-    def _provider(self) -> str:
+    def _provider(self, force: str | None = None) -> str:
+        if force in ("anthropic", "openai", "ollama"):
+            return force
         p = cfg.get("llm_provider") or "auto"
         if p != "auto":
             return p
@@ -60,8 +62,9 @@ class LLMRouter:
         max_tokens: int = 1024,
         est_tokens: int = 500,
         system: str = "",
+        force_provider: str | None = None,
     ) -> str:
-        provider = self._provider()
+        provider = self._provider(force_provider)
         if provider == "anthropic":
             return self._call_with_retry(lambda: self._anthropic_chat(messages, tier, max_tokens, system))
         if provider == "openai":
@@ -96,16 +99,22 @@ class LLMRouter:
     def _anthropic_chat(self, messages, tier, max_tokens, system):
         import anthropic
         from core.keys import get_key
+        from core.nsfw_sanitizer import sanitize, desanitize
         client = anthropic.Anthropic(api_key=get_key("anthropic"))
-        kwargs = dict(model=_ANTHROPIC_MODELS[tier], max_tokens=max_tokens, messages=messages)
+        safe_msgs = [
+            {**m, "content": sanitize(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
+            for m in messages
+        ]
+        kwargs = dict(model=_ANTHROPIC_MODELS[tier], max_tokens=max_tokens, messages=safe_msgs)
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
-        return resp.content[0].text
+        return desanitize(resp.content[0].text)
 
     def _anthropic_vision(self, prompt, images_b64, tier, max_tokens, system):
         import anthropic
         from core.keys import get_key
+        from core.nsfw_sanitizer import sanitize, desanitize
         client = anthropic.Anthropic(api_key=get_key("anthropic"))
         content = []
         for img in images_b64[:5]:  # Anthropic allows up to 5 images per message
@@ -113,16 +122,16 @@ class LLMRouter:
                 "type": "image",
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": img},
             })
-        content.append({"type": "text", "text": prompt})
+        content.append({"type": "text", "text": sanitize(prompt)})
         kwargs = dict(
             model=_ANTHROPIC_MODELS[tier],
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": content}],
         )
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
-        return resp.content[0].text
+        return desanitize(resp.content[0].text)
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
 

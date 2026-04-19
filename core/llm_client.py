@@ -25,6 +25,29 @@ DEFAULT_OLLAMA_MODELS = {
 }
 
 
+def _disable_thinking(system: str, model: str) -> str:
+    """Append /no_think for qwen3 models to prevent thinking mode from
+    consuming the entire token budget on structured-output requests."""
+    if "qwen3" in model.lower():
+        return system.rstrip() + "\n\n/no_think"
+    return system
+
+
+def _extract_content(resp) -> str:
+    """Pull text content from an Ollama response, handling qwen3 thinking edge cases."""
+    content = resp.message.content or ""
+    # Strip inline <think> blocks that some Ollama versions leave in content
+    if "<think>" in content:
+        content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
+    # If content is empty after stripping, fall back to thinking field (Ollama 0.9+)
+    if not content.strip():
+        thinking = getattr(resp.message, "thinking", None) or ""
+        if thinking:
+            log.warning("Response content empty, extracting from thinking field (len=%d)", len(thinking))
+            content = re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
+    return content
+
+
 class LLMClient:
     """Unified AI client backed by local Ollama with vision support.
 
@@ -40,6 +63,7 @@ class LLMClient:
         fast_model: str = DEFAULT_OLLAMA_MODELS[TIER_FAST],
         balanced_model: str = DEFAULT_OLLAMA_MODELS[TIER_BALANCED],
         power_model: str = DEFAULT_OLLAMA_MODELS[TIER_POWER],
+        vision_model: str = "qwen3-vl:8b",   # always used for image analysis
     ):
         self._host = host
         self._models = {
@@ -47,12 +71,17 @@ class LLMClient:
             TIER_BALANCED: balanced_model,
             TIER_POWER:    power_model,
         }
+        self._vision_model = vision_model
         self._client = None
 
     def _get_client(self):
         if self._client is None:
+            import httpx
             import ollama
-            self._client = ollama.Client(host=self._host)
+            self._client = ollama.Client(
+                host=self._host,
+                timeout=httpx.Timeout(connect=10, read=180, write=30, pool=10),
+            )
         return self._client
 
     def update_config(
@@ -61,6 +90,7 @@ class LLMClient:
         fast_model: str = "",
         balanced_model: str = "",
         power_model: str = "",
+        vision_model: str = "",
     ):
         """Update Ollama host or model selections at runtime."""
         if host and host != self._host:
@@ -72,6 +102,8 @@ class LLMClient:
             self._models[TIER_BALANCED] = balanced_model
         if power_model:
             self._models[TIER_POWER] = power_model
+        if vision_model:
+            self._vision_model = vision_model
 
     def has_provider(self, provider: str) -> bool:
         """Return True if Ollama is reachable (provider arg kept for compat)."""
@@ -93,17 +125,18 @@ class LLMClient:
         system: str = "",
     ) -> str:
         """Send a text chat to Ollama. Returns response text."""
+        model = self._model(tier)
         all_messages = []
         if system:
-            all_messages.append({"role": "system", "content": system})
+            all_messages.append({"role": "system", "content": _disable_thinking(system, model)})
         all_messages.extend(messages)
 
-        resp = self._get_client().chat(
-            model=self._model(tier),
-            messages=all_messages,
-            options={"num_predict": max_tokens},
-        )
-        return resp.message.content
+        kwargs = dict(model=model, messages=all_messages,
+                      options={"num_predict": max_tokens})
+        if "qwen3" in model.lower():
+            kwargs["think"] = False
+        resp = self._get_client().chat(**kwargs)
+        return _extract_content(resp)
 
     def chat_with_images(
         self,
@@ -114,13 +147,14 @@ class LLMClient:
         max_tokens: int = 2048,
         system: str = "",
     ) -> str:
-        """Send a vision request to Ollama. Returns response text."""
+        """Send a vision request to Ollama. Always uses the vision model (qwen3-vl),
+        not the text-tier models — text-only models silently ignore images."""
         import time
-        model = self._model(tier)
+        model = self._vision_model
         log.info("Ollama vision call: model=%s images=%d max_tokens=%d", model, len(images_b64), max_tokens)
         messages = []
         if system:
-            messages.append({"role": "system", "content": system})
+            messages.append({"role": "system", "content": _disable_thinking(system, model)})
         messages.append({
             "role": "user",
             "content": prompt,
@@ -128,13 +162,15 @@ class LLMClient:
         })
 
         t0 = time.time()
-        resp = self._get_client().chat(
-            model=model,
-            messages=messages,
-            options={"num_predict": max_tokens},
-        )
-        log.info("Ollama vision call done in %.1fs", time.time() - t0)
-        return resp.message.content
+        kwargs = dict(model=model, messages=messages,
+                      options={"num_predict": max_tokens})
+        if "qwen3" in model.lower():
+            kwargs["think"] = False
+        resp = self._get_client().chat(**kwargs)
+        elapsed = time.time() - t0
+        content = _extract_content(resp)
+        log.info("Ollama vision call done in %.1fs (response len=%d)", elapsed, len(content))
+        return content
 
     def list_models(self) -> list[str]:
         """Return names of all Ollama models installed locally."""

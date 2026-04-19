@@ -37,7 +37,7 @@
   bottom: 0;
   left: 6px; right: 6px;
   height: 2px;
-  background: linear-gradient(90deg, var(--circus-red), var(--accent));
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
   border-radius: 1px 1px 0 0;
 }
 

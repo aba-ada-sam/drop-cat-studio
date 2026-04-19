@@ -2,9 +2,9 @@
  * Drop Cat Go Studio — Video Bridges tab.
  * AI-powered transitions between clips. Accepts text, images, videos, or any mix.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js';
-import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el, formatDuration } from './components.js';
-import { handoff } from './handoff.js';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
+import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el, formatDuration } from './components.js?v=20260414';
+import { handoff } from './handoff.js?v=20260415';
 
 let items = [];   // {path, name, kind, duration, analysis}
 let activeMode = 'cinematic';
@@ -29,6 +29,8 @@ function outputPathToUrl(p) {
 
 export function init(panel) {
   panel.innerHTML = '';
+
+  // ── Layout (existing) ────────────────────────────────────────────────────────
   const layout = el('div', { class: 'wide-layout' });
   panel.appendChild(layout);
 

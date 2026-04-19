@@ -79,6 +79,12 @@ DEFAULTS: dict = {
     "forge_default_width": 1440,
     "forge_default_height": 810,
 
+    # Step 1 front-door defaults (SD Prompts tab)
+    "sd_step1_default_shape":    "single",   # "single" | "regional"
+    "sd_step1_default_source":   "vague",    # "vague" | "paste"
+    "sd_step1_default_suffix":   "(depth blur)",
+    "sd_step1_default_provider": "local",    # "local" (Ollama) | "cloud" (Anthropic/OpenAI)
+
     # ── Video Tools (tools_) ─────────────────────────────────────────────
     "tools_crf": 18,
     "tools_out_format": "mp4",

@@ -2,8 +2,8 @@
  * Drop Cat Go Studio — Wildcard Manager panel.
  * AI-powered wildcard file curation: prune, expand, merge, audit.
  */
-import { api } from './api.js';
-import { toast, createSlider, createSelect, el } from './components.js';
+import { api } from './api.js?v=20260414';
+import { toast, createSlider, createSelect, el } from './components.js?v=20260414';
 
 export function init(panel) {
   panel.innerHTML = '';

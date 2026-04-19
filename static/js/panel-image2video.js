@@ -2,8 +2,8 @@
  * Drop Cat Go Studio — Image to Video panel.
  * Ken Burns slideshow generator with drag-to-reorder images.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js';
-import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
+import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js?v=20260414';
 
 let images = [];
 
@@ -62,7 +62,7 @@ export function init(panel) {
   const zoom = createSlider(settingsCard, { label: 'Ken Burns Zoom', min: 0, max: 20, step: 1, value: 5, unit: '%' });
   const dur = createSlider(settingsCard, { label: 'Duration per Image', min: 1, max: 10, step: 0.5, value: 3, unit: 's' });
   const fade = createSlider(settingsCard, { label: 'Crossfade', min: 0, max: 2, step: 0.1, value: 0.5, unit: 's' });
-  const res = createSelect(settingsCard, { label: 'Resolution', options: ['1280x720', '1920x1080', '854x480'], value: '1280x720' });
+  const res = createSelect(settingsCard, { label: 'Resolution', options: ['854x480', '1280x720', '1440x810', '1920x1080', '2560x1440', '3840x2160'], value: '1440x810' });
   const aspect = createSelect(settingsCard, { label: 'Aspect Mode', options: ['auto', 'fixed', 'source'], value: 'auto' });
   const fit = createSelect(settingsCard, { label: 'Fit Mode', options: ['contain', 'cover'], value: 'contain' });
   const mode = createSelect(settingsCard, { label: 'Output Mode', options: ['combined', 'separate'], value: 'combined' });

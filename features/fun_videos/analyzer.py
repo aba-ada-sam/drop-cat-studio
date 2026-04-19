@@ -122,19 +122,59 @@ def generate_video_prompts(
 Generate exactly {num_prompts} prompts, each with different mood, camera work, and action."""
     )
 
+    last_text = ""
     for attempt in range(2):
-        text = router.route_vision(
+        last_text = router.route_vision(
             "\n\n".join(prompt_parts),
             [image_b64],
             tier=TIER_BALANCED,
             system=VIDEO_PROMPT_SYSTEM,
         )
-        result = parse_json_response(text)
+        result = parse_json_response(last_text)
         if result and isinstance(result, dict) and result.get("prompts"):
             return result
+        # Model returned a top-level array instead of {"prompts": [...]} — common
+        if isinstance(result, list) and result:
+            prompts = []
+            for i, item in enumerate(result[:num_prompts]):
+                if isinstance(item, str):
+                    prompts.append({"label": f"Take {i+1}", "prompt": item, "mood": "cinematic", "style": "dynamic"})
+                elif isinstance(item, dict) and item.get("prompt"):
+                    prompts.append({
+                        "label": item.get("label") or f"Take {i+1}",
+                        "prompt": item["prompt"],
+                        "mood":   item.get("mood")  or "cinematic",
+                        "style":  item.get("style") or "dynamic",
+                    })
+            if prompts:
+                log.info("Wrapped top-level array into prompts structure (%d prompts)", len(prompts))
+                return {"prompts": prompts}
         log.warning("Prompt generation attempt %d: unparseable response (len=%d): %.300s",
-                    attempt + 1, len(text), text)
-    raise RuntimeError(f"AI returned unparseable response after 2 attempts. Last response: {text[:200]}")
+                    attempt + 1, len(last_text), last_text)
+
+    # Salvage: pull any quoted or sentence-length strings from the raw response and
+    # treat them as prompts. Better than a blank error screen.
+    import re as _re
+    salvaged = []
+    # Look for "prompt": "..." patterns first
+    for m in _re.finditer(r'"prompt"\s*:\s*"([^"]{20,})"', last_text):
+        salvaged.append(m.group(1))
+    # Fallback: grab long sentences / paragraphs
+    if not salvaged:
+        for chunk in _re.split(r'\n{2,}|(?<=[.!?])\s+(?=[A-Z])', last_text):
+            chunk = chunk.strip().strip('"').strip("'")
+            if 20 < len(chunk) < 400:
+                salvaged.append(chunk)
+    if not salvaged:
+        salvaged = [last_text[:300].strip()]
+
+    log.warning("Using salvaged prompts from raw response (%d found)", len(salvaged))
+    return {
+        "prompts": [
+            {"label": f"Take {i+1}", "prompt": p, "mood": "cinematic", "style": "dynamic"}
+            for i, p in enumerate(salvaged[:num_prompts])
+        ]
+    }
 
 
 def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "", user_direction: str = "") -> str:

@@ -11,10 +11,15 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
+import asyncio
+import json as _json_std
 import logging
 import logging.handlers
 import os
+import sqlite3
 import threading
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -97,6 +102,7 @@ async def lifespan(app: FastAPI):
         fast_model=cfg.get("ollama_fast_model") or "qwen3-vl:8b",
         balanced_model=cfg.get("ollama_balanced_model") or "qwen3-vl:8b",
         power_model=cfg.get("ollama_power_model") or "qwen3-vl:30b",
+        vision_model=cfg.get("ollama_vision_model") or "qwen3-vl:8b",
     )
     _g["llm_router"] = LLMRouter(_g["llm_client"])
     # Auto-seed Anthropic key from credentials file if not already saved
@@ -110,7 +116,7 @@ async def lifespan(app: FastAPI):
         hw = [e[1] for e in _g["available_encoders"] if e[2]]
         log.info("Encoders: %s", ", ".join(hw) if hw else "CPU only")
 
-    # Start external services (WanGP, ACE-Step) in background
+    # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 
     # Periodic job cleanup — purge completed/errored jobs older than 24h
@@ -150,10 +156,10 @@ app.add_middleware(
 
 @app.middleware("http")
 async def no_cache_static(request: Request, call_next):
-    """Prevent browsers from caching JS/CSS so stale files never break the app."""
+    """Prevent browsers from caching JS/CSS/HTML so stale files never break the app."""
     response = await call_next(request)
     path = str(request.url.path)
-    if path.startswith("/static/js/") or path.startswith("/static/css/"):
+    if (path == "/" or path.startswith("/static/js/") or path.startswith("/static/css/")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -237,7 +243,7 @@ async def save_ollama_config(request: Request):
     """Save Ollama host and model preferences, hot-reload client."""
     body = await request.json()
     updates = {}
-    for key in ("ollama_host", "ollama_fast_model", "ollama_balanced_model", "ollama_power_model"):
+    for key in ("ollama_host", "ollama_fast_model", "ollama_balanced_model", "ollama_power_model", "ollama_vision_model"):
         if key in body:
             updates[key] = body[key]
     if updates:
@@ -248,6 +254,7 @@ async def save_ollama_config(request: Request):
                 fast_model=updates.get("ollama_fast_model", ""),
                 balanced_model=updates.get("ollama_balanced_model", ""),
                 power_model=updates.get("ollama_power_model", ""),
+                vision_model=updates.get("ollama_vision_model", ""),
             )
     return keys.status()
 
@@ -297,7 +304,7 @@ async def save_llm_config(request: Request):
 
 @app.get("/api/services")
 async def services_status():
-    return svc.get_status()
+    return JSONResponse(content=svc.get_status(), headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/services/start/{name}")
@@ -565,14 +572,16 @@ async def switch_session(session_id: str):
 
 @app.get("/api/system")
 async def system_info():
-    ollama_st = keys.status()  # {"ollama": bool, "models": [...]}
-    return {
+    ollama_st = await asyncio.to_thread(keys.status)
+    import json as _json
+    data = {
         "ffmpeg": ffmpeg_available(),
         "encoders": [{"id": e[0], "label": e[1], "hw": e[2]} for e in _g["available_encoders"]],
         "best_encoder": best_encoder(_g["available_encoders"]),
         "ollama": ollama_st,
         "services": svc.get_status(),
     }
+    return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 
 
 # ── Feature routers ──────────────────────────────────────────────────────────
@@ -587,6 +596,208 @@ app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
+
+
+# ── Presets (WS8) ────────────────────────────────────────────────────────────
+
+_PRESETS_DB = APP_DIR / "presets.db"
+
+
+def _presets_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(_PRESETS_DB), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS presets (
+            id TEXT PRIMARY KEY,
+            tab TEXT,
+            name TEXT,
+            settings TEXT,
+            created_at REAL
+        )""")
+    conn.commit()
+    return conn
+
+
+@app.get("/api/presets")
+async def presets_list(tab: str = ""):
+    def _query():
+        conn = _presets_db()
+        try:
+            if tab:
+                rows = conn.execute("SELECT * FROM presets WHERE tab = ? ORDER BY created_at DESC", (tab,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM presets ORDER BY created_at DESC").fetchall()
+            return [_preset_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+    presets = await asyncio.to_thread(_query)
+    return {"presets": presets}
+
+
+def _preset_to_dict(row) -> dict:
+    d = dict(row)
+    try:
+        d["settings"] = _json_std.loads(d.get("settings") or "{}")
+    except Exception:
+        d["settings"] = {}
+    return d
+
+
+@app.post("/api/presets")
+async def preset_create(request: Request):
+    body = await request.json()
+    preset_id = str(uuid.uuid4())[:8]
+    now = time.time()
+    def _insert():
+        conn = _presets_db()
+        try:
+            conn.execute(
+                "INSERT INTO presets (id, tab, name, settings, created_at) VALUES (?, ?, ?, ?, ?)",
+                (preset_id, body.get("tab", ""), body.get("name", "Preset"), _json_std.dumps(body.get("settings", {})), now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    await asyncio.to_thread(_insert)
+    return {"id": preset_id, "tab": body.get("tab", ""), "name": body.get("name", "Preset"), "settings": body.get("settings", {}), "created_at": now}
+
+
+@app.delete("/api/presets/{preset_id}")
+async def preset_delete(preset_id: str):
+    def _delete():
+        conn = _presets_db()
+        try:
+            conn.execute("DELETE FROM presets WHERE id = ?", (preset_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    await asyncio.to_thread(_delete)
+    return {"ok": True}
+
+
+# ── Gallery (WS2) ────────────────────────────────────────────────────────────
+
+_GALLERY_DB = APP_DIR / "gallery.db"
+
+def _gallery_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(_GALLERY_DB), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS gallery (
+            id TEXT PRIMARY KEY,
+            tab TEXT,
+            url TEXT,
+            thumbnail TEXT,
+            prompt TEXT,
+            model TEXT,
+            seed INTEGER,
+            metadata TEXT,
+            favorite INTEGER DEFAULT 0,
+            created_at REAL
+        )""")
+    conn.commit()
+    return conn
+
+
+def _row_to_dict(row) -> dict:
+    d = dict(row)
+    try:
+        d["metadata"] = _json_std.loads(d.get("metadata") or "{}")
+    except Exception:
+        d["metadata"] = {}
+    d["favorite"] = bool(d.get("favorite"))
+    return d
+
+
+@app.get("/api/gallery")
+async def gallery_list(tab: str = "", search: str = "", favorite: bool = False):
+    def _query():
+        conn = _gallery_db()
+        try:
+            clauses, params = [], []
+            if tab:
+                clauses.append("tab = ?"); params.append(tab)
+            if search:
+                clauses.append("(prompt LIKE ? OR model LIKE ?)"); params += [f"%{search}%", f"%{search}%"]
+            if favorite:
+                clauses.append("favorite = 1")
+            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(f"SELECT * FROM gallery {where} ORDER BY created_at DESC LIMIT 500", params).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+    items = await asyncio.to_thread(_query)
+    return {"items": items}
+
+
+@app.post("/api/gallery")
+async def gallery_create(request: Request):
+    body = await request.json()
+    item_id = str(uuid.uuid4())[:8]
+    now = time.time()
+    metadata = body.get("metadata", {})
+    def _insert():
+        conn = _gallery_db()
+        try:
+            conn.execute("""
+                INSERT INTO gallery (id, tab, url, thumbnail, prompt, model, seed, metadata, favorite, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+                item_id,
+                body.get("tab", ""),
+                body.get("url", ""),
+                body.get("thumbnail", ""),
+                body.get("prompt") or metadata.get("prompt", ""),
+                body.get("model")  or metadata.get("model", ""),
+                body.get("seed")   or metadata.get("seed"),
+                _json_std.dumps(metadata),
+                int(bool(body.get("favorite", False))),
+                now,
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+    await asyncio.to_thread(_insert)
+    return {
+        "id": item_id, "tab": body.get("tab", ""), "url": body.get("url", ""),
+        "thumbnail": body.get("thumbnail", ""), "prompt": body.get("prompt", ""),
+        "metadata": metadata, "favorite": False, "created_at": now,
+    }
+
+
+@app.patch("/api/gallery/{item_id}")
+async def gallery_update(item_id: str, request: Request):
+    body = await request.json()
+    def _update():
+        conn = _gallery_db()
+        try:
+            fields = []
+            params = []
+            if "favorite" in body:
+                fields.append("favorite = ?"); params.append(int(bool(body["favorite"])))
+            if "prompt" in body:
+                fields.append("prompt = ?"); params.append(body["prompt"])
+            if not fields:
+                return
+            params.append(item_id)
+            conn.execute(f"UPDATE gallery SET {', '.join(fields)} WHERE id = ?", params)
+            conn.commit()
+        finally:
+            conn.close()
+    await asyncio.to_thread(_update)
+    return {"ok": True}
+
+
+@app.delete("/api/gallery/{item_id}")
+async def gallery_delete(item_id: str):
+    def _delete():
+        conn = _gallery_db()
+        try:
+            conn.execute("DELETE FROM gallery WHERE id = ?", (item_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    await asyncio.to_thread(_delete)
+    return {"ok": True}
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

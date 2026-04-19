@@ -18,14 +18,6 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":7860 " ^| findstr "LISTENIN
 :: ── Install/update deps silently ─────────────────────────────────────────────
 pip install -q -r requirements.txt >> logs\server.log 2>&1
 
-:: ── Start Forge hidden if needed ─────────────────────────────────────────────
-python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7861/sdapi/v1/samplers', timeout=2)" >nul 2>&1
-if errorlevel 1 (
-    if exist "C:\forge\webui-user.bat" (
-        echo [%TIME%] Starting Forge SD hidden >> logs\server.log
-        start "" wscript.exe //nologo "%~dp0forge-start-hidden.vbs"
-    )
-)
 
 :: ── Run the server (blocks until server exits) ────────────────────────────────
 :: python.exe inherits the hidden console — no new window appears.

@@ -144,33 +144,44 @@ def interrupt() -> bool:
 
 def build_adetailer_args(
     enabled: bool = True,
+    sweeps: list | None = None,
+    # Legacy single-model params kept for backward compatibility
     model: str = "face_yolov8n.pt",
     confidence: float = 0.3,
     mask_blur: int = 4,
     denoising_strength: float = 0.4,
 ) -> dict:
-    """Build alwayson_scripts entry for ADetailer.
+    """Build alwayson_scripts entry for ADetailer. Supports 1–4 sweeps.
 
-    ADetailer auto-detects faces/hands and applies targeted inpainting.
+    Each sweep dict may contain:
+      model, confidence, mask_blur, denoise, inpaint_only_masked, padding,
+      min_ratio, max_ratio, prompt, negative_prompt
     """
     if not enabled:
         return {}
-    return {
-        "ADetailer": {
-            "args": [
-                True,   # enabled
-                False,  # skip_img2img
-                {
-                    "ad_model": model,
-                    "ad_confidence": confidence,
-                    "ad_mask_blur": mask_blur,
-                    "ad_denoising_strength": denoising_strength,
-                    "ad_inpaint_only_masked": True,
-                    "ad_inpaint_only_masked_padding": 32,
-                }
-            ]
+    if not sweeps:
+        sweeps = [{
+            "model": model, "confidence": confidence,
+            "mask_blur": mask_blur, "denoise": denoising_strength,
+        }]
+    args = [True, False]  # enabled, skip_img2img
+    for s in sweeps[:4]:
+        cfg = {
+            "ad_model":                    s.get("model",      "face_yolov8n.pt"),
+            "ad_confidence":               float(s.get("confidence", 0.3)),
+            "ad_mask_blur":                int(s.get("mask_blur",   4)),
+            "ad_denoising_strength":       float(s.get("denoise",   0.4)),
+            "ad_inpaint_only_masked":      bool(s.get("inpaint_only_masked", True)),
+            "ad_inpaint_only_masked_padding": int(s.get("padding",  32)),
+            "ad_mask_min_ratio":           float(s.get("min_ratio", 0.0)),
+            "ad_mask_max_ratio":           float(s.get("max_ratio", 1.0)),
         }
-    }
+        if s.get("prompt"):
+            cfg["ad_prompt"] = s["prompt"]; cfg["ad_use_prompt"] = True
+        if s.get("negative_prompt"):
+            cfg["ad_negative_prompt"] = s["negative_prompt"]; cfg["ad_use_negative_prompt"] = True
+        args.append(cfg)
+    return {"ADetailer": {"args": args}}
 
 
 def build_forge_couple_args(
@@ -246,8 +257,8 @@ def txt2img(
     prompt: str,
     negative_prompt: str = "",
     # Core
-    width: int = 1024,
-    height: int = 1024,
+    width: int = 1440,
+    height: int = 810,
     steps: int = 25,
     sampler_name: str = "DPM++ 2M SDE",
     scheduler: str = "Karras",
@@ -322,8 +333,8 @@ def img2img(
     negative_prompt: str = "",
     denoising_strength: float = 0.5,
     # Core
-    width: int = 1024,
-    height: int = 1024,
+    width: int = 1440,
+    height: int = 810,
     steps: int = 25,
     sampler_name: str = "DPM++ 2M SDE",
     scheduler: str = "Karras",

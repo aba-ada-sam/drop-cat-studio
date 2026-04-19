@@ -298,8 +298,8 @@ def make_logo(size=512):
     f_title    = load_font("Impact.ttf",        int(size*0.092))
     f_sub      = load_font("ArialBd.ttf",       int(size*0.052))
     f_tiny     = load_font("ArialBd.ttf",       int(size*0.038))
-    f_italic   = load_font("Ariali.ttf",        int(size*0.040))
-    f_ital_sm  = load_font("Ariali.ttf",        int(size*0.032))
+    f_italic   = load_font("Georgiab.ttf",       int(size*0.040))
+    f_ital_sm  = load_font("Georgiab.ttf",       int(size*0.032))
 
     # ── "Andrew's" banner scroll ──
     banner_y  = m + int(size * 0.115)
@@ -396,9 +396,26 @@ ico_frames[0].save(
 )
 print("  favicon.ico  (multi-size: 16 32 48 64 128 256)")
 
-# Also write a copy directly into the project root for Windows to pick up
-shutil.copy(os.path.join(STATIC, "favicon.ico"),
-            os.path.join(os.path.dirname(STATIC), "dropcat.ico"))
-print("  dropcat.ico  (project root — drag onto taskbar/desktop)")
+# ── Desktop icon: red circle with DCG monogram ──────────────────────────────
+
+def make_dcg_icon(size=256):
+    """Simple red circle with white DCG text — for desktop shortcut."""
+    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    RED  = (180, 20, 30)
+    pad  = max(1, size // 32)
+    draw.ellipse([pad, pad, size - pad, size - pad], fill=RED)
+    font_size = int(size * 0.46)
+    font = load_font("Impact.ttf", font_size)
+    draw.text((size // 2, size // 2), "DCG", font=font, fill=(255, 255, 255), anchor="mm")
+    return img
+
+# Save a high-res source and let Pillow auto-downscale into multi-size ICO
+make_dcg_icon(256).save(
+    os.path.join(os.path.dirname(STATIC), "dropcat.ico"),
+    format="ICO",
+    sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+)
+print("  dropcat.ico  (red circle DCG — desktop shortcut)")
 
 print("\nDone.")
