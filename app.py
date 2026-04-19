@@ -34,7 +34,7 @@ from core.ffmpeg_utils import ffmpeg_available
 from core.hw_encoders import detect_encoders, best_encoder
 from core.job_manager import JobManager
 from core.llm_client import LLMClient
-from core.llm_router import LLMRouter
+from core.llm_router import LLMRouter, TIER_BALANCED
 from services import manager as svc
 
 # ── Logging setup ────────────────────────────────────────────────────────────
@@ -582,6 +582,122 @@ async def system_info():
         "services": svc.get_status(),
     }
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
+
+
+# ── AI intent (palette-driven) ───────────────────────────────────────────────
+
+_AI_INTENT_TABS: dict[str, dict] = {
+    "sd-prompts": {
+        "schema": "steps (4-60), cfg (1-20), width/height (512-2048), sampler (str), scheduler (str), seed (int, -1 for random), prompt_append (str: extra tags to append), negative_append (str), smart_wildcards (bool), regional (bool), regions_n (1-4)",
+        "system": (
+            "You are a studio-control assistant. The user is on the SD Prompts tab. "
+            "Convert their free-text request into a JSON mutation of the current settings. "
+            "Output ONE json fenced block, nothing else. "
+            "Keys allowed: steps, cfg, width, height, sampler, scheduler, seed, prompt_append, negative_append, smart_wildcards, regional, regions_n. "
+            "Only include keys that need to change. "
+            "prompt_append is comma-separated tags (no sentences) to add to the current prompt; "
+            "negative_append same for the negative. "
+            "If the user asks for more variety, turn smart_wildcards on. "
+            "If the user asks for regional/Forge Couple, set regional:true and optionally regions_n. "
+            "Output: ```json\\n{\"reply\": \"<one short sentence>\", \"settings\": {...}}\\n```"
+        ),
+    },
+    "fun-videos": {
+        "schema": "prompt_append (str), steps (4-50), guidance (1-20), duration_sec (2-10)",
+        "system": (
+            "You are a studio-control assistant. The user is on the Create Videos tab (WanGP I2V/T2V). "
+            "Convert their free-text request into a JSON mutation of current settings. "
+            "Output ONE json fenced block, nothing else. "
+            "Keys allowed: prompt_append, steps, guidance, duration_sec. "
+            "prompt_append is comma-separated motion/style tags to append. "
+            "Output: ```json\\n{\"reply\": \"<one short sentence>\", \"settings\": {...}}\\n```"
+        ),
+    },
+    "bridges": {
+        "schema": "transition_mode (one of: cinematic, continuity, kinetic, surreal, meld, morph, shape_match, fade), creativity (0-1), bridge_length (2-10)",
+        "system": (
+            "You are a studio-control assistant. The user is on the Video Bridges tab. "
+            "Convert their free-text request into a JSON mutation of current settings. "
+            "Output ONE json fenced block, nothing else. "
+            "Keys allowed: transition_mode, creativity, bridge_length. "
+            "transition_mode must be one of: cinematic, continuity, kinetic, surreal, meld, morph, shape_match, fade. "
+            "Output: ```json\\n{\"reply\": \"<one short sentence>\", \"settings\": {...}}\\n```"
+        ),
+    },
+}
+
+
+def _parse_intent_json(raw: str) -> dict:
+    """Extract {reply, settings} from a fenced or bare JSON block."""
+    import re as _re
+    if not raw:
+        return {}
+    cleaned = _re.sub(r"<think>[\s\S]*?</think>\s*", "", raw).strip()
+    m = _re.search(r"```json\s*([\s\S]*?)\s*```", cleaned, _re.IGNORECASE)
+    candidate = m.group(1) if m else (cleaned if cleaned.startswith("{") else None)
+    if not candidate:
+        m2 = _re.search(r"\{[\s\S]*\}", cleaned)
+        if not m2:
+            return {}
+        candidate = m2.group(0)
+    try:
+        return _json_std.loads(candidate)
+    except Exception:
+        try:
+            return _json_std.loads(_re.sub(r",(\s*[}\]])", r"\1", candidate))
+        except Exception:
+            return {}
+
+
+@app.post("/api/ai-intent")
+async def ai_intent(request: Request):
+    """Natural-language settings mutation for a given tab.
+
+    Body: {tab, query, context}. Returns {reply, settings, provider_used}.
+    Settings is a dict the tab-side applier uses to mutate controls.
+    """
+    body = await request.json()
+    tab = (body.get("tab") or "").strip()
+    query = (body.get("query") or "").strip()
+    context = body.get("context") or {}
+    if not query:
+        raise HTTPException(400, "query required")
+    tab_cfg = _AI_INTENT_TABS.get(tab)
+    if not tab_cfg:
+        raise HTTPException(400, f"unknown tab: {tab!r}")
+
+    ctx_dump = _json_std.dumps(context, indent=2, default=str)[:2000]
+    user_msg = (
+        f"CURRENT SETTINGS:\n{ctx_dump}\n\n"
+        f"VALID KEYS AND RANGES: {tab_cfg['schema']}\n\n"
+        f"USER REQUEST: {query}"
+    )
+
+    llm = get_llm_router()
+    try:
+        raw = await asyncio.to_thread(
+            llm.route,
+            [{"role": "user", "content": user_msg}],
+            tier=TIER_BALANCED,
+            max_tokens=500,
+            system=tab_cfg["system"],
+        )
+    except Exception as e:
+        log.exception("ai-intent failed")
+        raise HTTPException(500, f"ai-intent failed: {e}")
+
+    parsed = _parse_intent_json(raw)
+    settings = parsed.get("settings")
+    if not isinstance(settings, dict):
+        settings = {}
+    reply = (parsed.get("reply") or "").strip() or "Adjusted."
+
+    try:
+        provider_used = llm._provider(None)  # noqa: SLF001
+    except Exception:
+        provider_used = "auto"
+
+    return {"reply": reply, "settings": settings, "provider_used": provider_used}
 
 
 # ── Feature routers ──────────────────────────────────────────────────────────

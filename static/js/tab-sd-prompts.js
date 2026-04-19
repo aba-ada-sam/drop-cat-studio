@@ -1174,4 +1174,39 @@ function buildStep1Panel(ctx) {
     toast('Prompt loaded — hit Generate', 'success');
     statusMsg.textContent = 'Ready — hit Generate.';
   });
+
+  // ── Palette-driven AI intent ──────────────────────────────────────────
+  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+    registerTabAI('sd-prompts', {
+      getContext: () => ({
+        prompt: baseTA.value,
+        width: parseInt(wIn.value) || 0,
+        height: parseInt(hIn.value) || 0,
+        steps: Number(stepsSlider.value) || 0,
+        cfg: Number(cfgSlider.value) || 0,
+        sampler: samplerSel.value,
+        scheduler: schedSel.value,
+        seed: parseInt(seedIn.value) || -1,
+        regional: fcEnabled,
+        smart_wildcards: smartWc,
+      }),
+      applySettings: (s) => {
+        if (typeof s.steps === 'number')  stepsSlider.value = Math.max(1, Math.min(60, s.steps));
+        if (typeof s.cfg === 'number')    cfgSlider.value   = Math.max(1, Math.min(20, s.cfg));
+        if (typeof s.width === 'number')  wIn.value = Math.max(64, Math.min(5120, s.width));
+        if (typeof s.height === 'number') hIn.value = Math.max(64, Math.min(5120, s.height));
+        if (typeof s.sampler === 'string')   samplerSel.value   = s.sampler;
+        if (typeof s.scheduler === 'string') schedSel.value     = s.scheduler;
+        if (typeof s.seed === 'number')      seedIn.value       = s.seed;
+        if (typeof s.prompt_append === 'string' && s.prompt_append.trim()) {
+          const cur = baseTA.value.trim();
+          baseTA.value = cur ? `${cur}, ${s.prompt_append.trim()}` : s.prompt_append.trim();
+        }
+        if (typeof s.smart_wildcards === 'boolean') applySmartWc(s.smart_wildcards);
+        if (typeof s.regional === 'boolean' && s.regional !== fcEnabled) {
+          applyShape(s.regional ? 'regional' : 'single', { fromUser: true });
+        }
+      },
+    });
+  }).catch(() => {});
 }

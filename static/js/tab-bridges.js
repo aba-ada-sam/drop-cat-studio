@@ -325,6 +325,26 @@ export function init(panel) {
   });
 
   player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; lastOutputPath = null; items = []; renderItems(); });
+
+  // ── Palette-driven AI intent ──────────────────────────────────────────
+  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+    registerTabAI('bridges', {
+      getContext: () => ({
+        transition_mode: activeMode,
+        creativity:     Number(creativity.value) || 0,
+        bridge_length:  Number(duration.value)   || 0,
+        steps:          Number(steps.value)      || 0,
+      }),
+      applySettings: (s) => {
+        if (typeof s.transition_mode === 'string' && modeBtns[s.transition_mode]) {
+          modeBtns[s.transition_mode].click();
+        }
+        if (typeof s.creativity === 'number')    creativity.value = Math.max(1, Math.min(10, s.creativity <= 1 ? s.creativity * 10 : s.creativity));
+        if (typeof s.bridge_length === 'number') duration.value   = Math.max(3, Math.min(20, s.bridge_length));
+        if (typeof s.steps === 'number')         steps.value      = Math.max(4, Math.min(50, s.steps));
+      },
+    });
+  }).catch(() => {});
 }
 
 export function receiveHandoff(_data) {

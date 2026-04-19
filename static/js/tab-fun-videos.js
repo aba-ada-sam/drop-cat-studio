@@ -315,4 +315,25 @@ export function init(panel) {
   i2vBtn.addEventListener('click', () => setMode('i2v'));
   t2vBtn.addEventListener('click', () => setMode('t2v'));
   setMode('i2v');
+
+  // ── Palette-driven AI intent ──────────────────────────────────────────
+  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+    registerTabAI('fun-videos', {
+      getContext: () => ({
+        prompt: promptTA.value,
+        steps: Number(stepsSlider.value) || 0,
+        guidance: Number(guidanceSlider.value) || 0,
+        duration_sec: Number(durSlider.value) || 0,
+      }),
+      applySettings: (s) => {
+        if (typeof s.steps === 'number')        stepsSlider.value    = Math.max(4, Math.min(50, s.steps));
+        if (typeof s.guidance === 'number')     guidanceSlider.value = Math.max(1, Math.min(20, s.guidance));
+        if (typeof s.duration_sec === 'number') durSlider.value      = Math.max(2, Math.min(20, s.duration_sec));
+        if (typeof s.prompt_append === 'string' && s.prompt_append.trim()) {
+          const cur = promptTA.value.trim();
+          promptTA.value = cur ? `${cur}, ${s.prompt_append.trim()}` : s.prompt_append.trim();
+        }
+      },
+    });
+  }).catch(() => {});
 }

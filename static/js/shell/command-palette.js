@@ -1,11 +1,15 @@
 /**
  * Drop Cat Go Studio -- Command palette (WS1 + WS9).
  * Ctrl+K to open. Fuzzy search across tabs, actions, presets.
+ * Free-text queries also surface an "Ask AI" row that sends the query to
+ * /api/ai-intent for the active tab.
  */
+import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419e';
 
 const _items = [];
 let _selected = 0;
 let _filtered = [];
+let _lastQuery = '';
 let _open = false;
 
 export function registerItem(item) {
@@ -36,9 +40,23 @@ export function isOpen() { return _open; }
 
 function _filter(query) {
   const q = query.toLowerCase().trim();
-  _filtered = q
+  _lastQuery = query.trim();
+  const matches = q
     ? _items.filter(i => i.label.toLowerCase().includes(q) || (i.hint || '').toLowerCase().includes(q) || (i.group || '').toLowerCase().includes(q))
     : _items;
+  // Append "Ask AI" pseudo-item when there's a query and the active tab has
+  // an AI applier registered. Ordered last so registered matches win on Enter.
+  if (q && activeTabHasApplier()) {
+    _filtered = [...matches, {
+      label: `Ask AI: "${_lastQuery}"`,
+      group: 'AI',
+      icon: '&#10022;',  // ✦
+      hint: 'Natural-language tweak for this tab',
+      action: () => askAI(_lastQuery),
+    }];
+  } else {
+    _filtered = matches;
+  }
   _selected = 0;
   _render();
 }
