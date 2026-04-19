@@ -30,3 +30,16 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local SQLite stores (auto-created on boot)
+*.db
+
+# Local planning / scratch notes (not part of shipped docs)
+RESTART_ME.txt
+DIAGNOSE_FORGE.md
+FORGE_REDESIGN_ANALYSIS.md
+REDESIGN_INSPIRATION.md
+REVIEW.md
+UI_REFACTOR_SUMMARY.md
+UX_PLAN.md
+OPEN_CLAW_MACHINE_CAPABILITIES.md
