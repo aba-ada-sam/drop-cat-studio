@@ -8,6 +8,7 @@ import { init as initImports } from './tab-imports.js?v=20260419c';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419c';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260419c';
+import { init as initImageGen } from './tab-image-gen.js?v=20260419c';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419c';
 import { init as initVideoTools  } from './panel-video-tools.js?v=20260419c';
 import { init as initWildcards   } from './panel-wildcards.js?v=20260419c';
@@ -24,6 +25,7 @@ const TAB_INIT = {
   'fun-videos':  initFunVideos,
   'bridges':     initBridges,
   'sd-prompts':  initSdPrompts,
+  'image-gen':   initImageGen,
   'image2video': initImage2Video,
   'video-tools': initVideoTools,
   'wildcards':   initWildcards,
