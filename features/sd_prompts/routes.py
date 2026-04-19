@@ -472,11 +472,12 @@ async def enhance_prompt(request: Request):
         raise HTTPException(500, f"enhance failed: {e}")
 
     # Persist any LLM-invented wildcards to disk so subsequent /forge/txt2img
-    # expands them. Namespaced under ai-generated/ for easy pruning later.
+    # expands them. Flat layout — filename stem becomes the __token__ the LLM
+    # already embedded in the prompt. Subfolder would mangle the token path.
     created = result.get("create_wildcards") or []
     persisted: list[dict] = []
     if created and wc_dir:
-        target_dir = Path(wc_dir) / "ai-generated"
+        target_dir = Path(wc_dir)
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             for wc_item in created:
@@ -485,16 +486,32 @@ async def enhance_prompt(request: Request):
                 if not name or not entries:
                     continue
                 fpath = target_dir / f"{name}.txt"
-                fpath.write_text("\n".join(entries) + "\n", encoding="utf-8")
+                # Don't clobber an existing wildcard silently — append with dedupe
+                # so a repeated "add wildcard" call grows the pool instead of
+                # replacing Andrew's curated entries.
+                existing: list[str] = []
+                if fpath.exists():
+                    existing = [
+                        ln.strip() for ln in fpath.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if ln.strip() and not ln.strip().startswith("#")
+                    ]
+                seen = {e.lower() for e in existing}
+                merged = list(existing)
+                for e in entries:
+                    if e.lower() not in seen:
+                        merged.append(e)
+                        seen.add(e.lower())
+                fpath.write_text("\n".join(merged) + "\n", encoding="utf-8")
                 persisted.append({
                     "name": name,
-                    "token": f"__ai-generated_{name}__",
-                    "count": len(entries),
+                    "token": f"__{name}__",
+                    "count": len(merged),
+                    "added": len(merged) - len(existing),
                     "path": str(fpath),
                 })
             if persisted:
                 invalidate_cache()
-                log.info("smart wildcards: created %d wildcard file(s) in %s", len(persisted), target_dir)
+                log.info("smart wildcards: created/extended %d wildcard file(s) in %s", len(persisted), target_dir)
         except Exception as e:
             log.warning("smart wildcards: persist failed (%s)", e)
 

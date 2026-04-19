@@ -524,6 +524,14 @@ AVAILABLE WILDCARDS (token  --  a few sample entries):
 
 Aim for 1-3 wildcard tokens in a typical prompt. Do not stuff every tag.
 Tokens slot into the tag list like any other tag: "(subject), __mood__, __camera__, detail".
+When regional mode is active, tokens inside regions are expanded INDEPENDENTLY per region —
+putting __mood__ in each region column is fine and produces per-region variety.
+
+STRICT TOKEN RULE: Every __token__ you write MUST satisfy one of:
+  (a) It appears verbatim in the AVAILABLE WILDCARDS list above, OR
+  (b) You emit it in a `create_wildcards` entry in this same response.
+NEVER invent a __token__ that is neither in the catalog nor in your create_wildcards list —
+the server cannot expand unknown tokens and they will ship to the image model as literal text.
 
 Only INVENT new wildcards when the user's idea EXPLICITLY asks for it with phrases like
 "add a wildcard for X", "new wildcard", "create wildcards", "I need variety in Y".
@@ -533,6 +541,7 @@ When you do, include an extra JSON key:
   ]
 Rules for new wildcards:
 - name: lowercase snake_case, matching the __token__ you used in the prompt
+  (token "__robot_type__" -> name "robot_type")
 - entries: at least 8, each 1-6 words, comma-free
 - Do NOT include this key if the user did not ask for new wildcards.
 """
