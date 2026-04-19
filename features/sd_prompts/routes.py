@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from core import config as cfg
-from core.wildcards import discover_filesystem_wildcards, expand as wc_expand, invalidate_cache
+from core.wildcards import discover_filesystem_wildcards, expand as wc_expand, get_all as wc_get_all, invalidate_cache
 from features.sd_prompts.prompt_engine import (
     AVAILABLE_MODELS,
     enhance_idea,
@@ -420,6 +420,21 @@ async def enhance_prompt(request: Request):
 
     provider = (body.get("provider") or "local").strip().lower()
     allow_rrated = bool(body.get("allow_rrated", False))
+    smart_wildcards = bool(body.get("smart_wildcards", False))
+
+    # Build the wildcard catalog once if smart mode is on — the LLM uses this
+    # to prefer existing tokens over inventing new ones.
+    wildcard_catalog: dict | None = None
+    wc_dir = cfg.get("sd_wildcards_dir") or ""
+    if smart_wildcards:
+        try:
+            all_wc = wc_get_all(wc_dir)
+            # Keep it bounded — no more than 40 tokens, most useful ones first
+            # (we pass through in insertion order; _enhance_system truncates to 40).
+            wildcard_catalog = {k: v for k, v in all_wc.items() if v}
+        except Exception as e:
+            log.warning("smart wildcards: catalog build failed (%s) — continuing without", e)
+            wildcard_catalog = None
 
     force: str | None = None
     if provider == "cloud":
@@ -447,6 +462,8 @@ async def enhance_prompt(request: Request):
             regions_n=regions_n,
             suffix=suffix,
             force_provider=force,
+            smart_wildcards=smart_wildcards,
+            wildcard_catalog=wildcard_catalog,
         )
     except ValueError as ve:
         raise HTTPException(400, str(ve))
@@ -454,6 +471,34 @@ async def enhance_prompt(request: Request):
         log.exception("enhance_prompt failed")
         raise HTTPException(500, f"enhance failed: {e}")
 
+    # Persist any LLM-invented wildcards to disk so subsequent /forge/txt2img
+    # expands them. Namespaced under ai-generated/ for easy pruning later.
+    created = result.get("create_wildcards") or []
+    persisted: list[dict] = []
+    if created and wc_dir:
+        target_dir = Path(wc_dir) / "ai-generated"
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for wc_item in created:
+                name = wc_item.get("name")
+                entries = wc_item.get("entries") or []
+                if not name or not entries:
+                    continue
+                fpath = target_dir / f"{name}.txt"
+                fpath.write_text("\n".join(entries) + "\n", encoding="utf-8")
+                persisted.append({
+                    "name": name,
+                    "token": f"__ai-generated_{name}__",
+                    "count": len(entries),
+                    "path": str(fpath),
+                })
+            if persisted:
+                invalidate_cache()
+                log.info("smart wildcards: created %d wildcard file(s) in %s", len(persisted), target_dir)
+        except Exception as e:
+            log.warning("smart wildcards: persist failed (%s)", e)
+
+    result["created_wildcards"] = persisted
     result["allow_rrated"] = allow_rrated
     return result
 

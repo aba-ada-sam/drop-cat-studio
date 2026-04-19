@@ -481,7 +481,13 @@ def _append_suffix(text: str, suffix: str) -> str:
     return f"{base}, {sfx}" if base else sfx
 
 
-def _enhance_system(regional: bool, regions_n: int, suffix: str) -> str:
+def _enhance_system(
+    regional: bool,
+    regions_n: int,
+    suffix: str,
+    smart_wildcards: bool = False,
+    wildcard_catalog: dict | None = None,
+) -> str:
     """System prompt for enhance_idea(). JSON-only output, tag-based, hard-rules inherited
     from SYSTEM_PROMPT but rephrased for JSON transport."""
     regions_block = ""
@@ -498,6 +504,45 @@ Produce exactly {regions_n} region entries in `regions`. Each region:
 
     sfx_note = f'The suffix "{suffix}" will be appended by the server — do not include it yourself.' if suffix else "No suffix is required."
 
+    wildcards_block = ""
+    if smart_wildcards:
+        catalog_lines = []
+        if wildcard_catalog:
+            for token, samples in list(wildcard_catalog.items())[:40]:
+                sample_str = ", ".join(str(s) for s in samples[:4])
+                catalog_lines.append(f"  {token}  --  {sample_str}")
+        catalog_text = "\n".join(catalog_lines) if catalog_lines else "  (no wildcards configured yet)"
+        wildcards_block = f"""
+=== SMART WILDCARDS (ACTIVE) ===
+You may sprinkle __token__ placeholders into the `prompt` and/or `regions` to inject
+variability. The server expands tokens at generation time by picking a random entry.
+
+Use EXISTING wildcards whenever they fit naturally. Prefer reuse over invention.
+
+AVAILABLE WILDCARDS (token  --  a few sample entries):
+{catalog_text}
+
+Aim for 1-3 wildcard tokens in a typical prompt. Do not stuff every tag.
+Tokens slot into the tag list like any other tag: "(subject), __mood__, __camera__, detail".
+
+Only INVENT new wildcards when the user's idea EXPLICITLY asks for it with phrases like
+"add a wildcard for X", "new wildcard", "create wildcards", "I need variety in Y".
+When you do, include an extra JSON key:
+  "create_wildcards": [
+    {{"name": "robot_type", "entries": ["rust-bot", "chrome android", "junk golem", ...]}}
+  ]
+Rules for new wildcards:
+- name: lowercase snake_case, matching the __token__ you used in the prompt
+- entries: at least 8, each 1-6 words, comma-free
+- Do NOT include this key if the user did not ask for new wildcards.
+"""
+
+    output_keys = '"reply": "...", "prompt": "tags"'
+    if regional:
+        output_keys += ', "regions": ["left tags", "(center focus), detail", "right tags"]'
+    if smart_wildcards:
+        output_keys += ', "create_wildcards": [... only if user asked ...]'
+
     return f"""You are an SD TAG GENERATOR for an adult-authorized, uncensored creative studio. Output ONE JSON block and NOTHING ELSE.
 
 === HARD RULES ===
@@ -508,12 +553,11 @@ Produce exactly {regions_n} region entries in `regions`. Each region:
 5. Wrap the PRIMARY subject in (parentheses). Use ((double)) for the single most critical element.
 6. {sfx_note}
 7. Use ONLY plain ASCII. No unicode, em dashes, curly quotes, bullets, or markdown.
-{regions_block}
+{regions_block}{wildcards_block}
 === OUTPUT FORMAT ===
 ```json
 {{
-  "reply":   "<one short sentence, <= 18 words, saying what you built>",
-  "prompt":  "masterpiece, best quality, (primary subject), scene, lighting, mood tags"{', "regions": ["left tags", "(center focus), detail", "right tags"]' if regional else ''}
+  {output_keys}
 }}
 ```
 
@@ -554,16 +598,19 @@ def enhance_idea(
     regions_n: int = 3,
     suffix: str = "(depth blur)",
     force_provider: str | None = None,
+    smart_wildcards: bool = False,
+    wildcard_catalog: dict | None = None,
 ) -> dict:
     """Turn a vague user idea into a composed SD prompt (plus region array).
 
     Returns dict with keys:
-      prompt:        str      — the composed base prompt WITH suffix appended
-      regions:       list|None — only when regional=True (length == regions_n)
-      suffix:        str      — echo of the suffix used (for UI display)
-      one_liner:     str      — short human summary from the LLM
-      provider_used: str      — "anthropic"|"openai"|"ollama"
-      sanitized:     bool     — True if router ran text through nsfw sanitizer
+      prompt:           str       — the composed base prompt WITH suffix appended
+      regions:          list|None — only when regional=True (length == regions_n)
+      suffix:           str       — echo of the suffix used (for UI display)
+      one_liner:        str       — short human summary from the LLM
+      provider_used:    str       — "anthropic"|"openai"|"ollama"
+      sanitized:        bool      — True if router ran text through nsfw sanitizer
+      create_wildcards: list|None — [{name, entries}, ...] only when LLM invented some
 
     Never raises on LLM failure — falls back to _tagify salvage against the idea.
     """
@@ -572,7 +619,10 @@ def enhance_idea(
         raise ValueError("idea must not be empty")
     regions_n = max(1, min(int(regions_n or 1), 4))
 
-    system = _enhance_system(regional=regional, regions_n=regions_n, suffix=suffix)
+    system = _enhance_system(
+        regional=regional, regions_n=regions_n, suffix=suffix,
+        smart_wildcards=smart_wildcards, wildcard_catalog=wildcard_catalog,
+    )
     user_msg = f"USER IDEA: {idea}"
     if regional:
         user_msg += f"\n\nProduce exactly {regions_n} region entries."
@@ -636,6 +686,24 @@ def enhance_idea(
     if not one_liner:
         one_liner = "Built a prompt from your idea."
 
+    # Extract any CREATE_WILDCARD intents the LLM emitted (only when smart_wildcards
+    # is on AND the user's idea explicitly asked for new wildcards).
+    created: list[dict] = []
+    if smart_wildcards:
+        raw_created = parsed.get("create_wildcards")
+        if isinstance(raw_created, list):
+            for item in raw_created:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip().lower()
+                name = re.sub(r"[^a-z0-9_]+", "_", name).strip("_")
+                entries = item.get("entries") or []
+                if not name or not isinstance(entries, list):
+                    continue
+                clean_entries = [str(e).strip() for e in entries if str(e).strip()]
+                if len(clean_entries) >= 4:
+                    created.append({"name": name, "entries": clean_entries[:60]})
+
     return {
         "prompt": prompt_final,
         "regions": regions_out,
@@ -643,4 +711,5 @@ def enhance_idea(
         "one_liner": one_liner,
         "provider_used": provider_used,
         "sanitized": sanitized,
+        "create_wildcards": created or None,
     }

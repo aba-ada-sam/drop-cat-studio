@@ -4,20 +4,20 @@
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
-import { init as initImports } from './tab-imports.js?v=20260419c';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419c';
-import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419c';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260419c';
-import { init as initImageGen } from './tab-image-gen.js?v=20260419c';
-import { init as initImage2Video } from './panel-image2video.js?v=20260419c';
-import { init as initVideoTools  } from './panel-video-tools.js?v=20260419c';
-import { init as initWildcards   } from './panel-wildcards.js?v=20260419c';
-import { consumeHandoff } from './handoff.js?v=20260419c';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419c';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419c';
-import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419c';
-import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260419c';
-import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260419c';
+import { init as initImports } from './tab-imports.js?v=20260419d';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419d';
+import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419d';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260419d';
+import { init as initImageGen } from './tab-image-gen.js?v=20260419d';
+import { init as initImage2Video } from './panel-image2video.js?v=20260419d';
+import { init as initVideoTools  } from './panel-video-tools.js?v=20260419d';
+import { init as initWildcards   } from './panel-wildcards.js?v=20260419d';
+import { consumeHandoff } from './handoff.js?v=20260419d';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419d';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419d';
+import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419d';
+import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260419d';
+import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260419d';
 
 // ── Tab module map ───────────────────────────────────────────────────────────
 const TAB_INIT = {

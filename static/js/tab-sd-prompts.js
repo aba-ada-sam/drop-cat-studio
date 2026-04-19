@@ -906,6 +906,7 @@ function buildStep1Panel(ctx) {
   let source    = _loadStep1('source',   'vague');     // "vague"  | "paste"
   let provider  = _loadStep1('provider', 'local');     // "local"  | "cloud"
   let rrated    = _loadStep1('rrated',   'false') === 'true';
+  let smartWc   = _loadStep1('smart_wildcards', 'true') === 'true';  // default ON
   const savedSuffix = _loadStep1('suffix', DEFAULT_SUFFIX);
 
   // Sync suffix input with saved value (keeps it consistent on tab re-entry)
@@ -930,6 +931,21 @@ function buildStep1Panel(ctx) {
   shapeSeg.appendChild(shapeBtnRegion);
   shapeRow.appendChild(shapeSeg);
   panel.appendChild(shapeRow);
+
+  // ── Row 1b: Smart wildcards ────────────────────────────────────────────
+  const wcRow = el('div', { class: 'step1-row' });
+  wcRow.appendChild(el('span', {
+    class: 'step1-label',
+    text: 'Smart wildcards',
+    title: 'When ON, the AI picks __wildcards__ from your library to add variety. Ask it to "add a wildcard for X" to create new ones automatically.',
+  }));
+  const wcSeg = el('div', { class: 'step1-seg', role: 'radiogroup', 'aria-label': 'Smart wildcards' });
+  const wcBtnOn  = el('button', { class: 'step1-seg-btn', type: 'button', text: 'On',  role: 'radio', title: 'AI uses existing wildcards and can create new ones when you ask' });
+  const wcBtnOff = el('button', { class: 'step1-seg-btn', type: 'button', text: 'Off', role: 'radio', title: 'Literal prompt, no __token__ placeholders' });
+  wcSeg.appendChild(wcBtnOn);
+  wcSeg.appendChild(wcBtnOff);
+  wcRow.appendChild(wcSeg);
+  panel.appendChild(wcRow);
 
   // ── Row 2: Source ──────────────────────────────────────────────────────
   const sourceRow = el('div', { class: 'step1-row' });
@@ -1059,10 +1075,17 @@ function buildStep1Panel(ctx) {
     rratedChk.disabled = newProvider !== 'cloud';
   }
 
+  function applySmartWc(on) {
+    smartWc = !!on;
+    setSeg(wcSeg, smartWc ? wcBtnOn : wcBtnOff);
+    _saveStep1('smart_wildcards', smartWc ? 'true' : 'false');
+  }
+
   // Initial application
   applyShape(shape);
   applySource(source);
   applyProvider(provider);
+  applySmartWc(smartWc);
 
   // ── Wire controls ──────────────────────────────────────────────────────
   shapeBtnSingle.addEventListener('click', () => applyShape('single', { fromUser: true }));
@@ -1071,6 +1094,8 @@ function buildStep1Panel(ctx) {
   sourceBtnPaste.addEventListener('click', () => applySource('paste'));
   provBtnLocal.addEventListener('click', () => applyProvider('local'));
   provBtnCloud.addEventListener('click', () => applyProvider('cloud'));
+  wcBtnOn.addEventListener('click', () => applySmartWc(true));
+  wcBtnOff.addEventListener('click', () => applySmartWc(false));
   rratedChk.addEventListener('change', () => {
     rrated = rratedChk.checked;
     _saveStep1('rrated', rrated ? 'true' : 'false');
@@ -1098,6 +1123,7 @@ function buildStep1Panel(ctx) {
           suffix: suffixMirror.value,
           provider,
           allow_rrated: rrated,
+          smart_wildcards: smartWc,
         }),
       });
       applyEnhanced({
@@ -1107,6 +1133,10 @@ function buildStep1Panel(ctx) {
       });
       const providerLabel = res.provider_used ? ` · via ${res.provider_used}${res.sanitized ? ' (sanitized)' : ''}` : '';
       toast(`${res.one_liner || 'Prompt ready'}${providerLabel}`, 'success', { duration: 7000 });
+      if (res.created_wildcards?.length) {
+        const names = res.created_wildcards.map(w => w.name).join(', ');
+        toast(`Created ${res.created_wildcards.length} new wildcard${res.created_wildcards.length > 1 ? 's' : ''}: ${names}`, 'info', { duration: 8000 });
+      }
       setBusy(false, 'Ready — hit Generate.');
       // Briefly pulse the Generate button to direct attention
       if (genBtn && !genBtn.disabled) {
