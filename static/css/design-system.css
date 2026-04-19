@@ -104,7 +104,6 @@ body {
   --rail-width: 200px;
   --rail-width-collapsed: 52px;
   --canvas-min-height: 300px;
-  --director-min-height: 280px;
   --split-ratio: 35%;
 
   /* ── Typography scaling (for ultrawide) ── */
@@ -1920,19 +1919,6 @@ textarea:focus { border-color: var(--accent); }
   min-width: 0;
   overflow: hidden;
 }
-
-/* Shell AI Director (PRIMARY interface, always visible) */
-#shell-director-wrap {
-  flex-shrink: 0;
-  min-height: var(--director-min-height);
-  border-top: 1px solid var(--border-2);
-  border-bottom: 1px solid var(--border-2);
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  overflow-y: auto;
-}
-/* No .open class logic needed — always visible */
 
 #split-pane {
   display: flex;

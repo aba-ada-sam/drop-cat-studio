@@ -629,7 +629,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Split pane
   initSplitPane();
 
-  // One-shot cleanup of legacy AI Director localStorage entries
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
