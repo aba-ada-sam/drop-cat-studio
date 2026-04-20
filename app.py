@@ -603,7 +603,7 @@ _AI_INTENT_TABS: dict[str, dict] = {
         ),
     },
     "fun-videos": {
-        "schema": "prompt_append (str), steps (4-50), guidance (1-20), duration_sec (2-10)",
+        "schema": "prompt_append (str, comma tags), steps (integer 4-50), guidance (1-20), duration_sec (seconds 2-20; 'slower' means LONGER duration, not shorter)",
         "system": (
             "You are a studio-control assistant. The user is on the Create Videos tab (WanGP I2V/T2V). "
             "Convert their free-text request into a JSON mutation of current settings. "
@@ -614,7 +614,7 @@ _AI_INTENT_TABS: dict[str, dict] = {
         ),
     },
     "bridges": {
-        "schema": "transition_mode (one of: cinematic, continuity, kinetic, surreal, meld, morph, shape_match, fade), creativity (0-1), bridge_length (2-10)",
+        "schema": "transition_mode (one of: cinematic, continuity, kinetic, surreal, meld, morph, shape_match, fade), creativity (integer 1-10, higher=wilder), bridge_length (seconds, 3-20), steps (integer 4-50)",
         "system": (
             "You are a studio-control assistant. The user is on the Video Bridges tab. "
             "Convert their free-text request into a JSON mutation of current settings. "
@@ -625,6 +625,20 @@ _AI_INTENT_TABS: dict[str, dict] = {
         ),
     },
 }
+
+
+_AI_INTENT_ALLOWED: dict[str, set[str]] = {
+    "sd-prompts": {
+        "steps", "cfg", "width", "height", "sampler", "scheduler", "seed",
+        "prompt_append", "negative_append", "smart_wildcards", "regional", "regions_n",
+    },
+    "fun-videos": {"prompt_append", "steps", "guidance", "duration_sec"},
+    "bridges":    {"transition_mode", "creativity", "bridge_length", "steps"},
+}
+
+
+def _allowed_intent_keys(tab: str) -> set[str]:
+    return _AI_INTENT_ALLOWED.get(tab, set())
 
 
 def _parse_intent_json(raw: str) -> dict:
@@ -687,10 +701,21 @@ async def ai_intent(request: Request):
         raise HTTPException(500, f"ai-intent failed: {e}")
 
     parsed = _parse_intent_json(raw)
-    settings = parsed.get("settings")
-    if not isinstance(settings, dict):
-        settings = {}
     reply = (parsed.get("reply") or "").strip() or "Adjusted."
+    # LLMs often skip the {reply, settings} wrapper and just emit the settings
+    # keys flat. Accept either shape: if there's a `settings` dict use it;
+    # otherwise treat the top-level JSON as the settings dict (sans `reply`).
+    settings_raw = parsed.get("settings")
+    if isinstance(settings_raw, dict):
+        settings = settings_raw
+    else:
+        settings = {k: v for k, v in parsed.items() if k != "reply"}
+    # Drop junk keys we don't accept for this tab — the JS applier ignores
+    # unknown keys too, but filtering server-side keeps the toast count honest.
+    allowed = _allowed_intent_keys(tab)
+    settings = {k: v for k, v in settings.items() if k in allowed}
+    if not settings:
+        log.warning("ai-intent: parsed no settings from LLM. raw=%r parsed=%r", (raw or "")[:400], parsed)
 
     try:
         provider_used = llm._provider(None)  # noqa: SLF001
