@@ -1,37 +1,33 @@
-' Drop Cat Go Studio - Silent Launcher
-' Runs launch-bg.bat in a hidden console (style=0), then polls until
-' the server is ready and opens Chrome. No visible windows at any point.
-' To see console output for debugging: use launch.bat instead.
+' Drop Cat Go Studio — Launcher
+' Starts manager.pyw (the tray manager) which handles everything:
+'   - keeps app.py alive and restarts it on crash
+'   - opens Chrome when the server is ready
+'   - shows tray icon with Open / Restart / Exit
 '
-' Port discovery: the server picks the first free port in 7860..7879 and
-' writes it to .dcs-port (JSON: {"port": N, "pid": P}). This script reads
-' the file to know which port to poll/open. If the file is missing (first
-' run, or the server hasn't written it yet), we probe 7860..7879 until
-' one responds.
+' If manager.pyw is already running (server already up), it just
+' opens Chrome directly without starting a second manager.
 
 Option Explicit
 
 Dim oShell, oFSO
 Set oShell = CreateObject("WScript.Shell")
 Set oFSO   = CreateObject("Scripting.FileSystemObject")
+
 Dim strDir : strDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
 Dim portFile : portFile = strDir & ".dcs-port"
 
-' Ports we'll probe if the port file is missing or stale.
 Const PORT_START = 7860
 Const PORT_END   = 7879
 
 ' ── Helpers ──────────────────────────────────────────────────────────────────
 
 Function ReadPortFromFile()
-    ' Returns the port the running server wrote, or 0 if file missing/bad.
     ReadPortFromFile = 0
     On Error Resume Next
     If Not oFSO.FileExists(portFile) Then Exit Function
-    Dim f : Set f = oFSO.OpenTextFile(portFile, 1) ' 1 = ForReading
+    Dim f : Set f = oFSO.OpenTextFile(portFile, 1)
     Dim txt : txt = f.ReadAll()
     f.Close
-    ' Minimal JSON parse — just extract "port": <digits>
     Dim re : Set re = New RegExp
     re.Pattern = """port""\s*:\s*(\d+)"
     Dim m : Set m = re.Execute(txt)
@@ -40,7 +36,6 @@ Function ReadPortFromFile()
 End Function
 
 Function ProbePort(port)
-    ' Returns True if http://127.0.0.1:<port>/api/system responds 200.
     ProbePort = False
     Dim http : Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
     On Error Resume Next
@@ -52,7 +47,7 @@ Function ProbePort(port)
 End Function
 
 Function FindRunningPort()
-    ' Try the port file first, then sweep the full range.
+    FindRunningPort = 0
     Dim filePort : filePort = ReadPortFromFile()
     If filePort > 0 Then
         If ProbePort(filePort) Then
@@ -67,38 +62,26 @@ Function FindRunningPort()
             Exit Function
         End If
     Next
-    FindRunningPort = 0
 End Function
 
-Sub OpenInChrome(port)
-    oShell.Run "chrome http://127.0.0.1:" & port, 1, False
-End Sub
-
-' ── Already-running check ────────────────────────────────────────────────────
-' If the server is already up, just open Chrome — no dialog, no questions.
+' ── If server is already running, open Chrome immediately ────────────────────
 
 Dim runningPort : runningPort = FindRunningPort()
 If runningPort > 0 Then
-    OpenInChrome runningPort
+    oShell.Run "chrome http://127.0.0.1:" & runningPort, 1, False
     WScript.Quit
 End If
 
-' ── Launch the background batch (hidden window, don't wait) ──────────────────
-oShell.Run "cmd /c """ & strDir & "launch-bg.bat""", 0, False
+' ── Start manager.pyw (hidden, detached) ─────────────────────────────────────
+' manager.pyw starts app.py, waits for it to be ready, then opens Chrome.
+' It also keeps app.py alive if it crashes.
 
-' ── Poll until any port in the range responds, then open Chrome ──────────────
-Dim tries : tries = 0
-Dim foundPort
-Do While tries < 90
-    WScript.Sleep 1000
-    tries = tries + 1
-    foundPort = FindRunningPort()
-    If foundPort > 0 Then
-        OpenInChrome foundPort
-        WScript.Quit
-    End If
-Loop
+Dim pythonw : pythonw = "pythonw.exe"
 
-' Timeout fallback — server didn't come up, open default port so the user
-' at least sees the browser error page instead of nothing happening.
-OpenInChrome PORT_START
+' Try to find pythonw.exe at Andrew's known Python 3.10 location
+Dim knownPythonw : knownPythonw = "C:\Users\andre\AppData\Local\Programs\Python\Python310\pythonw.exe"
+If oFSO.FileExists(knownPythonw) Then
+    pythonw = knownPythonw
+End If
+
+oShell.Run """" & pythonw & """ """ & strDir & "manager.pyw""", 0, False
