@@ -202,7 +202,10 @@ async function runSplash() {
     });
 
     setCheck('chk-server', 'loading', 'Connecting...');
-    const sys = await fetch('/api/system').then(r => r.json());
+    const _ctrl = new AbortController();
+    const _tid  = setTimeout(() => _ctrl.abort(), 12000);
+    const sys = await fetch('/api/system', { signal: _ctrl.signal }).then(r => r.json());
+    clearTimeout(_tid);
     setCheck('chk-server', 'ok', 'Server running');
     advanceHatOnce('server');
 

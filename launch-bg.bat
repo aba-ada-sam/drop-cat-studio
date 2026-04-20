@@ -27,10 +27,9 @@ if exist ".dcs-port" (
     del ".dcs-port" >nul 2>&1
 )
 
-:: ── Install/update deps silently ─────────────────────────────────────────────
-pip install -q -r requirements.txt >> logs\server.log 2>&1
-
 :: ── Run the server (blocks until server exits) ────────────────────────────────
+:: (deps are installed on first run via launch.bat or install.bat — skip here
+::  so the silent launcher doesn't add a 15-20s pip-check delay every start)
 :: python.exe inherits the hidden console — no new window appears.
 :: stdout/stderr go to server.log; important logs also go to logs/dropcat.log.
 echo [%TIME%] Starting python app.py >> logs\server.log
