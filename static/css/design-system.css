@@ -432,10 +432,11 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   white-space: normal;
 }
 
-/* ── Service pills (hidden from header, moved to sidebar) ────────────────────── */
+/* ── Service pills ─────────────────────────────────────────────────────────── */
 
 .service-pills {
-  display: none;  /* Hidden — services now in sidebar */
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
   background: transparent;
   border: none;

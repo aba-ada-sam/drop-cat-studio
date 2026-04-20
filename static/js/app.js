@@ -4,24 +4,26 @@
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
-import { init as initImports } from './tab-imports.js?v=20260419i';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419i';
-import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419i';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260419i';
-import { init as initImageGen } from './tab-image-gen.js?v=20260419i';
-import { init as initImage2Video } from './panel-image2video.js?v=20260419i';
-import { init as initVideoTools  } from './panel-video-tools.js?v=20260419i';
-import { init as initWildcards   } from './panel-wildcards.js?v=20260419i';
-import { consumeHandoff } from './handoff.js?v=20260419i';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419i';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419i';
-import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419i';
-import './shell/ai-intent.js?v=20260419i';
-import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260419i';
-import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260419i';
+import { init as initImports } from './tab-imports.js?v=20260419m';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
+import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260419o';
+import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
+import { init as initImageGen } from './tab-image-gen.js?v=20260419j';
+import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
+import { init as initVideoTools, receiveHandoff as videoToolsHandoff } from './panel-video-tools.js?v=20260419l';
+import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
+import { consumeHandoff } from './handoff.js?v=20260419j';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419j';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
+import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419j';
+import './shell/ai-intent.js?v=20260419j';
+import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260419j';
+import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260419j';
 
-// ── Tab module map ───────────────────────────────────────────────────────────
+// ── Tab module map ──────────────────────────────────────────────────────────
 const TAB_INIT = {
+  'pipeline':    initPipeline,
   'imports':     initImports,
   'fun-videos':  initFunVideos,
   'bridges':     initBridges,
@@ -32,13 +34,76 @@ const TAB_INIT = {
   'wildcards':   initWildcards,
 };
 const TAB_HANDOFF = {
-  'fun-videos': funHandoff,
-  'bridges':    bridgesHandoff,
-  'sd-prompts': sdPromptsHandoff,
+  'fun-videos':   funHandoff,
+  'bridges':      bridgesHandoff,
+  'sd-prompts':   sdPromptsHandoff,
+  'video-tools':  videoToolsHandoff,
 };
 const _tabInitialized = new Set();
 
-// ── Splash ───────────────────────────────────────────────────────────────────
+// ── Pipeline breadcrumb ───────────────────────────────────────────────────────
+// Injected once into each of the 4 pipeline panels so users always know
+// where they are and what comes next.
+const PIPELINE_STEPS = [
+  { id: 'sd-prompts',  num: '01', label: 'Generate Images' },
+  { id: 'fun-videos',  num: '02', label: 'Create Videos'   },
+  { id: 'bridges',     num: '03', label: 'Add Transitions'  },
+  { id: 'video-tools', num: '04', label: 'Finalize & Export' },
+];
+
+function _buildPipelineBar(activeTabId) {
+  const bar = document.createElement('div');
+  bar.className = 'pipeline-bar';
+
+  // Home button
+  const homeBtn = document.createElement('button');
+  homeBtn.className = 'pipeline-bar-home btn-icon';
+  homeBtn.title = 'Back to Studio Home';
+  homeBtn.innerHTML = '&#127968; <span>Home</span>';
+  homeBtn.addEventListener('click', () => switchTab('pipeline'));
+  bar.appendChild(homeBtn);
+
+  // Step pills
+  const pills = document.createElement('div');
+  pills.className = 'pipeline-bar-pills';
+  PIPELINE_STEPS.forEach((step, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'pipeline-bar-sep';
+      sep.textContent = '\u2192';
+      pills.appendChild(sep);
+    }
+    const pill = document.createElement('button');
+    pill.className = 'pipeline-bar-pill' + (step.id === activeTabId ? ' active' : '');
+    pill.title = `Go to Step ${step.num}: ${step.label}`;
+    pill.innerHTML = `<span class="pipeline-bar-num">${step.num}</span><span class="pipeline-bar-pill-label">${step.label}</span>`;
+    pill.addEventListener('click', () => switchTab(step.id));
+    pills.appendChild(pill);
+  });
+  bar.appendChild(pills);
+
+  // Next-step shortcut (only shown if there's a next step)
+  const curIdx = PIPELINE_STEPS.findIndex(s => s.id === activeTabId);
+  const next = PIPELINE_STEPS[curIdx + 1];
+  if (next) {
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'pipeline-bar-next btn btn-sm';
+    nextBtn.title = `Go to Step ${next.num}: ${next.label}`;
+    nextBtn.textContent = `${next.num} ${next.label} \u2192`;
+    nextBtn.addEventListener('click', () => switchTab(next.id));
+    bar.appendChild(nextBtn);
+  } else {
+    // On the last step, show a subtle "done" indicator
+    const done = document.createElement('span');
+    done.className = 'pipeline-bar-done';
+    done.textContent = '\u2713 Final step';
+    bar.appendChild(done);
+  }
+
+  return bar;
+}
+
+// ── Splash ──────────────────────────────────────────────────────────────────
 const SPLASH_BLOCKING_STATES = new Set(['unknown']);
 const SPLASH_LOADING_STATES  = new Set(['unknown', 'starting']);
 
@@ -194,7 +259,7 @@ async function runSplash() {
   }
 }
 
-// ── State ────────────────────────────────────────────────────────────────────
+// ── State ───────────────────────────────────────────────────────────────────
 const state = {
   activeTab:    'sd-prompts',
   logOpen:      true,
@@ -203,7 +268,7 @@ const state = {
   splitRatio:   safeStorage(() => localStorage.getItem('dropcat_split_ratio'), null) || '45%',
 };
 
-// ── Tab routing ──────────────────────────────────────────────────────────────
+// ── Tab routing ─────────────────────────────────────────────────────────────
 function switchTab(tabId) {
   state.activeTab = tabId;
 
@@ -226,6 +291,10 @@ function switchTab(tabId) {
       try {
         TAB_INIT[tabId](panel);
         _tabInitialized.add(tabId);
+        // Inject pipeline position bar into the 4 main pipeline steps
+        if (PIPELINE_STEPS.some(s => s.id === tabId)) {
+          panel.prepend(_buildPipelineBar(tabId));
+        }
       } catch (err) {
         console.error(`[${tabId}] Init failed:`, err);
         panel.innerHTML = `<div class="error-banner">Tab failed to load. Refresh.<br><small>${escHtml(err.message)}</small></div>`;
@@ -238,7 +307,7 @@ function switchTab(tabId) {
   if (handoffData && TAB_HANDOFF[tabId]) TAB_HANDOFF[tabId](handoffData);
 }
 
-// ── Service polling ──────────────────────────────────────────────────────────
+// ── Service polling ─────────────────────────────────────────────────────────
 const SERVICE_MESSAGES = {
   acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- set path in Settings' },
   forge:   { not_running: 'Not detected -- start Forge with --api flag', starting: 'Starting (~60s)...', not_configured: 'Not configured' },
@@ -281,7 +350,7 @@ async function pollServices() {
   } catch (_) {}
 }
 
-// ── Service panel ────────────────────────────────────────────────────────────
+// ── Service panel ───────────────────────────────────────────────────────────
 function openServicePanel() {
   document.getElementById('service-panel-overlay')?.classList.add('open');
   renderServicePanel();
@@ -351,7 +420,7 @@ function renderServicePanel() {
   }
 }
 
-// ── Log polling ──────────────────────────────────────────────────────────────
+// ── Log polling ─────────────────────────────────────────────────────────────
 async function pollLogs() {
   if (!state.logOpen) return;
   try {
@@ -367,7 +436,7 @@ async function pollLogs() {
   } catch (_) {}
 }
 
-// ── System info ──────────────────────────────────────────────────────────────
+// ── System info ─────────────────────────────────────────────────────────────
 async function loadSystemInfo() {
   try {
     const data = await fetch('/api/system').then(r => r.json());
@@ -383,11 +452,11 @@ async function loadSystemInfo() {
   } catch (_) {}
 }
 
-// ── Modals ───────────────────────────────────────────────────────────────────
+// ── Modals ──────────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id)?.classList.add('open');    }
 function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 
-// ── Settings ─────────────────────────────────────────────────────────────────
+// ── Settings ────────────────────────────────────────────────────────────────
 async function loadConfig() {
   try {
     state.config = await apiFetch('/api/config', { context: 'loadConfig' });
@@ -469,7 +538,7 @@ async function validatePath(type) {
   } catch (_) {}
 }
 
-// ── Service actions ──────────────────────────────────────────────────────────
+// ── Service actions ─────────────────────────────────────────────────────────
 async function svcAction(action, name) {
   const label = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
   toast(`${label} ${name}...`, 'info');
@@ -480,7 +549,7 @@ async function svcAction(action, name) {
   setTimeout(pollServices, 1000);
 }
 
-// ── Split pane ────────────────────────────────────────────────────────────────
+// ── Split pane ───────────────────────────────────────────────────────────────
 function initSplitPane() {
   const pane     = document.getElementById('split-pane');
   const controls = document.getElementById('split-controls');
@@ -551,7 +620,7 @@ function initRailToggle() {
   });
 }
 
-// ── Keyboard shortcuts registration ──────────────────────────────────────────
+// ── Keyboard shortcuts registration ─────────────────────────────────────────
 function initShortcuts() {
   const SHORTCUTS = [
     { key: 'k', ctrl: true, global: true, action: () => openPalette(), description: 'Command palette' },
@@ -564,10 +633,11 @@ function initShortcuts() {
       document.getElementById('gallery-detail-overlay')?.classList.remove('open');
       document.getElementById('error-log-overlay')?.classList.remove('open');
     }, description: 'Close / cancel' },
-    { key: '1', action: () => switchTab('sd-prompts'),  description: 'SD Prompts' },
-    { key: '2', action: () => switchTab('fun-videos'),  description: 'Make Videos' },
-    { key: '3', action: () => switchTab('bridges'),     description: 'Video Bridges' },
-    { key: '4', action: () => switchTab('image2video'), description: 'Image to Video' },
+    { key: '0', action: () => switchTab('pipeline'),   description: 'Studio Home' },
+    { key: '1', action: () => switchTab('sd-prompts'),  description: 'Generate Images (Step 01)' },
+    { key: '2', action: () => switchTab('fun-videos'),  description: 'Create Videos (Step 02)' },
+    { key: '3', action: () => switchTab('bridges'),     description: 'Add Transitions (Step 03)' },
+    { key: '4', action: () => switchTab('video-tools'), description: 'Finalize & Export (Step 04)' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
   ];
@@ -591,13 +661,16 @@ function initShortcuts() {
 // ── Command palette items ─────────────────────────────────────────────────────
 function initPaletteItems() {
   registerItems([
-    { label: 'SD Prompts',      group: 'Tabs',    icon: '<img src="/static/icon-sd-prompts.png" width="14">',   action: () => switchTab('sd-prompts') },
-    { label: 'Make Videos',     group: 'Tabs',    icon: '<img src="/static/icon-fun-videos.png" width="14">',   action: () => switchTab('fun-videos') },
-    { label: 'Video Bridges',   group: 'Tabs',    icon: '<img src="/static/icon-bridges.png" width="14">',      action: () => switchTab('bridges') },
-    { label: 'Image to Video',  group: 'Tabs',    icon: '<img src="/static/icon-image2video.png" width="14">', action: () => switchTab('image2video') },
-    { label: 'Video Tools',     group: 'Tabs',    icon: '<img src="/static/icon-video-tools.png" width="14">', action: () => switchTab('video-tools') },
-    { label: 'Wildcards',       group: 'Tabs',    icon: '<img src="/static/icon-wildcards.png" width="14">',   action: () => switchTab('wildcards') },
-    { label: 'Services',        group: 'Tabs',    icon: '&#9711;', action: () => switchTab('services') },
+    { label: 'Studio Home',      group: 'Tabs',    icon: '&#127968;',  action: () => switchTab('pipeline') },
+    { label: 'Generate Images',  group: 'Tabs',    icon: '&#127912;',  hint: '1', action: () => switchTab('sd-prompts') },
+    { label: 'Create Videos',    group: 'Tabs',    icon: '&#127916;',  hint: '2', action: () => switchTab('fun-videos') },
+    { label: 'Add Transitions',  group: 'Tabs',    icon: '&#128279;',  hint: '3', action: () => switchTab('bridges') },
+    { label: 'Finalize & Export',  group: 'Tabs',  icon: '&#9881;',    hint: '4', action: () => switchTab('video-tools') },
+    { label: 'Prompt Helpers',   group: 'Tabs',    icon: '&#10024;',   action: () => switchTab('wildcards') },
+    { label: 'Ken Burns',        group: 'Tabs',    icon: '&#128444;',  action: () => switchTab('image2video') },
+    { label: 'Quick Image',      group: 'Tabs',    icon: '&#9889;',    action: () => switchTab('image-gen') },
+    { label: 'Import Assets',    group: 'Tabs',    icon: '&#128229;',  action: () => switchTab('imports') },
+    { label: 'Services',         group: 'Tabs',    icon: '&#9711;',    action: () => switchTab('services') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
@@ -608,14 +681,14 @@ function initPaletteItems() {
   ]);
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
+// ── Utilities ───────────────────────────────────────────────────────────────
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// ── Init ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   runSplash();
 
@@ -640,6 +713,31 @@ document.addEventListener('DOMContentLoaded', () => {
   // Gallery
   const galleryEl = document.getElementById('split-gallery');
   if (galleryEl) initGallery(galleryEl);
+
+  // When a tab calls setPreview() (generation complete), pulse the gallery
+  // toggle button so the user notices there's a result to act on.
+  window.addEventListener('gallery:preview-updated', () => {
+    const pane = document.getElementById('split-pane');
+    const btn  = document.getElementById('btn-gallery-toggle');
+
+    // ── First-ever generation: auto-open the gallery once, never again ──────
+    if (!safeStorage(() => localStorage.getItem('dcg_visited_gallery'))) {
+      safeStorage(() => localStorage.setItem('dcg_visited_gallery', '1'));
+      if (pane && !pane.classList.contains('gallery-open')) {
+        pane.classList.add('gallery-open');
+        btn?.classList.add('active');
+        if (btn) btn.title = 'Hide gallery';
+        safeStorage(() => localStorage.setItem('dropcat_gallery_open', 'true'));
+      }
+      return; // panel is now open -- skip the pulse animation
+    }
+
+    // Subsequent generations: pulse the button if the panel is closed
+    if (!pane?.classList.contains('gallery-open') && btn) {
+      btn.classList.add('gallery-btn-pulse');
+      btn.addEventListener('animationend', () => btn.classList.remove('gallery-btn-pulse'), { once: true });
+    }
+  });
 
   // Presets
   initPresets();
@@ -711,7 +809,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.svc-restart').forEach(btn => btn.addEventListener('click', () => svcAction('restart', btn.dataset.svc)));
 
   // Boot default tab
-  switchTab('sd-prompts');
+  switchTab('pipeline');
   loadConfig();
   pollServices();
   pollLogs();

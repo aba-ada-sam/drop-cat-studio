@@ -10,11 +10,29 @@ let _items = [];
 let _filters = { tab: '', search: '' };
 let _containerEl = null;
 let _detailItem = null;
+let _preview = null; // { url, prompt, actions: [{label, onClick}] }
 
 export function init(containerEl) {
   _containerEl = containerEl;
   _render();
   _load();
+
+  // Allow any module to open a gallery item by id via a window event.
+  // tab-pipeline.js dispatches this when a recent-work thumbnail is clicked.
+  window.addEventListener('gallery:open-item', e => {
+    const id = e.detail?.id;
+    if (id == null) return;
+    const item = _items.find(i => String(i.id) === String(id));
+    if (item) _openDetail(item);
+  });
+}
+
+// Called by tabs after generation to show the result prominently in the right panel.
+// actions: [{label: '🎬 Create Video', primary: true, onClick: fn}, ...]
+export function setPreview(url, prompt, actions = []) {
+  _preview = { url, prompt, actions };
+  _renderPreview();
+  _renderGrid();
 }
 
 export async function addItem(item) {
@@ -62,7 +80,8 @@ async function _load() {
 
 function _render() {
   _containerEl.innerHTML = `
-    <div class="gallery-toolbar">
+    <div id="gallery-preview-area"></div>
+    <div class="gallery-toolbar" id="gallery-toolbar">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border)">
         <input type="search" id="gallery-search" placeholder="Search generations..." style="flex:1;min-width:120px;font-size:.82rem">
         <select id="gallery-tab-filter" style="font-size:.82rem">
@@ -86,6 +105,44 @@ function _render() {
   });
 }
 
+function _renderPreview() {
+  const area = _containerEl?.querySelector('#gallery-preview-area');
+  if (!area) return;
+  const toolbar = _containerEl?.querySelector('#gallery-toolbar');
+
+  if (!_preview) {
+    area.innerHTML = '';
+    if (toolbar) toolbar.style.display = '';
+    return;
+  }
+
+  const isVideo = /\.(mp4|webm|mov)$/i.test(_preview.url || '');
+  const mediaSrc = _preview.url;
+  const prompt = _preview.prompt || '';
+
+  const btnHtml = _preview.actions.map((a, i) =>
+    `<button class="btn btn-sm${a.primary ? ' btn-primary' : ''}" data-preview-action="${i}">${_esc(a.label)}</button>`
+  ).join('');
+
+  area.innerHTML = `
+    <div style="display:flex;flex-direction:column;background:var(--surface-2);border-bottom:1px solid var(--border)">
+      ${isVideo
+        ? `<video src="${mediaSrc}" controls style="width:100%;max-height:55vh;object-fit:contain;background:#000;display:block"></video>`
+        : `<img src="${mediaSrc}" alt="" style="width:100%;max-height:55vh;object-fit:contain;background:var(--bg);display:block">`}
+      <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+        ${btnHtml}
+        ${prompt ? `<p style="font-size:.75rem;color:var(--text-3);margin:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${_esc(prompt)}</p>` : ''}
+      </div>
+    </div>`;
+
+  _preview.actions.forEach((a, i) => {
+    area.querySelector(`[data-preview-action="${i}"]`)?.addEventListener('click', a.onClick);
+  });
+
+  // Hide the search toolbar when preview is active — history is below
+  if (toolbar) toolbar.style.display = 'none';
+}
+
 function _filtered() {
   return _items.filter(item => {
     if (_filters.tab && item.tab !== _filters.tab) return false;
@@ -104,10 +161,21 @@ function _renderGrid() {
   const items = _filtered();
 
   if (!items.length) {
-    grid.innerHTML = `<div class="gallery-empty" style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.2;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-      <p>No generations yet.<br>Create something to see it here.</p>
-    </div>`;
+    if (_preview) {
+      grid.innerHTML = ''; // history section is empty but preview is showing above
+    } else {
+      grid.innerHTML = `<div class="gallery-empty" style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.2;margin-bottom:12px"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        <p>No generations yet.<br>Create something to see it here.</p>
+      </div>`;
+    }
+    return;
+  }
+
+  // When preview is active, show a small "History" heading above the grid
+  if (_preview) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:6px 12px 2px;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">History</div>`;
+    for (const item of items) grid.appendChild(_makeCard(item));
     return;
   }
 

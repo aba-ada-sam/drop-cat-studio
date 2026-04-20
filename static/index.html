@@ -6,7 +6,7 @@
   <title>Drop Cat Go Studio</title>
   <link rel="icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" href="/static/logo-192.png">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260418d">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260419o">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
 </head>
 <body>
@@ -55,12 +55,10 @@
         </div>
 
         <div class="header-center">
-          <!-- Service cluster hidden — moved to sidebar/rail context -->
-          <button id="service-cluster-btn" class="service-pills" aria-label="Service status — click for details" title="Services now in sidebar" style="display:none;">
-            <span class="pill" id="pill-wangp"><span class="dot" aria-hidden="true"></span> WanGP</span>
-            <span class="pill" id="pill-acestep"><span class="dot" aria-hidden="true"></span> ACE-Step</span>
-            <span class="pill" id="pill-forge"><span class="dot" aria-hidden="true"></span> Forge SD</span>
-            <span class="pill" id="pill-ollama"><span class="dot" aria-hidden="true"></span> Ollama</span>
+          <button id="service-cluster-btn" class="service-pills" aria-label="Service status — click for details" title="Click for service details">
+            <span class="pill" id="pill-forge"><span class="dot" aria-hidden="true"></span> Image generation</span>
+            <span class="pill" id="pill-wangp"><span class="dot" aria-hidden="true"></span> Video generation</span>
+            <span class="pill" id="pill-acestep"><span class="dot" aria-hidden="true"></span> Music generation</span>
           </button>
         </div>
 
@@ -408,6 +406,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260417c"></script>
+  <script type="module" src="/static/js/app.js?v=20260419o"></script>
 </body>
 </html>

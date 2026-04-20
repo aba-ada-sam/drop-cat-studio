@@ -6,7 +6,7 @@
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
 import { handoff } from './handoff.js?v=20260415';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
 let _startImagePath = null;
 let _endImagePath   = null;

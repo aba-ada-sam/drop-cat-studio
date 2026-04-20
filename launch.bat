@@ -44,11 +44,10 @@ if exist ".dcs-port" (
 
 :: -- Start the server --------------------------------------------------
 :: The python server picks a free port from 7860..7879 and writes the
-:: chosen port to .dcs-port. We start Chrome after a short delay — it
-:: will hit the file and open the right port. Safe even if 7860 is
-:: occupied by Forge or another app.
+:: chosen port to .dcs-port. We poll for the file (up to 60s) so Chrome
+:: opens at the right port even when Python startup takes 10-15s.
 echo Starting server...
-start "" /b cmd /c "cd /d "%~dp0" && timeout /t 5 >nul && for /f \"tokens=2 delims=:,\" %%p in ('findstr /c:\"\\\"port\\\"\" \".dcs-port\" 2^>nul') do (for /f \"tokens=* delims= \" %%q in (\"%%p\") do start chrome http://127.0.0.1:%%q)"
+start "" /b "%~dp0open_browser.bat"
 python "%~dp0app.py"
 
 pause

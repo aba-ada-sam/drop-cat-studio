@@ -622,7 +622,9 @@ def start_forge() -> tuple[bool, str | None]:
                         message="Starting Forge SD — loading model, please wait (~90s)...")
             log.info("Starting Forge SD from %s (detached)...", forge_root)
 
+            # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser
             ps_args = (
+                f"$env:WEBUI_LAUNCH_LIVE_PREVIEW='0'; "
                 f"Start-Process -FilePath 'cmd.exe'"
                 f" -ArgumentList '/c \"{webui_bat}\"'"
                 f" -WorkingDirectory '{forge_root}'"

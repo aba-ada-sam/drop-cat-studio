@@ -11,7 +11,7 @@ import { api, apiUpload } from './api.js?v=20260414';
 import { toast, createDropZone, createSlider, el } from './components.js?v=20260414';
 import { handoff } from './handoff.js?v=20260415';
 import { RegionEditor } from './components/region-editor.js?v=20260416d';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
+import { pushFromTab as pushToGallery, setPreview } from './shell/gallery.js?v=20260419o';
 
 // ── State ───────────────────────────────────────────────────────────────────
 let sessionId        = 'default';
@@ -28,11 +28,18 @@ let fcEnabled = false;
 let fcQuickToggle = null;
 let _pendingHandoff = null;
 let _applyHandoff   = null;
+let _pendingConcept = null;   // concept text waiting for ideaTA to exist
+let _applyIdea      = null;   // wired by buildStep1Panel
 
 export function receiveHandoff(data) {
   if (data.type === 'image' && data.path) {
     if (_applyHandoff) _applyHandoff(data.path);
     else _pendingHandoff = data.path;
+  }
+  // Concept handoff from Studio Home: pre-fill the idea textarea
+  if (data.type === 'concept' && data.text) {
+    if (_applyIdea) _applyIdea(data.text);
+    else _pendingConcept = data.text;
   }
 }
 
@@ -181,6 +188,30 @@ export function init(panel) {
         seedIn.value = generatedImages[currentIdx].seed + 1;
         genBtn.click();
       }
+    }
+  }));
+  canvasActions.appendChild(el('button', {
+    class: 'btn btn-sm',
+    text: '⬇ Save',
+    title: 'Download image',
+    onclick() {
+      const img = generatedImages[currentIdx];
+      if (!img) return;
+      const a = document.createElement('a');
+      a.href = img.src;
+      a.download = `sd-${img.seed ?? 'image'}.png`;
+      a.click();
+    }
+  }));
+  canvasActions.appendChild(el('button', {
+    class: 'btn btn-primary btn-sm',
+    text: '🎬 Create Video',
+    title: 'Send this image to Create Videos tab',
+    onclick() {
+      const img = generatedImages[currentIdx];
+      if (!img) return;
+      handoff('fun-videos', { type: 'image', url: img.src, path: img.path || '' });
+      document.querySelector('[data-tab="fun-videos"]')?.click();
     }
   }));
 
@@ -766,7 +797,24 @@ export function init(panel) {
             height: Number(hIn.value),
           });
         }
+        const lastEntry = generatedImages[generatedImages.length - 1];
         showImage(generatedImages.length - 1);
+        setPreview(lastEntry.src, prompt, [
+          { label: '🎬 Create Video', primary: true, onClick() {
+              handoff('fun-videos', { type: 'image', url: lastEntry.src, path: lastEntry.path || '' });
+              document.querySelector('[data-tab="fun-videos"]')?.click();
+          }},
+          { label: '⬇ Save', onClick() {
+              const a = document.createElement('a');
+              a.href = lastEntry.src;
+              a.download = `sd-${lastEntry.seed ?? 'image'}.png`;
+              a.click();
+          }},
+          { label: '🔁 Variation', onClick() {
+              seedIn.value = lastEntry.seed + 1;
+              genBtn.click();
+          }},
+        ]);
         toast(`✨ Done! Seed: ${data.seed}`, 'success');
       }
     } catch (e) { toast(e.message, 'error'); }
@@ -985,6 +1033,13 @@ function buildStep1Panel(ctx) {
     placeholder: 'e.g. "a robot and an alien negotiating in a ruin"',
   });
   panel.appendChild(ideaTA);
+
+  // Wire concept handoff (from Studio Home pipeline tab)
+  _applyIdea = (text) => { ideaTA.value = text; ideaTA.focus(); };
+  if (_pendingConcept) {
+    ideaTA.value = _pendingConcept;
+    _pendingConcept = null;
+  }
 
   // ── Provider + R-rated row (only shown for vague source) ───────────────
   const providerRow = el('div', { class: 'step1-row step1-provider-row' });
