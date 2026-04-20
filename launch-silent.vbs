@@ -75,24 +75,12 @@ Sub OpenInChrome(port)
 End Sub
 
 ' ── Already-running check ────────────────────────────────────────────────────
+' If the server is already up, just open Chrome — no dialog, no questions.
 
 Dim runningPort : runningPort = FindRunningPort()
 If runningPort > 0 Then
-    Dim ans : ans = MsgBox( _
-        "Drop Cat Go Studio is already running on port " & runningPort & "." & vbCrLf & vbCrLf & _
-        "YES    - Open in Chrome (keep existing server)" & vbCrLf & _
-        "NO     - Restart the server (kill + relaunch)" & vbCrLf & _
-        "CANCEL - Do nothing", _
-        vbYesNoCancel + vbQuestion + vbDefaultButton1, _
-        "Drop Cat Go Studio")
-
-    If ans = vbYes Then
-        OpenInChrome runningPort
-        WScript.Quit
-    ElseIf ans = vbCancel Then
-        WScript.Quit
-    End If
-    ' vbNo: fall through — launch-bg.bat will kill the old instance
+    OpenInChrome runningPort
+    WScript.Quit
 End If
 
 ' ── Launch the background batch (hidden window, don't wait) ──────────────────
