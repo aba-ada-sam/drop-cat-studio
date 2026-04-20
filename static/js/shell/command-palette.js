@@ -4,7 +4,7 @@
  * Free-text queries also surface an "Ask AI" row that sends the query to
  * /api/ai-intent for the active tab.
  */
-import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419f';
+import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419g';
 
 const _items = [];
 let _selected = 0;
@@ -44,9 +44,8 @@ function _filter(query) {
   const matches = q
     ? _items.filter(i => i.label.toLowerCase().includes(q) || (i.hint || '').toLowerCase().includes(q) || (i.group || '').toLowerCase().includes(q))
     : _items;
-  // Append "Ask AI" pseudo-item when there's a query and the active tab has
-  // an AI applier registered. Ordered last so registered matches win on Enter.
   if (q && activeTabHasApplier()) {
+    // With a query: append "Ask AI: <query>" last so registered matches win on Enter.
     _filtered = [...matches, {
       label: `Ask AI: "${_lastQuery}"`,
       group: 'AI',
@@ -55,6 +54,29 @@ function _filter(query) {
       async: true,
       action: () => askAI(_lastQuery),
     }];
+  } else if (!q && activeTabHasApplier()) {
+    // Empty palette: surface recent AI queries as quick replays.
+    const history = getHistory();
+    if (history.length) {
+      const historyItems = history.map(prev => ({
+        label: prev,
+        group: 'Recent AI',
+        icon: '&#8635;',  // ↻
+        hint: 'Re-run on the current tab',
+        async: true,
+        action: () => askAI(prev),
+      }));
+      const clearItem = {
+        label: 'Clear AI history',
+        group: 'Recent AI',
+        icon: '&#10005;',  // ×
+        hint: `${history.length} stored`,
+        action: () => { clearHistory(); _filter(''); },
+      };
+      _filtered = [...historyItems, clearItem, ...matches];
+    } else {
+      _filtered = matches;
+    }
   } else {
     _filtered = matches;
   }
