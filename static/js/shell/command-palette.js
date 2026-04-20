@@ -4,7 +4,7 @@
  * Free-text queries also surface an "Ask AI" row that sends the query to
  * /api/ai-intent for the active tab.
  */
-import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419e';
+import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419f';
 
 const _items = [];
 let _selected = 0;
@@ -52,6 +52,7 @@ function _filter(query) {
       group: 'AI',
       icon: '&#10022;',  // ✦
       hint: 'Natural-language tweak for this tab',
+      async: true,
       action: () => askAI(_lastQuery),
     }];
   } else {
@@ -59,6 +60,20 @@ function _filter(query) {
   }
   _selected = 0;
   _render();
+}
+
+function _setBusy(busy, labelText) {
+  const input = document.getElementById('palette-input');
+  if (input) input.disabled = busy;
+  const container = document.getElementById('palette-results');
+  if (!container) return;
+  if (busy) {
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:24px 16px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--accent);font-size:.9rem';
+    wrap.innerHTML = `<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span><span>${labelText || 'Thinking…'}</span>`;
+    container.appendChild(wrap);
+  }
 }
 
 function _render() {
@@ -115,7 +130,7 @@ function _render() {
         _selected = idx;
         _highlightSelected();
       });
-      el.addEventListener('click', () => { _execute(item); close(); });
+      el.addEventListener('click', () => _runItem(item));
 
       container.appendChild(el);
       idx++;
@@ -132,7 +147,19 @@ function _highlightSelected() {
 }
 
 function _execute(item) {
-  if (item.action) item.action();
+  if (item.action) return item.action();
+}
+
+async function _runItem(item) {
+  if (!item) return;
+  if (item.async) {
+    _setBusy(true, 'Thinking…');
+    try { await _execute(item); }
+    finally { _setBusy(false); close(); }
+    return;
+  }
+  _execute(item);
+  close();
 }
 
 // Wire up DOM after load
@@ -159,7 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const item = _filtered[_selected];
-      if (item) { _execute(item); close(); }
+      if (item) _runItem(item);
     } else if (e.key === 'Escape') {
       close();
     }

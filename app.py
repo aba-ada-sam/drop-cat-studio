@@ -34,7 +34,7 @@ from core.ffmpeg_utils import ffmpeg_available
 from core.hw_encoders import detect_encoders, best_encoder
 from core.job_manager import JobManager
 from core.llm_client import LLMClient
-from core.llm_router import LLMRouter, TIER_BALANCED
+from core.llm_router import LLMRouter, TIER_BALANCED, TIER_FAST
 from services import manager as svc
 
 # ── Logging setup ────────────────────────────────────────────────────────────
@@ -692,8 +692,8 @@ async def ai_intent(request: Request):
         raw = await asyncio.to_thread(
             llm.route,
             [{"role": "user", "content": user_msg}],
-            tier=TIER_BALANCED,
-            max_tokens=500,
+            tier=TIER_FAST,
+            max_tokens=400,
             system=tab_cfg["system"],
         )
     except Exception as e:
