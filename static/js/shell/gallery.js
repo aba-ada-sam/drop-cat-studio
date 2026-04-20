@@ -3,7 +3,8 @@
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
 
-import { apiFetch, toast } from './toast.js?v=20260416d';
+import { apiFetch, toast } from './toast.js?v=20260419h';
+import { applySettingsToTab } from './ai-intent.js?v=20260419h';
 
 let _items = [];
 let _filters = { tab: '', search: '' };
@@ -26,6 +27,29 @@ export async function addItem(item) {
     _items.unshift(saved);
     _renderGrid();
   } catch (_) {}
+}
+
+// Tabs call this when a generation succeeds. Converts a filesystem path to
+// the /output/... URL the app serves, and bundles settings as metadata so
+// "Load Settings" from the gallery item can replay them.
+function _pathToUrl(p) {
+  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
+  const norm = p.replace(/\\/g, '/');
+  const idx  = norm.toLowerCase().indexOf('/output/');
+  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
+}
+
+export function pushFromTab(tab, savedPath, prompt, seed, settings) {
+  const url = _pathToUrl(savedPath);
+  if (!url) return;
+  return addItem({
+    tab,
+    url,
+    prompt: prompt || '',
+    model: settings?.model || '',
+    seed: typeof seed === 'number' ? seed : null,
+    metadata: { settings: settings || {} },
+  });
 }
 
 async function _load() {
@@ -230,8 +254,9 @@ function _openDetail(item) {
 }
 
 function _loadItemSettings(item) {
-  if (!item.metadata?.settings) return;
-  window._shellApi?.activeTab && window._shellApi?.applySettingsToTab(item.tab, item.metadata.settings);
+  if (!item.metadata?.settings || !item.tab) return;
+  const ok = applySettingsToTab(item.tab, item.metadata.settings);
+  if (!ok) toast(`Can't load settings — ${item.tab} tab not initialized yet`, 'info');
 }
 
 function _esc(s) {

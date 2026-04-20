@@ -11,6 +11,7 @@ import { api, apiUpload } from './api.js?v=20260414';
 import { toast, createDropZone, createSlider, el } from './components.js?v=20260414';
 import { handoff } from './handoff.js?v=20260415';
 import { RegionEditor } from './components/region-editor.js?v=20260416d';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
 
 // ── State ───────────────────────────────────────────────────────────────────
 let sessionId        = 'default';
@@ -749,10 +750,21 @@ export function init(panel) {
       });
       if (data.images?.length) {
         const info = `${samplerSel.value} • CFG ${cfgSlider.value} • ${stepsSlider.value} steps`;
-        for (const b64 of data.images) {
-          const entry = { src: `data:image/png;base64,${b64}`, seed: data.seed||-1, prompt, path: data.saved_paths?.[0]||null, info };
+        for (let i = 0; i < data.images.length; i++) {
+          const b64 = data.images[i];
+          const savedPath = data.saved_paths?.[i] || null;
+          const entry = { src: `data:image/png;base64,${b64}`, seed: data.seed||-1, prompt, path: savedPath, info };
           generatedImages.push(entry);
           addToGallery(entry);
+          if (savedPath) pushToGallery('sd-prompts', savedPath, prompt, data.seed, {
+            model: forgeStatus?.current_model || 'forge',
+            sampler: samplerSel.value,
+            scheduler: schedSel.value,
+            steps: Number(stepsSlider.value),
+            cfg: Number(cfgSlider.value),
+            width: Number(wIn.value),
+            height: Number(hIn.value),
+          });
         }
         showImage(generatedImages.length - 1);
         toast(`✨ Done! Seed: ${data.seed}`, 'success');
@@ -796,15 +808,23 @@ export function init(panel) {
         })
       });
       if (data.images?.length) {
+        const savedPath = data.saved_paths?.[0] || null;
         const entry = {
           src: `data:image/png;base64,${data.images[0]}`,
           seed: data.seed,
           prompt: i2iPromptIn.value,
-          path: data.saved_paths?.[0]||null,
+          path: savedPath,
           info: `img2img • denoise ${i2iDenoise.value}`
         };
         generatedImages.push(entry);
         addToGallery(entry);
+        if (savedPath) pushToGallery('sd-prompts', savedPath, i2iPromptIn.value, data.seed, {
+          model: forgeStatus?.current_model || 'forge',
+          mode: 'img2img',
+          denoise: Number(i2iDenoise.value),
+          steps: Number(stepsSlider.value),
+          cfg: Number(cfgSlider.value),
+        });
         showImage(generatedImages.length - 1);
         toast(`img2img done! Seed: ${data.seed}`, 'success');
       }

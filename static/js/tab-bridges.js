@@ -5,6 +5,7 @@
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el, formatDuration } from './components.js?v=20260414';
 import { handoff } from './handoff.js?v=20260415';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
 
 let items = [];   // {path, name, kind, duration, analysis}
 let activeMode = 'cinematic';
@@ -315,6 +316,13 @@ export function init(panel) {
           if (job.output) {
             lastOutputPath = job.output;
             player.show(outputPathToUrl(job.output));
+            pushToGallery('bridges', job.output, `${activeMode} transition (${items.length} clips)`, null, {
+              transition_mode: activeMode,
+              creativity: Number(creativity.value),
+              bridge_length: Number(duration.value),
+              steps: Number(steps.value),
+              clip_count: items.length,
+            });
             sendCard.style.display = '';
             toast('Bridges generated!', 'success');
           }

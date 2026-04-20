@@ -4,7 +4,7 @@
  * free text in the command palette and picks "Ask AI", we dispatch to the
  * currently active tab's applier.
  */
-import { apiFetch, toast } from './toast.js?v=20260419g';
+import { apiFetch, toast } from './toast.js?v=20260419h';
 
 const _appliers = {};
 const _HISTORY_KEY = 'dropcat_ai_intent_history';
@@ -44,6 +44,15 @@ export function hasApplier(tabId) {
 
 export function activeTabHasApplier() {
   return hasApplier(_activeTabId());
+}
+
+// Direct bridge for non-AI callers (e.g. gallery "Load Settings") to push
+// a settings dict into a specific tab's applier without going through /ai-intent.
+export function applySettingsToTab(tabId, settings) {
+  const entry = _appliers[tabId];
+  if (!entry || !settings || typeof settings !== 'object') return false;
+  try { entry.applySettings(settings); return true; }
+  catch (_) { return false; }
 }
 
 export async function askAI(query) {

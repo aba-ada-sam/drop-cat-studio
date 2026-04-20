@@ -6,6 +6,7 @@
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
 import { handoff } from './handoff.js?v=20260415';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
 
 let _startImagePath = null;
 let _endImagePath   = null;
@@ -269,6 +270,12 @@ export function init(panel) {
           if (j.output) {
             const url = pathToUrl(j.output);
             player.show(url, j.output);
+            pushToGallery('fun-videos', j.output, promptTA.value, null, {
+              mode,
+              steps: Number(stepsSlider.value),
+              guidance: Number(guidanceSlider.value),
+              duration_sec: Number(durSlider.value),
+            });
             // Handoff to bridges
             const bridgesBtn = vidWrap.querySelector('.to-bridges-btn') || (() => {
               const b = el('button', { class: 'btn btn-sm to-bridges-btn', text: '→ Add to Video Bridges', style: 'margin-top:8px;' });

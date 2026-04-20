@@ -4,6 +4,7 @@
  */
 import { api } from './api.js';
 import { toast, createSlider, createDropZone, el } from './components.js';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
 
 let forgeStatus = null;
 let _forgeRetryTimer = null;
@@ -379,14 +380,24 @@ export function init(panel) {
       });
 
       if (data.images?.length) {
+        const savedPath = data.saved_paths?.[0] || null;
         const entry = {
           src: `data:image/png;base64,${data.images[0]}`,
           seed: data.seed || -1,
           prompt,
-          path: data.saved_paths?.[0] || null,
+          path: savedPath,
         };
         generatedImages.push(entry);
         addToGallery(entry);
+        if (savedPath) pushToGallery('image-gen', savedPath, prompt, data.seed, {
+          model: modelSelect.value,
+          sampler: samplerSelect.value,
+          scheduler: schedulerSelect.value,
+          steps: Number(stepsSlider.value),
+          cfg: Number(cfgSlider.value),
+          width: parseInt(widthInput.value),
+          height: parseInt(heightInput.value),
+        });
         showImage(generatedImages.length - 1);
         toast(`Image generated! Seed: ${entry.seed}`, 'success');
       }
