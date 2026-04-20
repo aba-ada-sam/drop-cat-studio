@@ -247,7 +247,9 @@ function _openDetail(item) {
   overlay.querySelector('#gd-branch')?.addEventListener('click', () => {
     _loadItemSettings(item);
     overlay.classList.remove('open');
-    toast('Branched: settings loaded, tweak and re-generate', 'info');
+    // Branch & Tweak jumps to the source tab so you can immediately edit+regen.
+    if (item.tab) document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
+    toast('Branched: settings loaded — tweak and re-generate', 'info');
   });
 
   overlay.classList.add('open');
