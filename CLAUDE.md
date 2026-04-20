@@ -16,15 +16,18 @@ There are no tests, linting, or CI/CD configured. The app is tested manually thr
 
 ```
 app.py                  — FastAPI entry, lifespan, global routes, feature router registration
-core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session)
+core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session, nsfw sanitizer, wildcards)
 services/               — External service lifecycle (WanGP, ACE-Step, Forge, Ollama)
 features/               — Feature modules, each with routes.py + domain logic
   fun_videos/           — Photo → AI video + music (WanGP + ACE-Step)
   video_bridges/        — AI transition clips between videos (WanGP, OpenCV fallback)
-  sd_prompts/           — SD prompt generation + Forge integration + AI wildcard chat
+  sd_prompts/           — SD prompt generation + Forge integration + wildcard manager
   image2video/          — Ken Burns slideshow (pure ffmpeg, no AI)
   video_tools/          — Batch transforms + music mixer
 static/                 — Vanilla JS frontend (ES modules, no framework, no build)
+  js/shell/             — Cross-tab shell: gallery, presets, palette, shortcuts, toast, ai-intent
+  js/components/        — Reusable components (region-editor for Forge Couple)
+  js/tab-*.js           — Per-tab controllers, lazy-inited on first visit
 ```
 
 ### Critical pattern: circular import avoidance
@@ -73,11 +76,27 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 ### Frontend (`static/js/`)
 
 - **ES modules** loaded via `<script type="module">` — no bundler
+- **Cache busting** — every import in `app.js` has `?v=YYYYMMDD[letter]` (e.g. `?v=20260419h`). Bump the letter whenever any module changes, or bulk-bump to a new day. All modules use the same stamp.
 - **Tabs initialize lazily** — `app.js` calls each tab's `init(panel)` once on first visit, wrapped in try/catch with error banner
 - **Job polling** — `api.js:pollJob()` polls `GET /api/jobs/{id}` every 1.5s with a max-poll safety cap (400 polls ≈ 10 min)
 - **`session-updated` event** — dispatched by `pollJob` on job completion; session pickers auto-refresh if visible
 - **`components.js`** — shared UI factory (`el()`, `toast()`, `createDropZone()`, `createSlider()`, etc.)
 - **`handoff.js`** — cross-tab data passing (e.g., Fun Videos output → Bridges input)
+
+### Shell layer (`static/js/shell/`)
+
+Cross-cutting concerns owned by the shell, not per-tab:
+
+- **`toast.js`** — global toast host + `apiFetch()` with error-log integration. Every fetch in shell/tab code should use `apiFetch()` so failures populate the error log.
+- **`gallery.js`** — persistent cross-tab gallery. Pulls from `/api/gallery` (SQLite-backed). Tabs call `pushFromTab(tab, savedPath, prompt, seed, settings)` on generation success. Detail view has "Load Settings" (apply in-place) and "Branch & Tweak" (apply + jump to source tab).
+- **`presets.js`** — save/load named preset bundles per tab. Backed by `/api/presets`. Presets surface in the command palette as "Preset: <name>". Save is Ctrl+S (uses native `prompt()` for name).
+- **`command-palette.js`** — Ctrl+K. Fuzzy-matches registered items (tabs, actions, presets). If the active tab has an AI applier registered and the query doesn't match, shows `✦ Ask AI: "<query>"` as the last row. Empty palette surfaces last 5 AI queries as "Recent AI" for replay.
+- **`shortcuts.js`** — global keyboard shortcut registry. Registered in `app.js` init. Respects input focus.
+- **`ai-intent.js`** — palette-driven natural-language mutation. Each tab calls `registerTabAI(tabId, {getContext, applySettings})` at init time. Palette's Ask AI row calls `askAI(query)` which POSTs to `/api/ai-intent` and dispatches the result to the active tab's applier. Also exposes `applySettingsToTab()` for gallery "Load Settings".
+
+### Smart wildcards (sd-prompts)
+
+`/api/prompts/enhance` accepts `smart_wildcards: bool`. When true, the server passes the current wildcard catalog (inline + `sd_wildcards_dir/*.txt`) to the LLM so it can embed `__tokens__` in the composed prompt and optionally emit a `create_wildcards` JSON array to invent new ones when the user's idea explicitly asks. New wildcards are persisted flat to `sd_wildcards_dir/{name}.txt` with append+dedupe. System prompt enforces a STRICT TOKEN RULE — every emitted `__token__` must be in the catalog or in `create_wildcards`, because `wc_expand` leaves unknown tokens as literal text.
 
 ---
 
@@ -111,11 +130,21 @@ Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `
 
 ---
 
+## Local SQLite stores
+
+- `gallery.db` — cross-tab generation history (url, prompt, model, seed, metadata JSON). Gitignored. Created on first POST to `/api/gallery`.
+- `presets.db` — named setting bundles per tab. Gitignored. Created on first POST to `/api/presets`.
+
+Schemas live inline in `app.py` via `CREATE TABLE IF NOT EXISTS`. No migration system; schema changes require deleting the file.
+
+---
+
 ## Known Issues
 
 1. **ffmpeg** must be on PATH — nearly all video features require it. The splash screen warns if missing.
-2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works.
+2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works. The watchdog in `services/manager.py` re-checks externally-launched Forge every 30s.
 3. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
+4. **First AI intent call** takes ~14s because Ollama cold-loads the model. Subsequent calls are ~3s. The palette shows a "Thinking…" spinner for the duration.
 
 ---
 
