@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core import config as cfg
-from core import keys, log_buffer, session, wildcards
+from core import keys, log_buffer, port_lock, session, wildcards
 from core.ffmpeg_utils import ffmpeg_available
 from core.hw_encoders import detect_encoders, best_encoder
 from core.job_manager import JobManager
@@ -133,13 +133,15 @@ async def lifespan(app: FastAPI):
     from core import tray as _tray
     _tray.start_tray()
 
-    log.info("Drop Cat Go Studio ready on http://127.0.0.1:7860")
+    _port = _g.get("port", 7860)
+    log.info("Drop Cat Go Studio ready on http://127.0.0.1:%d", _port)
 
     yield
 
     # Shutdown
     log.info("Shutting down...")
     svc.shutdown_all()
+    port_lock.clear_port_file()
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -945,4 +947,16 @@ async def gallery_delete(item_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=7860)
+    # Pick the first free port from 7860..7879 so we don't collide with Forge,
+    # WanGP, another DCS instance, or any unrelated app that grabbed 7860.
+    try:
+        _port = port_lock.find_free_port()
+    except RuntimeError as e:
+        log.error("port discovery failed: %s", e)
+        raise SystemExit(1)
+    _g["port"] = _port
+    port_lock.write_port_file(_port)
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=_port)
+    finally:
+        port_lock.clear_port_file()

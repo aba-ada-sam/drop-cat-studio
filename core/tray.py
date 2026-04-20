@@ -18,7 +18,18 @@ ROOT_DIR    = Path(__file__).resolve().parent.parent
 STATIC_DIR  = ROOT_DIR / "static"
 OUTPUT_DIR  = ROOT_DIR / "output"
 ICO_PATH    = ROOT_DIR / "dropcat.ico"
-APP_URL     = "http://127.0.0.1:7860"
+
+
+def _app_url() -> str:
+    """Resolve the URL dynamically because the server may have picked a
+    non-default port (7860 was taken). Fall back to 7860 if the port file
+    hasn't been written yet or is unreadable."""
+    try:
+        from core import port_lock
+        port = port_lock.read_port_file() or 7860
+    except Exception:
+        port = 7860
+    return f"http://127.0.0.1:{port}"
 
 try:
     import pystray
@@ -61,14 +72,14 @@ def _build_icon_image() -> "Image.Image":
 
 
 def _open_app(icon=None, item=None):
-    webbrowser.open(APP_URL)
+    webbrowser.open(_app_url())
 
 
 def _show_outputs(icon=None, item=None):
     if OUTPUT_DIR.exists():
         os.startfile(str(OUTPUT_DIR))
     else:
-        webbrowser.open(APP_URL)
+        webbrowser.open(_app_url())
 
 
 def _exit_app(icon, item):

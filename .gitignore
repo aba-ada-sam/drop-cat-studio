@@ -34,6 +34,10 @@ desktop.ini
 # Local SQLite stores (auto-created on boot)
 *.db
 
+# Chosen port + PID — written at server startup, consumed by launchers / tray
+.dcs-port
+.dcs-port.tmp
+
 # Local planning / scratch notes (not part of shipped docs)
 RESTART_ME.txt
 DIAGNOSE_FORGE.md
