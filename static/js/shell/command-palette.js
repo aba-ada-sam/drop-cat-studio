@@ -4,7 +4,7 @@
  * Free-text queries also surface an "Ask AI" row that sends the query to
  * /api/ai-intent for the active tab.
  */
-import { askAI, activeTabHasApplier } from './ai-intent.js?v=20260419h';
+import { askAI, activeTabHasApplier, getHistory, clearHistory, undoLast, hasUndo } from './ai-intent.js?v=20260419i';
 
 const _items = [];
 let _selected = 0;
@@ -57,26 +57,36 @@ function _filter(query) {
   } else if (!q && activeTabHasApplier()) {
     // Empty palette: surface recent AI queries as quick replays.
     const history = getHistory();
+    const aiItems = [];
+    if (hasUndo()) {
+      aiItems.push({
+        label: 'Undo last AI change',
+        group: 'AI',
+        icon: '&#8630;',  // ↶
+        hint: 'Revert the last /api/ai-intent mutation',
+        action: () => undoLast(),
+      });
+    }
     if (history.length) {
-      const historyItems = history.map(prev => ({
-        label: prev,
-        group: 'Recent AI',
-        icon: '&#8635;',  // ↻
-        hint: 'Re-run on the current tab',
-        async: true,
-        action: () => askAI(prev),
-      }));
-      const clearItem = {
+      for (const prev of history) {
+        aiItems.push({
+          label: prev,
+          group: 'Recent AI',
+          icon: '&#8635;',  // ↻
+          hint: 'Re-run on the current tab',
+          async: true,
+          action: () => askAI(prev),
+        });
+      }
+      aiItems.push({
         label: 'Clear AI history',
         group: 'Recent AI',
         icon: '&#10005;',  // ×
         hint: `${history.length} stored`,
         action: () => { clearHistory(); _filter(''); },
-      };
-      _filtered = [...historyItems, clearItem, ...matches];
-    } else {
-      _filtered = matches;
+      });
     }
+    _filtered = aiItems.length ? [...aiItems, ...matches] : matches;
   } else {
     _filtered = matches;
   }

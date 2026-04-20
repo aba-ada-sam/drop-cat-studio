@@ -4,11 +4,13 @@
  * free text in the command palette and picks "Ask AI", we dispatch to the
  * currently active tab's applier.
  */
-import { apiFetch, toast } from './toast.js?v=20260419h';
+import { apiFetch, toast } from './toast.js?v=20260419i';
 
 const _appliers = {};
 const _HISTORY_KEY = 'dropcat_ai_intent_history';
 const _HISTORY_MAX = 5;
+const _undoStack = [];           // [{tabId, prev: {key: value}}]
+const _UNDO_MAX = 10;
 
 export function getHistory() {
   try {
@@ -55,6 +57,33 @@ export function applySettingsToTab(tabId, settings) {
   catch (_) { return false; }
 }
 
+export function hasUndo() { return _undoStack.length > 0; }
+
+/**
+ * Pop the last AI change and re-apply the snapshot captured before it ran.
+ * Returns true if something was undone, false otherwise.
+ */
+export function undoLast() {
+  const entry = _undoStack.pop();
+  if (!entry) {
+    toast('Nothing to undo', 'info');
+    return false;
+  }
+  const applier = _appliers[entry.tabId];
+  if (!applier) {
+    toast(`Can't undo — ${entry.tabId} tab isn't available`, 'info');
+    return false;
+  }
+  try {
+    applier.applySettings(entry.prev);
+    toast(`Undone (${Object.keys(entry.prev).join(', ')})`, 'success', { duration: 4000 });
+    return true;
+  } catch (e) {
+    toast(`Undo failed: ${e.message}`, 'error');
+    return false;
+  }
+}
+
 export async function askAI(query) {
   const q = (query || '').trim();
   if (!q) return;
@@ -77,13 +106,23 @@ export async function askAI(query) {
       toast(`Couldn't adjust anything for "${q}". Try being more specific.`, 'info', { duration: 6000 });
       return;
     }
+    // Snapshot pre-apply values for the keys the AI is about to change,
+    // so "Undo last AI change" can revert without remembering unrelated state.
+    const prevSnapshot = {};
+    for (const k of applied) {
+      if (k in context) prevSnapshot[k] = context[k];
+    }
     try { entry.applySettings(settings); }
     catch (e) { toast(`Apply failed: ${e.message}`, 'error'); return; }
     _pushHistory(q);
+    if (Object.keys(prevSnapshot).length) {
+      _undoStack.push({ tabId, prev: prevSnapshot });
+      if (_undoStack.length > _UNDO_MAX) _undoStack.shift();
+    }
     const summary = applied.length <= 3
       ? applied.join(', ')
       : `${applied.length} settings`;
-    toast(`${res.reply || 'Done'} (${summary})`, 'success', { duration: 6000 });
+    toast(`${res.reply || 'Done'} (${summary}) — Ctrl+K → Undo to revert`, 'success', { duration: 6000 });
   } catch (e) {
     toast(e.message || 'AI request failed', 'error');
   }
