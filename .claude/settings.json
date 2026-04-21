@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(curl -s -m 2 http://127.0.0.1:7860/api/system)",
+      "Monitor",
+      "Bash(tasklist *)",
+      "Bash(tasklist)",
+      "Bash(curl http://127.0.0.1*)",
+      "Bash(curl -s http://127.0.0.1*)",
+      "Bash(ollama list)",
+      "Bash(ollama list *)",
+      "Bash(netstat -ano *)",
+      "Bash(git log *)",
+      "Bash(git log)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-Process)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Start-Process *)",
+      "PowerShell(Start-Sleep *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Invoke-WebRequest *)",
+      "PowerShell(Get-Content *)"
+    ]
+  }
+}
