@@ -38,15 +38,11 @@ function _updateBadge() {
  * @returns {object} controller { update(pct), dismiss() }
  */
 export function toast(msg, level = 'info', opts = {}) {
-  // During startup, errors and info go silently to the log — no popup.
-  // Success toasts (user-triggered actions) always show.
-  if (_inStartup() && level !== 'success') {
-    if (level === 'error') _logError(msg, opts.context, opts.details);
-    return { update() {}, dismiss() {} };
-  }
+  // No popups ever. Errors go silently to the Errors log panel.
+  if (level === 'error') _logError(msg, opts.context, opts.details);
+  return { update() {}, dismiss() {} };
 
-  const wrap = _getWrap();
-  if (!wrap) return { update() {}, dismiss() {} };
+  const wrap = _getWrap(); // unreachable — kept so apiFetch still compiles
 
   // Deduplicate by id
   if (opts.id) {
