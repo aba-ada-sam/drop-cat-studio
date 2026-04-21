@@ -1,6 +1,6 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(curl -s -m 2 http://127.0.0.1:7860/api/system)",
       "Monitor",

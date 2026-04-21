@@ -402,11 +402,16 @@ def run_tray(srv: ServerManager) -> None:
 def main() -> None:
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
 
-    # Single-instance: if another manager is running, just open the app window.
-    import ctypes as _ctypes
-    _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "DropCatGoStudio_Manager_v1")
-    if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    # Single-instance lock via a bound socket — the OS releases it the instant
+    # this process dies, so there is no way for a stale lock to persist.
+    import socket as _socket
+    _lock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    _lock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 0)
+    try:
+        _lock.bind(("127.0.0.1", 17860))
+    except OSError:
         log.info("Already running — opening app window")
+        _lock.close()
         existing = find_running_server()
         if existing:
             open_app_window(existing)
