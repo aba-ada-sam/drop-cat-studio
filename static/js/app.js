@@ -7,7 +7,7 @@
 // tab-imports.js removed — import is handled per-tab
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421a';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421b';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
@@ -665,19 +665,6 @@ fetch('/api/theme').then(r => r.json()).then(t => {
   root.style.setProperty('--accent-bg',     `rgba(${rv},${gv},${bv},.13)`);
   root.style.setProperty('--accent-border', `rgba(${rv},${gv},${bv},.35)`);
 }).catch(() => {});
-
-// ── Rail collapse ─────────────────────────────────────────────────────────────
-function initRailToggle() {
-  const rail = document.getElementById('app-rail');
-  const btn  = document.getElementById('rail-toggle');
-  if (!rail || !btn) return;
-  const saved = safeStorage(() => localStorage.getItem('dropcat_rail_collapsed'), 'false');
-  if (saved === 'true') rail.classList.add('collapsed');
-  btn.addEventListener('click', () => {
-    rail.classList.toggle('collapsed');
-    safeStorage(() => localStorage.setItem('dropcat_rail_collapsed', String(rail.classList.contains('collapsed'))));
-  });
-}
 
 // ── Client-side error logging ────────────────────────────────────────────────
 function _reportClientError(message, source, lineno) {

@@ -204,8 +204,8 @@ class ServerManager:
         cflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
             env = os.environ.copy()
-        env["DCS_MANAGED"] = "1"   # tells app.py to skip its own tray icon
-        proc = subprocess.Popen(
+            env["DCS_MANAGED"] = "1"   # tells app.py to skip its own tray icon
+            proc = subprocess.Popen(
                 [PYTHON, str(APP_PY)],
                 cwd=str(ROOT),
                 stdout=log_fh,
