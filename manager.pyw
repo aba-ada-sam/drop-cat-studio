@@ -2,13 +2,13 @@
 manager.pyw — Drop Cat Go Studio tray + window manager
 Run with:  pythonw.exe manager.pyw
 
-- Opens app in a native WebView2 window (no browser needed)
-- Loading screen appears instantly; Python navigates to the app when ready
-- Single-instance mutex: double-click while running just shows the window
-- Tray icon: Show / Restart Server / Exit
+- Shows tkinter loading splash instantly while server starts
+- Opens app in Chrome --app mode (plain window, no URL bar or tabs)
+- Single-instance mutex: double-click while running re-opens the window
+- Tray: Open / Restart Server / Exit
 - Keeps app.py alive, restarts on crash (max 5 in 60s)
 
-Dependencies: pystray, Pillow, pywebview  (all in requirements.txt)
+Dependencies: pystray, Pillow  (pip install pystray Pillow)
 """
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -66,17 +65,6 @@ PYTHON = _python_exe()
 
 # ── Port helpers ──────────────────────────────────────────────────────────────
 
-def _port_free(port: int) -> bool:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.bind(("127.0.0.1", port))
-        return True
-    except OSError:
-        return False
-    finally:
-        s.close()
-
-
 def read_port_file() -> tuple[int | None, int | None]:
     try:
         data = json.loads(PORT_FILE.read_text(encoding="utf-8"))
@@ -120,6 +108,32 @@ def kill_pid(pid: int | None) -> None:
         log.info("Killed PID %d", pid)
     except Exception as exc:
         log.warning("taskkill %d failed: %s", pid, exc)
+
+
+# ── Open app window ───────────────────────────────────────────────────────────
+
+def open_app_window(port: int) -> None:
+    """Open the app in Chrome --app mode: plain window, no URL bar or tabs."""
+    url = f"http://127.0.0.1:{port}"
+    chrome_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ]
+    for path in chrome_paths:
+        if os.path.isfile(path):
+            subprocess.Popen([
+                path,
+                f"--app={url}",
+                "--window-size=1400,900",
+                "--window-position=100,50",
+            ])
+            log.info("Opened Chrome --app on port %d", port)
+            return
+    # Chrome not found — fall back to default browser
+    import webbrowser
+    webbrowser.open(url)
+    log.warning("Chrome not found, opened default browser")
 
 
 # ── Server process manager ────────────────────────────────────────────────────
@@ -253,7 +267,8 @@ class ServerManager:
             now = time.monotonic()
             self._restart_times = [t for t in self._restart_times if now - t < self.RESTART_WINDOW]
             if len(self._restart_times) >= self.MAX_RESTARTS:
-                log.error("Server crashed %d times in %ds — giving up.", self.MAX_RESTARTS, self.RESTART_WINDOW)
+                log.error("Server crashed %d times in %ds — giving up.",
+                          self.MAX_RESTARTS, self.RESTART_WINDOW)
                 self._gave_up = True
                 return
             self._restart_times.append(now)
@@ -265,7 +280,60 @@ class ServerManager:
             self._spawn()
 
 
-# ── Tray icon image ───────────────────────────────────────────────────────────
+# ── Loading splash (tkinter) ──────────────────────────────────────────────────
+
+def show_splash(srv: ServerManager) -> None:
+    """Frameless loading window that closes when the server is ready."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        srv.wait_ready(timeout=120)
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    root.attributes("-topmost", True)
+
+    W, H = 320, 180
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 20, "bold")).pack(pady=(28, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+
+    status = tk.StringVar(value="Starting…")
+    tk.Label(root, textvariable=status, bg="#0d0606", fg="#6a5a4a",
+             font=("Arial", 9)).pack(pady=(16, 0))
+
+    dot_var = tk.StringVar(value="●○○○")
+    tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
+             font=("Arial", 13)).pack(pady=4)
+
+    dots = ["●○○○", "○●○○", "○○●○", "○○○●"]
+    idx = [0]
+
+    def _tick():
+        idx[0] = (idx[0] + 1) % 4
+        dot_var.set(dots[idx[0]])
+        if idx[0] > 6:
+            status.set("Loading model…")
+        root.after(260, _tick)
+
+    def _poll():
+        if srv.ready:
+            root.destroy()
+        else:
+            root.after(400, _poll)
+
+    _tick()
+    root.after(400, _poll)
+    root.mainloop()
+
+
+# ── Tray icon ─────────────────────────────────────────────────────────────────
 
 def _build_icon_image():
     from PIL import Image, ImageDraw, ImageFont
@@ -293,33 +361,67 @@ def _build_icon_image():
     return img
 
 
-# ── Main entry ────────────────────────────────────────────────────────────────
+def run_tray(srv: ServerManager) -> None:
+    import pystray
+
+    def _open(icon=None, item=None):
+        if srv.port:
+            open_app_window(srv.port)
+
+    def _do_restart():
+        srv.restart()
+        srv.wait_ready(120)
+        if srv.port:
+            open_app_window(srv.port)
+
+    def _restart(icon=None, item=None):
+        threading.Thread(target=_do_restart, daemon=True).start()
+
+    def _exit(icon, item=None):
+        log.info("Exit from tray")
+        srv.stop()
+        clear_port_file()
+        try:
+            icon.stop()
+        except Exception:
+            pass
+        threading.Timer(0.5, lambda: os._exit(0)).start()
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open Drop Cat Go Studio", _open, default=True),
+        pystray.MenuItem("Restart Server", _restart),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Exit", _exit),
+    )
+    icon = pystray.Icon("DropCatGoStudio", _build_icon_image(), "Drop Cat Go Studio", menu)
+    icon.run()   # blocks until Exit is clicked
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
 
-    # Single-instance lock — second launch just focuses the existing window.
+    # Single-instance: if another manager is running, just open the app window.
     import ctypes as _ctypes
     _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "DropCatGoStudio_Manager_v1")
     if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        log.info("Already running — opening browser as fallback")
+        log.info("Already running — opening app window")
         existing = find_running_server()
         if existing:
-            webbrowser.open(f"http://127.0.0.1:{existing}")
+            open_app_window(existing)
         sys.exit(0)
 
-    # Check dependencies
     try:
         import pystray
         from PIL import Image
-        import webview
     except ImportError as exc:
-        log.error("Missing package: %s — run: pip install pystray Pillow pywebview", exc)
+        log.error("Missing: %s — run: pip install pystray Pillow", exc)
         try:
             import ctypes
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Drop Cat Go Studio cannot start:\n\n{exc}\n\nRun: pip install -r requirements.txt",
+                f"Cannot start:\n\n{exc}\n\nRun: pip install -r requirements.txt",
                 "Drop Cat Go Studio", 0x10,
             )
         except Exception:
@@ -330,105 +432,22 @@ def main() -> None:
     existing_port = find_running_server()
 
     if existing_port:
-        log.info("Server already on port %d — attaching tray only", existing_port)
+        log.info("Server already on port %d", existing_port)
         srv._port = existing_port
         srv._ready_event.set()
+        open_app_window(existing_port)
     else:
-        log.info("No server found — starting app.py")
+        log.info("Starting app.py")
         srv.start()
-
-    # ── Create native window ──────────────────────────────────────────────────
-
-    start_url = (
-        f"http://127.0.0.1:{existing_port}"
-        if existing_port
-        else (ROOT / "loading.html").as_uri()
-    )
-
-    win = webview.create_window(
-        "Drop Cat Go Studio",
-        start_url,
-        width=1400,
-        height=900,
-        min_size=(900, 600),
-        text_select=False,
-    )
-
-    _quitting = threading.Event()
-
-    # ── Tray menu ─────────────────────────────────────────────────────────────
-
-    def _show(icon=None, item=None):
-        try:
-            win.show()
-        except Exception:
-            pass
-
-    def _do_restart():
-        srv.restart()
-        srv.wait_ready(120)
+        # Show splash while server loads, then open the window
+        show_splash(srv)
         if srv.port:
-            try:
-                win.load_url(f"http://127.0.0.1:{srv.port}")
-            except Exception:
-                pass
-
-    def _restart(icon=None, item=None):
-        threading.Thread(target=_do_restart, daemon=True).start()
-
-    def _exit(icon=None, item=None):
-        log.info("Exit requested from tray")
-        _quitting.set()
-        srv.stop()
-        clear_port_file()
-        try:
-            icon.stop()
-        except Exception:
-            pass
-        try:
-            win.destroy()
-        except Exception:
-            pass
-        threading.Timer(0.5, lambda: os._exit(0)).start()
-
-    menu = pystray.Menu(
-        pystray.MenuItem("Show Drop Cat Go Studio", _show, default=True),
-        pystray.MenuItem("Restart Server", _restart),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Exit", _exit),
-    )
-    icon = pystray.Icon("DropCatGoStudio", _build_icon_image(), "Drop Cat Go Studio", menu)
-    threading.Thread(target=icon.run, daemon=True, name="tray").start()
-
-    # ── Navigate to app when server is ready ──────────────────────────────────
-
-    def _load_when_ready():
-        if existing_port:
-            return  # already showing the app
-        if srv.wait_ready(timeout=120) and srv.port:
-            log.info("Navigating window to http://127.0.0.1:%d", srv.port)
-            win.load_url(f"http://127.0.0.1:{srv.port}")
+            open_app_window(srv.port)
         else:
-            log.error("Server never became ready — window stays on loading screen")
+            log.error("Server never became ready")
 
-    # ── Closing window hides to tray instead of quitting ─────────────────────
-
-    def _on_closing():
-        if _quitting.is_set():
-            return True   # allow destroy (Exit was clicked)
-        win.hide()
-        return False      # block the close, just hide
-
-    win.events.closing += _on_closing
-
-    # webview.start() blocks the main thread until all windows are destroyed
-    webview.start(func=_load_when_ready, debug=False)
-
-    # Window was destroyed (Exit path) — clean up if not already done
-    if not _quitting.is_set():
-        srv.stop()
-        clear_port_file()
-    os._exit(0)
+    # Keep process alive for the tray icon
+    run_tray(srv)
 
 
 if __name__ == "__main__":
