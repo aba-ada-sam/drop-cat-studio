@@ -7,6 +7,8 @@
 import { api } from './api.js';
 import { toast, createSlider, el } from './components.js';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260420k';
+import { handoff } from './handoff.js';
+import { RegionEditor } from './components/region-editor.js';
 
 // ── Module state ─────────────────────────────────────────────────────────────
 let forgeStatus   = null;
@@ -59,7 +61,6 @@ export function init(panel) {
     placeholder: 'Negative prompt (optional)',
     style: 'width:100%; resize:vertical; margin-top:6px; font-size:.82rem; color:var(--text-2)',
   });
-  negArea.value = 'blurry, low quality, watermark, text, logo, ugly, deformed';
   promptCard.appendChild(negArea);
 
   // Compose + suffix row
@@ -162,6 +163,54 @@ export function init(panel) {
   hrUpscalerSel.appendChild(el('option', { value: 'ESRGAN_4x', text: 'ESRGAN_4x' }));
   hrBody.appendChild(hrUpscalerSel);
 
+  // ── Forge Couple (Regional Prompting) ────────────────────────────────────
+  const fcDet  = el('details', { style: 'margin-top:8px' });
+  const fcSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: '🗺 Regional Prompting (Forge Couple)' });
+  fcDet.appendChild(fcSumm);
+  const fcBody = el('div', { style: 'margin-top:8px; display:flex; flex-direction:column; gap:8px' });
+  fcDet.appendChild(fcBody);
+  settingsBody.appendChild(fcDet);
+
+  const fcEnabledRow = el('div', { style: 'display:flex; align-items:center; gap:6px' });
+  const fcEnabled = el('input', { type: 'checkbox', id: 'sd-fc-enable' });
+  fcEnabledRow.append(fcEnabled, el('label', { for: 'sd-fc-enable', text: 'Enable Forge Couple', style: 'cursor:pointer; font-size:.85rem' }));
+  fcBody.appendChild(fcEnabledRow);
+
+  // Direction + region count
+  const fcCtrlRow = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:8px' });
+  fcBody.appendChild(fcCtrlRow);
+
+  const fcDirSel = el('select', { style: 'width:100%; font-size:.82rem' });
+  for (const d of ['Horizontal', 'Vertical'])
+    fcDirSel.appendChild(el('option', { value: d, text: d }));
+  fcCtrlRow.append(
+    el('div', {}, [el('label', { text: 'Direction', style: 'font-size:.75rem; color:var(--text-3); display:block' }), fcDirSel]),
+  );
+
+  const fcCountSel = el('select', { style: 'width:100%; font-size:.82rem' });
+  for (const n of [2, 3, 4])
+    fcCountSel.appendChild(el('option', { value: String(n), text: `${n} regions` }));
+  fcCountSel.value = '3';
+  fcCtrlRow.append(
+    el('div', {}, [el('label', { text: 'Regions', style: 'font-size:.75rem; color:var(--text-3); display:block' }), fcCountSel]),
+  );
+
+  const fcBgWeight = createSlider(fcBody, { label: 'Background weight', min: 0.1, max: 1.0, step: 0.05, value: 0.5 });
+
+  // Visual region editor
+  const fcEditorWrap = el('div', { style: 'border:1px solid var(--border-2); border-radius:var(--r-sm); padding:8px; background:var(--bg)' });
+  fcBody.appendChild(fcEditorWrap);
+  const fcEditor = new RegionEditor(fcEditorWrap, { rows: 1, cols: 3, direction: 'Horizontal' });
+
+  // Rebuild editor when direction/count changes
+  function _rebuildFcEditor() {
+    const n = parseInt(fcCountSel.value);
+    const dir = fcDirSel.value;
+    fcEditor.setFromGrid(dir === 'Vertical' ? n : 1, dir === 'Horizontal' ? n : 1, dir);
+  }
+  fcDirSel.addEventListener('change', _rebuildFcEditor);
+  fcCountSel.addEventListener('change', _rebuildFcEditor);
+
   // ── Generate button row ──────────────────────────────────────────────────
   const genRow  = el('div', { style: 'display:flex; gap:8px; flex-shrink:0' });
   sidebar.appendChild(genRow);
@@ -215,9 +264,10 @@ export function init(panel) {
   }});
   const btnSendVideos = el('button', { class: 'btn btn-sm', text: '→ Make Videos', onclick() {
     const img = generatedImages[currentIdx];
-    if (!img?.path) return;
-    import('./handoff.js').then(h => h.handoff('fun-videos', { type: 'image', path: img.path }));
+    if (!img?.path) { toast('Generate an image first', 'error'); return; }
+    handoff('fun-videos', { type: 'image', path: img.path });
     document.querySelector('[data-tab="fun-videos"]')?.click();
+    toast('Image sent to Create Videos', 'info');
   }});
   actionRow.append(btnReuse, btnVariation, btnSendVideos);
 
@@ -551,6 +601,7 @@ export function init(panel) {
     composeBtn.disabled = true;
     composeBtn.textContent = '✦ Composing…';
     try {
+      const fcOn = fcEnabled.checked;
       const data = await api('/api/prompts/enhance', {
         method: 'POST',
         body: JSON.stringify({
@@ -558,9 +609,16 @@ export function init(panel) {
           suffix: suffixInput.value.trim(),
           provider: 'local',
           smart_wildcards: wildcardToggle.checked,
+          regional: fcOn,
+          regions_n: fcOn ? parseInt(fcCountSel.value) : undefined,
         }),
       });
       if (data.prompt) promptArea.value = data.prompt;
+      if (fcOn && Array.isArray(data.regions) && data.regions.length) {
+        fcEditor.setRegionPrompts(data.regions);
+        fcDet.open = true;
+        fcEnabled.checked = true;
+      }
       if (data.created_wildcards?.length) {
         toast(`Created ${data.created_wildcards.length} new wildcard file(s)`, 'success');
         await loadWildcardFiles();
@@ -591,6 +649,9 @@ export function init(panel) {
     }, 1000);
 
     try {
+      const useFc = fcEnabled.checked;
+      const fcRegions = useFc ? fcEditor.getRegions().map(r => r.prompt || '') : [];
+
       const data = await api('/api/prompts/forge/txt2img', {
         method: 'POST',
         body: JSON.stringify({
@@ -608,6 +669,11 @@ export function init(panel) {
           hr_upscaler: hrUpscalerSel.value || 'ESRGAN_4x',
           hr_steps: Number(hrStepsSlider.value),
           hr_denoise: Number(hrDenoiseSlider.value),
+          use_forge_couple: useFc,
+          columns: fcRegions,
+          forge_couple_direction: fcDirSel.value,
+          forge_couple_background: 'First Line',
+          forge_couple_bg_weight: Number(fcBgWeight.value),
         }),
       });
 

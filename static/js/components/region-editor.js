@@ -262,6 +262,11 @@ export class RegionEditor {
     this._el.appendChild(grid);
   }
 
+  setRegionPrompts(prompts) {
+    prompts.forEach((p, i) => { if (this._regions[i]) this._regions[i].prompt = p; });
+    this._render();
+  }
+
   _onChange() {
     if (this._opts.onChange) this._opts.onChange(this.getRegions());
   }

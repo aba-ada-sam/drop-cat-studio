@@ -7,7 +7,7 @@
 // tab-imports.js removed — import is handled per-tab
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260421c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260421c';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421c';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421d';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260421c';
 import { init as initImage2Video } from './panel-image2video.js?v=20260421c';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260421c';
@@ -637,18 +637,6 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-// ── Apply Windows accent colour at startup ───────────────────────────────────
-fetch('/api/theme').then(r => r.json()).then(t => {
-  const root = document.documentElement;
-  const hex  = t.accent || '#0078d4';
-  const rv = parseInt(hex.slice(1,3),16);
-  const gv = parseInt(hex.slice(3,5),16);
-  const bv = parseInt(hex.slice(5,7),16);
-  root.style.setProperty('--accent',        hex);
-  root.style.setProperty('--accent-2',      `rgb(${Math.min(255,rv+60)},${Math.min(255,gv+60)},${Math.min(255,bv+60)})`);
-  root.style.setProperty('--accent-bg',     `rgba(${rv},${gv},${bv},.13)`);
-  root.style.setProperty('--accent-border', `rgba(${rv},${gv},${bv},.35)`);
-}).catch(() => {});
 
 // ── Client-side error logging ────────────────────────────────────────────────
 function _reportClientError(message, source, lineno) {

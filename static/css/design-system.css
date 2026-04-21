@@ -36,28 +36,28 @@ body {
 :root {
   color-scheme: light dark;
 
-  /* ── Accent — overwritten at runtime by /api/theme or preferences ── */
-  --accent:        #0078d4;
-  --accent-2:      #60b0ff;
-  --accent-bg:     rgba(0,120,212,.13);
-  --accent-border: rgba(0,120,212,.35);
+  /* ── Circus / Burlesque accent — gold ── */
+  --accent:        #d4a017;
+  --accent-2:      #e8c040;
+  --accent-bg:     rgba(212,160,23,.13);
+  --accent-border: rgba(212,160,23,.35);
 
-  /* ── Dark (neutral) surfaces — default ── */
-  --bg:          #111111;
-  --bg-raised:   #181818;
-  --surface:     #1e1e1e;
-  --surface-2:   #272727;
-  --surface-3:   #303030;
+  /* ── Dark circus surfaces — near-black with warm crimson undertone ── */
+  --bg:          #0d0606;
+  --bg-raised:   #120707;
+  --surface:     #1a0a0a;
+  --surface-2:   #220d0d;
+  --surface-3:   #2c1010;
 
-  /* ── Borders ── */
-  --border:      rgba(255,255,255,.08);
-  --border-2:    rgba(255,255,255,.14);
-  --border-3:    rgba(255,255,255,.22);
+  /* ── Borders — warm tinted ── */
+  --border:      rgba(240,200,140,.08);
+  --border-2:    rgba(240,200,140,.14);
+  --border-3:    rgba(240,200,140,.22);
 
-  /* ── Text ── */
-  --text:        #f2f2f2;
-  --text-2:      #909090;
-  --text-3:      #585858;
+  /* ── Text — cream ── */
+  --text:        #f0e6d0;
+  --text-2:      #a89070;
+  --text-3:      #6a5040;
 
   /* ── Semantic ── */
   --green:       #3dba6b;
@@ -69,9 +69,9 @@ body {
   --amber:       #e8a840;
   --amber-bg:    rgba(232,168,64,.10);
 
-  /* ── Legacy aliases ── */
-  --circus-red:     AccentColor;
-  --circus-crimson: color-mix(in srgb, AccentColor 60%, black);
+  /* ── Circus ── */
+  --circus-red:     #c41e3a;
+  --circus-crimson: #6b0000;
 
   /* ── Radii ── */
   --r-sm:  5px;
@@ -209,7 +209,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   position: absolute;
   bottom: 0; left: 0; right: 0;
   height: 0%;
-  background: linear-gradient(to top, #4030a0, #7c6ff7, #b0a4ff);
+  background: linear-gradient(to top, #6b0000, #c41e3a, #e06050);
   transition: height 0.5s cubic-bezier(.22,1,.36,1);
 }
 
@@ -260,10 +260,10 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 
 @keyframes logo-pulse {
   0%,100% {
-    box-shadow: 0 0 60px rgba(124,111,247,.35), 0 0 140px rgba(124,111,247,.15), 0 30px 80px rgba(0,0,0,.7);
+    box-shadow: 0 0 60px rgba(212,160,23,.35), 0 0 140px rgba(212,160,23,.15), 0 30px 80px rgba(0,0,0,.7);
   }
   50% {
-    box-shadow: 0 0 90px rgba(124,111,247,.60), 0 0 200px rgba(124,111,247,.28), 0 30px 80px rgba(0,0,0,.7);
+    box-shadow: 0 0 90px rgba(212,160,23,.60), 0 0 200px rgba(212,160,23,.28), 0 30px 80px rgba(0,0,0,.7);
   }
 }
 
@@ -310,8 +310,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   color: var(--text);
   text-shadow:
     2px 2px 0 var(--circus-crimson),
-    0 0 40px rgba(124,111,247,.4),
-    0 0 80px rgba(124,111,247,.12);
+    0 0 40px rgba(212,160,23,.4),
+    0 0 80px rgba(212,160,23,.12);
   line-height: 1.0;
   margin-bottom: 6px;
 }
@@ -401,8 +401,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .header-logo {
   width: 42px; height: 42px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(124,111,247,.30);
-  box-shadow: 0 0 14px rgba(124,111,247,.22);
+  border: 1px solid rgba(212,160,23,.30);
+  box-shadow: 0 0 14px rgba(212,160,23,.22);
 }
 
 /* The title block -- "Andrew's" arched over "DROP CAT GO STUDIO" */
@@ -428,7 +428,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   text-transform: none;
   letter-spacing: .02em;
   color: var(--text);
-  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 16px rgba(124,111,247,.20);
+  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 16px rgba(212,160,23,.20);
   line-height: 1.2;
   white-space: normal;
 }
@@ -446,7 +446,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   border-radius: var(--r-md);
   transition: background var(--dur-fast);
 }
-.service-pills:hover { background: rgba(124,111,247,.06); }
+.service-pills:hover { background: rgba(212,160,23,.06); }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -521,16 +521,16 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 }
 .btn:hover { background: var(--surface-3); border-color: var(--accent); }
 .btn-primary {
-  background: linear-gradient(135deg, #7c6ff7 0%, #5040c0 100%);
-  color: #fff;
-  border-color: rgba(124,111,247,.5);
-  font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0,0,0,.3);
-  box-shadow: 0 2px 10px rgba(124,111,247,.35);
+  background: linear-gradient(135deg, #d4a017 0%, #a07010 100%);
+  color: #0d0606;
+  border-color: rgba(212,160,23,.5);
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,.2);
+  box-shadow: 0 2px 10px rgba(212,160,23,.35);
 }
 .btn-primary:hover {
-  background: linear-gradient(135deg, #9080ff 0%, #6450d8 100%);
-  box-shadow: 0 3px 16px rgba(124,111,247,.55);
+  background: linear-gradient(135deg, #e8b820 0%, #b88010 100%);
+  box-shadow: 0 3px 16px rgba(212,160,23,.55);
 }
 .btn-sm { padding: 5px 11px; font-size: .85rem; }
 
@@ -543,7 +543,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   padding: 18px 20px;
 }
 /* Subtle gold inner glow on cards */
-.card { box-shadow: inset 0 1px 0 rgba(124,111,247,.06); }
+.card { box-shadow: inset 0 1px 0 rgba(212,160,23,.06); }
 
 .placeholder-card {
   max-width: 580px;
@@ -637,7 +637,7 @@ select option { background: var(--surface-2); }
   max-width: 90vw;
   max-height: 82vh;
   overflow-y: auto;
-  box-shadow: var(--shadow-lg), 0 0 40px rgba(124,111,247,.12);
+  box-shadow: var(--shadow-lg), 0 0 40px rgba(212,160,23,.12);
 }
 .modal-header {
   display: flex;
@@ -903,7 +903,7 @@ select option { background: var(--surface-2); }
 .drop-zone:hover, .drop-zone.drag-over {
   border-color: var(--accent);
   background: var(--accent-bg);
-  box-shadow: inset 0 0 16px rgba(124,111,247,.06);
+  box-shadow: inset 0 0 16px rgba(212,160,23,.06);
 }
 .drop-zone-content { pointer-events: none; }
 .drop-zone-content svg { color: var(--text-3); margin-bottom: 7px; display: inline-block; }
@@ -1350,13 +1350,13 @@ textarea:focus { border-color: var(--accent); }
 .big-toggle-input:checked + .big-toggle-label {
   background: linear-gradient(135deg, #3a1f00, #5a3200);
   border-color: #c4850a;
-  box-shadow: inset 0 2px 8px rgba(0,0,0,.4), 0 0 24px rgba(124,111,247,.28);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.4), 0 0 24px rgba(212,160,23,.28);
 }
 
 .big-toggle-input:checked + .big-toggle-label .big-toggle-thumb {
   transform: translateX(40px);
   background: radial-gradient(circle at 35% 35%, #f0c040, #c4820a);
-  box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 12px rgba(124,111,247,.45);
+  box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 12px rgba(212,160,23,.45);
 }
 
 
@@ -1433,7 +1433,7 @@ textarea:focus { border-color: var(--accent); }
 .genre-tile.on {
   background: var(--accent-bg);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(124,111,247,.20);
+  box-shadow: 0 0 10px rgba(212,160,23,.20);
 }
 .genre-icon { font-size: 1.4rem; line-height: 1; }
 .genre-name { font-size: .64rem; font-weight: 700; color: var(--text-2); letter-spacing: .04em; text-align: center; }
@@ -1497,7 +1497,7 @@ textarea:focus { border-color: var(--accent); }
   background: var(--accent-bg);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 12px rgba(124,111,247,.25);
+  box-shadow: 0 0 12px rgba(212,160,23,.25);
 }
 .vocals-icon { font-size: 1.5rem; line-height: 1; }
 .vocals-name { font-size: .68rem; font-weight: 700; letter-spacing: .05em; }
@@ -1772,7 +1772,7 @@ textarea:focus { border-color: var(--accent); }
 .mode-tile.on {
   background: var(--accent-bg);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(124,111,247,.20);
+  box-shadow: 0 0 10px rgba(212,160,23,.20);
 }
 .mode-icon  { font-size: 1.3rem; line-height: 1; }
 .mode-label { font-size: .65rem; font-weight: 800; color: var(--text-2); letter-spacing: .04em; }
@@ -1864,8 +1864,8 @@ textarea:focus { border-color: var(--accent); }
   position: relative;
   white-space: normal;
 }
-.rail-tab:hover { color: var(--text-2); background: rgba(124,111,247,.06); }
-.rail-tab.active { color: var(--accent-2); background: rgba(124,111,247,.08); }
+.rail-tab:hover { color: var(--text-2); background: rgba(212,160,23,.06); }
+.rail-tab.active { color: var(--accent-2); background: rgba(212,160,23,.08); }
 .rail-tab.active::before {
   content: '';
   position: absolute;
@@ -2714,7 +2714,7 @@ input, textarea, select {
 .step1-panel {
   border: 1px solid var(--accent-border);
   border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(124,111,247,.07) 0%, var(--surface) 100%);
+  background: linear-gradient(180deg, rgba(212,160,23,.07) 0%, var(--surface) 100%);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -2860,6 +2860,6 @@ input, textarea, select {
 
 @keyframes step1-pulse {
   0%   { box-shadow: 0 0 0 0 var(--accent-bg); }
-  50%  { box-shadow: 0 0 0 10px rgba(124,111,247,0); }
-  100% { box-shadow: 0 0 0 0 rgba(124,111,247,0); }
+  50%  { box-shadow: 0 0 0 10px rgba(212,160,23,0); }
+  100% { box-shadow: 0 0 0 0 rgba(212,160,23,0); }
 }
