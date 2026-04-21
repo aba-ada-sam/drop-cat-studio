@@ -9,6 +9,12 @@ let _errorCount = 0;
 let _toastWrap = null;
 let _errorBadge = null;
 
+// Suppress toasts for the first 5s after load — errors go to the log only.
+// User can see the service pills; they don't need a popup for every
+// "not yet connected" state during startup.
+const _startupUntil = Date.now() + 5000;
+function _inStartup() { return Date.now() < _startupUntil; }
+
 function _getWrap() {
   if (!_toastWrap) _toastWrap = document.getElementById('toast-wrap');
   return _toastWrap;
@@ -31,6 +37,13 @@ function _updateBadge() {
  * @returns {object} controller { update(pct), dismiss() }
  */
 export function toast(msg, level = 'info', opts = {}) {
+  // During startup, errors and info go silently to the log — no popup.
+  // Success toasts (user-triggered actions) always show.
+  if (_inStartup() && level !== 'success') {
+    if (level === 'error') _logError(msg, opts.context, opts.details);
+    return { update() {}, dismiss() {} };
+  }
+
   const wrap = _getWrap();
   if (!wrap) return { update() {}, dismiss() {} };
 

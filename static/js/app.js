@@ -7,14 +7,14 @@
 import { init as initImports } from './tab-imports.js?v=20260419m';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260420e';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260420f';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
 import { init as initImageGen } from './tab-image-gen.js?v=20260419j';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
 import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
 import { consumeHandoff } from './handoff.js?v=20260419j';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419j';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420f';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419j';
 import './shell/ai-intent.js?v=20260419j';
@@ -662,6 +662,12 @@ function escHtml(s) {
 
 // ── Init ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Hide startup spinner after 5s (matches toast suppression window)
+  setTimeout(() => {
+    const s = document.getElementById('startup-spinner');
+    if (s) s.style.display = 'none';
+  }, 5000);
+
   runSplash();
 
   // Rail tab clicks
