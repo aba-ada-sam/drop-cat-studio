@@ -1919,6 +1919,7 @@ textarea:focus { border-color: var(--accent); }
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 
 #split-pane {
@@ -1934,37 +1935,39 @@ textarea:focus { border-color: var(--accent); }
   padding: 20px 24px;
   min-width: 0;
 }
-/* When gallery is open, use the saved split ratio */
-#split-pane.gallery-open #split-controls {
-  flex: 0 0 var(--split-ratio, 60%);
-  min-width: 320px;
-}
-#split-gallery { display: none; }
-#split-pane.gallery-open #split-gallery { display: block; }
-#split-pane.gallery-open #split-divider { display: block; }
-#split-divider { display: none; }
-
-#split-divider {
-  width: 5px;
-  background: var(--border);
-  cursor: col-resize;
-  flex-shrink: 0;
-  transition: background var(--dur-fast);
-  position: relative;
-}
-#split-divider:hover, #split-divider.dragging { background: var(--accent); }
-#split-divider::after {
-  content: '';
+/* Gallery overlay — full-height panel that covers the work area */
+#gallery-overlay {
+  display: none;
   position: absolute;
-  inset: 0 -4px;
+  inset: 0;
+  background: var(--bg);
+  z-index: 200;
+  flex-direction: column;
+  overflow: hidden;
+}
+#gallery-overlay[aria-hidden="false"] { display: flex; }
+
+#gallery-overlay-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gallery-overlay-title {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  letter-spacing: .05em;
+  text-transform: uppercase;
 }
 
 #split-gallery {
   flex: 1;
   overflow-y: auto;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
-  min-width: 280px;
+  padding: 16px 20px;
+  min-height: 0;
 }
 
 /* Gallery empty state */

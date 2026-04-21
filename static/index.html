@@ -6,7 +6,7 @@
   <title>Drop Cat Go Studio</title>
   <link rel="icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" href="/static/logo-192.png">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260419o">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260420c">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
 </head>
 <body>
@@ -156,7 +156,16 @@
       <!-- Main area -->
       <div id="app-main">
 
-        <!-- Split pane: controls + gallery -->
+        <!-- Gallery overlay (toggled by Gallery button, covers the work area) -->
+        <div id="gallery-overlay" aria-hidden="true">
+          <div id="gallery-overlay-bar">
+            <span class="gallery-overlay-title">Gallery</span>
+            <button class="btn-icon" id="btn-gallery-close" title="Close gallery">&#x2715;</button>
+          </div>
+          <div id="split-gallery" role="complementary" aria-label="Generation gallery"></div>
+        </div>
+
+        <!-- Controls: always full width -->
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
@@ -215,11 +224,6 @@
             </section>
           </div>
 
-          <!-- Draggable divider -->
-          <div id="split-divider" role="separator" aria-label="Resize panels" tabindex="0"></div>
-
-          <!-- Gallery pane -->
-          <div id="split-gallery" role="complementary" aria-label="Generation gallery"></div>
         </div>
 
       </div><!-- /#app-main -->
@@ -406,6 +410,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260420a"></script>
+  <script type="module" src="/static/js/app.js?v=20260420c"></script>
 </body>
 </html>

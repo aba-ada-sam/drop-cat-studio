@@ -11,7 +11,7 @@ import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab
 import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
 import { init as initImageGen } from './tab-image-gen.js?v=20260419j';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
-import { init as initVideoTools, receiveHandoff as videoToolsHandoff } from './panel-video-tools.js?v=20260419l';
+import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
 import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
 import { consumeHandoff } from './handoff.js?v=20260419j';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260419j';
@@ -37,7 +37,7 @@ const TAB_HANDOFF = {
   'fun-videos':   funHandoff,
   'bridges':      bridgesHandoff,
   'sd-prompts':   sdPromptsHandoff,
-  'video-tools':  videoToolsHandoff,
+  'video-tools':  null,
 };
 const _tabInitialized = new Set();
 
@@ -268,7 +268,7 @@ const state = {
   logOpen:      true,
   logSeq:       0,
   config:       {},
-  splitRatio:   safeStorage(() => localStorage.getItem('dropcat_split_ratio'), null) || '45%',
+  galleryOpen:  false,
 };
 
 // ── Tab routing ─────────────────────────────────────────────────────────────
@@ -552,61 +552,30 @@ async function svcAction(action, name) {
   setTimeout(pollServices, 1000);
 }
 
-// ── Split pane ───────────────────────────────────────────────────────────────
-function initSplitPane() {
-  const pane     = document.getElementById('split-pane');
-  const controls = document.getElementById('split-controls');
-  const divider  = document.getElementById('split-divider');
-  if (!pane || !controls || !divider) return;
+// ── Gallery overlay ──────────────────────────────────────────────────────────
+function _galleryOpen() {
+  const ov  = document.getElementById('gallery-overlay');
+  const btn = document.getElementById('btn-gallery-toggle');
+  if (!ov) return;
+  ov.setAttribute('aria-hidden', 'false');
+  btn?.classList.add('active');
+  if (btn) btn.title = 'Hide gallery';
+  state.galleryOpen = true;
+  refreshGallery();
+}
 
-  // Restore saved ratio
-  controls.style.flexBasis = state.splitRatio;
+function _galleryClose() {
+  const ov  = document.getElementById('gallery-overlay');
+  const btn = document.getElementById('btn-gallery-toggle');
+  if (!ov) return;
+  ov.setAttribute('aria-hidden', 'true');
+  btn?.classList.remove('active');
+  if (btn) btn.title = 'Show generation gallery';
+  state.galleryOpen = false;
+}
 
-  let dragging = false;
-  let startX = 0;
-  let startW = 0;
-
-  divider.addEventListener('mousedown', e => {
-    dragging = true;
-    startX = e.clientX;
-    startW = controls.getBoundingClientRect().width;
-    divider.classList.add('dragging');
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    const delta = e.clientX - startX;
-    const paneW = pane.getBoundingClientRect().width;
-    const newW  = Math.min(Math.max(startW + delta, 280), paneW - 280);
-    const ratio = Math.round(newW / paneW * 100) + '%';
-    controls.style.flexBasis = ratio;
-    state.splitRatio = ratio;
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!dragging) return;
-    dragging = false;
-    divider.classList.remove('dragging');
-    document.body.style.userSelect = '';
-    document.body.style.cursor = '';
-    safeStorage(() => localStorage.setItem('dropcat_split_ratio', state.splitRatio));
-  });
-
-  // Keyboard-adjustable divider
-  divider.addEventListener('keydown', e => {
-    if (!['ArrowLeft','ArrowRight'].includes(e.key)) return;
-    e.preventDefault();
-    const paneW = pane.getBoundingClientRect().width;
-    const curW  = controls.getBoundingClientRect().width;
-    const step  = e.shiftKey ? 50 : 10;
-    const newW  = Math.min(Math.max(curW + (e.key === 'ArrowRight' ? step : -step), 280), paneW - 280);
-    const ratio = Math.round(newW / paneW * 100) + '%';
-    controls.style.flexBasis = ratio;
-    state.splitRatio = ratio;
-    safeStorage(() => localStorage.setItem('dropcat_split_ratio', state.splitRatio));
-  });
+function _galleryToggle() {
+  state.galleryOpen ? _galleryClose() : _galleryOpen();
 }
 
 // ── Rail collapse ─────────────────────────────────────────────────────────────
@@ -704,8 +673,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initRailToggle();
 
   // Split pane
-  initSplitPane();
-
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
@@ -713,30 +680,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } catch (_) {}
 
-  // Gallery
+  // Gallery overlay
   const galleryEl = document.getElementById('split-gallery');
   if (galleryEl) initGallery(galleryEl);
 
-  // When a tab calls setPreview() (generation complete), pulse the gallery
-  // toggle button so the user notices there's a result to act on.
+  // Pulse Gallery button after a generation so user knows something's there
   window.addEventListener('gallery:preview-updated', () => {
-    const pane = document.getElementById('split-pane');
-    const btn  = document.getElementById('btn-gallery-toggle');
-
-    // ── First-ever generation: auto-open the gallery once, never again ──────
-    if (!safeStorage(() => localStorage.getItem('dcg_visited_gallery'))) {
-      safeStorage(() => localStorage.setItem('dcg_visited_gallery', '1'));
-      if (pane && !pane.classList.contains('gallery-open')) {
-        pane.classList.add('gallery-open');
-        btn?.classList.add('active');
-        if (btn) btn.title = 'Hide gallery';
-        safeStorage(() => localStorage.setItem('dropcat_gallery_open', 'true'));
-      }
-      return; // panel is now open -- skip the pulse animation
-    }
-
-    // Subsequent generations: pulse the button if the panel is closed
-    if (!pane?.classList.contains('gallery-open') && btn) {
+    const btn = document.getElementById('btn-gallery-toggle');
+    if (!state.galleryOpen && btn) {
       btn.classList.add('gallery-btn-pulse');
       btn.addEventListener('animationend', () => btn.classList.remove('gallery-btn-pulse'), { once: true });
     }
@@ -752,23 +703,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initPaletteItems();
 
   // Header buttons
-  document.getElementById('btn-gallery-toggle')?.addEventListener('click', () => {
-    const pane = document.getElementById('split-pane');
-    const btn  = document.getElementById('btn-gallery-toggle');
-    if (!pane) return;
-    const open = pane.classList.toggle('gallery-open');
-    btn.classList.toggle('active', open);
-    btn.title = open ? 'Hide gallery' : 'Show generation gallery';
-    safeStorage(() => localStorage.setItem('dropcat_gallery_open', String(open)));
-  });
-
-  // Restore gallery open state
-  if (safeStorage(() => localStorage.getItem('dropcat_gallery_open')) === 'true') {
-    const pane = document.getElementById('split-pane');
-    const btn  = document.getElementById('btn-gallery-toggle');
-    pane?.classList.add('gallery-open');
-    btn?.classList.add('active');
-  }
+  document.getElementById('btn-gallery-toggle')?.addEventListener('click', _galleryToggle);
+  document.getElementById('btn-gallery-close')?.addEventListener('click', _galleryClose);
 
   document.getElementById('btn-cmd-palette')?.addEventListener('click', openPalette);
   document.getElementById('service-cluster-btn')?.addEventListener('click', openServicePanel);
