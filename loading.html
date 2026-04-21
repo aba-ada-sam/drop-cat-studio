@@ -15,6 +15,7 @@
     justify-content: center;
     height: 100vh;
     gap: 28px;
+    user-select: none;
   }
   .logo { font-size: 2.4rem; font-weight: 900; letter-spacing: .04em; color: #d4a017; }
   .sub  { font-size: .9rem; color: #8a7a6a; letter-spacing: .12em; text-transform: uppercase; }
@@ -33,24 +34,6 @@
 <div class="logo">DROP CAT GO</div>
 <div class="sub">Studio</div>
 <div class="spinner"></div>
-<div class="msg" id="msg">Starting server…</div>
-<script>
-const ports = Array.from({length: 20}, (_, i) => 7860 + i);
-let attempt = 0;
-
-async function poll() {
-  attempt++;
-  if (attempt > 3) document.getElementById('msg').textContent = 'Still loading… (model may be initialising)';
-  for (const p of ports) {
-    try {
-      const r = await fetch('http://127.0.0.1:' + p + '/api/system',
-                            { signal: AbortSignal.timeout(1200) });
-      if (r.ok) { location.href = 'http://127.0.0.1:' + p; return; }
-    } catch {}
-  }
-  setTimeout(poll, 1000);
-}
-poll();
-</script>
+<div class="msg">Starting server…</div>
 </body>
 </html>
