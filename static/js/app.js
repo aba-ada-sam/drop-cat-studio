@@ -7,14 +7,14 @@
 import { init as initImports } from './tab-imports.js?v=20260419m';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260420f';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260420j';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
 import { init as initImageGen } from './tab-image-gen.js?v=20260419j';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
 import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
 import { consumeHandoff } from './handoff.js?v=20260419j';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420i';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420j';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419j';
 import './shell/ai-intent.js?v=20260419j';
@@ -662,6 +662,33 @@ function escHtml(s) {
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────
+// ── Apply Windows theme immediately ─────────────────────────────────────────
+fetch('/api/theme').then(r => r.json()).then(t => {
+  const root = document.documentElement;
+  const hex = t.accent || '#0078d4';
+  // Parse hex to rgb for derived colours
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  root.style.setProperty('--accent',        hex);
+  root.style.setProperty('--accent-2',      `rgb(${Math.min(255,r+60)},${Math.min(255,g+60)},${Math.min(255,b+60)})`);
+  root.style.setProperty('--accent-bg',     `rgba(${r},${g},${b},.13)`);
+  root.style.setProperty('--accent-border', `rgba(${r},${g},${b},.35)`);
+  if (!t.dark) {
+    root.style.setProperty('--bg',        '#f3f3f5');
+    root.style.setProperty('--bg-raised', '#ffffff');
+    root.style.setProperty('--surface',   '#ffffff');
+    root.style.setProperty('--surface-2', '#ebebef');
+    root.style.setProperty('--surface-3', '#e0e0e6');
+    root.style.setProperty('--border',    'rgba(0,0,0,.09)');
+    root.style.setProperty('--border-2',  'rgba(0,0,0,.15)');
+    root.style.setProperty('--border-3',  'rgba(0,0,0,.24)');
+    root.style.setProperty('--text',      '#111114');
+    root.style.setProperty('--text-2',    '#44444c');
+    root.style.setProperty('--text-3',    '#888894');
+  }
+}).catch(() => {});
+
 // ── Client-side error logging ────────────────────────────────────────────────
 function _reportClientError(message, source, lineno) {
   fetch('/api/logs/client', {

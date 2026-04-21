@@ -36,11 +36,11 @@ body {
 :root {
   color-scheme: light dark;
 
-  /* ── Windows system accent (follows user's Windows color settings) ── */
-  --accent:        AccentColor;
-  --accent-2:      color-mix(in srgb, AccentColor 70%, white);
-  --accent-bg:     color-mix(in srgb, AccentColor 12%, transparent);
-  --accent-border: color-mix(in srgb, AccentColor 35%, transparent);
+  /* ── Accent — overwritten at runtime by /api/theme (Windows registry) ── */
+  --accent:        #0078d4;
+  --accent-2:      #60b0ff;
+  --accent-bg:     rgba(0,120,212,.13);
+  --accent-border: rgba(0,120,212,.35);
 
   /* ── Dark mode surfaces (default) ── */
   --bg:          #111114;
@@ -129,28 +129,6 @@ body {
   --focus: var(--accent);
 }
 
-/* ── Light mode — follows Windows "Light" app mode setting ── */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg:        #f3f3f5;
-    --bg-raised: #ffffff;
-    --surface:   #ffffff;
-    --surface-2: #ebebef;
-    --surface-3: #e0e0e6;
-
-    --border:    rgba(0,0,0,.09);
-    --border-2:  rgba(0,0,0,.15);
-    --border-3:  rgba(0,0,0,.24);
-
-    --text:      #111114;
-    --text-2:    #44444c;
-    --text-3:    #888894;
-
-    --shadow-sm: 0 1px 4px rgba(0,0,0,.10);
-    --shadow-md: 0 4px 16px rgba(0,0,0,.12);
-    --shadow-lg: 0 8px 32px rgba(0,0,0,.16);
-  }
-}
 
 /* ── Typography ───────────────────────────────────────────────────────────── */
 

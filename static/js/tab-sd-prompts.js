@@ -643,13 +643,12 @@ export function init(panel) {
     if (!prompt.trim()) { toast('Enter or enhance a prompt above first', 'error'); return; }
 
     genBtn.disabled = true;
-    progressEl.style.display = '';
-    progressEl.textContent = 'Submitting...';
+    genBtn.textContent = 'Submitting…';
     progressTimer = setInterval(async () => {
       try {
         const p = await api('/api/prompts/forge/progress');
         const pct = Math.round((p.progress||0)*100);
-        progressEl.textContent = pct > 0 ? `Generating... ${pct}%` : 'Generating...';
+        genBtn.textContent = pct > 0 ? `Generating… ${pct}%` : 'Generating…';
       } catch (_) {}
     }, 1000);
 
@@ -722,7 +721,7 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
 
     clearInterval(progressTimer);
-    progressEl.style.display = 'none';
+    genBtn.textContent = '⚡ Generate';
     genBtn.disabled = false;
   });
 

@@ -42,13 +42,7 @@ export function formatDuration(sec) {
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 
-export function toast(msg, level = 'info') {
-  const wrap = document.getElementById('toast-wrap');
-  if (!wrap) return;
-  const t = el('div', { class: `toast ${level}`, text: msg });
-  wrap.appendChild(t);
-  setTimeout(() => t.remove(), 4000);
-}
+export function toast(_msg, _level) { /* no popups */ }
 
 // ── DropZone ─────────────────────────────────────────────────────────────────
 

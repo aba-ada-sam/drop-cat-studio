@@ -584,6 +584,29 @@ async def switch_session(session_id: str):
     return JSONResponse({"error": "Session not found"}, 404)
 
 
+# ── Windows theme ────────────────────────────────────────────────────────────
+
+@app.get("/api/theme")
+async def windows_theme():
+    """Return Windows accent colour and dark/light mode from the registry."""
+    try:
+        import winreg
+        dwm  = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM")
+        abgr = winreg.QueryValueEx(dwm, "AccentColor")[0]          # stored as AABBGGRR
+        r = abgr & 0xFF
+        g = (abgr >> 8) & 0xFF
+        b = (abgr >> 16) & 0xFF
+        accent = f"#{r:02X}{g:02X}{b:02X}"
+
+        pers = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                              r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        dark = winreg.QueryValueEx(pers, "AppsUseLightTheme")[0] == 0
+    except Exception:
+        accent = "#0078d4"   # Windows default blue fallback
+        dark   = True
+    return {"accent": accent, "dark": dark}
+
+
 # ── System info ──────────────────────────────────────────────────────────────
 
 @app.get("/api/system")
