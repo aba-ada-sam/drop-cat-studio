@@ -45,6 +45,7 @@ log = logging.getLogger("manager")
 
 PORT_START = 7860
 PORT_TRIES = 20
+_MUTEX_HANDLE = None  # held at module level so GC never releases it
 
 
 # ── Python interpreter ────────────────────────────────────────────────────────
@@ -402,16 +403,14 @@ def run_tray(srv: ServerManager) -> None:
 def main() -> None:
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
 
-    # Single-instance lock via a bound socket — the OS releases it the instant
-    # this process dies, so there is no way for a stale lock to persist.
-    import socket as _socket
-    _lock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-    _lock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 0)
-    try:
-        _lock.bind(("127.0.0.1", 17860))
-    except OSError:
+    # Single-instance: Windows named mutex held for the lifetime of the process.
+    # _MUTEX_HANDLE is module-level so Python's GC never releases it.
+    global _MUTEX_HANDLE
+    import ctypes as _ct
+    _k32 = _ct.WinDLL("kernel32", use_last_error=True)
+    _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
+    if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS — another manager owns it
         log.info("Already running — opening app window")
-        _lock.close()
         existing = find_running_server()
         if existing:
             open_app_window(existing)
