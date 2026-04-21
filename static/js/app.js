@@ -5,19 +5,19 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
-import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421b';
-import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
-import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
-import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
-import { consumeHandoff } from './handoff.js?v=20260419j';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420j';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
-import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419j';
-import './shell/ai-intent.js?v=20260419j';
-import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260419j';
-import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260419j';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260421c';
+import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260421c';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421c';
+import { init as initPipeline  } from './tab-pipeline.js?v=20260421c';
+import { init as initImage2Video } from './panel-image2video.js?v=20260421c';
+import { init as initVideoTools } from './panel-video-tools.js?v=20260421c';
+import { consumeHandoff } from './handoff.js?v=20260421c';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260421c';
+import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
+import './shell/ai-intent.js?v=20260421c';
+import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
+import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260421c';
 
 // ── Tab module map ──────────────────────────────────────────────────────────
 const TAB_INIT = {
@@ -435,21 +435,6 @@ async function pollLogs() {
   } catch (_) {}
 }
 
-// ── System info ─────────────────────────────────────────────────────────────
-async function loadSystemInfo() {
-  try {
-    const data = await fetch('/api/system').then(r => r.json());
-    const el = document.getElementById('system-info');
-    if (!el) return;
-    const lines = [];
-    lines.push(`FFmpeg: ${data.ffmpeg ? 'Available' : 'NOT FOUND'}`);
-    const hw = (data.encoders || []).filter(e => e.hw).map(e => e.label);
-    if (hw.length) lines.push(`GPU encoders: ${hw.join(', ')}`);
-    const ol = data.ollama || {};
-    lines.push(`Ollama: ${ol.available ? 'Connected -- ' + (ol.models || []).join(', ') : 'NOT running'}`);
-    el.innerHTML = lines.map(l => `<div>${escHtml(l)}</div>`).join('');
-  } catch (_) {}
-}
 
 // ── Modals ──────────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id)?.classList.add('open');    }
@@ -635,7 +620,6 @@ function initPaletteItems() {
     { label: 'Add Transitions',  group: 'Tabs',    icon: '&#128279;',  hint: '3', action: () => switchTab('bridges') },
     { label: 'Finalize & Export',  group: 'Tabs',  icon: '&#9881;',    hint: '4', action: () => switchTab('video-tools') },
     { label: 'Ken Burns',        group: 'Tabs',    icon: '&#128444;',  action: () => switchTab('image2video') },
-    { label: 'Services',         group: 'Tabs',    icon: '&#9711;',    action: () => switchTab('services') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
@@ -766,19 +750,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
-  // Service buttons in services tab
-  document.querySelectorAll('.svc-start').forEach(btn => btn.addEventListener('click', () => svcAction('start', btn.dataset.svc)));
-  document.querySelectorAll('.svc-stop').forEach(btn  => btn.addEventListener('click', () => svcAction('stop',  btn.dataset.svc)));
-  document.querySelectorAll('.svc-restart').forEach(btn => btn.addEventListener('click', () => svcAction('restart', btn.dataset.svc)));
-
   // Boot default tab
   switchTab('pipeline');
   loadConfig();
   pollServices();
   pollLogs();
-  loadSystemInfo();
 
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
-  setInterval(loadSystemInfo, 30000);
 });
