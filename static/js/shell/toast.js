@@ -9,11 +9,12 @@ let _errorCount = 0;
 let _toastWrap = null;
 let _errorBadge = null;
 
-// Suppress toasts for the first 5s after load — errors go to the log only.
-// User can see the service pills; they don't need a popup for every
-// "not yet connected" state during startup.
-const _startupUntil = Date.now() + 5000;
-function _inStartup() { return Date.now() < _startupUntil; }
+// Suppress toasts until the splash exits (app is actually visible).
+// app.js dispatches 'dcs:ready' from exitSplash(). Until then errors go
+// silently to the log — the user is staring at a loading screen anyway.
+let _splashDone = false;
+window.addEventListener('dcs:ready', () => { _splashDone = true; }, { once: true });
+function _inStartup() { return !_splashDone; }
 
 function _getWrap() {
   if (!_toastWrap) _toastWrap = document.getElementById('toast-wrap');

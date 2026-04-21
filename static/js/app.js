@@ -14,7 +14,7 @@ import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
 import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
 import { consumeHandoff } from './handoff.js?v=20260419j';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420f';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420h';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260419j';
 import './shell/ai-intent.js?v=20260419j';
@@ -142,6 +142,7 @@ async function runSplash() {
   }
 
   function exitSplash() {
+    window.dispatchEvent(new Event('dcs:ready'));
     splash.classList.add('fade-out');
     setTimeout(() => {
       splash.style.display = 'none';
@@ -675,11 +676,11 @@ window.addEventListener('unhandledrejection', e => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Hide startup spinner after 5s (matches toast suppression window)
-  setTimeout(() => {
+  // Hide startup spinner when app is ready
+  window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
-  }, 5000);
+  }, { once: true });
 
   runSplash();
 
