@@ -283,30 +283,6 @@ class ServerManager:
             self._spawn()
 
 
-# ── Windows toast notification ────────────────────────────────────────────────
-
-def _win_toast(title: str, message: str) -> None:
-    ps = (
-        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
-        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null;"
-        "$t = [Windows.UI.Notifications.ToastTemplateType]::ToastText02;"
-        "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($t);"
-        "$n = $x.GetElementsByTagName('text');"
-        f"$n[0].AppendChild($x.CreateTextNode('{title}')) | Out-Null;"
-        f"$n[1].AppendChild($x.CreateTextNode('{message}')) | Out-Null;"
-        "$tn = [Windows.UI.Notifications.ToastNotification]::new($x);"
-        "$m = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('DropCatGoStudio');"
-        "$m.Show($tn);"
-    )
-    try:
-        subprocess.Popen(
-            ["powershell", "-WindowStyle", "Hidden", "-Command", ps],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-        )
-    except Exception as exc:
-        log.debug("Toast failed: %s", exc)
 
 
 # ── Tray icon ─────────────────────────────────────────────────────────────────
@@ -359,16 +335,7 @@ def run_tray(srv: ServerManager, existing_port: int | None) -> None:
             srv._restart_times.clear()
             srv._stop_event.clear()
             srv.start()
-        if srv.wait_ready(timeout=120):
-            port = srv.port or PORT_START
-            _win_toast("Drop Cat Go Studio", f"Server restarted on port {port}")
-            try:
-                if icon_ref:
-                    icon_ref[0].notify(f"Restarted on port {port}.", "Drop Cat Go Studio")
-            except Exception:
-                pass
-        else:
-            _win_toast("Drop Cat Go Studio", "Restart timed out — check logs")
+        srv.wait_ready(timeout=120)
 
     def _exit(icon, item=None) -> None:
         log.info("Exit — stopping server and tray")
@@ -397,22 +364,10 @@ def run_tray(srv: ServerManager, existing_port: int | None) -> None:
 
     def _notify_when_ready() -> None:
         if existing_port:
-            time.sleep(1.5)
-            try:
-                icon.notify("Already running. Left-click to open.", "Drop Cat Go Studio")
-            except Exception:
-                pass
             return
         if srv.wait_ready(timeout=120):
             port = srv.port or PORT_START
-            _win_toast("Drop Cat Go Studio", f"Ready — opening browser")
             webbrowser.open(f"http://127.0.0.1:{port}")
-            try:
-                icon.notify(f"Ready on port {port}.", "Drop Cat Go Studio")
-            except Exception:
-                pass
-        else:
-            _win_toast("Drop Cat Go Studio", "Server did not start — check logs")
 
     threading.Thread(target=_notify_when_ready, daemon=True, name="notify").start()
 
@@ -423,6 +378,17 @@ def run_tray(srv: ServerManager, existing_port: int | None) -> None:
 
 def main() -> None:
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
+
+    # Single-instance lock — if another manager is already running, just open
+    # the browser and exit rather than spawning a second tray + server.
+    import ctypes as _ctypes
+    _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "DropCatGoStudio_Manager_v1")
+    if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        log.info("Another manager instance is running — opening browser and exiting")
+        existing = find_running_server()
+        if existing:
+            webbrowser.open(f"http://127.0.0.1:{existing}")
+        sys.exit(0)
 
     try:
         import pystray
