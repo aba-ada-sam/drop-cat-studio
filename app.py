@@ -346,6 +346,20 @@ async def get_logs(since: int = 0):
     return {"logs": log_buffer.get_recent()}
 
 
+@app.post("/api/logs/client")
+async def client_log(request: Request):
+    """Receive browser-side errors and write them to the server log."""
+    try:
+        body = await request.json()
+        msg  = body.get("message", "unknown client error")
+        src  = body.get("source", "")
+        line = body.get("lineno", "")
+        logger.error("CLIENT JS: %s  (%s:%s)", msg, src, line)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @app.get("/api/logs/file")
 async def get_log_file(lines: int = 200):
     """Return the last N lines from the persistent log file as plain text."""

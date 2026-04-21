@@ -661,6 +661,19 @@ function escHtml(s) {
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────
+// ── Client-side error logging ────────────────────────────────────────────────
+function _reportClientError(message, source, lineno) {
+  fetch('/api/logs/client', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: String(message), source: String(source || ''), lineno: lineno || 0 }),
+  }).catch(() => {});
+}
+window.onerror = (msg, src, line) => { _reportClientError(msg, src, line); return false; };
+window.addEventListener('unhandledrejection', e => {
+  _reportClientError(e.reason?.message || String(e.reason), 'promise', 0);
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   // Hide startup spinner after 5s (matches toast suppression window)
   setTimeout(() => {
