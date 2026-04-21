@@ -362,14 +362,11 @@ def run_tray(srv: ServerManager, existing_port: int | None) -> None:
     )
     icon_ref.append(icon)
 
-    def _notify_when_ready() -> None:
-        if existing_port:
-            return
-        if srv.wait_ready(timeout=120):
-            port = srv.port or PORT_START
-            webbrowser.open(f"http://127.0.0.1:{port}")
-
-    threading.Thread(target=_notify_when_ready, daemon=True, name="notify").start()
+    if not existing_port:
+        # Open loading page immediately so user sees feedback right away.
+        # It polls the server ports and redirects itself when ready.
+        loading = ROOT / "loading.html"
+        webbrowser.open(loading.as_uri())
 
     icon.run()
 
