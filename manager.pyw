@@ -285,6 +285,74 @@ class ServerManager:
 
 
 
+# ── Tkinter loading splash ───────────────────────────────────────────────────
+
+def show_loading_splash(srv: "ServerManager") -> None:
+    """Show a frameless loading window until the server is ready, then open Chrome."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        # tkinter not available — fall back to browser loading page
+        loading = ROOT / "loading.html"
+        webbrowser.open(loading.as_uri())
+        srv.wait_ready(timeout=120)
+        if srv.port:
+            webbrowser.open(f"http://127.0.0.1:{srv.port}")
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)          # no title bar
+    root.configure(bg="#0d0606")
+    root.attributes("-topmost", True)
+    root.resizable(False, False)
+
+    W, H = 340, 200
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 22, "bold")).pack(pady=(32, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 9)).pack()
+
+    status = tk.StringVar(value="Starting server…")
+    tk.Label(root, textvariable=status, bg="#0d0606", fg="#6a5a4a",
+             font=("Arial", 9)).pack(pady=(20, 0))
+
+    # Dot spinner
+    dot_var = tk.StringVar(value="")
+    tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
+             font=("Arial", 14)).pack(pady=6)
+
+    dots = ["●○○○", "○●○○", "○○●○", "○○○●"]
+    _dot_idx = [0]
+
+    def _tick():
+        _dot_idx[0] = (_dot_idx[0] + 1) % len(dots)
+        dot_var.set(dots[_dot_idx[0]])
+        root.after(250, _tick)
+
+    _tick()
+
+    def _poll():
+        if srv.ready:
+            status.set("Ready — opening app…")
+            root.after(400, _open_and_close)
+        else:
+            if threading.active_count() > 2:
+                status.set("Loading model…" if _dot_idx[0] > 8 else "Starting server…")
+            root.after(500, _poll)
+
+    def _open_and_close():
+        port = srv.port or PORT_START
+        webbrowser.open(f"http://127.0.0.1:{port}")
+        root.destroy()
+
+    root.after(500, _poll)
+    root.mainloop()
+
+
 # ── Tray icon ─────────────────────────────────────────────────────────────────
 
 def _build_icon_image():
@@ -362,13 +430,12 @@ def run_tray(srv: ServerManager, existing_port: int | None) -> None:
     )
     icon_ref.append(icon)
 
-    if not existing_port:
-        # Open loading page immediately so user sees feedback right away.
-        # It polls the server ports and redirects itself when ready.
-        loading = ROOT / "loading.html"
-        webbrowser.open(loading.as_uri())
+    # Run tray in background so tkinter splash can own the main thread
+    threading.Thread(target=icon.run, daemon=True, name="tray").start()
 
-    icon.run()
+    if not existing_port:
+        show_loading_splash(srv)  # blocks until server ready, then opens Chrome
+    # (if existing_port, Chrome was already opened by the VBS / mutex branch)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -417,6 +484,9 @@ def main() -> None:
 
     try:
         run_tray(srv, existing_port)
+        # run_tray returns after the splash closes; keep process alive for the tray
+        while True:
+            time.sleep(60)
     except Exception as exc:
         log.error("Tray crashed: %s", exc, exc_info=True)
         srv.stop()
