@@ -99,21 +99,20 @@ export function init(panel) {
   panel.appendChild(root);
 
   // ════════════════════════════════════════════════════════════════════════════
-  // CANVAS SECTION (Full width, ~60% of viewport)
+  // COLLAPSIBLE SECTIONS
   // ════════════════════════════════════════════════════════════════════════════
 
-  const canvasSection = el('div', {
-    class: 'canvas-section',
-    style: `flex:1; display:flex; flex-direction:column; gap:10px; padding:16px; background:var(--bg); border-bottom:1px solid var(--border); overflow-y:auto; min-height:400px`
+  const sectionsContainer = el('div', {
+    style: 'flex:1; overflow-y:auto; padding:14px 16px; background:var(--bg);'
   });
-  root.appendChild(canvasSection);
+  root.appendChild(sectionsContainer);
 
-  // Status bar
+  // Status bar (Forge connection + checkpoint picker)
   const statusBar = el('div', {
     class: 'card',
-    style: 'padding:10px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;'
+    style: 'padding:8px 14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;'
   });
-  canvasSection.appendChild(statusBar);
+  sectionsContainer.appendChild(statusBar);
 
   const forgeDot = el('span', { class: 'dot' });
   const forgeMsg = el('span', { style: 'font-size:.85rem; flex-shrink:0', text: 'Checking Forge...' });
@@ -135,16 +134,6 @@ export function init(panel) {
     }
     catch (e) { toast(e.message, 'error'); }
   });
-
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // COLLAPSIBLE SECTIONS (Below quick row, scrollable)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  const sectionsContainer = el('div', {
-    style: 'flex:1; overflow-y:auto; padding:14px 16px; background:var(--bg);'
-  });
-  root.appendChild(sectionsContainer);
 
   // ── Generate Controls (always visible) ──────────────────────────────────
 
@@ -836,7 +825,7 @@ export function init(panel) {
   checkForge();
   // Step 1 front door is built after core UI so it can reference baseTA, suffixIn, etc.
   buildStep1Panel({
-    root, sectionsContainer, canvasSection,
+    root, sectionsContainer,
     baseTA, suffixIn, regionalSec, promptSec,
     toggleFC, renderFCGrid,
     applyEnhanced,

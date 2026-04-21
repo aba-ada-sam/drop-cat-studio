@@ -34,28 +34,30 @@ body {
 /* ── Obsidian Studio Color Tokens ─────────────────────────────────────────── */
 
 :root {
-  /* ── Surfaces ── */
-  --bg:          #0b0b12;   /* near-black, slight violet */
-  --bg-raised:   #10101a;
-  --surface:     #16161f;   /* card backgrounds */
-  --surface-2:   #1e1e2a;   /* input backgrounds */
-  --surface-3:   #26263a;   /* hover states */
+  color-scheme: light dark;
 
-  /* ── Borders ── */
-  --border:      rgba(130,110,255,.13);
-  --border-2:    rgba(130,110,255,.23);
-  --border-3:    rgba(130,110,255,.38);
+  /* ── Windows system accent (follows user's Windows color settings) ── */
+  --accent:        AccentColor;
+  --accent-2:      color-mix(in srgb, AccentColor 70%, white);
+  --accent-bg:     color-mix(in srgb, AccentColor 12%, transparent);
+  --accent-border: color-mix(in srgb, AccentColor 35%, transparent);
 
-  /* ── Text ── */
-  --text:        #f0f0f8;   /* near white */
-  --text-2:      #9898b8;   /* secondary */
-  --text-3:      #5a5a78;   /* muted */
+  /* ── Dark mode surfaces (default) ── */
+  --bg:          #111114;
+  --bg-raised:   #18181c;
+  --surface:     #1e1e23;
+  --surface-2:   #26262d;
+  --surface-3:   #2e2e38;
 
-  /* ── Electric violet accent ── */
-  --accent:      #7c6ff7;
-  --accent-2:    #b0a4ff;
-  --accent-bg:   rgba(124,111,247,.12);
-  --accent-border: rgba(124,111,247,.32);
+  /* ── Dark mode borders ── */
+  --border:      rgba(255,255,255,.08);
+  --border-2:    rgba(255,255,255,.14);
+  --border-3:    rgba(255,255,255,.22);
+
+  /* ── Dark mode text ── */
+  --text:        #f2f2f4;
+  --text-2:      #9898a8;
+  --text-3:      #5a5a6a;
 
   /* ── Semantic ── */
   --green:       #3dba6b;
@@ -67,9 +69,9 @@ body {
   --amber:       #e8a840;
   --amber-bg:    rgba(232,168,64,.10);
 
-  /* ── Legacy aliases (mapped to accent for gradients) ── */
-  --circus-red:     #7c6ff7;
-  --circus-crimson: #5040c0;
+  /* ── Legacy aliases ── */
+  --circus-red:     AccentColor;
+  --circus-crimson: color-mix(in srgb, AccentColor 60%, black);
 
   /* ── Radii ── */
   --r-sm:  5px;
@@ -125,6 +127,29 @@ body {
 
   /* ── Focus ── */
   --focus: var(--accent);
+}
+
+/* ── Light mode — follows Windows "Light" app mode setting ── */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:        #f3f3f5;
+    --bg-raised: #ffffff;
+    --surface:   #ffffff;
+    --surface-2: #ebebef;
+    --surface-3: #e0e0e6;
+
+    --border:    rgba(0,0,0,.09);
+    --border-2:  rgba(0,0,0,.15);
+    --border-3:  rgba(0,0,0,.24);
+
+    --text:      #111114;
+    --text-2:    #44444c;
+    --text-3:    #888894;
+
+    --shadow-sm: 0 1px 4px rgba(0,0,0,.10);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.12);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,.16);
+  }
 }
 
 /* ── Typography ───────────────────────────────────────────────────────────── */
