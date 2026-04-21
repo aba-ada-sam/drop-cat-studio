@@ -81,7 +81,7 @@ def clear_port_file() -> None:
         pass
 
 
-def server_responds(port: int, timeout: float = 1.5) -> bool:
+def server_responds(port: int, timeout: float = 0.4) -> bool:
     try:
         with urlopen(f"http://127.0.0.1:{port}/api/system", timeout=timeout) as r:
             return r.status == 200
@@ -90,13 +90,10 @@ def server_responds(port: int, timeout: float = 1.5) -> bool:
 
 
 def find_running_server() -> int | None:
+    """Check only the port recorded in .dcs-port — no blind scan."""
     port, _ = read_port_file()
     if port and server_responds(port):
         return port
-    for offset in range(PORT_TRIES):
-        p = PORT_START + offset
-        if server_responds(p):
-            return p
     return None
 
 
@@ -436,6 +433,8 @@ def main() -> None:
         sys.exit(1)
 
     srv = ServerManager()
+
+    # Fast check: is a server already recorded in .dcs-port and alive?
     existing_port = find_running_server()
 
     if existing_port:
@@ -444,16 +443,16 @@ def main() -> None:
         srv._ready_event.set()
         open_app_window(existing_port)
     else:
+        # Start the server first, then show the splash immediately.
+        # Do NOT scan all 20 ports — that adds up to 30s of silence.
         log.info("Starting app.py")
         srv.start()
-        # Show splash while server loads, then open the window
-        show_splash(srv)
+        show_splash(srv)   # appears within ~1s of double-click
         if srv.port:
             open_app_window(srv.port)
         else:
             log.error("Server never became ready")
 
-    # Keep process alive for the tray icon
     run_tray(srv)
 
 
