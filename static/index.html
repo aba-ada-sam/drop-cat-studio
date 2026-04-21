@@ -6,7 +6,7 @@
   <title>Drop Cat Go Studio</title>
   <link rel="icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" href="/static/logo-192.png">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260420j">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260421a">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
 </head>
 <body>
@@ -98,14 +98,8 @@
       <!-- Left rail: Creative Pipeline Navigator -->
       <nav id="app-rail" aria-label="Creative Pipeline">
 
-        <!-- Project Management -->
-        <div class="rail-section-label">Project</div>
-        <button class="rail-tab" data-tab="imports" title="Load existing images, videos, prompts, or projects">
-          <span style="font-size:1.2rem">📥</span><span>Import Assets</span>
-        </button>
-
         <!-- Creative Pipeline Stages -->
-        <div class="rail-section-label" style="margin-top:12px">Pipeline</div>
+        <div class="rail-section-label">Pipeline</div>
 
         <button class="rail-tab active" data-tab="sd-prompts" aria-current="page" title="Step 1: Create images from prompts using AI">
           <span style="font-size:1rem">🎨</span><span>Generate Images</span>
@@ -129,16 +123,6 @@
 
         <!-- Creative Tools -->
         <div class="rail-section-label" style="margin-top:12px">Creative Tools</div>
-
-        <button class="rail-tab" data-tab="wildcards" title="Generate & manage wildcard sets for creative prompting">
-          <span style="font-size:1rem">✨</span><span>Wildcard Studio</span>
-          <span class="rail-tab-hint">AI-generated tags</span>
-        </button>
-
-        <button class="rail-tab" data-tab="image-gen" title="Direct Forge SD interface - no prompt engineering">
-          <span style="font-size:1rem">⚡</span><span>Quick Image</span>
-          <span class="rail-tab-hint">Direct Forge</span>
-        </button>
 
         <button class="rail-tab" data-tab="image2video" title="Create Ken Burns effect from static images">
           <span style="font-size:1rem">🖼️</span><span>Image to Video</span>
@@ -170,14 +154,11 @@
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
-            <section class="tab-panel" id="panel-imports" aria-label="Import Assets"></section>
             <section class="tab-panel active" id="panel-sd-prompts" aria-label="SD Prompts"></section>
             <section class="tab-panel" id="panel-fun-videos" aria-label="Make Videos"></section>
             <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
-            <section class="tab-panel" id="panel-image-gen" aria-label="Quick Image"></section>
             <section class="tab-panel" id="panel-image2video" aria-label="Image to Video"></section>
             <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
-            <section class="tab-panel" id="panel-wildcards" aria-label="Wildcard Manager"></section>
             <section class="tab-panel" id="panel-services" aria-label="Services">
               <div class="services-grid">
                 <div class="service-card" data-svc="wangp">
@@ -411,6 +392,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260420j"></script>
+  <script type="module" src="/static/js/app.js?v=20260421a"></script>
 </body>
 </html>

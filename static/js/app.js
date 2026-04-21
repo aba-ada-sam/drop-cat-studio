@@ -4,15 +4,13 @@
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
-import { init as initImports } from './tab-imports.js?v=20260419m';
+// tab-imports.js removed — import is handled per-tab
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260419o';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260419o';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260420j';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260421a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260419o';
-import { init as initImageGen } from './tab-image-gen.js?v=20260419j';
 import { init as initImage2Video } from './panel-image2video.js?v=20260419j';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260419l';
-import { init as initWildcards   } from './panel-wildcards.js?v=20260419j';
 import { consumeHandoff } from './handoff.js?v=20260419j';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260420j';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260419o';
@@ -24,14 +22,11 @@ import { init as initPresets, promptAndSave as savePreset } from './shell/preset
 // ── Tab module map ──────────────────────────────────────────────────────────
 const TAB_INIT = {
   'pipeline':    initPipeline,
-  'imports':     initImports,
   'fun-videos':  initFunVideos,
   'bridges':     initBridges,
   'sd-prompts':  initSdPrompts,
-  'image-gen':   initImageGen,
   'image2video': initImage2Video,
   'video-tools': initVideoTools,
-  'wildcards':   initWildcards,
 };
 const TAB_HANDOFF = {
   'fun-videos':   funHandoff,
@@ -639,10 +634,7 @@ function initPaletteItems() {
     { label: 'Create Videos',    group: 'Tabs',    icon: '&#127916;',  hint: '2', action: () => switchTab('fun-videos') },
     { label: 'Add Transitions',  group: 'Tabs',    icon: '&#128279;',  hint: '3', action: () => switchTab('bridges') },
     { label: 'Finalize & Export',  group: 'Tabs',  icon: '&#9881;',    hint: '4', action: () => switchTab('video-tools') },
-    { label: 'Prompt Helpers',   group: 'Tabs',    icon: '&#10024;',   action: () => switchTab('wildcards') },
     { label: 'Ken Burns',        group: 'Tabs',    icon: '&#128444;',  action: () => switchTab('image2video') },
-    { label: 'Quick Image',      group: 'Tabs',    icon: '&#9889;',    action: () => switchTab('image-gen') },
-    { label: 'Import Assets',    group: 'Tabs',    icon: '&#128229;',  action: () => switchTab('imports') },
     { label: 'Services',         group: 'Tabs',    icon: '&#9711;',    action: () => switchTab('services') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
@@ -661,33 +653,31 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-// ── Init ────────────────────────────────────────────────────────────────────
-// ── Apply Windows theme immediately ─────────────────────────────────────────
+// ── Apply Windows accent colour at startup ───────────────────────────────────
 fetch('/api/theme').then(r => r.json()).then(t => {
   const root = document.documentElement;
-  const hex = t.accent || '#0078d4';
-  // Parse hex to rgb for derived colours
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
+  const hex  = t.accent || '#0078d4';
+  const rv = parseInt(hex.slice(1,3),16);
+  const gv = parseInt(hex.slice(3,5),16);
+  const bv = parseInt(hex.slice(5,7),16);
   root.style.setProperty('--accent',        hex);
-  root.style.setProperty('--accent-2',      `rgb(${Math.min(255,r+60)},${Math.min(255,g+60)},${Math.min(255,b+60)})`);
-  root.style.setProperty('--accent-bg',     `rgba(${r},${g},${b},.13)`);
-  root.style.setProperty('--accent-border', `rgba(${r},${g},${b},.35)`);
-  if (!t.dark) {
-    root.style.setProperty('--bg',        '#f3f3f5');
-    root.style.setProperty('--bg-raised', '#ffffff');
-    root.style.setProperty('--surface',   '#ffffff');
-    root.style.setProperty('--surface-2', '#ebebef');
-    root.style.setProperty('--surface-3', '#e0e0e6');
-    root.style.setProperty('--border',    'rgba(0,0,0,.09)');
-    root.style.setProperty('--border-2',  'rgba(0,0,0,.15)');
-    root.style.setProperty('--border-3',  'rgba(0,0,0,.24)');
-    root.style.setProperty('--text',      '#111114');
-    root.style.setProperty('--text-2',    '#44444c');
-    root.style.setProperty('--text-3',    '#888894');
-  }
+  root.style.setProperty('--accent-2',      `rgb(${Math.min(255,rv+60)},${Math.min(255,gv+60)},${Math.min(255,bv+60)})`);
+  root.style.setProperty('--accent-bg',     `rgba(${rv},${gv},${bv},.13)`);
+  root.style.setProperty('--accent-border', `rgba(${rv},${gv},${bv},.35)`);
 }).catch(() => {});
+
+// ── Rail collapse ─────────────────────────────────────────────────────────────
+function initRailToggle() {
+  const rail = document.getElementById('app-rail');
+  const btn  = document.getElementById('rail-toggle');
+  if (!rail || !btn) return;
+  const saved = safeStorage(() => localStorage.getItem('dropcat_rail_collapsed'), 'false');
+  if (saved === 'true') rail.classList.add('collapsed');
+  btn.addEventListener('click', () => {
+    rail.classList.toggle('collapsed');
+    safeStorage(() => localStorage.setItem('dropcat_rail_collapsed', String(rail.classList.contains('collapsed'))));
+  });
+}
 
 // ── Client-side error logging ────────────────────────────────────────────────
 function _reportClientError(message, source, lineno) {

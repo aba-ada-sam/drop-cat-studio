@@ -206,12 +206,15 @@ class ServerManager:
         log_fh = open(SERVER_LOG, "a", encoding="utf-8", errors="replace")
         cflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
-            proc = subprocess.Popen(
+            env = os.environ.copy()
+        env["DCS_MANAGED"] = "1"   # tells app.py to skip its own tray icon
+        proc = subprocess.Popen(
                 [PYTHON, str(APP_PY)],
                 cwd=str(ROOT),
                 stdout=log_fh,
                 stderr=log_fh,
                 creationflags=cflags,
+                env=env,
             )
         except Exception as exc:
             log.error("Failed to spawn app.py: %s", exc)

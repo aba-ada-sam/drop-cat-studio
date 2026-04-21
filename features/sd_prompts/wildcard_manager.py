@@ -37,6 +37,12 @@ Output ONLY pipe-delimited action lines, one per line. No other text.
 Format: ACTION | target | parameters | reason
 Actions: PRUNE, MERGE, EXPAND, RENAME, DELETE"""
 
+GROW_SYSTEM = """You are generating a Stable Diffusion wildcard file from a concept description.
+Output ONLY entries, one per line. No numbering, no bullets, no explanation.
+Each entry is a short phrase or descriptor used in SD prompts.
+Make entries varied, vivid, specific, and creatively useful.
+Think in terms of: visual styles, lighting conditions, materials, moods, techniques, adjectives, settings."""
+
 AGGRESSIVENESS_MAP = {
     1: "only remove exact or near-exact duplicates",
     2: "remove duplicates and clearly redundant entries",
@@ -121,6 +127,16 @@ Existing entries (sample of {len(sample)}):
     raw = llm_router.route(
         [{"role": "user", "content": content}],
         tier=TIER_BALANCED, max_tokens=4096, system=EXPAND_SYSTEM,
+    )
+    return [_strip_numbering(line) for line in raw.splitlines() if line.strip()]
+
+
+def ai_grow(llm_router, concept: str, count: int = 30, model: str = "ollama") -> list[str]:
+    """Create a new wildcard file from a concept description, starting from scratch."""
+    content = f"Concept: {concept}\nGenerate {count} diverse, creative Stable Diffusion wildcard entries for this concept."
+    raw = llm_router.route(
+        [{"role": "user", "content": content}],
+        tier=TIER_BALANCED, max_tokens=4096, system=GROW_SYSTEM,
     )
     return [_strip_numbering(line) for line in raw.splitlines() if line.strip()]
 

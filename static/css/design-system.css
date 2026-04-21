@@ -31,33 +31,33 @@ body {
 }
 #app { display: flex; flex-direction: column; min-height: 100vh; }
 
-/* ── Obsidian Studio Color Tokens ─────────────────────────────────────────── */
+/* ── Color Tokens ─────────────────────────────────────────────────────────── */
 
 :root {
   color-scheme: light dark;
 
-  /* ── Accent — overwritten at runtime by /api/theme (Windows registry) ── */
+  /* ── Accent — overwritten at runtime by /api/theme or preferences ── */
   --accent:        #0078d4;
   --accent-2:      #60b0ff;
   --accent-bg:     rgba(0,120,212,.13);
   --accent-border: rgba(0,120,212,.35);
 
-  /* ── Dark mode surfaces (default) ── */
-  --bg:          #111114;
-  --bg-raised:   #18181c;
-  --surface:     #1e1e23;
-  --surface-2:   #26262d;
-  --surface-3:   #2e2e38;
+  /* ── Dark (neutral) surfaces — default ── */
+  --bg:          #111111;
+  --bg-raised:   #181818;
+  --surface:     #1e1e1e;
+  --surface-2:   #272727;
+  --surface-3:   #303030;
 
-  /* ── Dark mode borders ── */
+  /* ── Borders ── */
   --border:      rgba(255,255,255,.08);
   --border-2:    rgba(255,255,255,.14);
   --border-3:    rgba(255,255,255,.22);
 
-  /* ── Dark mode text ── */
-  --text:        #f2f2f4;
-  --text-2:      #9898a8;
-  --text-3:      #5a5a6a;
+  /* ── Text ── */
+  --text:        #f2f2f2;
+  --text-2:      #909090;
+  --text-3:      #585858;
 
   /* ── Semantic ── */
   --green:       #3dba6b;
@@ -83,7 +83,7 @@ body {
   --shadow-sm: 0 1px 4px rgba(0,0,0,.6);
   --shadow-md: 0 4px 16px rgba(0,0,0,.7);
   --shadow-lg: 0 8px 32px rgba(0,0,0,.8);
-  --glow-gold: 0 0 18px rgba(124,111,247,.20);
+  --glow-accent: 0 0 18px var(--accent-bg);
 
   /* ── Motion ── */
   --ease-ui:     cubic-bezier(.2,0,0,1);
@@ -128,7 +128,6 @@ body {
   /* ── Focus ── */
   --focus: var(--accent);
 }
-
 
 /* ── Typography ───────────────────────────────────────────────────────────── */
 
@@ -183,9 +182,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   border-radius: 40px;
   margin-bottom: 24px;
   box-shadow:
-    0 0 60px  rgba(124,111,247,.40),
-    0 0 140px rgba(124,111,247,.18),
-    0 30px 80px rgba(0,0,0,.7);
+    0 0 60px  rgba(0,0,0,.60),
+    0 30px 80px rgba(0,0,0,.80);
   animation: cat-entrance .9s cubic-bezier(.22,1.5,.36,1) both;
   transform-origin: center bottom;
   will-change: transform;

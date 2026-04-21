@@ -22,6 +22,7 @@ from features.sd_prompts.wildcard_manager import (
     _write_entries,
     ai_audit,
     ai_expand,
+    ai_grow,
     ai_merge,
     ai_prune,
     curator_analyze,
@@ -205,6 +206,49 @@ async def create_wildcard(request: Request):
     _write_entries(str(path), entries)
     invalidate_cache()
     return {"ok": True, "token": f"__{name}__", "path": str(path), "count": len(entries)}
+
+
+@router.post("/wildcards/grow")
+async def grow_wildcard(request: Request):
+    """Create a new wildcard file from a concept description using AI."""
+    import re
+    body = await request.json()
+    llm_router = _get_llm_router()
+    concept = (body.get("concept") or "").strip()
+    if not concept:
+        raise HTTPException(400, "concept required")
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        name = re.sub(r'[^a-z0-9_]', '', concept.lower()[:30].replace(" ", "_").strip("_"))
+    if not name:
+        raise HTTPException(400, "could not derive a file name from concept")
+
+    count = int(body.get("count", 30))
+    model = body.get("model", cfg.get("sd_model") or "claude-sonnet-4-6")
+
+    wc_dir = _get_wildcards_dir()
+    if not wc_dir:
+        raise HTTPException(400, "Wildcards directory not configured in Settings")
+
+    entries = ai_grow(llm_router, concept, count, model)
+
+    path = Path(wc_dir) / f"{name}.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_file_lines(str(path)) if path.exists() else []
+    seen = {e.lower() for e in existing}
+    merged = list(existing) + [e for e in entries if e.lower() not in seen]
+    _write_entries(str(path), merged)
+    invalidate_cache()
+
+    return {
+        "ok": True, "name": name,
+        "token": f"__{name}__",
+        "path": str(path),
+        "count": len(merged),
+        "entries": merged,
+        "added": len(merged) - len(existing),
+    }
 
 
 @router.post("/prune")
