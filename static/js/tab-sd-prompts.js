@@ -136,84 +136,6 @@ export function init(panel) {
     catch (e) { toast(e.message, 'error'); }
   });
 
-  // Canvas display (image or placeholder)
-  const canvasDisplay = el('div', {
-    class: 'card canvas-display',
-    style: `flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:var(--surface); min-height:300px; position:relative; overflow:hidden; border:2px solid var(--border);`
-  });
-  canvasSection.appendChild(canvasDisplay);
-
-  const resultImg = el('img', {
-    style: 'display:none; max-width:100%; max-height:100%; object-fit:contain; border-radius:var(--r-sm); cursor:pointer',
-    title: 'Click for full size',
-    onclick() { if (resultImg.src) window.open(resultImg.src, '_blank'); }
-  });
-  canvasDisplay.appendChild(resultImg);
-
-  const placeholderMsg = el('div', {
-    style: 'font-size:1.2rem; color:var(--text-3); text-align:center',
-    text: '🎬 Waiting for your first creation...'
-  });
-  canvasDisplay.appendChild(placeholderMsg);
-
-  const progressEl = el('div', {
-    style: 'display:none; position:absolute; bottom:20px; left:50%; transform:translateX(-50%); padding:12px 20px; background:var(--surface-2); border:1px solid var(--accent); border-radius:var(--r-sm); font-size:.85rem; color:var(--accent);',
-    text: 'Generating...'
-  });
-  canvasDisplay.appendChild(progressEl);
-
-  // Canvas action buttons
-  const canvasActions = el('div', {
-    style: 'display:none; justify-content:center; align-items:center; gap:10px; flex-wrap:wrap'
-  });
-  canvasSection.appendChild(canvasActions);
-
-  const navLabel = el('span', { style: 'font-size:.82rem; color:var(--text-2)' });
-  canvasActions.appendChild(el('button', {
-    class: 'btn btn-sm',
-    text: '◀ Prev',
-    onclick() { showImage(currentIdx - 1); }
-  }));
-  canvasActions.appendChild(navLabel);
-  canvasActions.appendChild(el('button', {
-    class: 'btn btn-sm',
-    text: 'Next ▶',
-    onclick() { showImage(currentIdx + 1); }
-  }));
-  canvasActions.appendChild(el('button', {
-    class: 'btn btn-sm',
-    text: 'Variation',
-    onclick() {
-      if (generatedImages[currentIdx]) {
-        seedIn.value = generatedImages[currentIdx].seed + 1;
-        genBtn.click();
-      }
-    }
-  }));
-  canvasActions.appendChild(el('button', {
-    class: 'btn btn-sm',
-    text: '⬇ Save',
-    title: 'Download image',
-    onclick() {
-      const img = generatedImages[currentIdx];
-      if (!img) return;
-      const a = document.createElement('a');
-      a.href = img.src;
-      a.download = `sd-${img.seed ?? 'image'}.png`;
-      a.click();
-    }
-  }));
-  canvasActions.appendChild(el('button', {
-    class: 'btn btn-primary btn-sm',
-    text: '🎬 Create Video',
-    title: 'Send this image to Create Videos tab',
-    onclick() {
-      const img = generatedImages[currentIdx];
-      if (!img) return;
-      handoff('fun-videos', { type: 'image', url: img.src, path: img.path || '' });
-      document.querySelector('[data-tab="fun-videos"]')?.click();
-    }
-  }));
 
   // ════════════════════════════════════════════════════════════════════════════
   // COLLAPSIBLE SECTIONS (Below quick row, scrollable)
@@ -647,15 +569,6 @@ export function init(panel) {
   function showImage(idx) {
     if (idx < 0 || idx >= generatedImages.length) return;
     currentIdx = idx;
-    const img = generatedImages[idx];
-
-    placeholderMsg.style.display = 'none';
-    resultImg.src = img.src;
-    resultImg.style.display = '';
-
-    canvasActions.style.display = generatedImages.length >= 1 ? 'flex' : 'none';
-    navLabel.textContent = `${idx + 1} / ${generatedImages.length}`;
-
     galleryGrid.querySelectorAll('.sd-thumb').forEach((t, i) => {
       t.style.outline = i === idx ? '2px solid var(--accent)' : 'none';
     });
