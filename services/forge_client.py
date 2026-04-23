@@ -43,6 +43,42 @@ def forge_alive() -> bool:
         return False
 
 
+def unload_checkpoint() -> bool:
+    """Ask Forge to release its model from VRAM. Returns True on success."""
+    try:
+        req = urllib.request.Request(
+            f"{_api_base()}/unload-checkpoint",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        log.info("Forge checkpoint unloaded from VRAM")
+        return True
+    except Exception as e:
+        log.debug("Forge unload skipped (Forge not running or error): %s", e)
+        return False
+
+
+def reload_checkpoint() -> bool:
+    """Ask Forge to reload its model back into VRAM. Returns True on success."""
+    try:
+        req = urllib.request.Request(
+            f"{_api_base()}/reload-checkpoint",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+        log.info("Forge checkpoint reloaded into VRAM")
+        return True
+    except Exception as e:
+        log.debug("Forge reload failed: %s", e)
+        return False
+
+
 def get_models() -> list[dict]:
     """Return list of available checkpoint models."""
     try:

@@ -156,6 +156,9 @@ def run_pipeline(job, photo_path, settings):
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")
 
+    from services.forge_client import unload_checkpoint, reload_checkpoint
+    forge_was_unloaded = unload_checkpoint()
+
     video_dur = probe_duration(video_path)
     audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
 
@@ -163,20 +166,24 @@ def run_pipeline(job, photo_path, settings):
         job.update(progress=70 + min(14, elapsed_s // 10),
                    message=f"Generating audio... {elapsed_s}s elapsed")
 
-    audio_path, audio_err = audio_generator.generate_audio(
-        prompt=music_prompt,
-        duration=audio_dur,
-        output_dir=str(job_dir),
-        audio_format=settings.get("audio_format", "mp3"),
-        bpm=settings.get("bpm"),
-        steps=int(settings.get("audio_steps", 8)),
-        guidance=float(settings.get("audio_guidance", 7.0)),
-        seed=-1,
-        lyrics=lyrics,
-        instrumental=instrumental,
-        stop_event=job.stop_event,
-        progress_cb=_audio_progress,
-    )
+    try:
+        audio_path, audio_err = audio_generator.generate_audio(
+            prompt=music_prompt,
+            duration=audio_dur,
+            output_dir=str(job_dir),
+            audio_format=settings.get("audio_format", "mp3"),
+            bpm=settings.get("bpm"),
+            steps=int(settings.get("audio_steps", 8)),
+            guidance=float(settings.get("audio_guidance", 7.0)),
+            seed=-1,
+            lyrics=lyrics,
+            instrumental=instrumental,
+            stop_event=job.stop_event,
+            progress_cb=_audio_progress,
+        )
+    finally:
+        if forge_was_unloaded:
+            reload_checkpoint()
 
     if _stopped():
         return

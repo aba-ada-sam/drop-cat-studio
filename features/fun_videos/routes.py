@@ -191,7 +191,14 @@ async def make_it(request: Request):
     photo_path = body.get("photo_path") or ""
     # photo_path is optional for text-to-video (T2V) models
     if photo_path and not os.path.isfile(photo_path):
-        raise HTTPException(400, "Photo not found")
+        # Resolve URL-style paths like /output/file.png → filesystem path
+        clean = photo_path.lstrip("/").replace("/", os.sep)
+        if clean.startswith(f"output{os.sep}") or clean.startswith("output/"):
+            resolved = str(Path(__file__).resolve().parent.parent.parent / clean.replace("/", os.sep))
+            if os.path.isfile(resolved):
+                photo_path = resolved
+    if photo_path and not os.path.isfile(photo_path):
+        raise HTTPException(400, f"Photo not found: {photo_path}")
     if not photo_path and not body.get("video_prompt", "").strip():
         raise HTTPException(400, "Provide either a photo or a video prompt")
 
@@ -231,3 +238,121 @@ async def make_it(request: Request):
 @router.get("/models")
 async def list_models():
     return {"models": {name: info for name, info in MODELS.items()}}
+
+
+@router.post("/add-music")
+async def add_music(request: Request):
+    """Analyze an existing video and add ACE-Step generated music to it.
+
+    Accepts:
+        video_path      — path to existing video file
+        music_prompt    — optional; if blank the LLM derives it from video frames
+        user_direction  — optional free-text guidelines fed to the LLM music director
+        instrumental    — bool (default True)
+        bpm             — optional int
+    """
+    from app import get_job_manager, get_llm_router
+    job_manager = get_job_manager()
+
+    body = await request.json()
+    video_path = body.get("video_path", "")
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, f"Video not found: {video_path}")
+
+    settings = {
+        "music_prompt":    body.get("music_prompt", ""),
+        "user_direction":  body.get("user_direction", ""),
+        "instrumental":    body.get("instrumental", True),
+        "bpm":             body.get("bpm"),
+        "audio_format":    "mp3",
+        "audio_steps":     8,
+        "audio_guidance":  7.0,
+    }
+
+    def _worker(job, vpath, cfg_settings):
+        from app import get_llm_router; llm_router = get_llm_router()
+        from features.fun_videos import analyzer, audio_generator
+        from features.fun_videos.video_generator import merge_video_audio
+        from core.ffmpeg_utils import probe_duration, extract_frame_b64
+        import time as _time
+        from pathlib import Path as _Path
+
+        job.update(progress=5, message="Analyzing video…")
+
+        music_prompt = cfg_settings.get("music_prompt", "").strip()
+        user_direction = cfg_settings.get("user_direction", "").strip()
+
+        if not music_prompt:
+            try:
+                frames = []
+                for pos in [0.1, 0.3, 0.5, 0.7, 0.9]:
+                    b64 = extract_frame_b64(vpath, position=pos, max_dim=512)
+                    if b64:
+                        frames.append(b64)
+                if frames:
+                    result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
+                    music_prompt = result.get("music_prompt", "")
+                    if not cfg_settings.get("bpm") and result.get("bpm"):
+                        cfg_settings["bpm"] = result["bpm"]
+            except Exception as e:
+                log.warning("Music analysis failed: %s", e)
+
+        if not music_prompt:
+            music_prompt = "cinematic ambient, warm strings, gentle piano"
+
+        job.update(progress=20, message="Generating music…")
+
+        from services.forge_client import unload_checkpoint, reload_checkpoint
+        forge_was_unloaded = unload_checkpoint()
+
+        video_dur = probe_duration(vpath)
+        audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
+
+        def _audio_progress(elapsed_s):
+            job.update(progress=20 + min(60, int(elapsed_s / audio_dur * 60)),
+                       message=f"Generating music… {elapsed_s:.0f}s elapsed")
+
+        try:
+            audio_path, audio_err = audio_generator.generate_audio(
+                prompt=music_prompt,
+                duration=audio_dur,
+                output_dir=str(_Path(vpath).parent),
+                audio_format=cfg_settings.get("audio_format", "mp3"),
+                bpm=cfg_settings.get("bpm"),
+                steps=int(cfg_settings.get("audio_steps", 8)),
+                guidance=float(cfg_settings.get("audio_guidance", 7.0)),
+                seed=-1,
+                lyrics="[inst]",
+                instrumental=cfg_settings.get("instrumental", True),
+                stop_event=job.stop_event,
+                progress_cb=_audio_progress,
+            )
+        finally:
+            if forge_was_unloaded:
+                reload_checkpoint()
+
+        if job.stop_event.is_set():
+            return
+        if not audio_path:
+            raise RuntimeError(f"Audio generation failed: {audio_err}")
+
+        job.update(progress=85, message="Mixing audio into video…")
+
+        stem = _Path(vpath).stem
+        final = str(_Path(vpath).parent / f"{stem}_with_music_{_time.strftime('%H%M%S')}.mp4")
+        merged = merge_video_audio(vpath, audio_path, final)
+        if not merged:
+            raise RuntimeError("Audio/video merge failed")
+
+        from core.session import get_current as get_session
+        try:
+            get_session().add_file(_Path(merged).name, "video", "fun_videos", path=merged)
+        except Exception:
+            pass
+
+        job.output = merged
+        job.message = f"Done — music prompt: {music_prompt[:60]}"
+
+    label = f"Add music: {Path(video_path).stem[:24]}"
+    job = job_manager.submit(JOB_FUN_VIDEO, _worker, video_path, settings, label=label)
+    return {"job_id": job.id}
