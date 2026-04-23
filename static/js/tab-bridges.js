@@ -12,14 +12,14 @@ let _items      = [];   // { path, name, kind, duration, analysis, prompt }
 let _activeMode = 'cinematic';
 
 const TRANSITION_MODES = [
-  { id: 'cinematic',   icon: '🎬', label: 'Cinematic',   sub: 'Camera moves & atmosphere' },
-  { id: 'continuity',  icon: '🔄', label: 'Continuity',  sub: 'Invisible matched cut' },
-  { id: 'kinetic',     icon: '⚡', label: 'Kinetic',     sub: 'High energy, velocity' },
-  { id: 'surreal',     icon: '🌀', label: 'Surreal',     sub: 'Dreamlike, impossible' },
-  { id: 'meld',        icon: '🌊', label: 'Meld',        sub: 'Textures liquefy' },
-  { id: 'morph',       icon: '🔮', label: 'Morph',       sub: 'Shapes transform' },
-  { id: 'shape_match', icon: '🔷', label: 'Shape Match', sub: 'Geometry aligned' },
-  { id: 'fade',        icon: '🌅', label: 'Fade',        sub: 'Clean dissolve' },
+  { id: 'cinematic',   label: 'Cinematic',   sub: 'Camera moves & atmosphere' },
+  { id: 'continuity',  label: 'Continuity',  sub: 'Invisible matched cut' },
+  { id: 'kinetic',     label: 'Kinetic',     sub: 'High energy, velocity' },
+  { id: 'surreal',     label: 'Surreal',     sub: 'Dreamlike, impossible' },
+  { id: 'meld',        label: 'Meld',        sub: 'Textures liquefy' },
+  { id: 'morph',       label: 'Morph',       sub: 'Shapes transform' },
+  { id: 'shape_match', label: 'Shape Match', sub: 'Geometry aligned' },
+  { id: 'fade',        label: 'Fade',        sub: 'Clean dissolve' },
 ];
 
 function outputPathToUrl(p) {
@@ -54,82 +54,45 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:900px; margin:0 auto;' });
   panel.appendChild(root);
 
-  // ── Session videos ────────────────────────────────────────────────────────
+  // ── Clip picker ──────────────────────────────────────────────────────────
   const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(pickerCard);
 
-  const pickerHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
-  pickerCard.appendChild(pickerHeader);
-  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Your Session Videos' }));
-
-  const refreshBtn = el('button', { class: 'btn btn-sm', text: '↻ Refresh' });
-  pickerHeader.appendChild(refreshBtn);
+  pickerCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Add Clips' }));
+  pickerCard.appendChild(el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:10px;', text: 'Add 2 or more video clips. A bridge transition will be generated between each adjacent pair.' }));
 
   const fileInput = el('input', { type: 'file', accept: 'video/*,image/*', multiple: 'true', style: 'display:none' });
   pickerCard.appendChild(fileInput);
-  const openFileBtn = el('button', { class: 'btn btn-sm', text: '📂 Open file…' });
-  pickerHeader.appendChild(openFileBtn);
-  openFileBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    if (!fileInput.files?.length) return;
+
+  async function _uploadFiles(files) {
     try {
-      const data = await apiUpload('/api/bridges/upload', Array.from(fileInput.files));
+      const data = await apiUpload('/api/bridges/upload', files);
       let added = 0;
       for (const f of data.files || []) { if (_addItem(f)) added++; }
-      if (added) { _renderItems(); toast(`Added ${added} file(s)`, 'success'); }
-    } catch (e) { toast(e.message, 'error'); }
-    fileInput.value = '';
-  });
-
-  const videoList = el('div', { style: 'display:flex; flex-direction:column; gap:4px; max-height:240px; overflow-y:auto;' });
-  pickerCard.appendChild(videoList);
-
-  async function loadSessionVideos() {
-    try {
-      const data = await api('/api/session/videos');
-      const vids = (data.videos || []).slice().reverse();
-      videoList.innerHTML = '';
-      if (!vids.length) {
-        videoList.appendChild(el('div', {
-          style: 'text-align:center; padding:24px 0; color:var(--text-3); font-size:.82rem;',
-          text: 'No session videos yet — create some in Create Videos first.',
-        }));
-        return;
-      }
-      for (const v of vids) {
-        const inSeq = !!_items.find(i => i.path === v.path);
-        const row = el('div', {
-          style: `display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; cursor:pointer; background:var(--bg-raised); border:1px solid ${inSeq ? 'var(--accent)' : 'var(--border-2)'};`,
-        });
-
-        row.appendChild(el('span', { style: 'font-size:1.1rem; flex-shrink:0;', text: '🎬' }));
-        const nameEl = el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: v.filename });
-        row.appendChild(nameEl);
-        if (v.duration) row.appendChild(el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: formatDuration(v.duration) }));
-
-        const badge = el('span', {
-          style: `font-size:.7rem; flex-shrink:0; padding:2px 7px; border-radius:10px; font-weight:600; ${inSeq ? 'color:var(--accent); background:color-mix(in srgb,var(--accent) 15%,transparent);' : 'color:var(--text-3); background:var(--bg);'}`,
-          text: inSeq ? '✓ Added' : '+ Add',
-        });
-        row.appendChild(badge);
-
-        row.addEventListener('click', () => {
-          if (_addItem({ path: v.path, name: v.filename, kind: 'video', duration: v.duration })) {
-            _renderItems();
-            loadSessionVideos();
-            toast(`Added "${v.filename}"`, 'success');
-          } else {
-            toast('Already in sequence', 'info');
-          }
-        });
-        videoList.appendChild(row);
-      }
+      if (added) { _renderItems(); toast(`Added ${added} clip${added !== 1 ? 's' : ''}`, 'success'); }
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  refreshBtn.addEventListener('click', loadSessionVideos);
-  loadSessionVideos();
-  window.addEventListener('session-updated', loadSessionVideos);
+  const dropZone = el('div', { style: 'border:2px dashed var(--border-2); border-radius:8px; padding:28px 16px; text-align:center; cursor:pointer; transition:border-color .15s;' }, [
+    el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:10px;', text: 'Drop video clips here' }),
+    el('button', { class: 'btn btn-sm', text: 'Open files...' }),
+  ]);
+  pickerCard.appendChild(dropZone);
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
+  dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-2)'; });
+  dropZone.addEventListener('drop', async e => {
+    e.preventDefault();
+    dropZone.style.borderColor = 'var(--border-2)';
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/') || f.type.startsWith('image/'));
+    if (files.length) await _uploadFiles(files);
+  });
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files?.length) return;
+    await _uploadFiles(Array.from(fileInput.files));
+    fileInput.value = '';
+  });
 
   // ── Sequence ──────────────────────────────────────────────────────────────
   const seqCard = el('div', { class: 'card', style: 'padding:14px;' });
@@ -140,7 +103,7 @@ export function init(panel) {
   const seqTitle = el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Sequence' });
   seqHeader.appendChild(seqTitle);
 
-  const analyzeBtn = el('button', { class: 'btn btn-sm', text: '🔍 Analyze clips' });
+  const analyzeBtn = el('button', { class: 'btn btn-sm', text: 'Analyze clips' });
   seqHeader.appendChild(analyzeBtn);
 
   analyzeBtn.addEventListener('click', async () => {
@@ -208,7 +171,7 @@ export function init(panel) {
     }
 
     _items.forEach((item, i) => {
-      const icon = item.kind === 'video' ? '🎬' : item.kind === 'image' ? '📷' : '📝';
+      const icon = item.kind === 'text' ? 'T' : item.kind === 'image' ? 'IMG' : 'VID';
       const meta = item.kind === 'text'
         ? 'text → video'
         : item.analysis
@@ -217,7 +180,7 @@ export function init(panel) {
 
       const row = el('div', { style: 'display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--border-2);' });
 
-      row.appendChild(el('span', { style: 'font-size:1.1rem; flex-shrink:0;', text: icon }));
+      row.appendChild(el('span', { style: 'font-size:.65rem; font-weight:700; color:var(--text-3); flex-shrink:0; width:28px; text-align:center;', text: icon }));
       row.appendChild(el('div', { style: 'flex:1; min-width:0;' }, [
         el('div', { style: 'font-size:.8rem; font-weight:600; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: `${i + 1}. ${item.name}` }),
         el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:1px;', text: meta }),
@@ -243,7 +206,7 @@ export function init(panel) {
       if (i < _items.length - 1) {
         const connector = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:4px 12px;' }, [
           el('div', { style: 'flex:1; height:1px; background:var(--border-2);' }),
-          el('span', { style: 'font-size:.68rem; font-weight:700; letter-spacing:.08em; color:var(--accent); opacity:.7; white-space:nowrap;', text: '⚡ BRIDGE' }),
+          el('span', { style: 'font-size:.68rem; font-weight:700; letter-spacing:.08em; color:var(--accent); opacity:.7; white-space:nowrap;', text: 'BRIDGE' }),
           el('div', { style: 'flex:1; height:1px; background:var(--border-2);' }),
         ]);
         itemList.appendChild(connector);
@@ -256,7 +219,7 @@ export function init(panel) {
   // ── Transition style ──────────────────────────────────────────────────────
   const styleCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(styleCard);
-  styleCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:10px;', text: '✦ Transition Style' }));
+  styleCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:10px;', text: 'Transition Style' }));
 
   const modeGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(4,1fr); gap:6px;' });
   styleCard.appendChild(modeGrid);
@@ -266,7 +229,6 @@ export function init(panel) {
     const tile = el('div', {
       style: `display:flex; flex-direction:column; align-items:center; gap:3px; padding:10px 6px; border-radius:8px; border:1px solid var(--border-2); cursor:pointer; text-align:center; transition:border-color .15s, background .15s; background:var(--bg-raised);`,
     });
-    tile.appendChild(el('span', { style: 'font-size:1.3rem;', text: m.icon }));
     tile.appendChild(el('span', { style: 'font-size:.75rem; font-weight:600; color:var(--text-2);', text: m.label }));
     tile.appendChild(el('span', { style: 'font-size:.65rem; color:var(--text-3); line-height:1.3;', text: m.sub }));
 
@@ -291,7 +253,7 @@ export function init(panel) {
   // ── Settings ──────────────────────────────────────────────────────────────
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(settingsCard);
-  settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: '⚙️ Settings' }));
+  settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Settings' }));
 
   const settingsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;' });
   settingsCard.appendChild(settingsGrid);
@@ -302,7 +264,7 @@ export function init(panel) {
   // ── Generate ──────────────────────────────────────────────────────────────
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
-    text: '⚡ Generate Bridges',
+    text: 'Generate Bridges',
     style: 'width:100%; font-size:1.1rem; padding:14px; font-weight:700;',
   });
   root.appendChild(genBtn);
