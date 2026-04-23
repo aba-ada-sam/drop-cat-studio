@@ -166,13 +166,15 @@ async def generate_prompts(request: Request):
 
     config = cfg.load()
     try:
+        num_prompts = int(body.get("num_prompts", config.get("fun_num_prompts", 4)))
         return await asyncio.to_thread(
             generate_video_prompts,
             llm_router,
             b64,
             user_direction=body.get("user_direction", ""),
-            num_prompts=int(body.get("num_prompts", config.get("fun_num_prompts", 4))),
+            num_prompts=num_prompts,
             creativity=float(body.get("creativity", config.get("fun_creativity", 8.0))),
+            max_tokens=int(body.get("max_tokens", 400 if num_prompts == 1 else 2048)),
         )
     except RuntimeError as e:
         msg = str(e)

@@ -195,21 +195,33 @@ export function init(panel) {
     placeholder: PROMPT_PLACEHOLDER });
   promptCard.appendChild(promptTA);
 
+  const promptStatus = el('div', {
+    style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:5px; display:flex; align-items:center; gap:6px;',
+  }, [
+    el('span', { style: 'display:inline-block; width:10px; height:10px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;' }),
+    el('span', { text: 'Generating motion prompt from image — takes ~20s...' }),
+  ]);
+  promptStatus.style.display = 'none';
+  promptCard.appendChild(promptStatus);
+
   // Auto-generate motion prompt from the selected image via LLM vision
   async function _autoGeneratePrompt(imagePath) {
     if (promptTA.value.trim()) return;
-    promptTA.placeholder = 'Analyzing image...';
+    promptStatus.style.display = 'flex';
+    promptTA.style.opacity = '0.5';
     try {
       const data = await api('/api/fun/generate-prompts', {
         method: 'POST',
-        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7 }),
+        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400 }),
       });
       const prompts = data.prompts || [];
-      if (prompts.length > 0 && !promptTA.value.trim()) promptTA.value = prompts[0];
+      const text = typeof prompts[0] === 'string' ? prompts[0] : prompts[0]?.prompt;
+      if (text && !promptTA.value.trim()) promptTA.value = text;
     } catch (_) {
-      // silent — user can still type, or the default kicks in at generation time
+      // silent — default kicks in at generation time
     } finally {
-      promptTA.placeholder = PROMPT_PLACEHOLDER;
+      promptStatus.style.display = 'none';
+      promptTA.style.opacity = '';
     }
   }
 

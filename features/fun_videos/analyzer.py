@@ -90,6 +90,7 @@ def generate_video_prompts(
     user_direction: str = "",
     num_prompts: int = 4,
     creativity: float = 8.0,
+    max_tokens: int = 2048,
 ) -> dict:
     """Generate creative I2V video prompts from a photo."""
     # Build creativity instruction
@@ -124,10 +125,12 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
 
     last_text = ""
     for attempt in range(2):
+        tier = TIER_FAST if num_prompts == 1 else TIER_BALANCED
         last_text = router.route_vision(
             "\n\n".join(prompt_parts),
             [image_b64],
-            tier=TIER_BALANCED,
+            tier=tier,
+            max_tokens=max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
         )
         result = parse_json_response(last_text)
