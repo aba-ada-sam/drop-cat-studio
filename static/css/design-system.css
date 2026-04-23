@@ -22,7 +22,7 @@ html { font-size: 16px; }
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   line-height: 1.55;
   height: 100vh;
@@ -30,7 +30,82 @@ body {
   display: flex;
   flex-direction: column;
 }
-#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: transparent; }
+
+/* ── Drop Cat SVG splash animation ───────────────────────────────────────── */
+.drop-cat-svg {
+  width: 180px;
+  height: 220px;
+  overflow: visible;
+  display: block;
+  margin: 0 auto;
+}
+
+#dc-group {
+  animation: dc-fall 0.55s cubic-bezier(0.4, 0, 1, 1) forwards,
+             dc-land 0.65s cubic-bezier(0.36, 0.07, 0.19, 0.97) 0.55s forwards;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  transform: translateY(-280px);
+}
+@keyframes dc-fall {
+  0%   { transform: translateY(-280px) scaleY(1.12) scaleX(0.9); }
+  100% { transform: translateY(0)      scaleY(1.12) scaleX(0.9); }
+}
+@keyframes dc-land {
+  0%   { transform: translateY(0)     scaleX(1.35) scaleY(0.62); }
+  35%  { transform: translateY(-52px) scaleX(0.88) scaleY(1.14); }
+  60%  { transform: translateY(-18px) scaleX(1.05) scaleY(0.96); }
+  80%  { transform: translateY(-5px)  scaleX(0.99) scaleY(1.02); }
+  100% { transform: translateY(0)     scaleX(1)    scaleY(1); }
+}
+
+/* Speed lines — fade out as cat lands */
+#dc-lines {
+  opacity: 1;
+  animation: dc-lines-fade 0.3s ease-out 0.42s forwards;
+}
+@keyframes dc-lines-fade { to { opacity: 0; } }
+
+/* Shadow on ground — pops in at impact */
+#dc-shadow {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleX(0);
+  animation: dc-shadow-in 0.12s ease-out 0.55s forwards;
+}
+@keyframes dc-shadow-in { to { transform: scaleX(1); } }
+
+/* Tail flick — starts after landing */
+#dc-tail {
+  transform-box: fill-box;
+  transform-origin: 18px 0px;
+  animation: dc-tail 2s ease-in-out 1.3s infinite;
+}
+@keyframes dc-tail {
+  0%, 100% { transform: rotate(0deg); }
+  30%      { transform: rotate(14deg); }
+  70%      { transform: rotate(-10deg); }
+}
+
+/* Eye blink — triggered when JS adds .blinking to #eye-left / #eye-right */
+.dc-eye-lid {
+  transform-box: fill-box;
+  transform-origin: center top;
+  transform: scaleY(0);
+}
+#eye-left.blinking  .dc-eye-lid,
+#eye-right.blinking .dc-eye-lid {
+  animation: dc-blink 0.35s ease-in-out forwards;
+}
+@keyframes dc-blink {
+  0%,100% { transform: scaleY(0); }
+  45%     { transform: scaleY(1); }
+}
+
+/* Cheshire smile — JS adds .smiling */
+#cheshire-smile { opacity: 0; transition: opacity 0.5s ease; }
+#cheshire-smile.smiling { opacity: 1; }
 
 /* ── Color Tokens ─────────────────────────────────────────────────────────── */
 
@@ -1826,6 +1901,7 @@ textarea:focus { border-color: var(--accent); }
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  background: transparent;
 }
 
 /* Left rail — creative pipeline navigator */
@@ -2006,6 +2082,7 @@ textarea:focus { border-color: var(--accent); }
   min-width: 0;
   overflow: hidden;
   position: relative;
+  background: transparent;
 }
 
 #split-pane {
@@ -2020,6 +2097,7 @@ textarea:focus { border-color: var(--accent); }
   overflow-y: auto;
   padding: 20px 24px;
   min-width: 0;
+  background: transparent;
 }
 /* Gallery overlay — full-height panel that covers the work area */
 #gallery-overlay {

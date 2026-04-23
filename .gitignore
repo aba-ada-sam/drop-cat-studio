@@ -38,6 +38,10 @@ desktop.ini
 .dcs-port
 .dcs-port.tmp
 
+# Node / Electron
+node_modules/
+.npm/
+
 # Local planning / scratch notes (not part of shipped docs)
 RESTART_ME.txt
 DIAGNOSE_FORGE.md
