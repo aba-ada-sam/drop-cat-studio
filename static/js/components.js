@@ -207,6 +207,9 @@ export function createVideoPlayer(container) {
     }
   });
 
+  const labelEl = el('div', { style: 'font-size:.78rem; font-weight:600; color:var(--text-3); margin-bottom:4px; display:none;' });
+  wrap.prepend(labelEl);
+
   return {
     el: wrap,
     show(url, rawPath) {
@@ -216,7 +219,13 @@ export function createVideoPlayer(container) {
       downloadLink.download = url.split('/').pop();
       const existing = wrap.querySelector('.video-error');
       if (existing) existing.remove();
+      labelEl.style.display = 'none';
       wrap.style.display = '';
+    },
+    showLabelled(url, rawPath, label) {
+      this.show(url, rawPath);
+      labelEl.textContent = label;
+      labelEl.style.display = '';
     },
     hide() { wrap.style.display = 'none'; video.src = ''; currentRawPath = null; },
     onStartOver(fn) { startOverFn = fn; },

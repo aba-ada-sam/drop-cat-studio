@@ -208,17 +208,18 @@ def run_pipeline(job, photo_path, settings):
 
     from core.session import get_current as get_session
     if merged:
-        job.output = merged
+        # Return both: raw video first, ACE-Step mixed second
+        job.output = [video_path, merged]
         job.meta["final_path"] = merged
-        job.message = "Complete! Video + audio merged"
+        job.message = "Complete!"
         try:
             get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
         except Exception as e:
-            log.warning("session.add_file failed (video still generated): %s", e)
+            log.warning("session.add_file failed: %s", e)
     else:
         job.output = video_path
-        job.message = "Video generated (merge failed, returning video only)"
+        job.message = "Video generated (audio merge failed)"
         try:
             get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
         except Exception as e:
-            log.warning("session.add_file failed (video still generated): %s", e)
+            log.warning("session.add_file failed: %s", e)

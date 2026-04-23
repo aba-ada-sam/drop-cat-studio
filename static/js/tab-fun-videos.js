@@ -277,10 +277,18 @@ export function init(panel) {
     if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping…', 'info'); }
   });
 
-  const vidWrap = el('div');
+  const vidWrap = el('div', { style: 'display:flex; flex-direction:column; gap:16px;' });
   root.appendChild(vidWrap);
-  const player = createVideoPlayer(vidWrap);
-  player.onStartOver(() => player.hide());
+
+  const playerRawWrap = el('div');
+  const playerMixWrap = el('div');
+  vidWrap.appendChild(playerMixWrap);   // ACE-Step mixed — shown first (the good one)
+  vidWrap.appendChild(playerRawWrap);   // raw video — shown second
+
+  const playerMix = createVideoPlayer(playerMixWrap);
+  const playerRaw = createVideoPlayer(playerRawWrap);
+  playerMix.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
+  playerRaw.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
 
   genBtn.addEventListener('click', async () => {
     const prompt = promptTA.value.trim();
@@ -337,20 +345,34 @@ export function init(panel) {
           genBtn.disabled = false;
           _activeJobId = null;
           if (j.output) {
-            player.show(pathToUrl(j.output), j.output);
-            pushToGallery('fun-videos', j.output, prompt, null, {
+            const outputs  = Array.isArray(j.output) ? j.output : [j.output];
+            const rawPath  = outputs[0];                       // raw WanGP video
+            const mixPath  = outputs.length > 1 ? outputs[1] : null;  // ACE-Step mixed
+
+            // Best output for gallery / handoff is the mixed version if available
+            const bestPath = mixPath || rawPath;
+
+            if (mixPath) {
+              playerMix.showLabelled(pathToUrl(mixPath), mixPath, 'With ACE-Step music');
+              playerRaw.showLabelled(pathToUrl(rawPath), rawPath, 'Raw video (no music)');
+            } else {
+              playerMix.show(pathToUrl(rawPath), rawPath);
+            }
+
+            pushToGallery('fun-videos', bestPath, prompt, null, {
               steps: Number(stepsSlider.value),
               guidance: Number(guidanceSlider.value),
               duration_sec: Number(durSlider.value),
             });
+
             const existing = vidWrap.querySelector('.to-bridges-btn');
             const bridgesBtn = existing || (() => {
-              const b = el('button', { class: 'btn btn-sm to-bridges-btn', text: '→ Add to Video Bridges', style: 'margin-top:8px;' });
+              const b = el('button', { class: 'btn btn-sm to-bridges-btn', text: '→ Add to Transitions', style: 'margin-top:8px;' });
               vidWrap.appendChild(b);
               return b;
             })();
             bridgesBtn.onclick = () => {
-              handoff('bridges', { type: 'video', path: j.output });
+              handoff('bridges', { type: 'video', path: bestPath });
               document.querySelector('[data-tab="bridges"]')?.click();
             };
           } else {
