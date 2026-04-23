@@ -182,7 +182,7 @@ export function init(panel) {
 
   // ── Forge Couple (Regional Prompting) ────────────────────────────────────
   const fcDet  = el('details', { style: 'margin-top:8px' });
-  const fcSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: '🗺 Regional Prompting (Forge Couple)' });
+  const fcSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: 'Regional Prompting (Forge Couple)' });
   fcDet.appendChild(fcSumm);
   const fcBody = el('div', { style: 'margin-top:8px; display:flex; flex-direction:column; gap:8px' });
   fcDet.appendChild(fcBody);

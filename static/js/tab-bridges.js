@@ -159,7 +159,7 @@ export function init(panel) {
 
     const count = _items.length;
     seqTitle.textContent = count
-      ? `Sequence — ${count} clip${count !== 1 ? 's' : ''}, ${Math.max(0, count - 1)} bridge${count !== 2 ? 's' : ''}`
+      ? `Sequence — ${count} clip${count !== 1 ? 's' : ''}, ${Math.max(0, count - 1)} bridge${count - 1 !== 1 ? 's' : ''}`
       : 'Sequence';
 
     if (!count) {
@@ -198,7 +198,7 @@ export function init(panel) {
         actions.appendChild(downBtn);
       }
       const removeBtn = el('button', { class: 'btn-icon-xs remove', text: '✕', title: 'Remove',
-        onclick() { _items.splice(i, 1); _renderItems(); loadSessionVideos(); } });
+        onclick() { _items.splice(i, 1); _renderItems(); } });
       actions.appendChild(removeBtn);
       row.appendChild(actions);
       itemList.appendChild(row);
@@ -292,7 +292,13 @@ export function init(panel) {
   }));
 
   genBtn.addEventListener('click', async () => {
-    if (_items.length < 2) { toast('Add at least 2 clips to generate bridges', 'error'); return; }
+    if (_items.length < 2) {
+      dropZone.style.outline = '2px solid var(--red)';
+      dropZone.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setTimeout(() => { dropZone.style.outline = ''; }, 2000);
+      toast('Add at least 2 clips above first', 'error');
+      return;
+    }
     genBtn.disabled = true;
     prog.show();
     prog.update(0, 'Submitting…');

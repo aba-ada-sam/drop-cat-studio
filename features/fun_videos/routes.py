@@ -156,8 +156,15 @@ async def generate_prompts(request: Request):
     _require_ai()
     body = await request.json()
     image_path = body.get("image_path", "")
+    # Resolve URL-style paths (e.g. /output/file.png) the same way /make-it does
+    if image_path and not os.path.isfile(image_path):
+        clean = image_path.lstrip("/").replace("/", os.sep)
+        if clean.startswith(f"output{os.sep}") or clean.startswith("output/"):
+            resolved = str(Path(__file__).resolve().parent.parent.parent / clean.replace("/", os.sep))
+            if os.path.isfile(resolved):
+                image_path = resolved
     if not image_path or not os.path.isfile(image_path):
-        raise HTTPException(400, "Image not found")
+        raise HTTPException(400, f"Image not found: {image_path}")
 
     _validate_image(Path(image_path).read_bytes(), Path(image_path).name)
     b64 = encode_image_b64(image_path)

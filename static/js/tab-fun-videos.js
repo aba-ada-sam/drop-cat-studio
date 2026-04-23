@@ -69,30 +69,32 @@ export function init(panel) {
 
   async function loadSessionImages() {
     try {
-      const data = await api('/api/session/images');
-      const imgs = (data.images || []).slice().sort((a, b) => (b.added_at || 0) - (a.added_at || 0));
+      // Use gallery (persists across restarts) filtered to images only
+      const data = await api('/api/gallery?limit=60&tab=sd-prompts');
+      const items = (data.items || data || []).filter(i =>
+        !/(\.mp4|\.webm|\.mov)$/i.test(i.url || '')
+      ).slice(0, 36);
       imageGrid.innerHTML = '';
       _selectedThumb = null;
-      if (!imgs.length) {
+      if (!items.length) {
         imageGrid.appendChild(el('div', {
           style: 'grid-column:1/-1; text-align:center; padding:32px 0; color:var(--text-3); font-size:.82rem; line-height:1.6;',
-          text: 'No generated images yet.\nGo to Generate Images first.',
+          text: 'No generated images yet — go to Generate Images first.',
         }));
         return;
       }
-      for (const img of imgs.slice(0, 36)) {
-        const url = img.path
-          ? img.path.replace(/\\/g, '/').replace(/^.*\/output\//, '/output/')
-          : `/output/${img.filename}`;
+      for (const item of items) {
+        const url  = item.url;
+        const path = item.metadata?.path || url;
         const thumb = el('img', {
-          src: url, title: img.filename,
+          src: url, title: item.prompt || url.split('/').pop(),
           style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; transition:border-color .15s;',
         });
         thumb.addEventListener('click', () => {
           if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
           thumb.style.borderColor = 'var(--accent)';
           _selectedThumb = thumb;
-          _applyStart(img.path || img.filename, url);
+          _applyStart(path, url);
         });
         imageGrid.appendChild(thumb);
       }
@@ -369,7 +371,8 @@ export function init(panel) {
     genBtn.disabled = true;
     prog.show();
     prog.update(0, 'Submitting...');
-    player.hide();
+    playerMix.hide();
+    playerRaw.hide();
 
     try {
       const { job_id } = await api('/api/fun/make-it', {
@@ -432,7 +435,7 @@ export function init(panel) {
               document.querySelector('[data-tab="bridges"]')?.click();
             };
           } else {
-            toast('Done — check output folder', 'success');
+            toast('Generation finished but no output file found — check server logs', 'error');
           }
         },
         (err) => {

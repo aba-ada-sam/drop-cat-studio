@@ -5,9 +5,9 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260423a';
-import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260422t';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260422j';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260423c';
+import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260423d';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260423e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260422h';
 import { consumeHandoff } from './handoff.js?v=20260422a';
