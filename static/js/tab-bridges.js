@@ -1,18 +1,19 @@
 /**
- * Drop Cat Go Studio — Video Bridges tab.
- * AI-powered transitions between clips. Accepts text, images, videos, or any mix.
+ * Drop Cat Go Studio — Add Transitions (Video Bridges)
+ * Pick session videos → arrange sequence → AI generates bridge clips between each pair.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el, formatDuration } from './components.js?v=20260414';
-import { handoff } from './handoff.js?v=20260415';
+import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration } from './components.js?v=20260414';
+import { toast } from './shell/toast.js?v=20260421c';
+import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
-let items = [];   // {path, name, kind, duration, analysis}
-let activeMode = 'cinematic';
+let _items      = [];   // { path, name, kind, duration, analysis, prompt }
+let _activeMode = 'cinematic';
 
 const TRANSITION_MODES = [
-  { id: 'cinematic',   icon: '🎬', label: 'Cinematic',   sub: 'Camera moves, atmosphere' },
-  { id: 'continuity',  icon: '🔄', label: 'Continuity',  sub: 'Invisible cut, matched' },
+  { id: 'cinematic',   icon: '🎬', label: 'Cinematic',   sub: 'Camera moves & atmosphere' },
+  { id: 'continuity',  icon: '🔄', label: 'Continuity',  sub: 'Invisible matched cut' },
   { id: 'kinetic',     icon: '⚡', label: 'Kinetic',     sub: 'High energy, velocity' },
   { id: 'surreal',     icon: '🌀', label: 'Surreal',     sub: 'Dreamlike, impossible' },
   { id: 'meld',        icon: '🌊', label: 'Meld',        sub: 'Textures liquefy' },
@@ -24,337 +25,378 @@ const TRANSITION_MODES = [
 function outputPathToUrl(p) {
   if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
   const norm = p.replace(/\\/g, '/');
-  const idx = norm.toLowerCase().indexOf('/output/');
+  const idx  = norm.toLowerCase().indexOf('/output/');
   return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
 }
+
+function _addItem(item) {
+  if (item.path && _items.find(i => i.path === item.path)) return false;
+  _items.push({ ...item, analysis: null });
+  return true;
+}
+
+export function receiveHandoff(data) {
+  if (data.type === 'video' && data.path) {
+    const name = data.path.split(/[\\/]/).pop();
+    if (_addItem({ path: data.path, name, kind: 'video' })) {
+      toast(`Added "${name}" to sequence`, 'success');
+      _renderItems?.();
+    }
+  }
+}
+
+// renderItems is set during init so receiveHandoff can call it even before tab visit
+let _renderItems = null;
 
 export function init(panel) {
   panel.innerHTML = '';
 
-  // ── Layout (existing) ────────────────────────────────────────────────────────
-  const layout = el('div', { class: 'wide-layout' });
-  panel.appendChild(layout);
+  const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:900px; margin:0 auto;' });
+  panel.appendChild(root);
 
-  const sidebar   = el('div', { class: 'sidebar' });
-  const mainArea  = el('div', { class: 'main-area' });
-  const infoPanel = el('div', { class: 'info-panel' });
-  layout.appendChild(sidebar);
-  layout.appendChild(mainArea);
-  layout.appendChild(infoPanel);
+  // ── Session videos ────────────────────────────────────────────────────────
+  const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(pickerCard);
 
-  // ── Info panel (ultrawide) ────────────────────────────────────────────
-  infoPanel.appendChild(el('div', { class: 'card' }, [
-    el('h3', { text: 'Session Files' }),
-    el('p', { class: 'text-muted', style: 'font-size:.85rem', text: 'Click to add to your clip sequence.' }),
-    el('div', { id: 'bridges-session-list', class: 'file-list', style: 'max-height:300px' }),
-  ]));
-  infoPanel.appendChild(el('div', { class: 'card' }, [
-    el('h3', { text: 'Tips' }),
-    el('div', { style: 'font-size:.82rem; color:var(--text-2); line-height:1.8' }, [
-      el('div', { text: '• Mix videos, images, and text freely' }),
-      el('div', { text: '• Order matters — drag clips to reorder' }),
-      el('div', { text: '• Cinematic works great for most content' }),
-      el('div', { text: '• Surreal + high creativity = wild results' }),
-      el('div', { text: '• Text-only clips become T2V segments' }),
-    ]),
-  ]));
+  const pickerHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
+  pickerCard.appendChild(pickerHeader);
+  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Your Session Videos' }));
 
-  // ── Clip sequence ─────────────────────────────────────────────────────
-  const clipsCard = el('div', { class: 'card bridges-clips-card' });
-  sidebar.appendChild(clipsCard);
+  const refreshBtn = el('button', { class: 'btn btn-sm', text: '↻ Refresh' });
+  pickerHeader.appendChild(refreshBtn);
 
-  clipsCard.appendChild(el('h3', { text: '🎞  Clip Sequence' }));
-  clipsCard.appendChild(el('p', { class: 'text-muted', style: 'font-size:.8rem; margin-bottom:10px',
-    text: 'Drop videos, images, or type a scene description. Need 2+ clips.' }));
-
-  // Text clip input (add a scene from description)
-  const textClipRow = el('div', { class: 'text-clip-row' });
-  const textClipInput = el('input', { type: 'text', placeholder: '📝  Describe a scene… (text-to-video clip)', class: 'text-clip-input' });
-  const textClipBtn   = el('button', { class: 'btn btn-sm', text: '+ Add' });
-  textClipRow.appendChild(textClipInput);
-  textClipRow.appendChild(textClipBtn);
-  clipsCard.appendChild(textClipRow);
-
-  textClipBtn.addEventListener('click', () => {
-    const txt = textClipInput.value.trim();
-    if (!txt) return;
-    items.push({ path: null, name: txt.slice(0, 40), kind: 'text', prompt: txt, analysis: null });
-    textClipInput.value = '';
-    renderItems();
-    toast('Text clip added', 'success');
-  });
-  textClipInput.addEventListener('keydown', e => { if (e.key === 'Enter') textClipBtn.click(); });
-
-  // File drop zone
-  createDropZone(clipsCard, {
-    accept: 'video/*,image/*',
-    label: 'Drop videos or images here',
-    async onFiles(files) {
-      try {
-        const data = await apiUpload('/api/bridges/upload', files);
-        for (const f of data.files || []) items.push({ ...f, analysis: null });
-        renderItems();
-        toast(`Added ${data.files?.length || 0} file(s)`, 'success');
-      } catch (e) { toast(e.message, 'error'); }
-    },
-  });
-
-  // Path paste
-  const pathInput = el('input', { type: 'text', placeholder: 'Or paste file paths (comma-separated)…', style: 'margin-top:8px; width:100%' });
-  clipsCard.appendChild(pathInput);
-  pathInput.addEventListener('keydown', async e => {
-    if (e.key !== 'Enter') return;
-    const paths = pathInput.value.split(',').map(p => p.trim()).filter(Boolean);
-    if (!paths.length) return;
+  const fileInput = el('input', { type: 'file', accept: 'video/*,image/*', multiple: 'true', style: 'display:none' });
+  pickerCard.appendChild(fileInput);
+  const openFileBtn = el('button', { class: 'btn btn-sm', text: '📂 Open file…' });
+  pickerHeader.appendChild(openFileBtn);
+  openFileBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files?.length) return;
     try {
-      const data = await api('/api/bridges/add-paths', { method: 'POST', body: JSON.stringify({ paths }) });
-      for (const f of data.files || []) {
-        if (!f.error) items.push({ ...f, analysis: null });
-        else toast(`Skipped: ${f.name}`, 'info');
-      }
-      renderItems();
-      pathInput.value = '';
-      toast(`Added ${data.files?.filter(f => !f.error).length || 0} file(s)`, 'success');
+      const data = await apiUpload('/api/bridges/upload', Array.from(fileInput.files));
+      let added = 0;
+      for (const f of data.files || []) { if (_addItem(f)) added++; }
+      if (added) { _renderItems(); toast(`Added ${added} file(s)`, 'success'); }
     } catch (e) { toast(e.message, 'error'); }
+    fileInput.value = '';
   });
 
-  // Session picker
-  const sessionRow = el('div', { style: 'display:flex; gap:6px; margin-top:8px' });
-  const sessionBtn  = el('button', { class: 'btn btn-sm', text: '+ From Session' });
-  const analyzeBtn  = el('button', { class: 'btn btn-sm', text: '🔍 Analyze All' });
-  sessionRow.appendChild(sessionBtn);
-  sessionRow.appendChild(analyzeBtn);
-  clipsCard.appendChild(sessionRow);
+  const videoList = el('div', { style: 'display:flex; flex-direction:column; gap:4px; max-height:240px; overflow-y:auto;' });
+  pickerCard.appendChild(videoList);
 
-  const sessionPicker = el('div', { class: 'session-picker', style: 'display:none; margin-top:8px' });
-  clipsCard.appendChild(sessionPicker);
-
-  async function refreshSessionPicker() {
+  async function loadSessionVideos() {
     try {
       const data = await api('/api/session/videos');
-      sessionPicker.innerHTML = '';
-      const vids = data.videos || [];
-      if (!vids.length) { sessionPicker.textContent = 'No session videos yet.'; return; }
+      const vids = (data.videos || []).slice().reverse();
+      videoList.innerHTML = '';
+      if (!vids.length) {
+        videoList.appendChild(el('div', {
+          style: 'text-align:center; padding:24px 0; color:var(--text-3); font-size:.82rem;',
+          text: 'No session videos yet — create some in Create Videos first.',
+        }));
+        return;
+      }
       for (const v of vids) {
-        const row = el('div', { class: 'file-item', style: 'cursor:pointer', onclick() {
-          if (!items.find(i => i.path === v.path))
-            items.push({ path: v.path, name: v.filename, kind: 'video', analysis: null });
-          renderItems();
-          sessionPicker.style.display = 'none';
-        }}, [
-          el('span', { class: 'name', text: v.filename }),
-          el('span', { class: 'meta', text: v.source }),
-        ]);
-        sessionPicker.appendChild(row);
+        const inSeq = !!_items.find(i => i.path === v.path);
+        const row = el('div', {
+          style: `display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; cursor:pointer; background:var(--bg-raised); border:1px solid ${inSeq ? 'var(--accent)' : 'var(--border-2)'};`,
+        });
+
+        row.appendChild(el('span', { style: 'font-size:1.1rem; flex-shrink:0;', text: '🎬' }));
+        const nameEl = el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: v.filename });
+        row.appendChild(nameEl);
+        if (v.duration) row.appendChild(el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: formatDuration(v.duration) }));
+
+        const badge = el('span', {
+          style: `font-size:.7rem; flex-shrink:0; padding:2px 7px; border-radius:10px; font-weight:600; ${inSeq ? 'color:var(--accent); background:color-mix(in srgb,var(--accent) 15%,transparent);' : 'color:var(--text-3); background:var(--bg);'}`,
+          text: inSeq ? '✓ Added' : '+ Add',
+        });
+        row.appendChild(badge);
+
+        row.addEventListener('click', () => {
+          if (_addItem({ path: v.path, name: v.filename, kind: 'video', duration: v.duration })) {
+            _renderItems();
+            loadSessionVideos();
+            toast(`Added "${v.filename}"`, 'success');
+          } else {
+            toast('Already in sequence', 'info');
+          }
+        });
+        videoList.appendChild(row);
       }
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  sessionBtn.addEventListener('click', async () => {
-    const show = sessionPicker.style.display === 'none';
-    sessionPicker.style.display = show ? '' : 'none';
-    if (show) refreshSessionPicker();
-  });
+  refreshBtn.addEventListener('click', loadSessionVideos);
+  loadSessionVideos();
+  window.addEventListener('session-updated', loadSessionVideos);
 
-  // Auto-refresh if visible when a job completes elsewhere
-  window.addEventListener('session-updated', () => {
-    if (sessionPicker.style.display !== 'none') refreshSessionPicker();
-  });
+  // ── Sequence ──────────────────────────────────────────────────────────────
+  const seqCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(seqCard);
+
+  const seqHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
+  seqCard.appendChild(seqHeader);
+  const seqTitle = el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Sequence' });
+  seqHeader.appendChild(seqTitle);
+
+  const analyzeBtn = el('button', { class: 'btn btn-sm', text: '🔍 Analyze clips' });
+  seqHeader.appendChild(analyzeBtn);
 
   analyzeBtn.addEventListener('click', async () => {
+    const toAnalyze = _items.filter(it => !it.analysis && it.kind !== 'text');
+    if (!toAnalyze.length) { toast('Nothing to analyze', 'info'); return; }
     analyzeBtn.disabled = true;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].analysis || items[i].kind === 'text') continue;
+    for (let i = 0; i < _items.length; i++) {
+      if (_items[i].analysis || _items[i].kind === 'text') continue;
       try {
-        toast(`Analyzing clip ${i + 1}/${items.length}…`, 'info');
-        items[i].analysis = await api('/api/bridges/analyze', {
-          method: 'POST', body: JSON.stringify({ path: items[i].path }),
+        toast(`Analyzing clip ${i + 1}/${_items.length}…`, 'info');
+        _items[i].analysis = await api('/api/bridges/analyze', {
+          method: 'POST', body: JSON.stringify({ path: _items[i].path }),
         });
+        _renderItems();
       } catch (e) { toast(`Analysis failed: ${e.message}`, 'error'); }
     }
-    renderItems();
     analyzeBtn.disabled = false;
-    toast('Done', 'success');
+    toast('Analysis done', 'success');
   });
 
-  // Clip list render
-  const itemList = el('div', { class: 'bridges-item-list' });
-  clipsCard.appendChild(itemList);
+  const itemList = el('div', { style: 'display:flex; flex-direction:column; gap:0;' });
+  seqCard.appendChild(itemList);
 
-  function renderItems() {
+  // Text scene toggle
+  const textToggleRow = el('div', { style: 'margin-top:10px; border-top:1px solid var(--border-2); padding-top:10px;' });
+  seqCard.appendChild(textToggleRow);
+  const textToggle = el('button', { class: 'btn btn-sm', text: '+ Add text scene (text → video clip)' });
+  textToggleRow.appendChild(textToggle);
+  const textInput = el('div', { style: 'display:none; margin-top:8px; display:none;' });
+  textToggleRow.appendChild(textInput);
+  const textTA = el('input', { type: 'text', placeholder: 'Describe a scene…', style: 'flex:1;' });
+  const textAddBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Add' });
+  textInput.appendChild(el('div', { style: 'display:flex; gap:6px;' }, [textTA, textAddBtn]));
+  let textOpen = false;
+  textToggle.addEventListener('click', () => {
+    textOpen = !textOpen;
+    textInput.style.display = textOpen ? '' : 'none';
+    if (textOpen) textTA.focus();
+  });
+  const addText = () => {
+    const txt = textTA.value.trim();
+    if (!txt) return;
+    _items.push({ path: null, name: txt.slice(0, 50), kind: 'text', prompt: txt, analysis: null });
+    textTA.value = '';
+    _renderItems();
+    toast('Text scene added', 'success');
+  };
+  textAddBtn.addEventListener('click', addText);
+  textTA.addEventListener('keydown', e => { if (e.key === 'Enter') addText(); });
+
+  _renderItems = function renderItems() {
     itemList.innerHTML = '';
-    if (!items.length) {
-      itemList.appendChild(el('p', { class: 'text-muted', style: 'text-align:center; padding:14px; font-size:.8rem',
-        text: 'No clips yet — drop files or type a scene above' }));
+
+    const count = _items.length;
+    seqTitle.textContent = count
+      ? `Sequence — ${count} clip${count !== 1 ? 's' : ''}, ${Math.max(0, count - 1)} bridge${count !== 2 ? 's' : ''}`
+      : 'Sequence';
+
+    if (!count) {
+      itemList.appendChild(el('div', {
+        style: 'text-align:center; padding:28px 0; color:var(--text-3); font-size:.82rem;',
+        text: 'Add videos from above — you need at least 2 clips to generate bridges.',
+      }));
       return;
     }
-    items.forEach((item, i) => {
+
+    _items.forEach((item, i) => {
       const icon = item.kind === 'video' ? '🎬' : item.kind === 'image' ? '📷' : '📝';
       const meta = item.kind === 'text'
-        ? 'text-to-video'
+        ? 'text → video'
         : item.analysis
           ? `${item.analysis.mood || ''} · ${formatDuration(item.duration)}`
           : formatDuration(item.duration) || item.kind;
 
-      const row = el('div', { class: 'bridge-clip-row' }, [
-        el('span', { class: 'bridge-clip-icon', text: icon }),
-        el('div', { class: 'bridge-clip-info' }, [
-          el('span', { class: 'bridge-clip-name', text: `${i + 1}. ${item.name || 'clip'}` }),
-          el('span', { class: 'bridge-clip-meta', text: meta }),
-        ]),
-        el('div', { class: 'bridge-clip-actions' }, [
-          i > 0 ? el('button', { class: 'btn-icon-xs', text: '↑', title: 'Move up', onclick() { [items[i-1], items[i]] = [items[i], items[i-1]]; renderItems(); } }) : el('span'),
-          i < items.length-1 ? el('button', { class: 'btn-icon-xs', text: '↓', title: 'Move down', onclick() { [items[i], items[i+1]] = [items[i+1], items[i]]; renderItems(); } }) : el('span'),
-          el('button', { class: 'btn-icon-xs remove', text: '✕', onclick() { items.splice(i, 1); renderItems(); } }),
-        ]),
-      ]);
+      const row = el('div', { style: 'display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--border-2);' });
+
+      row.appendChild(el('span', { style: 'font-size:1.1rem; flex-shrink:0;', text: icon }));
+      row.appendChild(el('div', { style: 'flex:1; min-width:0;' }, [
+        el('div', { style: 'font-size:.8rem; font-weight:600; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: `${i + 1}. ${item.name}` }),
+        el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:1px;', text: meta }),
+      ]));
+
+      const actions = el('div', { style: 'display:flex; gap:4px; flex-shrink:0;' });
+      if (i > 0) {
+        const upBtn = el('button', { class: 'btn-icon-xs', text: '↑', title: 'Move up',
+          onclick() { [_items[i-1], _items[i]] = [_items[i], _items[i-1]]; _renderItems(); } });
+        actions.appendChild(upBtn);
+      }
+      if (i < _items.length - 1) {
+        const downBtn = el('button', { class: 'btn-icon-xs', text: '↓', title: 'Move down',
+          onclick() { [_items[i], _items[i+1]] = [_items[i+1], _items[i]]; _renderItems(); } });
+        actions.appendChild(downBtn);
+      }
+      const removeBtn = el('button', { class: 'btn-icon-xs remove', text: '✕', title: 'Remove',
+        onclick() { _items.splice(i, 1); _renderItems(); loadSessionVideos(); } });
+      actions.appendChild(removeBtn);
+      row.appendChild(actions);
       itemList.appendChild(row);
 
-      if (i < items.length - 1) {
-        const bridge = el('div', { class: 'bridge-connector' }, [
-          el('span', { class: 'bridge-connector-line' }),
-          el('span', { class: 'bridge-connector-label', text: '⚡ BRIDGE' }),
-          el('span', { class: 'bridge-connector-line' }),
+      if (i < _items.length - 1) {
+        const connector = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:4px 12px;' }, [
+          el('div', { style: 'flex:1; height:1px; background:var(--border-2);' }),
+          el('span', { style: 'font-size:.68rem; font-weight:700; letter-spacing:.08em; color:var(--accent); opacity:.7; white-space:nowrap;', text: '⚡ BRIDGE' }),
+          el('div', { style: 'flex:1; height:1px; background:var(--border-2);' }),
         ]);
-        itemList.appendChild(bridge);
+        itemList.appendChild(connector);
       }
     });
-  }
+  };
 
-  // ── Transition mode tiles ─────────────────────────────────────────────
-  const modeCard = el('div', { class: 'card bridges-mode-card' });
-  sidebar.appendChild(modeCard);
-  modeCard.appendChild(el('h3', { text: '✦  Transition Style' }));
+  _renderItems();
 
-  const modeGrid = el('div', { class: 'mode-grid' });
+  // ── Transition style ──────────────────────────────────────────────────────
+  const styleCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(styleCard);
+  styleCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:10px;', text: '✦ Transition Style' }));
+
+  const modeGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(4,1fr); gap:6px;' });
+  styleCard.appendChild(modeGrid);
+
   const modeBtns = {};
   for (const m of TRANSITION_MODES) {
-    const btn = el('div', { class: `mode-tile${m.id === 'cinematic' ? ' on' : ''}` }, [
-      el('span', { class: 'mode-icon', text: m.icon }),
-      el('span', { class: 'mode-label', text: m.label }),
-      el('span', { class: 'mode-sub', text: m.sub }),
-    ]);
-    btn.addEventListener('click', () => {
-      activeMode = m.id;
-      Object.values(modeBtns).forEach(b => b.classList.remove('on'));
-      btn.classList.add('on');
+    const tile = el('div', {
+      style: `display:flex; flex-direction:column; align-items:center; gap:3px; padding:10px 6px; border-radius:8px; border:1px solid var(--border-2); cursor:pointer; text-align:center; transition:border-color .15s, background .15s; background:var(--bg-raised);`,
     });
-    modeBtns[m.id] = btn;
-    modeGrid.appendChild(btn);
+    tile.appendChild(el('span', { style: 'font-size:1.3rem;', text: m.icon }));
+    tile.appendChild(el('span', { style: 'font-size:.75rem; font-weight:600; color:var(--text-2);', text: m.label }));
+    tile.appendChild(el('span', { style: 'font-size:.65rem; color:var(--text-3); line-height:1.3;', text: m.sub }));
+
+    if (m.id === _activeMode) {
+      tile.style.borderColor = 'var(--accent)';
+      tile.style.background = 'color-mix(in srgb, var(--accent) 15%, var(--bg-raised))';
+    }
+
+    tile.addEventListener('click', () => {
+      _activeMode = m.id;
+      for (const [id, t] of Object.entries(modeBtns)) {
+        const on = id === m.id;
+        t.style.borderColor = on ? 'var(--accent)' : 'var(--border-2)';
+        t.style.background  = on ? 'color-mix(in srgb, var(--accent) 15%, var(--bg-raised))' : 'var(--bg-raised)';
+      }
+    });
+
+    modeBtns[m.id] = tile;
+    modeGrid.appendChild(tile);
   }
-  modeCard.appendChild(modeGrid);
 
-  // ── Generation settings (compact) ────────────────────────────────────
-  const settingsCard = el('div', { class: 'card' });
-  sidebar.appendChild(settingsCard);
-  settingsCard.appendChild(el('h3', { text: '⚙  Settings' }));
+  // ── Settings ──────────────────────────────────────────────────────────────
+  const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(settingsCard);
+  settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: '⚙️ Settings' }));
 
-  const settingsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px' });
+  const settingsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;' });
   settingsCard.appendChild(settingsGrid);
-  const model      = createSelect(settingsGrid, { label: 'Model', options: ['LTX-2 Dev19B Distilled', 'Wan2.1-I2V-14B-480P', 'Wan2.1-I2V-14B-720P'], value: 'LTX-2 Dev19B Distilled' });
-  const resolution = createSelect(settingsGrid, { label: 'Resolution', options: ['480p', '580p', '720p'], value: '480p' });
-  const duration   = createSlider(settingsCard, { label: 'Bridge Length', min: 3, max: 20, step: 0.5, value: 10, unit: 's' });
-  const creativity = createSlider(settingsCard, { label: 'Creativity', min: 1, max: 10, step: 1, value: 9 });
-  const steps      = createSlider(settingsCard, { label: 'Steps', min: 4, max: 50, step: 1, value: 20 });
+  const durSlider        = createSlider(settingsGrid, { label: 'Bridge length (s)', min: 3, max: 20, step: 0.5, value: 10 });
+  const creativitySlider = createSlider(settingsGrid, { label: 'Creativity',         min: 1, max: 10, step: 1,   value: 9  });
+  const stepsSlider      = createSlider(settingsCard, { label: 'Steps',              min: 4, max: 50, step: 1,   value: 20 });
 
-  // ── Generate button ───────────────────────────────────────────────────
+  // ── Generate ──────────────────────────────────────────────────────────────
   const genBtn = el('button', {
-    class: 'btn btn-primary',
-    text: '★  Generate Bridges',
-    style: 'font-size:1.15rem; padding:14px 32px; margin-top:14px; width:100%',
+    class: 'btn btn-primary btn-generate',
+    text: '⚡ Generate Bridges',
+    style: 'width:100%; font-size:1.1rem; padding:14px; font-weight:700;',
   });
-  sidebar.appendChild(genBtn);
+  root.appendChild(genBtn);
 
-  // ── Main area ─────────────────────────────────────────────────────────
-  const progress = createProgressCard(mainArea);
-  const player   = createVideoPlayer(mainArea);
-  let lastOutputPath = null;
+  const progWrap = el('div');
+  root.appendChild(progWrap);
+  const prog = createProgressCard(progWrap);
 
-  // "Send to Post Processing" -- shown after generation completes
-  const sendCard = el('div', { class: 'card', style: 'display:none; text-align:center; padding:14px 20px' }, [
-  ]);
-  mainArea.appendChild(sendCard);
+  const vidWrap = el('div');
+  root.appendChild(vidWrap);
+  const player = createVideoPlayer(vidWrap);
+  let _lastOutput = null;
 
-  const placeholder = el('div', { class: 'card', style: 'text-align:center; padding:60px 20px; color:var(--text-3)' }, [
-    el('div', { style: 'font-size:5rem; margin-bottom:16px', text: '🎞️' }),
-    el('p', { style: 'font-size:1.1rem', text: 'Build your sequence on the left' }),
-    el('p', { style: 'font-size:.88rem; margin-top:8px', text: 'Mix text, images and videos — AI stitches them together with cinematic transitions' }),
-  ]);
-  mainArea.appendChild(placeholder);
+  const sendCard = el('div', { class: 'card', style: 'display:none; padding:14px; text-align:center;' });
+  root.appendChild(sendCard);
+  sendCard.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:10px;', text: 'Next step:' }));
+  sendCard.appendChild(el('button', {
+    class: 'btn btn-primary', text: '→ Audio & Export',
+    style: 'padding:9px 24px; font-size:.95rem;',
+    onclick() {
+      if (!_lastOutput) return;
+      handoff('video-tools', { type: 'video', path: _lastOutput });
+      document.querySelector('[data-tab="video-tools"]')?.click();
+    },
+  }));
 
   genBtn.addEventListener('click', async () => {
-    if (items.length < 2) { toast('Need at least 2 clips', 'error'); return; }
+    if (_items.length < 2) { toast('Add at least 2 clips to generate bridges', 'error'); return; }
     genBtn.disabled = true;
-    placeholder.style.display = 'none';
-    progress.show();
+    prog.show();
+    prog.update(0, 'Submitting…');
     player.hide();
+    sendCard.style.display = 'none';
 
     try {
       const data = await api('/api/bridges/generate', {
         method: 'POST',
         body: JSON.stringify({
-          items: items.map(it => ({ path: it.path, kind: it.kind, prompt: it.prompt, analysis: it.analysis })),
+          items: _items.map(it => ({ path: it.path, kind: it.kind, prompt: it.prompt, analysis: it.analysis })),
           settings: {
-            model: model.value,
-            resolution: resolution.value,
-            transition_mode: activeMode,
-            prompt_mode: 'ai_informed',
-            duration: duration.value,
-            steps: steps.value,
-            guidance: 10,
-            creativity: creativity.value,
+            model:           'LTX-2 Dev19B Distilled',
+            resolution:      '480p',
+            transition_mode: _activeMode,
+            prompt_mode:     'ai_informed',
+            duration:        durSlider.value,
+            steps:           stepsSlider.value,
+            guidance:        10,
+            creativity:      creativitySlider.value,
           },
         }),
       });
 
-      progress.onCancel(async () => { await stopJob(data.job_id); genBtn.disabled = false; });
+      prog.onCancel(async () => { await stopJob(data.job_id).catch(() => {}); genBtn.disabled = false; });
       pollJob(data.job_id,
-        job => progress.update(job.progress, job.message),
-        job => {
-          progress.hide();
+        j => prog.update(j.progress || 0, j.message || 'Working…'),
+        j => {
+          prog.hide();
           genBtn.disabled = false;
-          if (job.output) {
-            lastOutputPath = job.output;
-            player.show(outputPathToUrl(job.output));
-            pushToGallery('bridges', job.output, `${activeMode} transition (${items.length} clips)`, null, {
-              transition_mode: activeMode,
-              creativity: Number(creativity.value),
-              bridge_length: Number(duration.value),
-              steps: Number(steps.value),
-              clip_count: items.length,
+          if (j.output) {
+            _lastOutput = j.output;
+            player.show(outputPathToUrl(j.output), j.output);
+            pushToGallery('bridges', j.output, `${_activeMode} transition (${_items.length} clips)`, null, {
+              transition_mode: _activeMode,
+              creativity:      Number(creativitySlider.value),
+              bridge_length:   Number(durSlider.value),
+              steps:           Number(stepsSlider.value),
+              clip_count:      _items.length,
             });
             sendCard.style.display = '';
             toast('Bridges generated!', 'success');
           }
         },
-        err => { progress.hide(); genBtn.disabled = false; toast(err, 'error'); },
+        err => { prog.hide(); genBtn.disabled = false; toast(err, 'error'); },
       );
-    } catch (e) { progress.hide(); genBtn.disabled = false; toast(e.message, 'error'); }
+    } catch (e) { prog.hide(); genBtn.disabled = false; toast(e.message, 'error'); }
   });
 
-  player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; lastOutputPath = null; items = []; renderItems(); });
+  player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; _lastOutput = null; });
 
-  // ── Palette-driven AI intent ──────────────────────────────────────────
+  // ── Palette AI intent ─────────────────────────────────────────────────────
   import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
     registerTabAI('bridges', {
       getContext: () => ({
-        transition_mode: activeMode,
-        creativity:     Number(creativity.value) || 0,
-        bridge_length:  Number(duration.value)   || 0,
-        steps:          Number(steps.value)      || 0,
+        transition_mode: _activeMode,
+        creativity:      Number(creativitySlider.value) || 0,
+        bridge_length:   Number(durSlider.value)        || 0,
+        steps:           Number(stepsSlider.value)      || 0,
       }),
       applySettings: (s) => {
-        if (typeof s.transition_mode === 'string' && modeBtns[s.transition_mode]) {
-          modeBtns[s.transition_mode].click();
-        }
-        if (typeof s.creativity === 'number')    creativity.value = Math.max(1, Math.min(10, s.creativity <= 1 ? s.creativity * 10 : s.creativity));
-        if (typeof s.bridge_length === 'number') duration.value   = Math.max(3, Math.min(20, s.bridge_length));
-        if (typeof s.steps === 'number')         steps.value      = Math.max(4, Math.min(50, s.steps));
+        if (typeof s.transition_mode === 'string' && modeBtns[s.transition_mode]) modeBtns[s.transition_mode].click();
+        if (typeof s.creativity    === 'number') creativitySlider.value = Math.max(1,  Math.min(10, s.creativity));
+        if (typeof s.bridge_length === 'number') durSlider.value        = Math.max(3,  Math.min(20, s.bridge_length));
+        if (typeof s.steps         === 'number') stepsSlider.value      = Math.max(4,  Math.min(50, s.steps));
       },
     });
   }).catch(() => {});
-}
-
-export function receiveHandoff(_data) {
-  // Reserved for cross-tab handoff (e.g. session file dropped onto this tab)
 }

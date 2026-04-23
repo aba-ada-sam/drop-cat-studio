@@ -618,6 +618,7 @@ async def forge_txt2img(request: Request):
             enabled=True,
             model=body.get("adetailer_model", "face_yolov8n.pt"),
             denoising_strength=float(body.get("adetailer_denoise", 0.4)),
+            confidence=float(body.get("adetailer_confidence", 0.3)),
         )
     else:
         adetailer_args = None
@@ -691,6 +692,7 @@ async def forge_img2img(request: Request):
             enabled=True,
             model=body.get("adetailer_model", "face_yolov8n.pt"),
             denoising_strength=float(body.get("adetailer_denoise", 0.4)),
+            confidence=float(body.get("adetailer_confidence", 0.3)),
         )
     else:
         adetailer_args = None

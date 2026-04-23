@@ -25,11 +25,12 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.55;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
-#app { display: flex; flex-direction: column; min-height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* ── Color Tokens ─────────────────────────────────────────────────────────── */
 
@@ -1912,6 +1913,90 @@ textarea:focus { border-color: var(--accent); }
   transition: color var(--dur-fast);
 }
 .rail-collapse-btn:hover { color: var(--text-2); }
+
+/* ── Pipeline breadcrumb bar ─────────────────────────────────────────────── */
+.pipeline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.pipeline-bar-home {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .8rem;
+  color: var(--text-3);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.pipeline-bar-home:hover { color: var(--accent); border-color: var(--accent-border); }
+
+.pipeline-bar-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.pipeline-bar-sep {
+  color: var(--text-3);
+  opacity: .5;
+  font-size: .75rem;
+  padding: 0 2px;
+  pointer-events: none;
+}
+
+.pipeline-bar-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-raised);
+  color: var(--text-3);
+  font-size: .78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+}
+.pipeline-bar-pill:hover { color: var(--text); border-color: var(--accent-border); }
+.pipeline-bar-pill.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pipeline-bar-num {
+  font-size: .65rem;
+  font-weight: 700;
+  opacity: .55;
+  letter-spacing: .04em;
+}
+.pipeline-bar-pill.active .pipeline-bar-num { opacity: .8; }
+
+.pipeline-bar-next {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: .78rem;
+}
+
+.pipeline-bar-done {
+  margin-left: auto;
+  font-size: .75rem;
+  color: var(--green, #4caf50);
+  opacity: .75;
+  white-space: nowrap;
+}
 
 /* Split pane */
 #app-main {

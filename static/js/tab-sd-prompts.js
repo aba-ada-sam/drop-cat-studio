@@ -5,9 +5,10 @@
  * Wildcard tokens (__token__) are expanded server-side before sending to Forge.
  */
 import { api } from './api.js';
-import { toast, createSlider, el } from './components.js';
+import { createSlider, el } from './components.js';
+import { toast } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260420k';
-import { handoff } from './handoff.js';
+import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';
 
 // ── Module state ─────────────────────────────────────────────────────────────
@@ -82,17 +83,9 @@ export function init(panel) {
   const wcLabel = el('label', { for: 'sd-smart-wc', text: '✨', title: 'Smart wildcards: AI creates new ones as needed', style: 'cursor:pointer; font-size:1rem' });
   composeRow.append(composeBtn, suffixInput, wildcardToggle, wcLabel);
 
-  // ── Settings (collapsible) ───────────────────────────────────────────────
-  const settingsDet = el('details', { style: 'flex-shrink:0' });
-  const settingsSumm = el('summary', {
-    style: 'cursor:pointer; font-size:.85rem; color:var(--text-2); padding:6px 0; list-style:none; display:flex; align-items:center; gap:6px',
-    text: '⚙ Generation settings',
-  });
-  settingsDet.appendChild(settingsSumm);
-  sidebar.appendChild(settingsDet);
-
-  const settingsBody = el('div', { class: 'card', style: 'margin-top:4px' });
-  settingsDet.appendChild(settingsBody);
+  // ── Settings ─────────────────────────────────────────────────────────────
+  const settingsBody = el('div', { class: 'card', style: 'flex-shrink:0' });
+  sidebar.appendChild(settingsBody);
 
   // Sampler + Scheduler
   const ssRow = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px' });
@@ -162,6 +155,30 @@ export function init(panel) {
   const hrUpscalerSel   = el('select', { style: 'width:100%; font-size:.82rem; margin-top:4px' });
   hrUpscalerSel.appendChild(el('option', { value: 'ESRGAN_4x', text: 'ESRGAN_4x' }));
   hrBody.appendChild(hrUpscalerSel);
+
+  // ── ADetailer ────────────────────────────────────────────────────────────
+  const adDet  = el('details', { style: 'margin-top:8px' });
+  const adSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: '🎯 ADetailer (face / hand fix)' });
+  adDet.appendChild(adSumm);
+  const adBody = el('div', { style: 'margin-top:6px; display:flex; flex-direction:column; gap:6px' });
+  adDet.appendChild(adBody);
+  settingsBody.appendChild(adDet);
+
+  const adEnabledRow = el('div', { style: 'display:flex; align-items:center; gap:6px' });
+  const adEnabled = el('input', { type: 'checkbox', id: 'sd-ad-enable' });
+  adEnabledRow.append(adEnabled, el('label', { for: 'sd-ad-enable', text: 'Enable ADetailer', style: 'cursor:pointer; font-size:.85rem' }));
+  adBody.appendChild(adEnabledRow);
+
+  const adModelGrp = el('div', {});
+  adModelGrp.appendChild(el('label', { text: 'Model', style: 'font-size:.75rem; color:var(--text-3); display:block' }));
+  const adModelSel = el('select', { style: 'width:100%; font-size:.82rem' });
+  for (const m of ['face_yolov8n.pt', 'face_yolov8s.pt', 'hand_yolov8n.pt', 'person_yolov8n-seg.pt', 'mediapipe_face_full', 'mediapipe_face_short', 'mediapipe_face_mesh'])
+    adModelSel.appendChild(el('option', { value: m, text: m }));
+  adModelGrp.appendChild(adModelSel);
+  adBody.appendChild(adModelGrp);
+
+  const adDenoiseSlider = createSlider(adBody, { label: 'Denoise', min: 0.1, max: 1.0, step: 0.05, value: 0.4 });
+  const adConfidenceSlider = createSlider(adBody, { label: 'Confidence', min: 0.1, max: 1.0, step: 0.05, value: 0.3 });
 
   // ── Forge Couple (Regional Prompting) ────────────────────────────────────
   const fcDet  = el('details', { style: 'margin-top:8px' });
@@ -669,6 +686,10 @@ export function init(panel) {
           hr_upscaler: hrUpscalerSel.value || 'ESRGAN_4x',
           hr_steps: Number(hrStepsSlider.value),
           hr_denoise: Number(hrDenoiseSlider.value),
+          adetailer: adEnabled.checked,
+          adetailer_model: adModelSel.value,
+          adetailer_denoise: Number(adDenoiseSlider.value),
+          adetailer_confidence: Number(adConfidenceSlider.value),
           use_forge_couple: useFc,
           columns: fcRegions,
           forge_couple_direction: fcDirSel.value,

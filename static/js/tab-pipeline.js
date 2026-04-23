@@ -4,7 +4,7 @@
  * Routes the user's raw idea to sd-prompts via handoff.
  */
 import { el } from './components.js?v=20260414';
-import { handoff } from './handoff.js?v=20260415';
+import { handoff } from './handoff.js?v=20260422a';
 
 // ── Module state (reset on each init) ──────────────────────────────────────
 let _svcInterval = null;
@@ -49,11 +49,16 @@ const STEPS = [
     },
   },
   {
-    num: '04', icon: '⚙️', label: 'Finalize & Export',
-    hint: 'Reverse, speed-ramp, upscale, adjust audio, convert formats',
-    tab: 'video-tools', svc: null,    // uses ffmpeg, no AI service required
-    svcLabels: {},
-    staticStatus: 'ffmpeg · no GPU required',
+    num: '04', icon: '🎵', label: 'Audio',
+    hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
+    tab: 'video-tools', svc: 'acestep',
+    svcLabels: {
+      running:        'ACE-Step ready',
+      not_running:    'ACE-Step offline',
+      starting:       'ACE-Step starting…',
+      not_configured: 'Set path in Settings',
+      unknown:        'Checking…',
+    },
   },
 ];
 

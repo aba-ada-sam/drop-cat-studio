@@ -5,6 +5,7 @@
 
 import { apiFetch, toast } from './toast.js?v=20260419h';
 import { applySettingsToTab } from './ai-intent.js?v=20260419h';
+import { handoff } from '../handoff.js?v=20260422a';
 
 let _items = [];
 let _filters = { tab: '', search: '' };
@@ -66,7 +67,7 @@ export function pushFromTab(tab, savedPath, prompt, seed, settings) {
     prompt: prompt || '',
     model: settings?.model || '',
     seed: typeof seed === 'number' ? seed : null,
-    metadata: { settings: settings || {} },
+    metadata: { path: savedPath, settings: settings || {} },
   });
 }
 
@@ -299,6 +300,7 @@ function _openDetail(item) {
         ${item.created_at ? `<div class="gallery-meta-block"><strong>Created</strong><span>${new Date(item.created_at).toLocaleString()}</span></div>` : ''}
         ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">→ Make Video</button>` : ''}
           <a href="${item.url}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
@@ -307,6 +309,13 @@ function _openDetail(item) {
     </div>`;
 
   overlay.querySelector('.modal-close').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.querySelector('#gd-make-video')?.addEventListener('click', () => {
+    const path = item.metadata?.path || item.url;
+    handoff('fun-videos', { type: 'image', path, url: item.url });
+    overlay.classList.remove('open');
+    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+    toast('Image sent to Create Videos', 'info');
+  });
   overlay.querySelector('#gd-load-settings')?.addEventListener('click', () => {
     _loadItemSettings(item);
     overlay.classList.remove('open');

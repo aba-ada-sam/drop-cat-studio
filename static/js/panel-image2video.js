@@ -3,7 +3,9 @@
  * Ken Burns slideshow generator with drag-to-reorder images.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js?v=20260414';
+import { createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js?v=20260414';
+import { toast } from './shell/toast.js?v=20260421c';
+import { handoff } from './handoff.js?v=20260422a';
 
 let images = [];
 
@@ -105,7 +107,29 @@ export function init(panel) {
       progress.onCancel(async () => { await stopJob(data.job_id); genBtn.disabled = false; });
       pollJob(data.job_id,
         job => progress.update(job.progress, job.message),
-        job => { progress.hide(); genBtn.disabled = false; if (job.output) player.show(`/output/${job.output}`); toast('Video created!', 'success'); },
+        job => {
+          progress.hide(); genBtn.disabled = false;
+          if (job.output) {
+            player.show(`/output/${job.output}`);
+            toast('Video created!', 'success');
+            let ar = right.querySelector('.i2v-action-row');
+            if (!ar) {
+              ar = el('div', { class: 'i2v-action-row', style: 'display:flex; gap:8px; margin-top:8px; justify-content:center; flex-wrap:wrap' });
+              right.appendChild(ar);
+            }
+            ar.innerHTML = '';
+            ar.append(
+              el('button', { class: 'btn btn-sm', text: '→ Add Transitions', onclick() {
+                handoff('bridges', { type: 'video', path: job.output });
+                document.querySelector('[data-tab="bridges"]')?.click();
+              }}),
+              el('button', { class: 'btn btn-primary btn-sm', text: '→ Audio & Export', onclick() {
+                handoff('video-tools', { type: 'video', path: job.output });
+                document.querySelector('[data-tab="video-tools"]')?.click();
+              }}),
+            );
+          }
+        },
         err => { progress.hide(); genBtn.disabled = false; toast(err, 'error'); },
       );
     } catch (e) { progress.hide(); genBtn.disabled = false; toast(e.message, 'error'); }
