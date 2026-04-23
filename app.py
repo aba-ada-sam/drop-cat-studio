@@ -983,6 +983,18 @@ async def gallery_delete(item_id: str):
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
+class _PollFilter(logging.Filter):
+    """Drop access-log noise from high-frequency internal polling endpoints."""
+    _SKIP = ("/api/logs", "/api/services", "/api/jobs/")
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(s in msg for s in self._SKIP)
+
+
+logging.getLogger("uvicorn.access").addFilter(_PollFilter())
+
+
 if __name__ == "__main__":
     import uvicorn
     # Pick the first free port from 7860..7879 so we don't collide with Forge,
