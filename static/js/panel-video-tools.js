@@ -41,14 +41,14 @@ function _buildAudioSection(root) {
 
   const pickerHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
   pickerCard.appendChild(pickerHeader);
-  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: '🎵 Add AI Music to a Video' }));
+  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Add AI Music to a Video' }));
 
   const refreshBtn = el('button', { class: 'btn btn-sm', text: '↻ Refresh' });
   pickerHeader.appendChild(refreshBtn);
 
   const fileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none' });
   pickerCard.appendChild(fileInput);
-  const openFileBtn = el('button', { class: 'btn btn-sm', text: '📂 Open file…' });
+  const openFileBtn = el('button', { class: 'btn btn-sm', text: 'Open file...' });
   pickerHeader.appendChild(openFileBtn);
   openFileBtn.addEventListener('click', () => fileInput.click());
 
@@ -62,7 +62,7 @@ function _buildAudioSection(root) {
   const clearSelBtn  = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'flex-shrink:0;',
     onclick() { _selectedVideo = null; selectedCard.style.display = 'none'; _refreshList(); },
   });
-  selectedCard.appendChild(el('span', { style: 'font-size:1.2rem; flex-shrink:0;', text: '🎬' }));
+  selectedCard.appendChild(el('span', { style: 'font-size:.7rem; font-weight:700; color:var(--text-3); flex-shrink:0;', text: 'VID' }));
   selectedCard.appendChild(selectedName);
   selectedCard.appendChild(clearSelBtn);
 
@@ -100,7 +100,7 @@ function _buildAudioSection(root) {
         const row = el('div', {
           style: `display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; cursor:pointer; background:var(--bg-raised); border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border-2)'};`,
         });
-        row.appendChild(el('span', { style: 'font-size:1.1rem; flex-shrink:0;', text: '🎬' }));
+        row.appendChild(el('span', { style: 'font-size:.7rem; font-weight:700; color:var(--text-3); flex-shrink:0; width:28px;', text: 'VID' }));
         row.appendChild(el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: v.filename }));
         if (v.duration) row.appendChild(el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: formatDuration(v.duration) }));
         row.appendChild(el('span', {
@@ -145,7 +145,7 @@ function _buildAudioSection(root) {
   // ── Generate ─────────────────────────────────────────────────────────────
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
-    text: '🎵 Generate & Mix Music',
+    text: 'Generate & Mix Music',
     style: 'width:100%; font-size:1.05rem; padding:13px; font-weight:700;',
   });
   root.appendChild(genBtn);
@@ -229,11 +229,11 @@ function _buildBatchSection(root) {
 
   const queueHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
   queueCard.appendChild(queueHeader);
-  queueHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: '⚙️ Batch Transform — File Queue' }));
+  queueHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Batch Transform — File Queue' }));
 
   const batchFileInput = el('input', { type: 'file', accept: 'video/*', multiple: 'true', style: 'display:none' });
   queueCard.appendChild(batchFileInput);
-  const addFilesBtn = el('button', { class: 'btn btn-sm', text: '📂 Add files…' });
+  const addFilesBtn = el('button', { class: 'btn btn-sm', text: 'Add files...' });
   queueHeader.appendChild(addFilesBtn);
   addFilesBtn.addEventListener('click', () => batchFileInput.click());
 

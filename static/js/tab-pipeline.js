@@ -13,7 +13,7 @@ let _stepCards   = [];   // [{step, dot, msg}]
 // ── Pipeline step definitions ─────────────────────────────────────────────
 const STEPS = [
   {
-    num: '01', icon: '🎨', label: 'Generate Images',
+    num: '01', icon: '', label: 'Generate Images',
     hint: 'Turn any text idea into AI images with Stable Diffusion',
     tab: 'sd-prompts', svc: 'forge',
     svcLabels: {
@@ -25,7 +25,7 @@ const STEPS = [
     },
   },
   {
-    num: '02', icon: '🎬', label: 'Create Videos',
+    num: '02', icon: '', label: 'Create Videos',
     hint: 'Animate images with AI motion. Add AI-generated music with a single prompt.',
     tab: 'fun-videos', svc: 'wangp',
     svcLabels: {
@@ -37,7 +37,7 @@ const STEPS = [
     },
   },
   {
-    num: '03', icon: '🔗', label: 'Add Transitions',
+    num: '03', icon: '', label: 'Create Transitions',
     hint: 'Create cinematic bridge clips between scenes',
     tab: 'bridges', svc: 'wangp',
     svcLabels: {
@@ -49,7 +49,7 @@ const STEPS = [
     },
   },
   {
-    num: '04', icon: '🎵', label: 'Audio',
+    num: '04', icon: '', label: 'Audio',
     hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
     tab: 'video-tools', svc: 'acestep',
     svcLabels: {
@@ -112,7 +112,7 @@ function _buildHero(root) {
 
   const goBtn = el('button', {
     class: 'btn btn-primary pipeline-concept-go',
-    text: '✨  Generate Images from this Idea',
+    text: 'Generate Images from this Idea',
     onclick() { _launchConcept(conceptTA.value.trim()); },
   });
   btnRow.appendChild(goBtn);

@@ -313,6 +313,7 @@ function _openDetail(item) {
     const path = item.metadata?.path || item.url;
     handoff('fun-videos', { type: 'image', path, url: item.url });
     overlay.classList.remove('open');
+    document.getElementById('btn-gallery-close')?.click();  // close gallery overlay
     document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
     toast('Image sent to Create Videos', 'info');
   });

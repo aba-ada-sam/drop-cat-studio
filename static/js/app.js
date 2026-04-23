@@ -9,7 +9,7 @@ import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-v
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260422t';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260422j';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
-import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260422g';
+import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260422h';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260422m';
@@ -606,12 +606,12 @@ function initShortcuts() {
 // ── Command palette items ─────────────────────────────────────────────────────
 function initPaletteItems() {
   registerItems([
-    { label: 'Studio Home',      group: 'Tabs',    icon: '&#127968;',  action: () => switchTab('pipeline') },
-    { label: 'Generate Images',  group: 'Tabs',    icon: '&#127912;',  hint: '1', action: () => switchTab('sd-prompts') },
-    { label: 'Create Videos',    group: 'Tabs',    icon: '&#127916;',  hint: '2', action: () => switchTab('fun-videos') },
-    { label: 'Add Transitions',  group: 'Tabs',    icon: '&#128279;',  hint: '3', action: () => switchTab('bridges') },
-    { label: 'Audio',              group: 'Tabs',  icon: '&#127925;',  hint: '4', action: () => switchTab('video-tools') },
-    { label: 'Batch Processing',   group: 'Tabs',  icon: '&#9881;',    hint: '5', action: () => switchTab('video-tools-batch') },
+    { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
+    { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
+    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('fun-videos') },
+    { label: 'Create Transitions', group: 'Tabs', hint: '3', action: () => switchTab('bridges') },
+    { label: 'Audio',            group: 'Tabs',   hint: '4', action: () => switchTab('video-tools') },
+    { label: 'Batch Processing', group: 'Tabs',   hint: '5', action: () => switchTab('video-tools-batch') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
