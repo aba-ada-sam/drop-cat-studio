@@ -52,7 +52,7 @@ export function init(panel) {
 
   const promptArea = el('textarea', {
     rows: '5',
-    placeholder: 'Describe the image…\nUse __wildcard_name__ tokens for variety.\nOr type an idea and hit ✦ Compose.',
+    placeholder: 'Describe the image…\nUse __wildcard_name__ tokens for variety.\nOr type an idea and hit Compose.',
     style: 'width:100%; resize:vertical; font-size:.9rem',
   });
   promptCard.appendChild(promptArea);
@@ -71,7 +71,7 @@ export function init(panel) {
   const composeBtn = el('button', {
     class: 'btn btn-sm',
     style: 'font-size:.82rem',
-    text: '✦ Compose with AI',
+    text: 'Compose with AI',
     title: 'AI reads your wildcard library, may create new wildcards, and fills the prompt with __tokens__',
   });
   const suffixInput = el('input', {
@@ -80,7 +80,7 @@ export function init(panel) {
     value: '(depth blur)',
   });
   const wildcardToggle = el('input', { type: 'checkbox', id: 'sd-smart-wc', checked: true, style: 'cursor:pointer' });
-  const wcLabel = el('label', { for: 'sd-smart-wc', text: '✨', title: 'Smart wildcards: AI creates new ones as needed', style: 'cursor:pointer; font-size:1rem' });
+  const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });
   composeRow.append(composeBtn, suffixInput, wildcardToggle, wcLabel);
 
   // ── Settings ─────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ export function init(panel) {
 
   // ── ADetailer ────────────────────────────────────────────────────────────
   const adDet  = el('details', { style: 'margin-top:8px' });
-  const adSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: '🎯 ADetailer (face / hand fix)' });
+  const adSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: 'ADetailer (face / hand fix)' });
   adDet.appendChild(adSumm);
   const adBody = el('div', { style: 'margin-top:6px; display:flex; flex-direction:column; gap:6px' });
   adDet.appendChild(adBody);
@@ -234,12 +234,12 @@ export function init(panel) {
 
   const genBtn  = el('button', {
     class: 'btn btn-primary',
-    text: '⚡ Generate',
+    text: 'Generate',
     style: 'flex:1; font-size:1rem; padding:10px 0',
     disabled: true,
   });
   const stopBtn = el('button', {
-    class: 'btn btn-sm', text: '⏹ Stop',
+    class: 'btn btn-sm', text: 'Stop',
     style: 'font-size:.85rem; display:none',
     async onclick() {
       try { await api('/api/prompts/forge/interrupt', { method: 'POST' }); }
@@ -307,7 +307,7 @@ export function init(panel) {
   const wcDet  = el('details', { style: 'border-top:1px solid var(--border); padding-top:8px' });
   const wcSumm = el('summary', {
     style: 'cursor:pointer; font-weight:600; font-size:.9rem; padding:8px 16px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none',
-    text: '✨ Wildcard Workshop',
+    text: 'Wildcard Workshop',
   });
   wcDet.appendChild(wcSumm);
   wcSection.appendChild(wcDet);
@@ -401,7 +401,7 @@ export function init(panel) {
 
   growRow.appendChild(nameInput);
 
-  const growBtn = el('button', { class: 'btn btn-primary', text: '✨ Grow Wildcards', style: 'font-size:.85rem; width:100%; margin-top:8px' });
+  const growBtn = el('button', { class: 'btn btn-primary', text: 'Grow Wildcards', style: 'font-size:.85rem; width:100%; margin-top:8px' });
   growPanel.appendChild(growBtn);
   const growResult = el('div', { style: 'display:none; margin-top:8px; font-size:.8rem' });
   growPanel.appendChild(growResult);
@@ -410,7 +410,7 @@ export function init(panel) {
     const concept = conceptInput.value.trim();
     if (!concept) { toast('Describe a concept first', 'error'); return; }
     growBtn.disabled = true;
-    growBtn.textContent = '✨ Growing…';
+    growBtn.textContent = 'Growing…';
     growResult.style.display = 'none';
     try {
       const data = await api('/api/prompts/wildcards/grow', {
@@ -425,7 +425,7 @@ export function init(panel) {
       await loadWildcardFiles();
     } catch (e) { toast(e.message, 'error'); }
     growBtn.disabled = false;
-    growBtn.textContent = '✨ Grow Wildcards';
+    growBtn.textContent = 'Grow Wildcards';
   });
 
   // ── Expand panel ──
@@ -533,6 +533,7 @@ export function init(panel) {
     resultImg.src = img.src;
     resultImg.style.display = '';
     emptyMsg.style.display  = 'none';
+    topArea.classList.add('has-result');
     resultInfo.style.display = '';
     resultInfo.textContent   = `Seed: ${img.seed}`;
     actionRow.style.display  = 'flex';
@@ -616,7 +617,7 @@ export function init(panel) {
     const idea = promptArea.value.trim();
     if (!idea) { toast('Type an idea in the prompt box first', 'error'); return; }
     composeBtn.disabled = true;
-    composeBtn.textContent = '✦ Composing…';
+    composeBtn.textContent = 'Composing…';
     try {
       const fcOn = fcEnabled.checked;
       const data = await api('/api/prompts/enhance', {
@@ -642,7 +643,7 @@ export function init(panel) {
       }
     } catch (e) { toast(e.message, 'error'); }
     composeBtn.disabled = false;
-    composeBtn.textContent = '✦ Compose with AI';
+    composeBtn.textContent = 'Compose with AI';
   });
 
   // ── Generate ─────────────────────────────────────────────────────────────
@@ -716,7 +717,7 @@ export function init(panel) {
     progressMsg.style.display = 'none';
     stopBtn.style.display     = 'none';
     genBtn.disabled           = false;
-    genBtn.textContent        = '⚡ Generate';
+    genBtn.textContent        = 'Generate';
   });
 
   promptArea.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); genBtn.click(); } });
