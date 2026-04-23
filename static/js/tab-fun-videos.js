@@ -4,7 +4,7 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
-import { toast } from './shell/toast.js?v=20260421c';
+import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
@@ -195,33 +195,52 @@ export function init(panel) {
     placeholder: PROMPT_PLACEHOLDER });
   promptCard.appendChild(promptTA);
 
+  const promptStatusMsg = el('span', { text: 'Generating motion prompt from image...' });
   const promptStatus = el('div', {
-    style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:5px; display:flex; align-items:center; gap:6px;',
+    style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:5px; align-items:center; gap:6px;',
   }, [
     el('span', { style: 'display:inline-block; width:10px; height:10px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;' }),
-    el('span', { text: 'Generating motion prompt from image — takes ~20s...' }),
+    promptStatusMsg,
+    el('span', { style: 'color:var(--text-3);', text: '— or just click Generate to skip' }),
   ]);
-  promptStatus.style.display = 'none';
   promptCard.appendChild(promptStatus);
 
-  // Auto-generate motion prompt from the selected image via LLM vision
+  let _autoPromptAbort = null;
+
+  // Auto-generate motion prompt from the selected image via LLM vision.
+  // Abortable so clicking Generate immediately cancels it.
   async function _autoGeneratePrompt(imagePath) {
     if (promptTA.value.trim()) return;
+    if (_autoPromptAbort) _autoPromptAbort.abort();
+    _autoPromptAbort = new AbortController();
+    const { signal } = _autoPromptAbort;
+
     promptStatus.style.display = 'flex';
-    promptTA.style.opacity = '0.5';
+
+    // Safety timeout — give up after 30s and let the user proceed
+    const timeout = setTimeout(() => {
+      _autoPromptAbort?.abort();
+      promptStatus.style.display = 'none';
+    }, 30000);
+
     try {
       const data = await api('/api/fun/generate-prompts', {
         method: 'POST',
         body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400 }),
+        signal,
       });
       const prompts = data.prompts || [];
       const text = typeof prompts[0] === 'string' ? prompts[0] : prompts[0]?.prompt;
       if (text && !promptTA.value.trim()) promptTA.value = text;
-    } catch (_) {
-      // silent — default kicks in at generation time
+    } catch (e) {
+      if (e?.name !== 'AbortError') {
+        console.warn('[auto-prompt] failed:', e?.message);
+        apiFetch('/api/logs/client', { method: 'POST', body: JSON.stringify({ message: `auto-prompt failed: ${e?.message} | path: ${imagePath}`, source: 'tab-fun-videos', lineno: 0 }) }).catch(() => {});
+      }
     } finally {
+      clearTimeout(timeout);
       promptStatus.style.display = 'none';
-      promptTA.style.opacity = '';
+      _autoPromptAbort = null;
     }
   }
 
@@ -330,8 +349,12 @@ export function init(panel) {
   playerRaw.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
 
   genBtn.addEventListener('click', async () => {
+    // Cancel any in-flight auto-prompt — we don't need it anymore
+    if (_autoPromptAbort) { _autoPromptAbort.abort(); _autoPromptAbort = null; }
+    promptStatus.style.display = 'none';
+
     const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
-    if (!promptTA.value.trim()) promptTA.value = prompt;  // show what was used
+    if (!promptTA.value.trim()) promptTA.value = prompt;
     if (!_startImagePath) {
       pickerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       pickerCard.style.outline = '2px solid var(--red)';

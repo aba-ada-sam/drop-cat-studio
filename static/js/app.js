@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260422ae';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260423a';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260422t';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260422j';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
