@@ -704,13 +704,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Log toggle — closed by default, preference persisted in localStorage
   const logToggle  = document.getElementById('log-toggle');
   const logContent = document.getElementById('log-content');
-  state.logOpen = localStorage.getItem('dcs-log-open') === 'true';
-  logToggle?.classList.toggle('open', state.logOpen);
-  logContent?.classList.toggle('open', state.logOpen);
-  logToggle?.setAttribute('aria-expanded', String(state.logOpen));
+  state.logOpen = false;
+  logToggle?.setAttribute('aria-expanded', 'false');
   logToggle?.addEventListener('click', () => {
     state.logOpen = !state.logOpen;
-    localStorage.setItem('dcs-log-open', state.logOpen);
     logToggle.classList.toggle('open', state.logOpen);
     logContent.classList.toggle('open', state.logOpen);
     logToggle.setAttribute('aria-expanded', String(state.logOpen));
