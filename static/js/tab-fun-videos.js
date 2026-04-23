@@ -1,18 +1,18 @@
 /**
  * Drop Cat Go Studio — Create Videos
- * Direct WanGP interface: I2V, T2V, start+end image morphs.
- * No AI Director. Write your prompt, hit generate.
+ * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { toast, createDropZone, createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
-import { handoff } from './handoff.js?v=20260415';
+import { createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
+import { toast } from './shell/toast.js?v=20260421c';
+import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
 let _startImagePath = null;
 let _endImagePath   = null;
 let _activeJobId    = null;
 let _models         = {};
-let _applyStart     = null;   // wired after init for handoff
+let _applyStart     = null;
 
 export function receiveHandoff(data) {
   if (data.type === 'image' && data.path) {
@@ -36,112 +36,173 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:860px; margin:0 auto;' });
   panel.appendChild(root);
 
-  // ── Mode ──────────────────────────────────────────────────────────────────
-  let mode = 'i2v';
-  const modeRow = el('div', { style: 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;' });
-  root.appendChild(modeRow);
+  // ── Image picker ──────────────────────────────────────────────────────────
+  const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(pickerCard);
 
-  modeRow.appendChild(el('span', { text: 'Mode:', style: 'font-size:.85rem; color:var(--text-3); font-weight:600;' }));
-  const i2vBtn = el('button', { class: 'btn btn-sm btn-primary', text: '📷 Image → Video' });
-  const t2vBtn = el('button', { class: 'btn btn-sm',             text: '📝 Text → Video'  });
-  modeRow.appendChild(i2vBtn);
-  modeRow.appendChild(t2vBtn);
-  const modeHint = el('span', { style: 'font-size:.76rem; color:var(--text-3); margin-left:4px;' });
-  modeRow.appendChild(modeHint);
+  const pickerHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
+  pickerCard.appendChild(pickerHeader);
+  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Your Generated Images' }));
 
-  // ── Image inputs ──────────────────────────────────────────────────────────
-  const imageCard = el('div', { class: 'card', style: 'padding:14px; display:grid; grid-template-columns:1fr 1fr; gap:14px;' });
-  root.appendChild(imageCard);
+  const refreshBtn = el('button', { class: 'btn btn-sm', text: 'Refresh' });
+  pickerHeader.appendChild(refreshBtn);
 
-  // Start image
-  const startCol = el('div');
-  imageCard.appendChild(startCol);
-  startCol.appendChild(el('div', { style: 'font-size:.82rem; font-weight:600; margin-bottom:6px; color:var(--text-2);', text: 'Start Image' }));
-
-  const startPreview = el('img', { style: 'display:none; width:100%; max-height:180px; object-fit:cover; border-radius:var(--r-sm); margin-bottom:6px;' });
-  startCol.appendChild(startPreview);
-  const startClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'display:none; font-size:.72rem; margin-bottom:6px;',
-    onclick() { _startImagePath = null; startPreview.style.display = 'none'; startPreview.src = ''; startClearBtn.style.display = 'none'; }
+  const fileInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  pickerCard.appendChild(fileInput);
+  const openFileBtn = el('button', { class: 'btn btn-sm', text: 'Open file...' });
+  pickerHeader.appendChild(openFileBtn);
+  openFileBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/fun/upload', Array.from(fileInput.files));
+      const f = data.files?.[0];
+      if (f) _applyStart(f.path, f.url || pathToUrl(f.path));
+    } catch (e) { toast(e.message, 'error'); }
+    fileInput.value = '';
   });
-  startCol.appendChild(startClearBtn);
 
-  createDropZone(startCol, {
-    accept: 'image/*', multiple: false, label: 'Drop start image or click to browse',
-    async onFiles(files) {
-      try {
-        const data = await apiUpload('/api/fun/upload', files);
-        const f = data.files?.[0];
-        if (f) {
-          _startImagePath = f.path;
-          startPreview.src = f.url || `/uploads/${f.name}`;
-          startPreview.style.display = '';
-          startClearBtn.style.display = '';
-          toast('Start image ready', 'success');
-        }
-      } catch (e) { toast(e.message, 'error'); }
+  const imageGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:6px; max-height:280px; overflow-y:auto;' });
+  pickerCard.appendChild(imageGrid);
+
+  let _selectedThumb = null;
+
+  async function loadSessionImages() {
+    try {
+      const data = await api('/api/session/images');
+      const imgs = (data.images || []).slice().sort((a, b) => (b.added_at || 0) - (a.added_at || 0));
+      imageGrid.innerHTML = '';
+      _selectedThumb = null;
+      if (!imgs.length) {
+        imageGrid.appendChild(el('div', {
+          style: 'grid-column:1/-1; text-align:center; padding:32px 0; color:var(--text-3); font-size:.82rem; line-height:1.6;',
+          text: 'No generated images yet.\nGo to Generate Images first.',
+        }));
+        return;
+      }
+      for (const img of imgs.slice(0, 36)) {
+        const url = img.path
+          ? img.path.replace(/\\/g, '/').replace(/^.*\/output\//, '/output/')
+          : `/output/${img.filename}`;
+        const thumb = el('img', {
+          src: url, title: img.filename,
+          style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; transition:border-color .15s;',
+        });
+        thumb.addEventListener('click', () => {
+          if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
+          thumb.style.borderColor = 'var(--accent)';
+          _selectedThumb = thumb;
+          _applyStart(img.path || img.filename, url);
+        });
+        imageGrid.appendChild(thumb);
+      }
+    } catch (e) { toast(e.message, 'error'); }
+  }
+
+  refreshBtn.addEventListener('click', loadSessionImages);
+  loadSessionImages();
+
+  // ── Selected image strip ──────────────────────────────────────────────────
+  const selectedCard = el('div', { class: 'card', style: 'display:none; padding:10px 14px; align-items:center; gap:12px;' });
+  root.appendChild(selectedCard);
+
+  const selectedPreview = el('img', { style: 'width:72px; height:72px; object-fit:cover; border-radius:6px; flex-shrink:0;' });
+  const selectedName    = el('div', { style: 'font-size:.74rem; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;' });
+  const clearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'margin-left:auto; flex-shrink:0;',
+    onclick() {
+      _startImagePath = null;
+      selectedCard.style.display = 'none';
+      if (_selectedThumb) { _selectedThumb.style.borderColor = 'transparent'; _selectedThumb = null; }
     },
   });
+
+  selectedCard.appendChild(selectedPreview);
+  selectedCard.appendChild(el('div', { style: 'flex:1; min-width:0;' }, [
+    el('div', { style: 'font-size:.82rem; font-weight:600; color:var(--text-2);', text: 'Selected for video' }),
+    selectedName,
+  ]));
+  selectedCard.appendChild(clearBtn);
 
   _applyStart = (path, url) => {
     _startImagePath = path;
-    startPreview.src = url || pathToUrl(path);
-    startPreview.style.display = '';
-    startClearBtn.style.display = '';
-    toast('Image loaded', 'success');
+    selectedPreview.src = url || pathToUrl(path);
+    selectedName.textContent = path.split(/[\\/]/).pop();
+    selectedCard.style.display = 'flex';
   };
 
-  // End image (optional)
-  const endCol = el('div');
-  imageCard.appendChild(endCol);
-  endCol.appendChild(el('div', { style: 'font-size:.82rem; font-weight:600; margin-bottom:2px; color:var(--text-2);', text: 'End Image' }));
-  endCol.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:6px;', text: 'Optional — video morphs from start to end' }));
+  // ── End image (optional morph) ────────────────────────────────────────────
+  const endToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
+  root.appendChild(endToggleRow);
 
-  const endPreview = el('img', { style: 'display:none; width:100%; max-height:180px; object-fit:cover; border-radius:var(--r-sm); margin-bottom:6px;' });
-  endCol.appendChild(endPreview);
-  const endClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'display:none; font-size:.72rem; margin-bottom:6px;',
-    onclick() { _endImagePath = null; endPreview.style.display = 'none'; endPreview.src = ''; endClearBtn.style.display = 'none'; }
+  const endChk = el('input', { type: 'checkbox', id: 'fv-end-toggle' });
+  const endToggleLabel = el('label', { for: 'fv-end-toggle', style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;',
+    text: '+ End image — morph from start to end' });
+  endToggleRow.appendChild(endChk);
+  endToggleRow.appendChild(endToggleLabel);
+
+  const endCard = el('div', { class: 'card', style: 'display:none; padding:14px;' });
+  root.appendChild(endCard);
+
+  endCard.appendChild(el('div', { style: 'font-size:.82rem; font-weight:600; margin-bottom:2px; color:var(--text-2);', text: 'End Image' }));
+  endCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;', text: 'Video morphs from your selected image into this one.' }));
+
+  const endPreview = el('img', { style: 'display:none; width:120px; height:80px; object-fit:cover; border-radius:6px; margin-bottom:6px;' });
+  endCard.appendChild(endPreview);
+  const endClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear end image', style: 'display:none; font-size:.72rem; margin-bottom:8px;',
+    onclick() { _endImagePath = null; endPreview.style.display = 'none'; endPreview.src = ''; endClearBtn.style.display = 'none'; },
   });
-  endCol.appendChild(endClearBtn);
+  endCard.appendChild(endClearBtn);
 
-  createDropZone(endCol, {
-    accept: 'image/*', multiple: false, label: 'Drop end image (optional)',
-    async onFiles(files) {
-      try {
-        const data = await apiUpload('/api/fun/upload', files);
-        const f = data.files?.[0];
-        if (f) {
-          _endImagePath = f.path;
-          endPreview.src = f.url || `/uploads/${f.name}`;
-          endPreview.style.display = '';
-          endClearBtn.style.display = '';
-          toast('End image ready', 'success');
-        }
-      } catch (e) { toast(e.message, 'error'); }
-    },
+  const endFileInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  endCard.appendChild(endFileInput);
+  const endOpenBtn = el('button', { class: 'btn btn-sm', text: 'Choose end image...' });
+  endCard.appendChild(endOpenBtn);
+  endOpenBtn.addEventListener('click', () => endFileInput.click());
+  endFileInput.addEventListener('change', async () => {
+    if (!endFileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/fun/upload', Array.from(endFileInput.files));
+      const f = data.files?.[0];
+      if (f) {
+        _endImagePath = f.path;
+        endPreview.src = f.url || pathToUrl(f.path);
+        endPreview.style.display = '';
+        endClearBtn.style.display = '';
+      }
+    } catch (e) { toast(e.message, 'error'); }
+    endFileInput.value = '';
   });
 
-  // ── Prompt ────────────────────────────────────────────────────────────────
+  endChk.addEventListener('change', () => {
+    endCard.style.display = endChk.checked ? '' : 'none';
+    if (!endChk.checked) {
+      _endImagePath = null;
+      endPreview.style.display = 'none';
+      endPreview.src = '';
+      endClearBtn.style.display = 'none';
+    }
+  });
+
+  // ── Motion prompt ─────────────────────────────────────────────────────────
   const promptCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(promptCard);
-
-  promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: '🎬 Video Prompt' }));
+  promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
   promptCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;',
-    text: 'Describe motion and action — present tense, action verbs. What moves, where the camera goes, what transforms. The model already sees your image.' }));
-
-  const promptTA = el('textarea', { rows: '4', style: 'width:100%; resize:vertical; font-size:.9rem;',
+    text: 'Describe what moves and where the camera goes — present tense, action verbs.' }));
+  const promptTA = el('textarea', { rows: '3', style: 'width:100%; resize:vertical; font-size:.9rem;',
     placeholder: 'e.g. "Camera slowly pushes in, subject blinks and smiles, hair lifts in the breeze, warm light pulses across the frame"' });
   promptCard.appendChild(promptTA);
 
-  // ── Model & Settings ──────────────────────────────────────────────────────
+  // ── Settings ──────────────────────────────────────────────────────────────
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(settingsCard);
-  settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: '⚙️ Settings' }));
+  settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Settings' }));
 
   const topGrid = el('div', { style: 'display:grid; grid-template-columns:2fr 1fr; gap:10px; margin-bottom:10px;' });
   settingsCard.appendChild(topGrid);
 
-  const modelSel = el('select', { style: 'width:100%;' });
-  const modelInfo = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:3px;', text: '' });
+  const modelSel  = el('select', { style: 'width:100%;' });
+  const modelInfo = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:3px;' });
   topGrid.appendChild(el('div', {}, [
     el('label', { text: 'Model', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     modelSel, modelInfo,
@@ -160,35 +221,31 @@ export function init(panel) {
   const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 30  });
   const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 7.5 });
 
-  function onModelChange() {
+  modelSel.addEventListener('change', () => {
     const m = _models[modelSel.value];
     if (!m) return;
-    const dur = Math.min(parseFloat(durSlider.value) || 14, m.max_sec);
-    durSlider.value = dur;
-    modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'×'+m.res[1] : ''}  •  ${m.fps}fps  •  ${m.i2v ? 'I2V+T2V' : 'T2V only'}`;
-    if (mode === 'i2v' && !m.i2v) setMode('t2v');
-  }
-  modelSel.addEventListener('change', onModelChange);
+    durSlider.value = Math.min(parseFloat(durSlider.value) || 14, m.max_sec);
+    modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'×'+m.res[1] : ''}  •  ${m.fps}fps`;
+  });
 
   api('/api/fun/models').then(data => {
     _models = data.models || {};
     modelSel.innerHTML = '';
-    for (const [name] of Object.entries(_models)) {
+    for (const [name] of Object.entries(_models))
       modelSel.appendChild(el('option', { value: name, text: name }));
-    }
     const ltx = Object.keys(_models).find(k => k.includes('LTX'));
     if (ltx) modelSel.value = ltx;
-    onModelChange();
+    modelSel.dispatchEvent(new Event('change'));
   }).catch(() => {});
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   const audioCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(audioCard);
 
-  const audioChk = el('input', { type: 'checkbox', id: 'av-audio', checked: 'true' });
+  const audioChk = el('input', { type: 'checkbox', id: 'fv-audio', checked: 'true' });
   audioCard.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center; margin-bottom:10px;' }, [
     audioChk,
-    el('label', { for: 'av-audio', text: '🎵 Generate music', style: 'cursor:pointer; font-weight:600;' }),
+    el('label', { for: 'fv-audio', text: 'Generate music', style: 'cursor:pointer; font-weight:600;' }),
   ]));
 
   const audioBody = el('div');
@@ -198,43 +255,52 @@ export function init(panel) {
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     musicIn,
   ]));
-  const instrChk = el('input', { type: 'checkbox', id: 'av-instr' });
+  const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [
     instrChk,
-    el('label', { for: 'av-instr', text: 'Instrumental only (no AI lyrics)', style: 'cursor:pointer; font-size:.85rem;' }),
+    el('label', { for: 'fv-instr', text: 'Instrumental only (no AI lyrics)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
   audioChk.addEventListener('change', () => { audioBody.style.display = audioChk.checked ? '' : 'none'; });
 
   // ── Generate ──────────────────────────────────────────────────────────────
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
-    text: '⚡ Generate Video',
+    text: 'Generate Video',
     style: 'width:100%; font-size:1.1rem; padding:14px; font-weight:700;',
   });
   root.appendChild(genBtn);
 
-  // Progress
   const progWrap = el('div');
   root.appendChild(progWrap);
   const prog = createProgressCard(progWrap);
   prog.onCancel(async () => {
-    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping...', 'info'); }
+    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping…', 'info'); }
   });
 
-  // Video result
   const vidWrap = el('div');
   root.appendChild(vidWrap);
   const player = createVideoPlayer(vidWrap);
-  player.onStartOver(() => { player.hide(); });
+  player.onStartOver(() => player.hide());
 
   genBtn.addEventListener('click', async () => {
     const prompt = promptTA.value.trim();
-    if (!prompt)                       { toast('Write a video prompt first', 'error'); return; }
-    if (mode === 'i2v' && !_startImagePath) { toast('Drop a start image first', 'error');    return; }
+    if (!prompt) {
+      promptTA.focus();
+      promptTA.style.outline = '2px solid var(--red)';
+      setTimeout(() => { promptTA.style.outline = ''; }, 2000);
+      toast('Write a motion prompt first', 'error');
+      return;
+    }
+    if (!_startImagePath) {
+      pickerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      pickerCard.style.outline = '2px solid var(--red)';
+      setTimeout(() => { pickerCard.style.outline = ''; }, 2000);
+      toast('Select an image above first', 'error');
+      return;
+    }
 
-    const m       = _models[modelSel.value] || {};
-    const maxSec  = m.max_sec || 20;
-    const duration = Math.min(parseFloat(durSlider.value) || 14, maxSec);
+    const m        = _models[modelSel.value] || {};
+    const duration = Math.min(parseFloat(durSlider.value) || 14, m.max_sec || 20);
 
     genBtn.disabled = true;
     prog.show();
@@ -245,16 +311,16 @@ export function init(panel) {
       const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
         body: JSON.stringify({
-          photo_path:    mode === 'i2v' ? _startImagePath : null,
-          video_prompt:  prompt,
-          music_prompt:  musicIn.value.trim(),
-          model:         modelSel.value,
+          photo_path:   _startImagePath,
+          video_prompt: prompt,
+          music_prompt: musicIn.value.trim(),
+          model:        modelSel.value,
           duration,
-          steps:         parseInt(stepsSlider.value)    || 30,
-          guidance:      parseFloat(guidanceSlider.value) || 7.5,
-          seed:          parseInt(seedIn.value) || -1,
-          skip_audio:    !audioChk.checked,
-          instrumental:  instrChk.checked,
+          steps:        parseInt(stepsSlider.value)     || 30,
+          guidance:     parseFloat(guidanceSlider.value) || 7.5,
+          seed:         parseInt(seedIn.value)           || -1,
+          skip_audio:     !audioChk.checked,
+          instrumental:   instrChk.checked,
           end_photo_path: _endImagePath || null,
         }),
       });
@@ -262,22 +328,23 @@ export function init(panel) {
 
       pollJob(
         job_id,
-        (j) => prog.update(j.progress || 0, j.message || 'Working...'),
+        (j) => {
+          const msg = j.message || (j.status === 'queued' ? 'Queued — waiting for GPU...' : 'Working...');
+          prog.update(j.progress || 0, msg);
+        },
         (j) => {
           prog.hide();
           genBtn.disabled = false;
           _activeJobId = null;
           if (j.output) {
-            const url = pathToUrl(j.output);
-            player.show(url, j.output);
-            pushToGallery('fun-videos', j.output, promptTA.value, null, {
-              mode,
+            player.show(pathToUrl(j.output), j.output);
+            pushToGallery('fun-videos', j.output, prompt, null, {
               steps: Number(stepsSlider.value),
               guidance: Number(guidanceSlider.value),
               duration_sec: Number(durSlider.value),
             });
-            // Handoff to bridges
-            const bridgesBtn = vidWrap.querySelector('.to-bridges-btn') || (() => {
+            const existing = vidWrap.querySelector('.to-bridges-btn');
+            const bridgesBtn = existing || (() => {
               const b = el('button', { class: 'btn btn-sm to-bridges-btn', text: '→ Add to Video Bridges', style: 'margin-top:8px;' });
               vidWrap.appendChild(b);
               return b;
@@ -304,37 +371,18 @@ export function init(panel) {
     }
   });
 
-  // ── Mode switching ────────────────────────────────────────────────────────
-  function setMode(m) {
-    mode = m;
-    i2vBtn.classList.toggle('btn-primary', m === 'i2v');
-    t2vBtn.classList.toggle('btn-primary', m === 't2v');
-    imageCard.style.display = m === 'i2v' ? '' : 'none';
-    if (m === 'i2v') {
-      modeHint.textContent = 'Animates your image. Prompt describes what HAPPENS — motion, camera, action.';
-      promptTA.placeholder = 'e.g. "Camera slowly pushes in, subject blinks and smiles, hair lifts in the breeze, warm light pulses across the frame"';
-    } else {
-      modeHint.textContent = 'Generates from text only. No image needed. Use a T2V model.';
-      promptTA.placeholder = 'e.g. "A lone astronaut walks across a crimson desert at sunset, dust swirling in the wind, cinematic tracking shot"';
-    }
-  }
-
-  i2vBtn.addEventListener('click', () => setMode('i2v'));
-  t2vBtn.addEventListener('click', () => setMode('t2v'));
-  setMode('i2v');
-
-  // ── Palette-driven AI intent ──────────────────────────────────────────
+  // ── Palette AI intent ─────────────────────────────────────────────────────
   import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
     registerTabAI('fun-videos', {
       getContext: () => ({
-        prompt: promptTA.value,
-        steps: Number(stepsSlider.value) || 0,
-        guidance: Number(guidanceSlider.value) || 0,
-        duration_sec: Number(durSlider.value) || 0,
+        prompt:       promptTA.value,
+        steps:        Number(stepsSlider.value)    || 0,
+        guidance:     Number(guidanceSlider.value) || 0,
+        duration_sec: Number(durSlider.value)      || 0,
       }),
       applySettings: (s) => {
-        if (typeof s.steps === 'number')        stepsSlider.value    = Math.max(4, Math.min(50, s.steps));
-        if (typeof s.guidance === 'number')     guidanceSlider.value = Math.max(1, Math.min(20, s.guidance));
+        if (typeof s.steps        === 'number') stepsSlider.value    = Math.max(4, Math.min(50, s.steps));
+        if (typeof s.guidance     === 'number') guidanceSlider.value = Math.max(1, Math.min(20, s.guidance));
         if (typeof s.duration_sec === 'number') durSlider.value      = Math.max(2, Math.min(20, s.duration_sec));
         if (typeof s.prompt_append === 'string' && s.prompt_append.trim()) {
           const cur = promptTA.value.trim();
