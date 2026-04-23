@@ -189,9 +189,36 @@ export function init(panel) {
   promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
   promptCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;',
     text: 'Describe what moves and where the camera goes — present tense, action verbs.' }));
+  const PROMPT_PLACEHOLDER = 'e.g. "Camera slowly pushes in, subject blinks and smiles, hair lifts in the breeze, warm light pulses across the frame"';
+  const PROMPT_DEFAULT     = 'Camera slowly pushes in, gentle natural movement, warm light across the frame';
   const promptTA = el('textarea', { rows: '3', style: 'width:100%; resize:vertical; font-size:.9rem;',
-    placeholder: 'e.g. "Camera slowly pushes in, subject blinks and smiles, hair lifts in the breeze, warm light pulses across the frame"' });
+    placeholder: PROMPT_PLACEHOLDER });
   promptCard.appendChild(promptTA);
+
+  // Auto-generate motion prompt from the selected image via LLM vision
+  async function _autoGeneratePrompt(imagePath) {
+    if (promptTA.value.trim()) return;
+    promptTA.placeholder = 'Analyzing image...';
+    try {
+      const data = await api('/api/fun/generate-prompts', {
+        method: 'POST',
+        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7 }),
+      });
+      const prompts = data.prompts || [];
+      if (prompts.length > 0 && !promptTA.value.trim()) promptTA.value = prompts[0];
+    } catch (_) {
+      // silent — user can still type, or the default kicks in at generation time
+    } finally {
+      promptTA.placeholder = PROMPT_PLACEHOLDER;
+    }
+  }
+
+  // Extend _applyStart (defined above) to trigger auto-prompt
+  const _applyStartBase = _applyStart;
+  _applyStart = (path, url) => {
+    _applyStartBase(path, url);
+    _autoGeneratePrompt(path);
+  };
 
   // ── Settings ──────────────────────────────────────────────────────────────
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
@@ -291,14 +318,8 @@ export function init(panel) {
   playerRaw.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
 
   genBtn.addEventListener('click', async () => {
-    const prompt = promptTA.value.trim();
-    if (!prompt) {
-      promptTA.focus();
-      promptTA.style.outline = '2px solid var(--red)';
-      setTimeout(() => { promptTA.style.outline = ''; }, 2000);
-      toast('Write a motion prompt first', 'error');
-      return;
-    }
+    const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
+    if (!promptTA.value.trim()) promptTA.value = prompt;  // show what was used
     if (!_startImagePath) {
       pickerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       pickerCard.style.outline = '2px solid var(--red)';
