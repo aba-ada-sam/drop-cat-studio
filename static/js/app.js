@@ -732,7 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
   // Boot default tab
-  switchTab('pipeline');
+  switchTab('sd-prompts');
   loadConfig();
   pollServices();
   pollLogs();

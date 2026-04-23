@@ -22,7 +22,7 @@ html { font-size: 16px; }
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: transparent;
+  background: var(--bg);
   color: var(--text);
   line-height: 1.55;
   height: 100vh;
@@ -30,7 +30,7 @@ body {
   display: flex;
   flex-direction: column;
 }
-#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: transparent; }
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* ── Color Tokens ─────────────────────────────────────────────────────────── */
 
@@ -1826,7 +1826,6 @@ textarea:focus { border-color: var(--accent); }
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: transparent;
 }
 
 /* Left rail — creative pipeline navigator */
@@ -2007,7 +2006,6 @@ textarea:focus { border-color: var(--accent); }
   min-width: 0;
   overflow: hidden;
   position: relative;
-  background: transparent;
 }
 
 #split-pane {
@@ -2022,7 +2020,6 @@ textarea:focus { border-color: var(--accent); }
   overflow-y: auto;
   padding: 20px 24px;
   min-width: 0;
-  background: transparent;
 }
 /* Gallery overlay — full-height panel that covers the work area */
 #gallery-overlay {
