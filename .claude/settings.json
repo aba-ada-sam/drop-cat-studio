@@ -10,6 +10,8 @@
       "Bash(curl -s http://127.0.0.1*)",
       "Bash(ollama list)",
       "Bash(ollama list *)",
+      "Bash(ollama show *)",
+      "Bash(ollama pull *)",
       "Bash(netstat -ano *)",
       "Bash(git log *)",
       "Bash(git log)",
@@ -22,7 +24,23 @@
       "PowerShell(Select-String *)",
       "PowerShell(Test-Path *)",
       "PowerShell(Invoke-WebRequest *)",
-      "PowerShell(Get-Content *)"
+      "PowerShell(Get-Content *)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests",
+      "mcp__playwright__browser_press_key",
+      "mcp__playwright__browser_select_option",
+      "mcp__playwright__browser_hover",
+      "mcp__playwright__browser_scroll",
+      "mcp__computer_use__screenshot",
+      "mcp__computer_use__get_screen_size"
     ]
   }
 }

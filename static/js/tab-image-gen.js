@@ -315,6 +315,7 @@ export function init(panel) {
   function showImage(idx) {
     if (idx < 0 || idx >= generatedImages.length) return;
     currentIdx = idx;
+    layout.classList.add('has-result');
     const img = generatedImages[idx];
     resultImg.src = img.src;
     resultImg.style.display = '';
