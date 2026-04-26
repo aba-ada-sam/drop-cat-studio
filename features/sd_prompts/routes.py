@@ -740,3 +740,69 @@ async def forge_progress():
     """Get current Forge generation progress."""
     from services.forge_client import get_progress
     return get_progress()
+
+
+# ── OpenAI DALL-E 3 Image Generation ────────────────────────────────────────
+
+@router.get("/openai/status")
+async def openai_image_status():
+    """Return whether an OpenAI key is configured for image generation."""
+    from core.keys import get_key
+    return {"available": bool(get_key("openai")), "model": "dall-e-3"}
+
+
+@router.post("/openai/txt2img")
+async def openai_txt2img(request: Request):
+    """Generate an image via OpenAI DALL-E 3.
+
+    Request body:
+      { "prompt": str, "size": "1792x1024"|"1024x1024"|"1024x1792",
+        "quality": "standard"|"hd", "style": "vivid"|"natural" }
+    """
+    from openai import OpenAI
+    from core.keys import get_key
+
+    body = await request.json()
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt required")
+
+    key = get_key("openai")
+    if not key:
+        raise HTTPException(400, "OpenAI API key not configured — add it in Settings")
+
+    size    = body.get("size", "1792x1024")
+    quality = body.get("quality", "standard")
+    style   = body.get("style", "vivid")
+
+    valid_sizes = {"1024x1024", "1792x1024", "1024x1792"}
+    if size not in valid_sizes:
+        size = "1792x1024"
+
+    try:
+        client = OpenAI(api_key=key)
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            style=style,
+            n=1,
+            response_format="b64_json",
+        )
+    except Exception as e:
+        log.exception("openai_txt2img failed")
+        raise HTTPException(500, f"DALL-E 3 generation failed: {e}")
+
+    b64 = response.data[0].b64_json
+    revised = response.data[0].revised_prompt or prompt
+
+    saved_paths = _save_and_register([b64])
+
+    return {
+        "images": [b64],
+        "saved_paths": saved_paths,
+        "revised_prompt": revised,
+        "seed": -1,
+        "info": {"seed": -1, "revised_prompt": revised},
+    }
