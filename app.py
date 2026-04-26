@@ -996,7 +996,32 @@ logging.getLogger("uvicorn.access").addFilter(_PollFilter())
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import os, signal, urllib.request, urllib.error, uvicorn
+
+    # ── Single-instance enforcement ──────────────────────────────────────────
+    # If a previous DCS instance is alive (port file exists + /api/system
+    # responds), kill it so we don't stack up tray icons and ports.
+    _prev_port = port_lock.read_port_file()
+    if _prev_port:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{_prev_port}/api/system", timeout=1)
+            # Still alive — read its PID from the port file and kill it
+            import json as _json
+            _pf = (port_lock.PORT_FILE).read_text(encoding="utf-8")
+            _prev_pid = _json.loads(_pf).get("pid")
+            if _prev_pid and _prev_pid != os.getpid():
+                try:
+                    import subprocess
+                    subprocess.call(["taskkill", "/F", "/PID", str(_prev_pid)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    log.info("Killed previous DCS instance (PID %s port %s)", _prev_pid, _prev_port)
+                    import time; time.sleep(0.5)
+                except Exception:
+                    pass
+        except (urllib.error.URLError, OSError):
+            pass  # dead already — port file is stale
+        port_lock.clear_port_file()
+
     # Pick the first free port from 7860..7879 so we don't collide with Forge,
     # WanGP, another DCS instance, or any unrelated app that grabbed 7860.
     try:
