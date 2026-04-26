@@ -214,6 +214,13 @@
       </div>
       <form class="modal-body" autocomplete="off" onsubmit="return false">
         <div class="settings-section">
+          <h4 class="settings-section-label">Stable Diffusion / Forge WebUI</h4>
+          <div class="form-group">
+            <label for="cfg-forge_root">WebUI Path <span class="hint-text">-- folder containing webui-user.bat (must be started with --api)</span></label>
+            <input type="text" id="cfg-forge_root" placeholder="C:\path\to\stable-diffusion-webui" autocomplete="off">
+          </div>
+        </div>
+        <div class="settings-section">
           <h4 class="settings-section-label">AI Video Generation (WanGP)</h4>
           <div class="form-group">
             <label for="cfg-wan2gp_root">WanGP Path <span class="hint-text">-- e.g. C:\pinokio\api\wan.git\app</span></label>

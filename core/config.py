@@ -71,6 +71,7 @@ DEFAULTS: dict = {
     # ── SD Prompts (sd_) ─────────────────────────────────────────────────
     "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
+    "forge_root": r"C:\Users\andre\My Drive\sd\stable-diffusion-webui",
     "forge_url": "http://127.0.0.1:7861",
     "forge_default_sampler": "DPM++ 2M SDE",
     "forge_default_scheduler": "Karras",

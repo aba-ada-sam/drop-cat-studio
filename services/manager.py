@@ -656,7 +656,7 @@ def start_forge() -> tuple[bool, str | None]:
                 last_log = time.time()
             time.sleep(5)
 
-        msg = "Forge did not respond within 5 minutes — check C:\\forge\\webui-user.bat"
+        msg = f"Forge did not respond within 5 minutes — check {forge_root}\\webui-user.bat"
         _set_status("forge", state="error", message=msg)
         log.error(msg)
         return False, msg

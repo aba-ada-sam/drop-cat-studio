@@ -380,11 +380,6 @@ export function init(panel) {
         }
       } else {
         if (!_forgeRetryTimer) _forgeRetryTimer = setInterval(checkForge, 10000);
-        // Auto-switch to DALL-E if Forge is offline and key is available
-        if (openaiAvail && source === 'forge') {
-          setSource('dalle');
-          toast('Forge offline — switched to DALL-E 3', 'info');
-        }
       }
       updateBanner();
     } catch (_) {
