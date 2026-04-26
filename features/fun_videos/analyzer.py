@@ -190,15 +190,14 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
     parts.append("Keep it short, clever, and slightly absurd.")
 
     try:
-        text = router.route_vision(
-            "\n".join(parts),
-            video_frames_b64[:4],
-            tier=TIER_BALANCED,
+        text = router.route(
+            [{"role": "user", "content": "\n".join(parts)}],
+            tier=TIER_FAST,
             system=LYRICS_SYSTEM,
         )
         return text.strip() if text else ""
     except Exception as e:
-        log.warning(f"Lyrics generation failed: {e}")
+        log.warning("Lyrics generation failed: %s", e)
         return ""
 
 

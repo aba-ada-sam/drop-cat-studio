@@ -19,7 +19,7 @@ ACESTEP_PORT = 8019
 API_BASE = f"http://{ACESTEP_HOST}:{ACESTEP_PORT}"
 
 MAX_DURATION = 120
-GENERATION_TIMEOUT = 180  # 3 min — if ACE-Step can't finish by then, skip to video-only
+GENERATION_TIMEOUT = 300  # 5 min
 POLL_INTERVAL = 3
 
 
@@ -158,7 +158,7 @@ def generate_audio(
         "prompt": effective_prompt,
         "lyrics": effective_lyrics,
         "chunk_mask_mode": "auto",
-        "thinking": has_vocals,
+        "thinking": False,
         "audio_duration": duration,
         "audio_format": audio_format,
         "batch_size": 1,
@@ -168,7 +168,7 @@ def generate_audio(
         "guidance_scale": guidance,
         "lm_backend": "pt",
         "use_cot_caption": False,
-        "use_cot_language": has_vocals,
+        "use_cot_language": False,
     }
     if bpm and bpm > 0:
         payload["bpm"] = int(bpm)

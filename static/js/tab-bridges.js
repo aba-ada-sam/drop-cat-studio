@@ -3,7 +3,7 @@
  * Pick session videos → arrange sequence → AI generates bridge clips between each pair.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration } from './components.js?v=20260414';
+import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260426c';
 import { toast } from './shell/toast.js?v=20260421c';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
@@ -22,12 +22,6 @@ const TRANSITION_MODES = [
   { id: 'fade',        label: 'Fade',        sub: 'Clean dissolve' },
 ];
 
-function outputPathToUrl(p) {
-  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
-  const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
-}
 
 function _addItem(item) {
   if (item.path && _items.find(i => i.path === item.path)) return false;
@@ -331,7 +325,7 @@ export function init(panel) {
           genBtn.disabled = false;
           if (j.output) {
             _lastOutput = j.output;
-            player.show(outputPathToUrl(j.output), j.output);
+            player.show(pathToUrl(j.output), j.output);
             pushToGallery('bridges', j.output, `${_activeMode} transition (${_items.length} clips)`, null, {
               transition_mode: _activeMode,
               creativity:      Number(creativitySlider.value),

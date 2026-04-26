@@ -26,6 +26,21 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 MAX_IMAGE_MB = 15
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_path(raw: str) -> str:
+    """Resolve a URL-style path like /output/file.png to an absolute filesystem path."""
+    if not raw or os.path.isfile(raw):
+        return raw
+    clean = raw.lstrip("/").replace("/", os.sep)
+    if clean.startswith(f"output{os.sep}") or clean.startswith("output/"):
+        resolved = str(_PROJECT_ROOT / clean.replace("/", os.sep))
+        if os.path.isfile(resolved):
+            return resolved
+    return raw
+
+
 def _validate_image(data: bytes, filename: str) -> Image.Image:
     """Validate image data. Returns the PIL Image on success, raises HTTPException on failure."""
     if len(data) > MAX_IMAGE_MB * 1024 * 1024:
@@ -155,14 +170,7 @@ async def generate_prompts(request: Request):
 
     _require_ai()
     body = await request.json()
-    image_path = body.get("image_path", "")
-    # Resolve URL-style paths (e.g. /output/file.png) the same way /make-it does
-    if image_path and not os.path.isfile(image_path):
-        clean = image_path.lstrip("/").replace("/", os.sep)
-        if clean.startswith(f"output{os.sep}") or clean.startswith("output/"):
-            resolved = str(Path(__file__).resolve().parent.parent.parent / clean.replace("/", os.sep))
-            if os.path.isfile(resolved):
-                image_path = resolved
+    image_path = _resolve_path(body.get("image_path", ""))
     if not image_path or not os.path.isfile(image_path):
         raise HTTPException(400, f"Image not found: {image_path}")
 
@@ -197,15 +205,7 @@ async def make_it(request: Request):
     from features.fun_videos.pipeline import run_pipeline
 
     body = await request.json()
-    photo_path = body.get("photo_path") or ""
-    # photo_path is optional for text-to-video (T2V) models
-    if photo_path and not os.path.isfile(photo_path):
-        # Resolve URL-style paths like /output/file.png → filesystem path
-        clean = photo_path.lstrip("/").replace("/", os.sep)
-        if clean.startswith(f"output{os.sep}") or clean.startswith("output/"):
-            resolved = str(Path(__file__).resolve().parent.parent.parent / clean.replace("/", os.sep))
-            if os.path.isfile(resolved):
-                photo_path = resolved
+    photo_path = _resolve_path(body.get("photo_path") or "")
     if photo_path and not os.path.isfile(photo_path):
         raise HTTPException(400, f"Photo not found: {photo_path}")
     if not photo_path and not body.get("video_prompt", "").strip():

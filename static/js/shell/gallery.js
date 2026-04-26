@@ -6,6 +6,7 @@
 import { apiFetch, toast } from './toast.js?v=20260419h';
 import { applySettingsToTab } from './ai-intent.js?v=20260419h';
 import { handoff } from '../handoff.js?v=20260422a';
+import { pathToUrl } from '../components.js?v=20260426c';
 
 let _items = [];
 let _filters = { tab: '', search: '' };
@@ -51,15 +52,8 @@ export async function addItem(item) {
 // Tabs call this when a generation succeeds. Converts a filesystem path to
 // the /output/... URL the app serves, and bundles settings as metadata so
 // "Load Settings" from the gallery item can replay them.
-function _pathToUrl(p) {
-  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
-  const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
-}
-
 export function pushFromTab(tab, savedPath, prompt, seed, settings) {
-  const url = _pathToUrl(savedPath);
+  const url = pathToUrl(savedPath);
   if (!url) return;
   return addItem({
     tab,

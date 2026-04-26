@@ -3,7 +3,7 @@
  * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createProgressCard, createVideoPlayer, createSlider, el } from './components.js?v=20260414';
+import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260426c';
 import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
@@ -21,12 +21,6 @@ export function receiveHandoff(data) {
   }
 }
 
-function pathToUrl(p) {
-  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
-  const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
-}
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -70,7 +64,7 @@ export function init(panel) {
   async function loadSessionImages() {
     try {
       // Use gallery (persists across restarts) filtered to images only
-      const data = await api('/api/gallery?limit=60&tab=sd-prompts');
+      const data = await api('/api/gallery?limit=60');
       const items = (data.items || data || []).filter(i =>
         !/(\.mp4|\.webm|\.mov)$/i.test(i.url || '')
       ).slice(0, 36);
@@ -315,7 +309,7 @@ export function init(panel) {
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     musicIn,
   ]));
-  const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
+  const instrChk = el('input', { type: 'checkbox', id: 'fv-instr', checked: 'true' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [
     instrChk,
     el('label', { for: 'fv-instr', text: 'Instrumental only (no AI lyrics)', style: 'cursor:pointer; font-size:.85rem;' }),
@@ -638,11 +632,10 @@ export function init(panel) {
             resolution:      '480p',
             transition_mode: 'cinematic',
             prompt_mode:     'ai_informed',
-            duration:        _seqItems[0]?.gap || 8,
+            duration:        Math.round(_seqItems.slice(0, -1).reduce((s, i) => s + i.gap, 0) / Math.max(1, _seqItems.length - 1)),
             steps:           20,
             guidance:        10,
             creativity:      8,
-            per_gap_durations: _seqItems.slice(0, -1).map(i => i.gap),
           },
         }),
       });

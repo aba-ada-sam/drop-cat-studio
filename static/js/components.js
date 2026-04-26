@@ -5,6 +5,13 @@
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
+export function pathToUrl(p) {
+  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
+  const norm = p.replace(/\\/g, '/');
+  const idx  = norm.toLowerCase().indexOf('/output/');
+  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
+}
+
 export function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
