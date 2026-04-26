@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260423c';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260426a';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260423d';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260423e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
@@ -42,9 +42,8 @@ const _tabInitialized = new Set();
 const PIPELINE_STEPS = [
   { id: 'sd-prompts',        num: '01', label: 'Generate Images'  },
   { id: 'fun-videos',        num: '02', label: 'Create Videos'    },
-  { id: 'bridges',           num: '03', label: 'Add Transitions'  },
-  { id: 'video-tools',       num: '04', label: 'Audio'            },
-  { id: 'video-tools-batch', num: '05', label: 'Batch Processing' },
+  { id: 'video-tools',       num: '03', label: 'Audio'            },
+  { id: 'video-tools-batch', num: '04', label: 'Batch Processing' },
 ];
 
 function _buildPipelineBar(activeTabId) {
@@ -580,9 +579,8 @@ function initShortcuts() {
     { key: '0', action: () => switchTab('pipeline'),   description: 'Studio Home' },
     { key: '1', action: () => switchTab('sd-prompts'),  description: 'Generate Images (Step 01)' },
     { key: '2', action: () => switchTab('fun-videos'),  description: 'Create Videos (Step 02)' },
-    { key: '3', action: () => switchTab('bridges'),     description: 'Add Transitions (Step 03)' },
-    { key: '4', action: () => switchTab('video-tools'),       description: 'Audio (Step 04)' },
-    { key: '5', action: () => switchTab('video-tools-batch'), description: 'Batch Processing (Step 05)' },
+    { key: '3', action: () => switchTab('video-tools'),       description: 'Audio (Step 03)' },
+    { key: '4', action: () => switchTab('video-tools-batch'), description: 'Batch Processing (Step 04)' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
   ];
@@ -609,9 +607,8 @@ function initPaletteItems() {
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
     { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
     { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('fun-videos') },
-    { label: 'Create Transitions', group: 'Tabs', hint: '3', action: () => switchTab('bridges') },
-    { label: 'Audio',            group: 'Tabs',   hint: '4', action: () => switchTab('video-tools') },
-    { label: 'Batch Processing', group: 'Tabs',   hint: '5', action: () => switchTab('video-tools-batch') },
+    { label: 'Audio',            group: 'Tabs',   hint: '3', action: () => switchTab('video-tools') },
+    { label: 'Batch Processing', group: 'Tabs',   hint: '4', action: () => switchTab('video-tools-batch') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
