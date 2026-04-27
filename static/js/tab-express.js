@@ -35,10 +35,8 @@ export function init(panel) {
 
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
-  const dropHint = el('div', { class: 'drop-hint', style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' });
-  const dropZone = el('div', {
-    style: 'border:2px dashed var(--border-2); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:border-color .15s; position:relative;',
-  }, [preview, dropHint]);
+  const dropHint = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' });
+  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative;' }, [preview, dropHint]);
   root.appendChild(dropZone);
 
   function _applyImage(path, url) {
@@ -46,14 +44,14 @@ export function init(panel) {
     preview.src = url;
     preview.style.display = '';
     dropHint.style.display = 'none';
-    dropZone.style.borderColor = 'var(--accent)';
-    dropZone.style.padding = '8px';
+    dropZone.classList.add('drop-zone-loaded');
   }
   _applyImageFn = _applyImage;
 
   dropZone.addEventListener('click', () => imgInput.click());
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
-  dropZone.addEventListener('dragleave', () => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; });
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', async e => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
@@ -90,11 +88,9 @@ export function init(panel) {
       for (const item of images.slice(0, 12)) {
         const thumb = el('img', {
           src: item.thumbnail || item.url,
+          class: 'gallery-thumb',
           title: item.prompt || 'Use this image',
-          style: 'height:60px; width:60px; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; flex-shrink:0; transition:border-color .12s;',
         });
-        thumb.addEventListener('mouseenter', () => { thumb.style.borderColor = 'var(--accent)'; });
-        thumb.addEventListener('mouseleave', () => { thumb.style.borderColor = 'transparent'; });
         thumb.addEventListener('click', () => {
           const path = item.metadata?.path || item.url;
           _applyImage(path, item.url);
@@ -209,8 +205,7 @@ export function init(panel) {
     _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
     preview.style.display = 'none'; preview.src = '';
     dropHint.style.display = '';
-    dropZone.style.borderColor = 'var(--border-2)';
-    dropZone.style.padding = '40px 20px';
+    dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     ideaInput.value = '';
     lyricInput.value = '';
     createBtn.disabled = false;
