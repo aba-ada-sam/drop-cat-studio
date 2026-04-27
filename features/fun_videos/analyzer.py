@@ -199,14 +199,14 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
         parts.append(f'Music style: "{music_prompt}"')
     if user_direction:
         parts.append(f'Creative direction: "{user_direction}"')
-    parts.append("Keep it short, clever, and slightly absurd.")
+    parts.append("Look at these frames from the video and write lyrics that are SPECIFIC to what you see — the subject, their expression, what they're doing, the setting. Make it feel written FOR this video, not generic.")
 
+    prompt = "\n\n".join(parts)
     try:
-        text = router.route(
-            [{"role": "user", "content": "\n".join(parts)}],
-            tier=TIER_FAST,
-            system=LYRICS_SYSTEM,
-        )
+        if video_frames_b64:
+            text = router.route_vision(prompt, video_frames_b64, tier=TIER_FAST, system=LYRICS_SYSTEM)
+        else:
+            text = router.route([{"role": "user", "content": prompt}], tier=TIER_FAST, system=LYRICS_SYSTEM)
         return text.strip() if text else ""
     except Exception as e:
         log.warning("Lyrics generation failed: %s", e)
