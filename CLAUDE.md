@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 5 separate tools (previously independent apps on different ports) into one FastAPI + vanilla JS web app. Single server on port 7860, no build step.
+**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 5 separate tools into one FastAPI + vanilla JS web app. The server picks its own port (7860–7879), writes `.dcs-port`, and the browser reads that file. No build step.
 
-**Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860
+**Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860 (or whichever port was free)
+
+**Design philosophy:** simpleton path first. The Express tab ("Create") is the zero-friction entry — drop image, describe idea, get video with AI music + lyrics. Advanced users can go deeper through the per-step tabs (Generate Images → Create Videos → Audio). Never add infrastructure complexity (service names, LLM provider controls) to the header or primary UI.
 
 There are no tests, linting, or CI/CD configured. The app is tested manually through the UI.
 
@@ -88,11 +90,20 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 Cross-cutting concerns owned by the shell, not per-tab:
 
 - **`toast.js`** — global toast host + `apiFetch()` with error-log integration. Every fetch in shell/tab code should use `apiFetch()` so failures populate the error log.
-- **`gallery.js`** — persistent cross-tab gallery. Pulls from `/api/gallery` (SQLite-backed). Tabs call `pushFromTab(tab, savedPath, prompt, seed, settings)` on generation success. Detail view has "Load Settings" (apply in-place) and "Branch & Tweak" (apply + jump to source tab). The gallery renders in `#split-gallery` inside `#gallery-overlay` — a full-screen overlay toggled by the Gallery header button. It is **never** a persistent side panel. Do not add a split-pane/side-column gallery back; it steals workspace.
+- **`gallery.js`** — persistent cross-tab gallery. Pulls from `/api/gallery` (SQLite-backed). Tabs call `pushFromTab(tab, savedPath, prompt, seed, settings)` on generation success. Detail view has "Load Settings" (apply in-place) and "Branch & Tweak" (apply + jump to source tab). The gallery renders in `#split-gallery` inside `#gallery-overlay` — a full-screen overlay toggled by the **Gallery** rail button (bottom of left rail). It is **never** a persistent side panel. Do not add a split-pane/side-column gallery back; it steals workspace.
 - **`presets.js`** — save/load named preset bundles per tab. Backed by `/api/presets`. Presets surface in the command palette as "Preset: <name>". Save is Ctrl+S (uses native `prompt()` for name).
 - **`command-palette.js`** — Ctrl+K. Fuzzy-matches registered items (tabs, actions, presets). If the active tab has an AI applier registered and the query doesn't match, shows `✦ Ask AI: "<query>"` as the last row. Empty palette surfaces last 5 AI queries as "Recent AI" for replay.
 - **`shortcuts.js`** — global keyboard shortcut registry. Registered in `app.js` init. Respects input focus.
 - **`ai-intent.js`** — palette-driven natural-language mutation. Each tab calls `registerTabAI(tabId, {getContext, applySettings})` at init time. Palette's Ask AI row calls `askAI(query)` which POSTs to `/api/ai-intent` and dispatches the result to the active tab's applier. Also exposes `applySettingsToTab()` for gallery "Load Settings".
+
+### Header (`static/index.html` — `#app-header`)
+
+The header contains three zones:
+- **Left:** logo + app name
+- **Center:** service status pills (`#service-cluster-btn`) — green/red dots for Forge SD, WanGP, ACE-Step. Click opens service panel.
+- **Right:** `#ai-badge` (shows effective AI provider: "✦ AI: Anthropic" / "✦ AI: Local" / "✦ AI") + Settings gear.
+
+**Do not add provider-switch controls to the header.** LLM provider selection lives in Settings only. The badge is read-only status + click-to-configure.
 
 ### Smart wildcards (sd-prompts)
 
@@ -117,6 +128,8 @@ Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `
 
 - **Config:** `config.json` in project root (auto-created from `DEFAULTS`)
 - **API keys precedence:** `config.json` (highest) → `C:\JSON Credentials\QB_WC_credentials.json` (fallback)
+- **Key lookup aliases in credentials file:** `anthropic_key` or `anthropic_api_key`; `openai_key`, `openai_api_key`, or `open_ai_key`
+- **Default provider:** `"auto"` — resolves to Anthropic if key set, else OpenAI if key set, else Ollama
 - **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, plus globals
 
 ---

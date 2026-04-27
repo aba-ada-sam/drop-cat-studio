@@ -473,32 +473,23 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .header-center { display: flex; align-items: center; gap: 8px; }
 .header-right { display: flex; align-items: center; gap: 8px; }
 
-.provider-pills {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--bg-raised);
+.ai-badge {
+  padding: 4px 10px;
   border: 1px solid var(--border-2);
   border-radius: 6px;
-}
-.provider-pill {
-  padding: 4px 10px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
+  background: var(--bg-raised);
   color: var(--text-3);
   font-size: .72rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  letter-spacing: .02em;
-  transition: background .12s, color .12s;
+  letter-spacing: .04em;
+  transition: color .15s, border-color .15s;
+  white-space: nowrap;
 }
-.provider-pill:hover { color: var(--text); }
-.provider-pill.active {
-  background: var(--accent);
-  color: var(--bg);
-  font-weight: 700;
-}
+.ai-badge:hover { color: var(--text); border-color: var(--accent); }
+.ai-badge.ai-cloud { color: var(--accent); border-color: var(--accent); }
+.ai-badge.ai-local { color: var(--text-2); }
+.ai-badge.ai-none  { color: var(--red, #c41e3a); border-color: var(--red, #c41e3a); }
 
 /* Logo image */
 .header-logo {

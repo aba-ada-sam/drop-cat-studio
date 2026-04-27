@@ -445,40 +445,43 @@ async function loadConfig() {
       if (el) el.value = val;
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
-    onLLMProviderChange(llm.provider || 'ollama');
-    if (llm.anthropic_key_hint) {
-      const h = document.getElementById('anthropic-key-hint');
-      if (h) h.textContent = `Current key: ${llm.anthropic_key_hint}`;
-    }
+    _applyLLMState(llm);
   } catch (_) {}
 }
 
-function onLLMProviderChange(provider) {
-  // Header pills
-  document.querySelectorAll('.provider-pill').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.provider === provider);
-  });
-  // Settings modal legacy toggle
-  const useAnthropic = provider === 'anthropic';
-  const toggle = document.getElementById('provider-toggle-input');
-  if (toggle) toggle.checked = useAnthropic;
-  document.getElementById('llm-ollama-section').style.display    = (provider === 'ollama') ? '' : 'none';
-  document.getElementById('llm-anthropic-section').style.display = useAnthropic ? '' : 'none';
-  ['ollama','anthropic'].forEach(p => {
-    const side = document.getElementById(`provider-side-${p}`);
-    if (side) {
-      side.classList.toggle('active',   p === provider);
-      side.classList.toggle('inactive', p !== provider);
-    }
-  });
-}
+function _applyLLMState(llm) {
+  const provider   = llm.provider   || 'auto';
+  const effective  = llm.effective_provider || provider;
 
-async function switchProvider(provider) {
-  try {
-    await apiFetch('/api/llm/config', { method: 'POST', body: JSON.stringify({ provider }), context: 'switchProvider' });
-    onLLMProviderChange(provider);
-    toast(`AI provider: ${provider}`, 'success');
-  } catch (_) {}
+  // Sync the settings select (may already be set by the config loop above)
+  const sel = document.getElementById('cfg-llm_provider');
+  if (sel && sel.value !== provider) sel.value = provider;
+
+  // Ollama section: show when provider uses local AI
+  const showOllama = (provider === 'ollama' || provider === 'auto');
+  const ollamaSec = document.getElementById('llm-ollama-section');
+  if (ollamaSec) ollamaSec.style.display = showOllama ? '' : 'none';
+
+  // Key hints
+  const ah = document.getElementById('anthropic-key-hint');
+  if (ah) ah.textContent = llm.anthropic_key_hint ? `Current: ${llm.anthropic_key_hint}` : 'Not set';
+  const oh = document.getElementById('openai-key-hint');
+  if (oh) oh.textContent = llm.openai_key_hint ? `Current: ${llm.openai_key_hint}` : 'Not set';
+
+  // Effective provider hint under the select
+  const hint = document.getElementById('ai-effective-hint');
+  if (hint && provider === 'auto') hint.textContent = `Using: ${effective}`;
+  else if (hint) hint.textContent = '';
+
+  // Header AI badge
+  const badge = document.getElementById('ai-badge');
+  if (badge) {
+    const isCloud = (effective === 'anthropic' || effective === 'openai');
+    const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
+    badge.className = 'ai-badge ' + (isCloud ? 'ai-cloud' : hasAny ? 'ai-local' : 'ai-none');
+    badge.textContent = isCloud ? `✦ AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
+                                 : effective === 'ollama' ? '✦ AI: Local' : '✦ AI';
+  }
 }
 
 async function saveSettings() {
@@ -495,7 +498,7 @@ async function saveSettings() {
     if (Object.keys(ollamaBody).length) {
       await apiFetch('/api/ollama/config', { method: 'POST', body: JSON.stringify(ollamaBody), context: 'saveOllama' });
     }
-    const llmBody = { provider: document.getElementById('provider-toggle-input')?.checked ? 'anthropic' : 'ollama' };
+    const llmBody = { provider: document.getElementById('cfg-llm_provider')?.value || 'auto' };
     const anthropicKey = document.getElementById('cfg-anthropic_key')?.value;
     const openaiKey    = document.getElementById('cfg-openai_key')?.value;
     if (anthropicKey) llmBody.anthropic_key = anthropicKey;
@@ -726,11 +729,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Modals
-  // Provider pills
-  document.querySelectorAll('.provider-pill').forEach(btn => {
-    btn.addEventListener('click', () => switchProvider(btn.dataset.provider));
-  });
-
   document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
   document.querySelectorAll('.modal-close').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -743,7 +741,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Settings
-  document.getElementById('provider-toggle-input')?.addEventListener('change', e => onLLMProviderChange(e.target.checked ? 'anthropic' : 'ollama'));
+  document.getElementById('cfg-llm_provider')?.addEventListener('change', e => {
+    const showOllama = (e.target.value === 'ollama' || e.target.value === 'auto');
+    const sec = document.getElementById('llm-ollama-section');
+    if (sec) sec.style.display = showOllama ? '' : 'none';
+  });
+  document.getElementById('ai-badge')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));

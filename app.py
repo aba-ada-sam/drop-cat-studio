@@ -273,16 +273,22 @@ async def keys_status():
 @app.get("/api/llm/config")
 async def get_llm_config():
     """Return current LLM provider and whether keys are set."""
-    provider = cfg.get("llm_provider") or "ollama"
+    provider = cfg.get("llm_provider") or "auto"
     anthropic_key = keys.get_key("anthropic")
     openai_key = keys.get_key("openai")
+    if provider == "auto":
+        if anthropic_key:   effective = "anthropic"
+        elif openai_key:    effective = "openai"
+        else:               effective = "ollama"
+    else:
+        effective = provider
     return {
         "provider": provider,
+        "effective_provider": effective,
         "anthropic_key_set": bool(anthropic_key),
         "openai_key_set": bool(openai_key),
-        # Return masked keys for display (show last 4 chars)
         "anthropic_key_hint": f"...{anthropic_key[-4:]}" if len(anthropic_key) > 4 else ("set" if anthropic_key else ""),
-        "openai_key_hint": f"...{openai_key[-4:]}" if len(openai_key) > 4 else ("set" if openai_key else ""),
+        "openai_key_hint":    f"...{openai_key[-4:]}" if len(openai_key) > 4 else ("set" if openai_key else ""),
     }
 
 
