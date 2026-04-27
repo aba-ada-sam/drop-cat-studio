@@ -245,7 +245,79 @@ export function init(panel) {
   _applyStart = (path, url) => {
     _applyStartBase(path, url);
     _autoGeneratePrompt(path);
+    refineRow.style.display = 'flex';
   };
+
+  // ── Prompt refinement row ──────────────────────────────────────────────────
+  const refineRow = el('div', { style: 'display:none; gap:6px; align-items:center; margin-top:6px;' });
+  promptCard.appendChild(refineRow);
+
+  const refineInput = el('input', {
+    type: 'text',
+    placeholder: 'Refine: "make it more dramatic", "add fog", "slow camera"...',
+    style: 'flex:1; font-size:.82rem;',
+  });
+  const refineBtn = el('button', { class: 'btn btn-sm', text: 'Refine' });
+  refineRow.appendChild(refineInput);
+  refineRow.appendChild(refineBtn);
+
+  const refineSuggestion = el('div', { style: 'display:none; margin-top:6px; padding:8px 10px; background:var(--bg-raised); border-radius:6px; font-size:.82rem; color:var(--text-2); border:1px solid var(--border-2);' });
+  promptCard.appendChild(refineSuggestion);
+
+  const refineActions = el('div', { style: 'display:none; gap:6px; margin-top:4px;' });
+  const refineApply  = el('button', { class: 'btn btn-sm btn-primary', text: 'Use this' });
+  const refineTryAgain = el('button', { class: 'btn btn-sm', text: 'Try again' });
+  refineActions.appendChild(refineApply);
+  refineActions.appendChild(refineTryAgain);
+  promptCard.appendChild(refineActions);
+
+  let _lastSuggestion = '';
+
+  async function _refinePrompt() {
+    const feedback = refineInput.value.trim();
+    if (!feedback || !promptTA.value.trim()) return;
+    refineBtn.disabled = true;
+    refineBtn.textContent = '...';
+    try {
+      const data = await api('/api/fun/refine-prompt', {
+        method: 'POST',
+        body: JSON.stringify({
+          current_prompt: promptTA.value.trim(),
+          feedback,
+          image_path: _startImagePath || '',
+        }),
+      });
+      _lastSuggestion = data.prompt || '';
+      if (_lastSuggestion) {
+        refineSuggestion.textContent = _lastSuggestion;
+        refineSuggestion.style.display = '';
+        refineActions.style.display = 'flex';
+      }
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      refineBtn.disabled = false;
+      refineBtn.textContent = 'Refine';
+    }
+  }
+
+  refineBtn.addEventListener('click', _refinePrompt);
+  refineInput.addEventListener('keydown', e => { if (e.key === 'Enter') _refinePrompt(); });
+
+  refineApply.addEventListener('click', () => {
+    if (_lastSuggestion) {
+      promptTA.value = _lastSuggestion;
+      refineSuggestion.style.display = 'none';
+      refineActions.style.display = 'none';
+      refineInput.value = '';
+    }
+  });
+
+  refineTryAgain.addEventListener('click', () => {
+    refineSuggestion.style.display = 'none';
+    refineActions.style.display = 'none';
+    _refinePrompt();
+  });
 
   // ── Settings ──────────────────────────────────────────────────────────────
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
@@ -331,18 +403,36 @@ export function init(panel) {
     if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping…', 'info'); }
   });
 
-  const vidWrap = el('div', { style: 'display:flex; flex-direction:column; gap:16px;' });
+  const vidWrap = el('div');
   root.appendChild(vidWrap);
 
-  const playerRawWrap = el('div');
-  const playerMixWrap = el('div');
-  vidWrap.appendChild(playerMixWrap);   // ACE-Step mixed — shown first (the good one)
-  vidWrap.appendChild(playerRawWrap);   // raw video — shown second
+  const resultTabBar = el('div', { class: 'result-tabs', style: 'display:none;' });
+  const tabMix = el('button', { class: 'result-tab active', text: 'With ACE-Step music' });
+  const tabRaw = el('button', { class: 'result-tab', text: 'Raw video' });
+  resultTabBar.appendChild(tabMix);
+  resultTabBar.appendChild(tabRaw);
+  vidWrap.appendChild(resultTabBar);
 
-  const playerMix = createVideoPlayer(playerMixWrap);
-  const playerRaw = createVideoPlayer(playerRawWrap);
-  playerMix.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
-  playerRaw.onStartOver(() => { playerMix.hide(); playerRaw.hide(); });
+  const playerWrap = el('div');
+  vidWrap.appendChild(playerWrap);
+  const player = createVideoPlayer(playerWrap);
+
+  let _rawPath = null, _mixPath = null;
+
+  function _showResultTab(which) {
+    tabMix.classList.toggle('active', which === 'mix');
+    tabRaw.classList.toggle('active', which === 'raw');
+    const p = which === 'mix' ? _mixPath : _rawPath;
+    if (p) player.show(pathToUrl(p), p);
+  }
+
+  tabMix.addEventListener('click', () => _showResultTab('mix'));
+  tabRaw.addEventListener('click', () => _showResultTab('raw'));
+  player.onStartOver(() => {
+    player.hide();
+    resultTabBar.style.display = 'none';
+    _rawPath = null; _mixPath = null;
+  });
 
   genBtn.addEventListener('click', async () => {
     // Cancel any in-flight auto-prompt — we don't need it anymore
@@ -365,8 +455,8 @@ export function init(panel) {
     genBtn.disabled = true;
     prog.show();
     prog.update(0, 'Submitting...');
-    playerMix.hide();
-    playerRaw.hide();
+    player.hide();
+    resultTabBar.style.display = 'none';
 
     try {
       const { job_id } = await api('/api/fun/make-it', {
@@ -398,18 +488,17 @@ export function init(panel) {
           genBtn.disabled = false;
           _activeJobId = null;
           if (j.output) {
-            const outputs  = Array.isArray(j.output) ? j.output : [j.output];
-            const rawPath  = outputs[0];                       // raw WanGP video
-            const mixPath  = outputs.length > 1 ? outputs[1] : null;  // ACE-Step mixed
+            const outputs = Array.isArray(j.output) ? j.output : [j.output];
+            _rawPath  = outputs[0];
+            _mixPath  = outputs.length > 1 ? outputs[1] : null;
+            const bestPath = _mixPath || _rawPath;
 
-            // Best output for gallery / handoff is the mixed version if available
-            const bestPath = mixPath || rawPath;
-
-            if (mixPath) {
-              playerMix.showLabelled(pathToUrl(mixPath), mixPath, 'With ACE-Step music');
-              playerRaw.showLabelled(pathToUrl(rawPath), rawPath, 'Raw video (no music)');
+            if (_mixPath) {
+              resultTabBar.style.display = 'flex';
+              _showResultTab('mix');
             } else {
-              playerMix.show(pathToUrl(rawPath), rawPath);
+              resultTabBar.style.display = 'none';
+              player.show(pathToUrl(_rawPath), _rawPath);
             }
 
             pushToGallery('fun-videos', bestPath, prompt, null, {

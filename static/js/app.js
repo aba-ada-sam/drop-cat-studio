@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260426d';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260426i';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260423e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
@@ -452,11 +452,16 @@ async function loadConfig() {
 }
 
 function onLLMProviderChange(provider) {
+  // Header pills
+  document.querySelectorAll('.provider-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.provider === provider);
+  });
+  // Settings modal legacy toggle
   const useAnthropic = provider === 'anthropic';
   const toggle = document.getElementById('provider-toggle-input');
   if (toggle) toggle.checked = useAnthropic;
-  document.getElementById('llm-ollama-section').style.display    = useAnthropic ? 'none' : '';
-  document.getElementById('llm-anthropic-section').style.display = useAnthropic ? ''     : 'none';
+  document.getElementById('llm-ollama-section').style.display    = (provider === 'ollama') ? '' : 'none';
+  document.getElementById('llm-anthropic-section').style.display = useAnthropic ? '' : 'none';
   ['ollama','anthropic'].forEach(p => {
     const side = document.getElementById(`provider-side-${p}`);
     if (side) {
@@ -464,6 +469,14 @@ function onLLMProviderChange(provider) {
       side.classList.toggle('inactive', p !== provider);
     }
   });
+}
+
+async function switchProvider(provider) {
+  try {
+    await apiFetch('/api/llm/config', { method: 'POST', body: JSON.stringify({ provider }), context: 'switchProvider' });
+    onLLMProviderChange(provider);
+    toast(`AI provider: ${provider}`, 'success');
+  } catch (_) {}
 }
 
 async function saveSettings() {
@@ -711,6 +724,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Modals
+  // Provider pills
+  document.querySelectorAll('.provider-pill').forEach(btn => {
+    btn.addEventListener('click', () => switchProvider(btn.dataset.provider));
+  });
+
   document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
   document.querySelectorAll('.modal-close').forEach(btn => {
     btn.addEventListener('click', () => {

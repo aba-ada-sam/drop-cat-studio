@@ -193,10 +193,47 @@ async def generate_prompts(request: Request):
         )
     except RuntimeError as e:
         msg = str(e)
-        # Detect AI content-policy refusals and return a clean 422 instead of 500
         if "unparseable" in msg.lower() or "not able to" in msg.lower() or "won't produce" in msg.lower():
-            raise HTTPException(422, f"AI declined to generate prompts for this image. Try a different photo or creative direction.")
+            raise HTTPException(422, "AI declined to generate prompts for this image.")
         raise HTTPException(500, msg)
+
+
+@router.post("/refine-prompt")
+async def refine_prompt(request: Request):
+    """Refine an existing motion prompt based on user feedback."""
+    from app import get_llm_router; llm_router = get_llm_router()
+    from core.llm_client import TIER_FAST
+
+    body = await request.json()
+    current_prompt = body.get("current_prompt", "").strip()
+    feedback       = body.get("feedback", "").strip()
+    image_path     = _resolve_path(body.get("image_path", ""))
+
+    if not feedback:
+        raise HTTPException(400, "Feedback is required")
+    if not current_prompt:
+        raise HTTPException(400, "Current prompt is required")
+
+    system = (
+        "You are a cinematic video prompt writer. "
+        "Given an existing motion prompt and the user's feedback, "
+        "write an improved version. Return only the refined prompt text — no explanation, no quotes."
+    )
+    user_msg = f"Current prompt:\n{current_prompt}\n\nUser feedback:\n{feedback}\n\nWrite an improved prompt:"
+
+    def _refine():
+        if image_path and os.path.isfile(image_path):
+            from core.llm_client import encode_image_b64
+            b64 = encode_image_b64(image_path)
+            if b64:
+                return llm_router.route_vision(user_msg, [b64], tier=TIER_FAST, system=system, max_tokens=200)
+        return llm_router.route([{"role": "user", "content": user_msg}], tier=TIER_FAST, system=system, max_tokens=200)
+
+    try:
+        result = await asyncio.to_thread(_refine)
+        return {"prompt": (result or "").strip()}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 @router.post("/make-it")
