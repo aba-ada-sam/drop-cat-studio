@@ -5,7 +5,7 @@ Ported from DropCatGo-Fun-Videos_w_Audio/main.py analyzer functions.
 """
 import logging
 
-from core.llm_client import TIER_BALANCED, TIER_POWER, parse_json_response
+from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER, parse_json_response
 
 log = logging.getLogger(__name__)
 

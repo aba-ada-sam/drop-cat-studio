@@ -85,7 +85,7 @@ SAFE_DEFAULTS: dict = {
     "speakers_locations": "",
     "frames_positions": "",
     "guidance_phases": 0,
-    "motion_amplitude": 0,
+    "motion_amplitude": 1,    # WanGP rejects values < 1
     "denoising_strength": 1.0,
     "masking_strength": 1.0,
     "model_switch_phase": 0,
@@ -94,7 +94,18 @@ SAFE_DEFAULTS: dict = {
     "keep_frames_video_guide": "",
     "keep_frames_video_source": "",
     "force_fps": "",
-    "sliding_window_size": 0,
-    "sliding_window_overlap": 1,
+    # WanGP validates these even when sliding window isn't actually needed.
+    "sliding_window_size": 129,   # WanGP UI default; only activates if video > this frame count
+    "sliding_window_overlap": 17,
     "sliding_window_discard_last_frames": 0,
+    # Keys accessed directly via inputs["key"] in wgp.py — must be present or KeyError
+    "multi_images_gen_type": 0,
+    "image_quality": "",
+    "video_quality": "",
+    "base_model_type": "",
+    "lset_name": "",
+    "model_filename": "",
+    "modules": [],
+    "settings_version": 0,
+    "type": "",
 }
