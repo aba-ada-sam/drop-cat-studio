@@ -253,7 +253,7 @@ async def make_it(request: Request):
     settings = {
         "video_prompt": body.get("video_prompt", ""),
         "music_prompt": body.get("music_prompt", ""),
-        "lyrics": body.get("lyrics", ""),
+        "lyric_direction": body.get("lyric_direction", ""),
         "user_direction": body.get("user_direction", ""),
         "use_wildcards": body.get("use_wildcards", False),
         "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
@@ -309,7 +309,8 @@ async def add_music(request: Request):
     settings = {
         "music_prompt":    body.get("music_prompt", ""),
         "user_direction":  body.get("user_direction", ""),
-        "instrumental":    body.get("instrumental", True),
+        "lyric_direction": body.get("lyric_direction", ""),
+        "instrumental":    body.get("instrumental", False),
         "bpm":             body.get("bpm"),
         "audio_format":    "mp3",
         "audio_steps":     8,
@@ -347,6 +348,23 @@ async def add_music(request: Request):
         if not music_prompt:
             music_prompt = "cinematic ambient, warm strings, gentle piano"
 
+        instrumental = cfg_settings.get("instrumental", False)
+        lyrics = ""
+        if not instrumental:
+            job.update(progress=15, message="Writing lyrics…")
+            try:
+                frames_lyr = []
+                for pos in [0.1, 0.4, 0.7]:
+                    b64 = extract_frame_b64(vpath, position=pos, max_dim=512)
+                    if b64:
+                        frames_lyr.append(b64)
+                lyric_direction = cfg_settings.get("lyric_direction", "") or cfg_settings.get("user_direction", "")
+                lyrics = analyzer.generate_lyrics(llm_router, frames_lyr, music_prompt, lyric_direction)
+            except Exception as e:
+                log.warning("Lyrics generation failed: %s", e)
+            if not lyrics:
+                lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
+
         job.update(progress=20, message="Generating music…")
 
         from services.forge_client import unload_checkpoint, reload_checkpoint
@@ -369,8 +387,8 @@ async def add_music(request: Request):
                 steps=int(cfg_settings.get("audio_steps", 8)),
                 guidance=float(cfg_settings.get("audio_guidance", 7.0)),
                 seed=-1,
-                lyrics="[inst]",
-                instrumental=cfg_settings.get("instrumental", True),
+                lyrics=lyrics,
+                instrumental=instrumental,
                 stop_event=job.stop_event,
                 progress_cb=_audio_progress,
             )

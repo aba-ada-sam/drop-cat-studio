@@ -17,6 +17,20 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
+# Quality suffixes appended to every video prompt before sending to WanGP.
+# These are model-family specific tags the models were trained on.
+_PROMPT_SUFFIXES = {
+    "ltx":  "cinematic depth blur, shallow depth of field, film grain, high quality, photorealistic motion",
+    "wan":  "cinematic motion, smooth animation, photorealistic, high quality, detailed",
+}
+
+def _finalize_prompt(prompt: str, model_name: str) -> str:
+    """Append model-appropriate quality suffix to any video prompt."""
+    base = (prompt or "").strip().rstrip(".,;")
+    key = "ltx" if "ltx" in model_name.lower() else "wan"
+    suffix = _PROMPT_SUFFIXES[key]
+    return f"{base}, {suffix}" if base else suffix
+
 
 def run_pipeline(job, photo_path, settings):
     """Full pipeline worker function for JobManager.
@@ -44,7 +58,7 @@ def run_pipeline(job, photo_path, settings):
 
     video_prompt = settings.get("video_prompt", "")
     music_prompt = settings.get("music_prompt", "")
-    lyrics = settings.get("lyrics", "")
+    lyric_direction = settings.get("lyric_direction", "")  # user's lyric theme/guideline
     use_wildcards = settings.get("use_wildcards", False)
     skip_audio = settings.get("skip_audio", False)
     user_direction = settings.get("user_direction", "")
@@ -80,6 +94,8 @@ def run_pipeline(job, photo_path, settings):
         # the hard 60% marker set when generation finishes.
         pct = 10 + int(step / total_steps * 48) if total_steps > 0 else 10
         job.update(progress=pct, message=f"Generating video... step {step}/{total_steps}")
+
+    video_prompt = _finalize_prompt(video_prompt, settings.get("model_name", ""))
 
     video_path = video_generator.generate_video(
         image_path=photo_path,
@@ -138,7 +154,8 @@ def run_pipeline(job, photo_path, settings):
 
     # ── Phase 2b: Auto-generate lyrics if needed ──────────────────────────
     instrumental = settings.get("instrumental", False)
-    if not instrumental and not lyrics:
+    lyrics = ""
+    if not instrumental:
         job.update(progress=68, message="Writing lyrics...")
         try:
             frames = []
@@ -147,11 +164,15 @@ def run_pipeline(job, photo_path, settings):
                 if b64:
                     frames.append(b64)
             if frames:
-                lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, user_direction)
+                lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, lyric_direction or user_direction)
                 if lyrics:
                     _log("[info] Auto-generated lyrics")
         except Exception as e:
             _log(f"[warning] Lyrics generation failed: {e}")
+        # Fallback: minimal structure so ACE-Step still renders vocals
+        if not lyrics:
+            lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
+            _log("[info] Using fallback lyrics")
 
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")

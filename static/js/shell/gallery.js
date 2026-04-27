@@ -298,6 +298,7 @@ function _openDetail(item) {
           <a href="${item.url}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
+          <button class="btn btn-sm btn-danger" id="gd-delete">Delete from Gallery</button>
         </div>
       </div>
     </div>`;
@@ -322,6 +323,12 @@ function _openDetail(item) {
     // Branch & Tweak jumps to the source tab so you can immediately edit+regen.
     if (item.tab) document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
     toast('Branched: settings loaded — tweak and re-generate', 'info');
+  });
+  overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
+    overlay.classList.remove('open');
+    await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {});
+    _items = _items.filter(i => i.id !== item.id);
+    _renderGrid();
   });
 
   overlay.classList.add('open');

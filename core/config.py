@@ -24,7 +24,7 @@ DEFAULTS: dict = {
     "acestep_root": "",
 
     # ── LLM Provider ─────────────────────────────────────────────────────
-    "llm_provider": "auto",          # auto | ollama | anthropic | openai
+    "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
     "anthropic_key": "",
     "openai_key": "",
 

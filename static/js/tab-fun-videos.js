@@ -364,8 +364,8 @@ export function init(panel) {
 
   const slidersGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' });
   settingsCard.appendChild(slidersGrid);
-  const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 30  });
-  const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 7.5 });
+  const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 40  });
+  const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 8.5 });
 
   modelSel.addEventListener('change', () => {
     const m = _models[modelSel.value];
@@ -506,12 +506,12 @@ export function init(panel) {
           music_prompt: musicIn.value.trim(),
           model:        modelSel.value,
           duration,
-          steps:        parseInt(stepsSlider.value)     || 30,
-          guidance:     parseFloat(guidanceSlider.value) || 7.5,
+          steps:        parseInt(stepsSlider.value)     || 40,
+          guidance:     parseFloat(guidanceSlider.value) || 8.5,
           seed:         parseInt(seedIn.value)           || -1,
           skip_audio:     !audioChk.checked,
           instrumental:   instrChk.checked,
-          lyrics:         instrChk.checked ? '' : lyricGuideTA.value.trim(),
+          lyric_direction: instrChk.checked ? '' : lyricGuideTA.value.trim(),
           end_photo_path: _endImagePath || null,
         }),
       });
@@ -546,6 +546,51 @@ export function init(panel) {
               guidance: Number(guidanceSlider.value),
               duration_sec: Number(durSlider.value),
             });
+
+            // Redo Audio panel (shown after generation)
+            if (!vidWrap.querySelector('.redo-audio-card')) {
+              const redoCard = el('div', { class: 'card redo-audio-card', style: 'padding:12px; margin-top:10px;' });
+              redoCard.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:8px; color:var(--text-2);', text: 'Redo Audio' }));
+              const redoMusicIn = el('input', { type: 'text', placeholder: 'Music style (blank = AI picks from video)', style: 'width:100%; margin-bottom:6px; font-size:.82rem;' });
+              const redoLyricIn = el('input', { type: 'text', placeholder: 'Lyric direction (optional)', style: 'width:100%; margin-bottom:8px; font-size:.82rem;' });
+              const redoBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Regenerate Audio' });
+              const redoProg = el('div', { style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:6px;' });
+              redoCard.appendChild(redoMusicIn);
+              redoCard.appendChild(redoLyricIn);
+              redoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [redoBtn, redoProg]));
+              vidWrap.appendChild(redoCard);
+
+              redoBtn.addEventListener('click', async () => {
+                if (!_rawPath) return;
+                redoBtn.disabled = true;
+                redoProg.style.display = '';
+                redoProg.textContent = 'Submitting…';
+                try {
+                  const { job_id } = await api('/api/fun/add-music', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      video_path:      _rawPath,
+                      music_prompt:    redoMusicIn.value.trim(),
+                      lyric_direction: redoLyricIn.value.trim(),
+                      instrumental:    false,
+                    }),
+                  });
+                  pollJob(job_id,
+                    j => { redoProg.textContent = j.message || 'Working…'; },
+                    j => {
+                      redoBtn.disabled = false; redoProg.style.display = 'none';
+                      if (j.output) {
+                        _mixPath = j.output;
+                        resultTabBar.style.display = 'flex';
+                        _showResultTab('mix');
+                        toast('Audio regenerated!', 'success');
+                      }
+                    },
+                    err => { redoBtn.disabled = false; redoProg.style.display = 'none'; toast(err, 'error'); },
+                  );
+                } catch (e) { redoBtn.disabled = false; redoProg.style.display = 'none'; toast(e.message, 'error'); }
+              });
+            }
 
             const existing = vidWrap.querySelector('.to-seq-btn');
             const seqBtn = existing || (() => {
