@@ -13,7 +13,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427a';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427b';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
@@ -313,37 +313,50 @@ const SERVICE_MESSAGES = {
 // Latest service state for service panel
 const _svcState = {};
 
+const _SVC_TO_TYPE = { forge: 'image', wangp: 'video', acestep: 'sound' };
+
 async function pollServices() {
   try {
     const data = await fetch('/api/services').then(r => r.json());
-    let anyProblem = false;
     for (const [name, info] of Object.entries(data)) {
       _svcState[name] = info;
       const dotClass = info.state || 'unknown';
-      if (!['running','ready','ok'].includes(dotClass)) anyProblem = true;
 
-      const pillDot = document.querySelector(`#pill-${name} .dot`);
-      if (pillDot) { pillDot.className = 'dot'; pillDot.classList.add(dotClass); }
+      // New AI-type pill dots
+      const typeKey = _SVC_TO_TYPE[name];
+      if (typeKey) {
+        const d = document.getElementById(`ap-${typeKey}-dot`);
+        if (d) { d.className = `dot ${dotClass}`; }
+      }
 
+      // Text dot: update when ollama state changes
+      if (name === 'ollama') _updateTextDot(info.state);
+
+      // Service panel meta (IDs used by renderServicePanel)
       const svcId = name === 'forge' ? 'dot-forge-svc' : `dot-${name}`;
       const svcDot = document.getElementById(svcId);
       if (svcDot) { svcDot.className = 'dot'; svcDot.classList.add(dotClass); }
-
       const override = SERVICE_MESSAGES[name]?.[info.state];
       const displayMsg = override || info.message || info.state;
       const msgId = name === 'forge' ? 'msg-forge-svc' : `msg-${name}`;
       const msgEl = document.getElementById(msgId);
       if (msgEl) msgEl.textContent = displayMsg;
-
-      const pill = document.getElementById(`pill-${name}`);
-      if (pill) pill.title = displayMsg;
     }
 
-    // Update service panel if open
     if (document.getElementById('service-panel-overlay')?.classList.contains('open')) {
       renderServicePanel();
     }
   } catch (_) {}
+}
+
+function _updateTextDot(ollamaState) {
+  const dot = document.getElementById('ap-text-dot');
+  if (!dot) return;
+  // Cloud providers are always treated as ready if a key was found (badge will show it)
+  const badge = document.getElementById('ai-badge');
+  const isCloud = badge?.classList.contains('ai-cloud');
+  const ok = isCloud || ollamaState === 'running';
+  dot.className = `dot ${ok ? 'running' : 'unknown'}`;
 }
 
 // ── Service panel ───────────────────────────────────────────────────────────
@@ -474,14 +487,26 @@ function _applyLLMState(llm) {
   if (hint && provider === 'auto') hint.textContent = `Using: ${effective}`;
   else if (hint) hint.textContent = '';
 
-  // Header AI badge
+  // Header AI badge (kept for compat; element may not exist)
   const badge = document.getElementById('ai-badge');
+  const isCloud = (effective === 'anthropic' || effective === 'openai');
+  const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
   if (badge) {
-    const isCloud = (effective === 'anthropic' || effective === 'openai');
-    const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
     badge.className = 'ai-badge ' + (isCloud ? 'ai-cloud' : hasAny ? 'ai-local' : 'ai-none');
     badge.textContent = isCloud ? `✦ AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
                                  : effective === 'ollama' ? '✦ AI: Local' : '✦ AI';
+  }
+
+  // Text pill dot + label
+  const textDot = document.getElementById('ap-text-dot');
+  if (textDot) {
+    const ok = (isCloud && hasAny) || (_svcState.ollama?.state === 'running');
+    textDot.className = `dot ${ok ? 'running' : 'unknown'}`;
+  }
+  const textLabel = document.querySelector('#ap-text .ap-label');
+  if (textLabel) {
+    textLabel.textContent = isCloud ? `Text: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
+                                    : effective === 'ollama' ? 'Text: Local' : 'Text';
   }
 }
 
@@ -566,6 +591,124 @@ function _galleryClose() {
 
 function _galleryToggle() {
   state.galleryOpen ? _galleryClose() : _galleryOpen();
+}
+
+// ── AI-type header pills ──────────────────────────────────────────────────────
+function initAIPills() {
+  const TYPES = ['text', 'image', 'video', 'sound'];
+  let _openType = null;
+
+  function closeAllMenus() {
+    TYPES.forEach(t => { document.getElementById(`ap-${t}-menu`)?.toggleAttribute('hidden', true); });
+    _openType = null;
+  }
+
+  async function renderMenu(type) {
+    const menu = document.getElementById(`ap-${type}-menu`);
+    if (!menu) return;
+    menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading…</div>`;
+
+    if (type === 'text')  { await _renderTextMenu(menu); }
+    if (type === 'image') { _renderSvcMenu(menu, 'forge',   'Forge SD',  'Stable Diffusion image generation'); }
+    if (type === 'video') { await _renderVideoMenu(menu); }
+    if (type === 'sound') { _renderSvcMenu(menu, 'acestep', 'ACE-Step',  'AI music + lyrics generation'); }
+  }
+
+  async function _renderTextMenu(menu) {
+    let llm = {};
+    try { llm = await apiFetch('/api/llm/config', { context: 'pill.text' }); } catch (_) {}
+    const current = llm.provider || 'auto';
+    const PROVIDERS = [
+      { value: 'auto',      label: 'Auto',      hint: 'Best available' },
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude — fast & smart' },
+      { value: 'openai',    label: 'OpenAI',    hint: 'GPT-4o' },
+      { value: 'ollama',    label: 'Ollama',    hint: 'Local / private' },
+    ];
+    menu.innerHTML = '<div class="ap-menu-title">Text AI</div>';
+    for (const p of PROVIDERS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-text-p" value="${p.value}"${p.value === current ? ' checked' : ''}>
+        <span class="ap-opt-label">${p.label}</span><span class="ap-opt-hint">${p.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ llm_provider: p.value }), context: 'pill.text.save' }).catch(() => {});
+        const fresh = await apiFetch('/api/llm/config', { context: 'pill.text.refresh' }).catch(() => ({}));
+        _applyLLMState(fresh);
+        closeAllMenus();
+        toast(`Text AI → ${p.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    const link = document.createElement('button');
+    link.className = 'ap-menu-link'; link.textContent = '⚙ Settings →';
+    link.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); closeAllMenus(); });
+    menu.appendChild(link);
+  }
+
+  async function _renderVideoMenu(menu) {
+    let models = {}, configData = {};
+    try { models = (await apiFetch('/api/fun/models', { context: 'pill.video' })).models || {}; } catch (_) {}
+    try { configData = await apiFetch('/api/config', { context: 'pill.video.cfg' }); } catch (_) {}
+    const currentModel = configData.wan_model || 'LTX-2 Dev19B Distilled';
+    const svc = _svcState.wangp || {};
+
+    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${svc.state||'—'}</span></div>
+      <div class="ap-menu-subtitle">Select model</div>`;
+    for (const [name, info] of Object.entries(models)) {
+      const res = info.res ? `${info.res[0]}×${info.res[1]}` : '';
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-video-m" value="${escHtml(name)}"${name === currentModel ? ' checked' : ''}>
+        <span class="ap-opt-label">${escHtml(name)}</span>${res ? `<span class="ap-opt-hint">${res}</span>` : ''}`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ wan_model: name }), context: 'pill.video.save' }).catch(() => {});
+        closeAllMenus();
+        toast(`Video model → ${name}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="wangp" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="wangp" data-act="stop">Stop</button>
+      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  function _renderSvcMenu(menu, svcName, label, hint) {
+    const svc = _svcState[svcName] || {};
+    const st = svc.state || 'unknown';
+    const msg = SERVICE_MESSAGES[svcName]?.[svc.state] || svc.message || svc.state || '—';
+    menu.innerHTML = `<div class="ap-menu-title">${label} <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${st}</span></div>
+      <div class="ap-menu-subtitle">${hint}</div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 10px;line-height:1.5;">${msg}</div>
+      <div class="ap-menu-sep"></div>`;
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="stop">Stop</button>
+      ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
+      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  // Wire pill buttons
+  TYPES.forEach(type => {
+    document.querySelector(`#ap-${type} .ai-pill-btn`)?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (_openType === type) { closeAllMenus(); return; }
+      closeAllMenus();
+      _openType = type;
+      renderMenu(type);
+      document.getElementById(`ap-${type}-menu`)?.removeAttribute('hidden');
+    });
+    document.getElementById(`ap-${type}-menu`)?.addEventListener('click', e => e.stopPropagation());
+  });
+  document.addEventListener('click', closeAllMenus);
 }
 
 // ── Rail collapse ─────────────────────────────────────────────────────────────
@@ -710,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-gallery-rail')?.addEventListener('click', _galleryToggle);
   document.getElementById('btn-gallery-close')?.addEventListener('click', _galleryClose);
 
-  document.getElementById('service-cluster-btn')?.addEventListener('click', openServicePanel);
+  initAIPills();
 
   document.getElementById('btn-close-svc-panel')?.addEventListener('click', closeServicePanel);
   document.getElementById('service-panel-overlay')?.addEventListener('click', e => {
@@ -747,7 +890,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sec = document.getElementById('llm-ollama-section');
     if (sec) sec.style.display = showOllama ? '' : 'none';
   });
-  document.getElementById('ai-badge')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
+  // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));

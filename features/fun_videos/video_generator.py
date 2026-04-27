@@ -22,6 +22,7 @@ MODELS = {
     "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True},
     "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True},
     "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 20, "i2v": True},
+    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 20, "i2v": True},
     "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False},
     "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False},
 }

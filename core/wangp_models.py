@@ -11,6 +11,7 @@ MODEL_MAP: dict[str, str] = {
     "Wan2.1-I2V-14B-720P":      "i2v_720p",
     "Wan2.1-VACE-1.3B":         "vace_1.3B",
     "LTX-2 Dev19B Distilled":   "ltx2_distilled",
+    "LTX-2 Dev13B":             "ltxv_13B",
 }
 
 
