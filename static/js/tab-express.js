@@ -237,12 +237,18 @@ export function init(panel) {
         progressLabel.textContent = 'Reading image…';
         const data = await api('/api/fun/generate-prompts', {
           method: 'POST',
-          body: JSON.stringify({ image_path: _imagePath, num_prompts: 1, creativity: 8, max_tokens: 400 }),
+          body: JSON.stringify({
+            image_path: _imagePath,
+            num_prompts: 1,
+            creativity: 9,
+            max_tokens: 400,
+            user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
+          }),
         });
         const p = data.prompts?.[0];
-        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || 'Camera slowly pushes in, gentle movement, warm light';
+        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || 'Subject erupts into motion, hair and clothes whipping in sudden wind, arms fly wide, explosive energy bursts through the frame';
       } catch (_) {
-        motionPrompt = 'Camera slowly pushes in, gentle movement, warm light';
+        motionPrompt = 'Subject erupts into motion, hair and clothes whipping in sudden wind, arms fly wide, explosive energy bursts through the frame';
       }
     }
 

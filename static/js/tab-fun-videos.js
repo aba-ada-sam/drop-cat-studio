@@ -184,9 +184,9 @@ export function init(panel) {
   root.appendChild(promptCard);
   promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
   promptCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;',
-    text: 'Describe what moves and where the camera goes — present tense, action verbs.' }));
-  const PROMPT_PLACEHOLDER = 'e.g. "Camera slowly pushes in, subject blinks and smiles, hair lifts in the breeze, warm light pulses across the frame"';
-  const PROMPT_DEFAULT     = 'Camera slowly pushes in, gentle natural movement, warm light across the frame';
+    text: 'Describe the action — what does the subject DO? Camera moves are secondary.' }));
+  const PROMPT_PLACEHOLDER = 'e.g. "Throws head back laughing, hair whipping sideways, hands clap wildly, energy radiates outward, camera pulls back to reveal full burst of motion"';
+  const PROMPT_DEFAULT     = 'Subject erupts into motion, hair and clothes responding to sudden energy, arms move expressively, dynamic action fills every corner of the frame';
   const promptTA = el('textarea', { rows: '3', style: 'width:100%; resize:vertical; font-size:.9rem;',
     placeholder: PROMPT_PLACEHOLDER });
   promptCard.appendChild(promptTA);
