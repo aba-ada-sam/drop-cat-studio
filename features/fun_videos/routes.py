@@ -190,6 +190,7 @@ async def generate_prompts(request: Request):
             num_prompts=num_prompts,
             creativity=float(body.get("creativity", config.get("fun_creativity", 8.0))),
             max_tokens=int(body.get("max_tokens", 400 if num_prompts == 1 else 2048)),
+            force_provider=body.get("provider") or None,
         )
     except RuntimeError as e:
         msg = str(e)

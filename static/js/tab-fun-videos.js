@@ -201,17 +201,30 @@ export function init(panel) {
   ]);
   promptCard.appendChild(promptStatus);
 
+  // ── Create Story row ──────────────────────────────────────────────────────
+  const storyRow = el('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
+  const storyBtn = el('button', { class: 'btn btn-sm btn-primary', text: '✦ Create Story', title: 'Generate a motion prompt from your image using AI' });
+  const storyProviderSel = el('select', { style: 'font-size:.78rem; padding:2px 6px;', title: 'LLM used to write the story' });
+  for (const [val, label] of [['auto','Auto'], ['anthropic','Anthropic'], ['openai','OpenAI'], ['ollama','Ollama']]) {
+    storyProviderSel.appendChild(el('option', { value: val, text: label }));
+  }
+  storyRow.appendChild(storyBtn);
+  storyRow.appendChild(el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: 'via' }));
+  storyRow.appendChild(storyProviderSel);
+  promptCard.appendChild(storyRow);
+
   let _autoPromptAbort = null;
 
   // Auto-generate motion prompt from the selected image via LLM vision.
-  // Abortable so clicking Generate immediately cancels it.
-  async function _autoGeneratePrompt(imagePath) {
-    if (promptTA.value.trim()) return;
+  // force=true: regenerates even if prompt textarea already has content.
+  async function _autoGeneratePrompt(imagePath, force = false) {
+    if (!force && promptTA.value.trim()) return;
     if (_autoPromptAbort) _autoPromptAbort.abort();
     _autoPromptAbort = new AbortController();
     const { signal } = _autoPromptAbort;
 
     promptStatus.style.display = 'flex';
+    storyBtn.disabled = true;
 
     // Safety timeout — give up after 30s and let the user proceed
     const timeout = setTimeout(() => {
@@ -220,14 +233,15 @@ export function init(panel) {
     }, 30000);
 
     try {
+      const provider = storyProviderSel.value || 'auto';
       const data = await api('/api/fun/generate-prompts', {
         method: 'POST',
-        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400 }),
+        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400, provider }),
         signal,
       });
       const prompts = data.prompts || [];
       const text = typeof prompts[0] === 'string' ? prompts[0] : prompts[0]?.prompt;
-      if (text && !promptTA.value.trim()) promptTA.value = text;
+      if (text) promptTA.value = text;
     } catch (e) {
       if (e?.name !== 'AbortError') {
         console.warn('[auto-prompt] failed:', e?.message);
@@ -236,6 +250,7 @@ export function init(panel) {
     } finally {
       clearTimeout(timeout);
       promptStatus.style.display = 'none';
+      storyBtn.disabled = false;
       _autoPromptAbort = null;
     }
   }
@@ -247,6 +262,11 @@ export function init(panel) {
     _autoGeneratePrompt(path);
     refineRow.style.display = 'flex';
   };
+
+  storyBtn.addEventListener('click', () => {
+    if (!_startImagePath) { toast('Load an image first', 'error'); return; }
+    _autoGeneratePrompt(_startImagePath, true);
+  });
 
   // ── Prompt refinement row ──────────────────────────────────────────────────
   const refineRow = el('div', { style: 'display:none; gap:6px; align-items:center; margin-top:6px;' });
@@ -381,11 +401,30 @@ export function init(panel) {
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     musicIn,
   ]));
-  const instrChk = el('input', { type: 'checkbox', id: 'fv-instr', checked: 'true' });
-  audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [
+  const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
+  audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
     instrChk,
     el('label', { for: 'fv-instr', text: 'Instrumental only (no AI lyrics)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
+
+  const lyricGuideWrap = el('div');
+  const lyricGuideTA = el('textarea', {
+    rows: '2',
+    placeholder: 'Lyric guideline (optional) — theme, mood, subject, tone, e.g. "playful adventure, celebrate the dog"',
+    style: 'width:100%; resize:vertical; font-size:.82rem;',
+  });
+  lyricGuideWrap.appendChild(el('div', {}, [
+    el('label', { text: 'Lyric Guideline', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
+    lyricGuideTA,
+  ]));
+  audioBody.appendChild(lyricGuideWrap);
+
+  function _syncLyricGuide() {
+    lyricGuideWrap.style.display = instrChk.checked ? 'none' : '';
+  }
+  instrChk.addEventListener('change', _syncLyricGuide);
+  _syncLyricGuide();
+
   audioChk.addEventListener('change', () => { audioBody.style.display = audioChk.checked ? '' : 'none'; });
 
   // ── Generate ──────────────────────────────────────────────────────────────
@@ -472,6 +511,7 @@ export function init(panel) {
           seed:         parseInt(seedIn.value)           || -1,
           skip_audio:     !audioChk.checked,
           instrumental:   instrChk.checked,
+          lyrics:         instrChk.checked ? '' : lyricGuideTA.value.trim(),
           end_photo_path: _endImagePath || null,
         }),
       });

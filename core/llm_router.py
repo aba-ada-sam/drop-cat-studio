@@ -81,8 +81,9 @@ class LLMRouter:
         max_tokens: int = 2048,
         est_tokens: int = 800,
         system: str = "",
+        force_provider: str | None = None,
     ) -> str:
-        provider = self._provider()
+        provider = self._provider(force_provider)
         if provider == "anthropic":
             return self._call_with_retry(lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system))
         if provider == "openai":

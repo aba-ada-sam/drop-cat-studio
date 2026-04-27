@@ -91,6 +91,7 @@ def generate_video_prompts(
     num_prompts: int = 4,
     creativity: float = 8.0,
     max_tokens: int = 2048,
+    force_provider: str | None = None,
 ) -> dict:
     """Generate creative I2V video prompts from a photo."""
     # Build creativity instruction
@@ -132,6 +133,7 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
             tier=tier,
             max_tokens=max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
+            force_provider=force_provider,
         )
         result = parse_json_response(last_text)
         if result and isinstance(result, dict) and result.get("prompts"):
