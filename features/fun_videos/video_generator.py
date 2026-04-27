@@ -49,6 +49,8 @@ def generate_video(
     duration: float = 14.0,
     model_name: str = "LTX-2 Dev19B Distilled",
     resolution: str = "580p",
+    override_width: int | None = None,
+    override_height: int | None = None,
     steps: int = 30,
     guidance: float = 7.5,
     seed: int = -1,
@@ -63,10 +65,15 @@ def generate_video(
 
     progress_fn(step: int, total_steps: int) is called each time the worker
     reports a new inference step, allowing callers to update a progress bar.
+    override_width / override_height bypass the model's native resolution so
+    custom aspect ratios work regardless of which model is loaded.
     """
     model_info = MODELS.get(model_name, MODELS["LTX-2 Dev19B Distilled"])
     fps = model_info.get("fps", 16)
-    res_w, res_h = _resolve_res(model_name, resolution)
+    if override_width and override_height:
+        res_w, res_h = int(override_width), int(override_height)
+    else:
+        res_w, res_h = _resolve_res(model_name, resolution)
 
     num_frames = max(17, int(duration * fps))
     if num_frames % 2 == 0:

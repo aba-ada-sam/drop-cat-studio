@@ -23,38 +23,67 @@ export function init(panel) {
   const root = el('div', { style: 'max-width:680px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:20px;' });
   panel.appendChild(root);
 
-  // Pick whatever model WanGP currently has loaded; user can override via selector
-  let _model = 'Wan2.1-I2V-14B-480P';
-  let _duration = 6;
-  let _allModels = {};
+  // ── Output resolution state ───────────────────────────────────────────────
+  const RATIOS = [
+    { label: '16:9', value: '16:9', rw: 16, rh: 9  },
+    { label: '9:16', value: '9:16', rw: 9,  rh: 16 },
+    { label: '1:1',  value: '1:1',  rw: 1,  rh: 1  },
+    { label: '4:3',  value: '4:3',  rw: 4,  rh: 3  },
+    { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
+  ];
+  const QUALITIES = [
+    { label: '480P',  px: 480,  model: 'Wan2.1-I2V-14B-480P',   maxSec: 16 },
+    { label: '580P',  px: 580,  model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
+    { label: '720P',  px: 720,  model: 'Wan2.1-I2V-14B-720P',   maxSec: 12 },
+    { label: '1080P', px: 1080, model: 'Wan2.1-I2V-14B-720P',   maxSec: 8  },
+  ];
 
-  function _refreshModelSelector(sel) {
-    sel.innerHTML = '';
-    const entries = Object.entries(_allModels);
-    if (!entries.length) {
-      sel.appendChild(new Option('Loading…', ''));
-      return;
-    }
-    for (const [name, info] of entries) {
-      const res = info.res ? `${info.res[0]}×${info.res[1]}` : '';
-      const label = res ? `${name}  (${res})` : name;
-      const opt = new Option(label, name);
-      if (name === _model) opt.selected = true;
-      sel.appendChild(opt);
-    }
+  let _model      = 'LTX-2 Dev19B Distilled';
+  let _duration   = 8;
+  let _allModels  = {};
+  let _ratio      = '16:9';
+  let _qualityPx  = 580;
+  let _outW       = 1032;
+  let _outH       = 580;
+
+  function _computeDims(ratioStr, qualityPx) {
+    const [rw, rh] = ratioStr.split(':').map(Number);
+    let w, h;
+    if (rw === rh)      { w = h = qualityPx; }
+    else if (rh > rw)   { w = qualityPx; h = Math.round(qualityPx * rh / rw); }
+    else                 { h = qualityPx; w = Math.round(qualityPx * rw / rh); }
+    if (w % 2) w++;
+    if (h % 2) h++;
+    return [w, h];
+  }
+
+  function _preferredModel(qualityPx) {
+    const pref = QUALITIES.find(q => q.px === qualityPx)?.model;
+    return (pref && _allModels[pref]) ? pref : _model;
+  }
+
+  // Placeholders filled in when the UI section is built
+  let _dimsLabel = null;
+  let _warnEl    = null;
+  let _ratioChips   = {};
+  let _qualityChips = {};
+
+  function _refreshOutput() {
+    [_outW, _outH] = _computeDims(_ratio, _qualityPx);
+    if (_dimsLabel) _dimsLabel.textContent = `${_outW} × ${_outH}`;
+    if (_warnEl) _warnEl.style.display = (_outW >= 1080 || _outH >= 1080) ? '' : 'none';
   }
 
   api('/api/fun/models').then(data => {
     _allModels = data.models || {};
     const models = Object.entries(_allModels);
     if (models.length) {
-      _model = models[0][0];
-      _duration = Math.min(8, models[0][1]?.max_sec || 8);
+      // Try to keep the current quality selection's preferred model; fall back to first loaded
+      const pref = _preferredModel(_qualityPx);
+      _model    = pref || models[0][0];
+      _duration = Math.min(8, (_allModels[_model]?.max_sec || 8));
     }
-    if (_modelSel) _refreshModelSelector(_modelSel);
   }).catch(() => {});
-
-  let _modelSel = null;
 
   // ── Heading ───────────────────────────────────────────────────────────────
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
@@ -164,18 +193,63 @@ export function init(panel) {
     lyricInput,
   ]));
 
-  // ── Output quality selector ───────────────────────────────────────────────
-  const modelSelEl = el('select', { style: 'flex:1; font-size:.82rem;' });
-  _modelSel = modelSelEl;
-  modelSelEl.appendChild(new Option('Loading models…', ''));
-  modelSelEl.addEventListener('change', () => {
-    _model = modelSelEl.value;
-    const info = _allModels[_model];
-    if (info?.max_sec) _duration = Math.min(8, info.max_sec);
+  // ── Output settings ───────────────────────────────────────────────────────
+  const CHIP_BASE = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const CHIP_ON   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+
+  function _makeChipGroup(items, activeVal, onPick) {
+    const row = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+    const chips = {};
+    for (const item of items) {
+      const btn = el('button', { style: CHIP_BASE + (item.value === activeVal ? CHIP_ON : ''), text: item.label });
+      btn.addEventListener('click', () => {
+        Object.entries(chips).forEach(([v, b]) => b.setAttribute('style', CHIP_BASE + (v === item.value ? CHIP_ON : '')));
+        onPick(item);
+      });
+      chips[item.value] = btn;
+      row.appendChild(btn);
+    }
+    return { row, chips };
+  }
+
+  const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '1032 × 580' });
+  _dimsLabel = dimsLabel;
+  const warnEl = el('div', {
+    style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.1); border:1px solid rgba(232,160,0,.3); border-radius:6px; padding:6px 10px;',
+    text: '⚠ 1080P is demanding — expect slower generation and higher VRAM use. Make sure your GPU has at least 16 GB VRAM.',
   });
-  root.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
-    el('div', { style: 'font-size:.8rem; color:var(--text-3); white-space:nowrap;', text: 'Output quality' }),
-    modelSelEl,
+  _warnEl = warnEl;
+
+  const { row: ratioRow } = _makeChipGroup(
+    RATIOS.map(r => ({ label: r.label, value: r.value })),
+    _ratio,
+    item => { _ratio = item.value; _refreshOutput(); },
+  );
+  const { row: qualRow } = _makeChipGroup(
+    QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
+    String(_qualityPx),
+    item => {
+      _qualityPx = Number(item.value);
+      _model     = _preferredModel(_qualityPx);
+      _duration  = Math.min(8, QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 8);
+      _refreshOutput();
+    },
+  );
+
+  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Aspect ratio' }),
+      ratioRow,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
+      qualRow,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:2px;' }, [
+      el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
+      dimsLabel,
+    ]),
+    warnEl,
   ]));
 
   // ── Create button ─────────────────────────────────────────────────────────
@@ -319,17 +393,19 @@ export function init(panel) {
       const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
         body: JSON.stringify({
-          photo_path:   _imagePath,
-          video_prompt: motionPrompt,
-          music_prompt: '',
+          photo_path:    _imagePath,
+          video_prompt:  motionPrompt,
+          music_prompt:  '',
           lyric_direction: lyricInput.value.trim(),
-          model:        _model,
-          duration:     _duration,
-          steps:        40,
-          guidance:     8.5,
-          seed:         -1,
-          skip_audio:   false,
-          instrumental: false,
+          model:         _model,
+          duration:      _duration,
+          steps:         40,
+          guidance:      8.5,
+          seed:          -1,
+          skip_audio:    false,
+          instrumental:  false,
+          output_width:  _outW,
+          output_height: _outH,
         }),
       });
       _jobId = job_id;

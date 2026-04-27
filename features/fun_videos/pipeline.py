@@ -97,6 +97,8 @@ def run_pipeline(job, photo_path, settings):
 
     video_prompt = _finalize_prompt(video_prompt, settings.get("model_name", ""))
 
+    ow = settings.get("override_width")
+    oh = settings.get("override_height")
     video_path = video_generator.generate_video(
         image_path=photo_path,
         prompt=video_prompt,
@@ -104,6 +106,8 @@ def run_pipeline(job, photo_path, settings):
         duration=float(settings.get("video_duration", 14.0)),
         model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
         resolution=settings.get("resolution", "580p"),
+        override_width=int(ow) if ow else None,
+        override_height=int(oh) if oh else None,
         steps=int(settings.get("video_steps", 30)),
         guidance=float(settings.get("video_guidance", 7.5)),
         seed=int(settings.get("video_seed", -1)),

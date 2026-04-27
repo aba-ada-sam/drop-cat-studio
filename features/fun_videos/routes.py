@@ -279,6 +279,8 @@ async def make_it(request: Request):
         "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
         "model_name": body.get("model", config.get("wan_model", "LTX-2 Dev19B Distilled")),
         "resolution": body.get("resolution", config.get("resolution", "580p")),
+        "override_width":  body.get("output_width"),
+        "override_height": body.get("output_height"),
         "video_steps": body.get("steps", config.get("fun_video_steps", 30)),
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
