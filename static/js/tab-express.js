@@ -5,7 +5,7 @@
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { createVideoPlayer, el, pathToUrl } from './components.js?v=20260426c';
 import { toast, apiFetch } from './shell/toast.js?v=20260421c';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260426g';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260427a';
 import { handoff } from './handoff.js?v=20260422a';
 
 // Module-level so receiveHandoff can call _applyImageFn even after init
@@ -23,16 +23,38 @@ export function init(panel) {
   const root = el('div', { style: 'max-width:680px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:20px;' });
   panel.appendChild(root);
 
-  // Pick whatever model WanGP currently has loaded
+  // Pick whatever model WanGP currently has loaded; user can override via selector
   let _model = 'Wan2.1-I2V-14B-480P';
   let _duration = 6;
+  let _allModels = {};
+
+  function _refreshModelSelector(sel) {
+    sel.innerHTML = '';
+    const entries = Object.entries(_allModels);
+    if (!entries.length) {
+      sel.appendChild(new Option('Loading…', ''));
+      return;
+    }
+    for (const [name, info] of entries) {
+      const res = info.res ? `${info.res[0]}×${info.res[1]}` : '';
+      const label = res ? `${name}  (${res})` : name;
+      const opt = new Option(label, name);
+      if (name === _model) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+
   api('/api/fun/models').then(data => {
-    const models = Object.entries(data.models || {});
+    _allModels = data.models || {};
+    const models = Object.entries(_allModels);
     if (models.length) {
       _model = models[0][0];
       _duration = Math.min(8, models[0][1]?.max_sec || 8);
     }
+    if (_modelSel) _refreshModelSelector(_modelSel);
   }).catch(() => {});
+
+  let _modelSel = null;
 
   // ── Heading ───────────────────────────────────────────────────────────────
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
@@ -102,11 +124,22 @@ export function init(panel) {
           class: 'gallery-thumb',
           title: item.prompt || 'Use this image',
         });
+        const removeBtn = el('button', {
+          style: 'position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;',
+          title: 'Remove from list',
+          text: '×',
+        });
+        const thumbWrap = el('div', { style: 'position:relative;flex-shrink:0;' }, [thumb, removeBtn]);
         thumb.addEventListener('click', () => {
           const path = item.metadata?.path || item.url;
           _applyImage(path, item.url);
         });
-        recentRow.appendChild(thumb);
+        removeBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          thumbWrap.remove();
+          if (!recentRow.children.length) recentWrap.style.display = 'none';
+        });
+        recentRow.appendChild(thumbWrap);
       }
       recentWrap.style.display = '';
     } catch (_) {}
@@ -129,6 +162,20 @@ export function init(panel) {
     ideaInput,
     el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:10px; margin-bottom:2px;', text: 'Lyric direction (optional)' }),
     lyricInput,
+  ]));
+
+  // ── Output quality selector ───────────────────────────────────────────────
+  const modelSelEl = el('select', { style: 'flex:1; font-size:.82rem;' });
+  _modelSel = modelSelEl;
+  modelSelEl.appendChild(new Option('Loading models…', ''));
+  modelSelEl.addEventListener('change', () => {
+    _model = modelSelEl.value;
+    const info = _allModels[_model];
+    if (info?.max_sec) _duration = Math.min(8, info.max_sec);
+  });
+  root.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+    el('div', { style: 'font-size:.8rem; color:var(--text-3); white-space:nowrap;', text: 'Output quality' }),
+    modelSelEl,
   ]));
 
   // ── Create button ─────────────────────────────────────────────────────────

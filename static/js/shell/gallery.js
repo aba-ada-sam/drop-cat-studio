@@ -270,12 +270,20 @@ function _openDetail(item) {
     overlay.setAttribute('aria-modal', 'true');
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => {
-      if (e.target === overlay) overlay.classList.remove('open');
+      if (e.target === overlay) {
+        overlay.querySelector('video')?.pause();
+        overlay.classList.remove('open');
+      }
     });
   }
 
   const isVideo = /\.(mp4|webm|mov)$/i.test(item.url || '');
   const meta = item.metadata || {};
+
+  function _closeOverlay() {
+    overlay.querySelector('video')?.pause();
+    overlay.classList.remove('open');
+  }
 
   overlay.innerHTML = `
     <div class="gallery-detail">
@@ -298,12 +306,12 @@ function _openDetail(item) {
           <a href="${item.url}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
-          <button class="btn btn-sm btn-danger" id="gd-delete">Delete from Gallery</button>
+          <button class="btn btn-sm btn-danger" id="gd-delete">Delete File</button>
         </div>
       </div>
     </div>`;
 
-  overlay.querySelector('.modal-close').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.querySelector('.modal-close').addEventListener('click', _closeOverlay);
   overlay.querySelector('#gd-make-video')?.addEventListener('click', () => {
     const path = item.metadata?.path || item.url;
     handoff('express', { type: 'image', path, url: item.url });
@@ -325,10 +333,20 @@ function _openDetail(item) {
     toast('Branched: settings loaded — tweak and re-generate', 'info');
   });
   overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
-    overlay.classList.remove('open');
-    await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {});
+    if (!confirm('Delete this file permanently? This cannot be undone.')) return;
+    _closeOverlay();
+    const filePath = item.metadata?.path;
+    await Promise.all([
+      apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {}),
+      filePath ? apiFetch('/api/output/delete', {
+        method: 'POST',
+        body: JSON.stringify({ path: filePath }),
+        context: 'gallery.delete-file',
+      }).catch(() => {}) : Promise.resolve(),
+    ]);
     _items = _items.filter(i => i.id !== item.id);
     _renderGrid();
+    toast('File deleted', 'success');
   });
 
   overlay.classList.add('open');
