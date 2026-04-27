@@ -23,6 +23,17 @@ export function init(panel) {
   const root = el('div', { style: 'max-width:680px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:20px;' });
   panel.appendChild(root);
 
+  // Pick whatever model WanGP currently has loaded
+  let _model = 'Wan2.1-I2V-14B-480P';
+  let _duration = 6;
+  api('/api/fun/models').then(data => {
+    const models = Object.entries(data.models || {});
+    if (models.length) {
+      _model = models[0][0];
+      _duration = Math.min(8, models[0][1]?.max_sec || 8);
+    }
+  }).catch(() => {});
+
   // ── Heading ───────────────────────────────────────────────────────────────
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
     el('div', { style: 'font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px;', text: 'Create a video' }),
@@ -250,6 +261,8 @@ export function init(panel) {
       } catch (_) {
         motionPrompt = 'Subject erupts into motion, hair and clothes whipping in sudden wind, arms fly wide, explosive energy bursts through the frame';
       }
+      // Show what was generated so the user can see it
+      ideaInput.value = motionPrompt;
     }
 
     progressBar.querySelector('.express-bar').style.width = '15%';
@@ -263,8 +276,8 @@ export function init(panel) {
           video_prompt: motionPrompt,
           music_prompt: '',
           lyric_direction: lyricInput.value.trim(),
-          model:        'LTX-2 Dev19B Distilled',
-          duration:     14,
+          model:        _model,
+          duration:     _duration,
           steps:        40,
           guidance:     8.5,
           seed:         -1,
