@@ -4,8 +4,19 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { createVideoPlayer, el, pathToUrl } from './components.js?v=20260426c';
-import { toast } from './shell/toast.js?v=20260421c';
+import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260426g';
+import { handoff } from './handoff.js?v=20260422a';
+
+// Module-level so receiveHandoff can call _applyImageFn even after init
+let _applyImageFn = null;
+
+export function receiveHandoff(data) {
+  if (!_applyImageFn) return;
+  if (data?.type === 'image' && data.path) {
+    _applyImageFn(data.path, data.url || pathToUrl(data.path));
+  }
+}
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -13,7 +24,7 @@ export function init(panel) {
   panel.appendChild(root);
 
   // ── Heading ───────────────────────────────────────────────────────────────
-  root.appendChild(el('div', { style: 'text-align:center; padding-bottom:8px;' }, [
+  root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
     el('div', { style: 'font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px;', text: 'Create a video' }),
     el('div', { style: 'font-size:.85rem; color:var(--text-3);', text: 'Drop an image, describe what you want, click Create.' }),
   ]));
@@ -24,22 +35,21 @@ export function init(panel) {
 
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
+  const dropHint = el('div', { class: 'drop-hint', style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' });
   const dropZone = el('div', {
     style: 'border:2px dashed var(--border-2); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:border-color .15s; position:relative;',
-  }, [
-    preview,
-    el('div', { class: 'drop-hint', style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' }),
-  ]);
+  }, [preview, dropHint]);
   root.appendChild(dropZone);
 
   function _applyImage(path, url) {
     _imagePath = path;
     preview.src = url;
     preview.style.display = '';
-    dropZone.querySelector('.drop-hint').style.display = 'none';
+    dropHint.style.display = 'none';
     dropZone.style.borderColor = 'var(--accent)';
     dropZone.style.padding = '8px';
   }
+  _applyImageFn = _applyImage;
 
   dropZone.addEventListener('click', () => imgInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
@@ -64,15 +74,54 @@ export function init(panel) {
     imgInput.value = '';
   });
 
-  // ── Idea input ────────────────────────────────────────────────────────────
+  // ── Recent images strip ───────────────────────────────────────────────────
+  const recentWrap = el('div', { style: 'display:none;' });
+  const recentRow  = el('div', { style: 'display:flex; gap:6px; overflow-x:auto; padding:2px 0;' });
+  recentWrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:5px;', text: 'Recent images — click to use' }));
+  recentWrap.appendChild(recentRow);
+  root.appendChild(recentWrap);
+
+  async function _loadRecent() {
+    try {
+      const data = await apiFetch('/api/gallery?limit=16', { context: 'express.recent' });
+      const images = (data.items || []).filter(i => !/\.(mp4|webm|mov)/i.test(i.url));
+      if (!images.length) return;
+      recentRow.innerHTML = '';
+      for (const item of images.slice(0, 12)) {
+        const thumb = el('img', {
+          src: item.thumbnail || item.url,
+          title: item.prompt || 'Use this image',
+          style: 'height:60px; width:60px; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; flex-shrink:0; transition:border-color .12s;',
+        });
+        thumb.addEventListener('mouseenter', () => { thumb.style.borderColor = 'var(--accent)'; });
+        thumb.addEventListener('mouseleave', () => { thumb.style.borderColor = 'transparent'; });
+        thumb.addEventListener('click', () => {
+          const path = item.metadata?.path || item.url;
+          _applyImage(path, item.url);
+        });
+        recentRow.appendChild(thumb);
+      }
+      recentWrap.style.display = '';
+    } catch (_) {}
+  }
+  _loadRecent();
+
+  // ── Idea + Lyric direction ────────────────────────────────────────────────
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
     placeholder: 'Describe your idea, mood, or style — or leave blank to let AI decide.',
   });
+  const lyricInput = el('input', {
+    type: 'text',
+    style: 'width:100%; font-size:.82rem; margin-top:8px;',
+    placeholder: 'Lyric direction (optional) — e.g. "playful adventure, upbeat, about the dog"',
+  });
   root.appendChild(el('div', { class: 'card', style: 'padding:14px;' }, [
     el('div', { style: 'font-size:.8rem; color:var(--text-3); margin-bottom:6px;', text: 'Your idea (optional)' }),
     ideaInput,
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:10px; margin-bottom:2px;', text: 'Lyric direction (optional)' }),
+    lyricInput,
   ]));
 
   // ── Create button ─────────────────────────────────────────────────────────
@@ -82,6 +131,19 @@ export function init(panel) {
     style: 'width:100%; font-size:1.15rem; padding:16px; font-weight:700; letter-spacing:.04em;',
   });
   root.appendChild(createBtn);
+
+  // Subtle escape hatch to the full Create Videos tab
+  const advLink = el('div', { style: 'text-align:center; margin-top:-10px;' });
+  const advBtn  = el('button', {
+    style: 'background:none; border:none; cursor:pointer; font-size:.75rem; color:var(--text-3); padding:4px 8px;',
+    text: 'Want more control?  Open Create Videos →',
+  });
+  advLink.appendChild(advBtn);
+  root.appendChild(advLink);
+  advBtn.addEventListener('click', () => {
+    if (_imagePath) handoff('fun-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
+    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+  });
 
   // ── Progress ──────────────────────────────────────────────────────────────
   const progressArea = el('div', { class: 'card', style: 'display:none; padding:16px;' });
@@ -128,22 +190,35 @@ export function init(panel) {
   tabMix.addEventListener('click', () => _showTab('mix'));
   tabRaw.addEventListener('click', () => _showTab('raw'));
 
-  const startOverBtn = el('button', { class: 'btn btn-sm', text: 'Start over', style: 'margin-top:8px;' });
-  resultArea.appendChild(startOverBtn);
+  // Post-result action row
+  const resultActions = el('div', { style: 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;' });
+  resultArea.appendChild(resultActions);
+
+  const startOverBtn = el('button', { class: 'btn btn-sm', text: 'Start over' });
   startOverBtn.addEventListener('click', _reset);
+  resultActions.appendChild(startOverBtn);
+
+  const tweakBtn = el('button', { class: 'btn btn-sm', text: 'Tweak in Create Videos →' });
+  tweakBtn.addEventListener('click', () => {
+    if (_imagePath) handoff('fun-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
+    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+  });
+  resultActions.appendChild(tweakBtn);
 
   function _reset() {
     _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
     preview.style.display = 'none'; preview.src = '';
-    dropZone.querySelector('.drop-hint').style.display = '';
+    dropHint.style.display = '';
     dropZone.style.borderColor = 'var(--border-2)';
     dropZone.style.padding = '40px 20px';
     ideaInput.value = '';
+    lyricInput.value = '';
     createBtn.disabled = false;
     progressArea.style.display = 'none';
     resultArea.style.display = 'none';
     resultTabBar.style.display = 'none';
     player.hide();
+    _loadRecent();
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
@@ -160,7 +235,7 @@ export function init(panel) {
     progressLabel.textContent = 'Submitting…';
     progressBar.querySelector('.express-bar').style.width = '5%';
 
-    // Auto-generate a prompt from the image + idea
+    // Auto-generate a motion prompt from the image + idea if not provided
     let motionPrompt = ideaInput.value.trim();
     if (!motionPrompt) {
       try {
@@ -183,16 +258,17 @@ export function init(panel) {
       const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
         body: JSON.stringify({
-          photo_path:  _imagePath,
+          photo_path:   _imagePath,
           video_prompt: motionPrompt,
           music_prompt: '',
+          lyrics:       lyricInput.value.trim(),
           model:        'LTX-2 Dev19B Distilled',
           duration:     14,
           steps:        30,
           guidance:     7.5,
           seed:         -1,
           skip_audio:   false,
-          instrumental: true,
+          instrumental: false,
         }),
       });
       _jobId = job_id;
@@ -218,7 +294,7 @@ export function init(panel) {
             } else {
               player.show(pathToUrl(_rawPath), _rawPath);
             }
-            pushToGallery('fun-videos', best, motionPrompt, null, {});
+            pushToGallery('express', best, motionPrompt, null, {});
             toast('Done!', 'success');
           }
         },

@@ -305,11 +305,11 @@ function _openDetail(item) {
   overlay.querySelector('.modal-close').addEventListener('click', () => overlay.classList.remove('open'));
   overlay.querySelector('#gd-make-video')?.addEventListener('click', () => {
     const path = item.metadata?.path || item.url;
-    handoff('fun-videos', { type: 'image', path, url: item.url });
+    handoff('express', { type: 'image', path, url: item.url });
     overlay.classList.remove('open');
-    document.getElementById('btn-gallery-close')?.click();  // close gallery overlay
-    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
-    toast('Image sent to Create Videos', 'info');
+    document.getElementById('btn-gallery-close')?.click();
+    document.querySelector('.rail-tab[data-tab="express"]')?.click();
+    toast('Image loaded — click Create!', 'info');
   });
   overlay.querySelector('#gd-load-settings')?.addEventListener('click', () => {
     _loadItemSettings(item);

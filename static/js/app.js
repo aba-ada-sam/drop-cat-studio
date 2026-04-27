@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress  } from './tab-express.js?v=20260426l';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260426r';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260426j';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260426m';
@@ -30,6 +30,7 @@ const TAB_INIT = {
   'video-tools-batch': initVideoToolsBatch,
 };
 const TAB_HANDOFF = {
+  'express':           expressHandoff,
   'fun-videos':        funHandoff,
   'bridges':           bridgesHandoff,
   'sd-prompts':        sdPromptsHandoff,
