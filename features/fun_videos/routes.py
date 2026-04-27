@@ -321,7 +321,7 @@ async def add_music(request: Request):
         from app import get_llm_router; llm_router = get_llm_router()
         from features.fun_videos import analyzer, audio_generator
         from features.fun_videos.video_generator import merge_video_audio
-        from core.ffmpeg_utils import probe_duration, extract_frame_b64
+        from core.ffmpeg_utils import probe_duration, sample_frames_temporal
         import time as _time
         from pathlib import Path as _Path
 
@@ -332,11 +332,7 @@ async def add_music(request: Request):
 
         if not music_prompt:
             try:
-                frames = []
-                for pos in [0.1, 0.3, 0.5, 0.7, 0.9]:
-                    b64 = extract_frame_b64(vpath, position=pos, max_dim=512)
-                    if b64:
-                        frames.append(b64)
+                frames = sample_frames_temporal(vpath)
                 if frames:
                     result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
                     music_prompt = result.get("music_prompt", "")
@@ -353,11 +349,7 @@ async def add_music(request: Request):
         if not instrumental:
             job.update(progress=15, message="Writing lyrics…")
             try:
-                frames_lyr = []
-                for pos in [0.1, 0.4, 0.7]:
-                    b64 = extract_frame_b64(vpath, position=pos, max_dim=512)
-                    if b64:
-                        frames_lyr.append(b64)
+                frames_lyr = sample_frames_temporal(vpath)
                 lyric_direction = cfg_settings.get("lyric_direction", "") or cfg_settings.get("user_direction", "")
                 lyrics = analyzer.generate_lyrics(llm_router, frames_lyr, music_prompt, lyric_direction)
             except Exception as e:

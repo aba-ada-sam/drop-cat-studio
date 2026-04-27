@@ -182,6 +182,40 @@ def extract_frame_b64(
     return None
 
 
+def sample_frames_temporal(
+    video_path: str | Path,
+    max_frames: int = 12,
+    max_dim: int = 512,
+) -> list[str]:
+    """Sample frames across a video's full duration for AI analysis.
+
+    Strategy (matches the original DropCatGo approach):
+      - duration ≤ max_frames seconds  → 1 frame per second (centred in each second)
+      - duration  > max_frames seconds → max_frames evenly-spaced frames
+
+    This gives the AI a temporal view of the video so it can write a story
+    that tracks what actually happens over time, not just a snapshot.
+    """
+    dur = probe_duration(video_path)
+    if dur <= 0:
+        return []
+
+    if dur <= max_frames:
+        # 1 fps — centre of each second
+        positions = [(i + 0.5) / dur for i in range(int(dur))]
+    else:
+        # evenly spaced, avoid the very first and last frame
+        step = 1.0 / max_frames
+        positions = [step * i + step / 2 for i in range(max_frames)]
+
+    frames = []
+    for pos in positions:
+        b64 = extract_frame_b64(video_path, position=min(pos, 0.999), max_dim=max_dim)
+        if b64:
+            frames.append(b64)
+    return frames
+
+
 def run_ffmpeg(
     cmd: list[str],
     timeout: int = 3600,

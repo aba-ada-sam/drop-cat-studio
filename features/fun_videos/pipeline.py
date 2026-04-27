@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from core import config as cfg
-from core.ffmpeg_utils import probe_duration, extract_frame_b64
+from core.ffmpeg_utils import probe_duration, extract_frame_b64, sample_frames_temporal
 from core.wildcards import expand
 
 log = logging.getLogger(__name__)
@@ -135,11 +135,7 @@ def run_pipeline(job, photo_path, settings):
 
     if not music_prompt:
         try:
-            frames = []
-            for pos in [0.1, 0.3, 0.5, 0.7, 0.9]:
-                b64 = extract_frame_b64(video_path, position=pos, max_dim=512)
-                if b64:
-                    frames.append(b64)
+            frames = sample_frames_temporal(video_path)
             if frames:
                 music_result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
                 music_prompt = music_result.get("music_prompt", "cinematic ambient, warm strings")
@@ -158,11 +154,7 @@ def run_pipeline(job, photo_path, settings):
     if not instrumental:
         job.update(progress=68, message="Writing lyrics...")
         try:
-            frames = []
-            for pos in [0.1, 0.4, 0.7]:
-                b64 = extract_frame_b64(video_path, position=pos, max_dim=512)
-                if b64:
-                    frames.append(b64)
+            frames = sample_frames_temporal(video_path)
             if frames:
                 lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, lyric_direction or user_direction)
                 if lyrics:
