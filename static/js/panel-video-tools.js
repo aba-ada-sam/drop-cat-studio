@@ -78,29 +78,32 @@ function _buildAudioSection(root) {
 
   async function _refreshList() {
     try {
-      const data = await api('/api/session/videos');
-      const vids = (data.videos || []).slice().reverse();
+      const data = await api('/api/gallery?limit=40');
+      const vids = (data.items || data || [])
+        .filter(i => /(\.mp4|\.webm|\.mov)$/i.test(i.url || ''))
+        .slice(0, 30);
       videoList.innerHTML = '';
       if (!vids.length) {
         videoList.appendChild(el('div', {
           style: 'text-align:center; padding:24px 0; color:var(--text-3); font-size:.82rem;',
-          text: 'No session videos yet — create some in Create Videos first.',
+          text: 'No generated videos yet — create some in Create Videos first.',
         }));
         return;
       }
       for (const v of vids) {
-        const isSelected = _selectedVideo === v.path;
+        const vpath = v.metadata?.path || v.url;
+        const vname = vpath.split(/[\\/]/).pop();
+        const isSelected = _selectedVideo === vpath;
         const row = el('div', {
           style: `display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; cursor:pointer; background:var(--bg-raised); border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border-2)'};`,
         });
         row.appendChild(el('span', { style: 'font-size:.7rem; font-weight:700; color:var(--text-3); flex-shrink:0; width:28px;', text: 'VID' }));
-        row.appendChild(el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: v.filename }));
-        if (v.duration) row.appendChild(el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: formatDuration(v.duration) }));
+        row.appendChild(el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: vname }));
         row.appendChild(el('span', {
           style: `font-size:.7rem; flex-shrink:0; padding:2px 7px; border-radius:10px; font-weight:600; ${isSelected ? 'color:var(--accent); background:color-mix(in srgb,var(--accent) 15%,transparent);' : 'color:var(--text-3); background:var(--bg);'}`,
           text: isSelected ? '✓ Selected' : 'Select',
         }));
-        row.addEventListener('click', () => _applyVideo(v.path));
+        row.addEventListener('click', () => _applyVideo(vpath));
         videoList.appendChild(row);
       }
     } catch (e) { toast(e.message, 'error'); }

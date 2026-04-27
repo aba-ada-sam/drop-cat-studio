@@ -10,7 +10,7 @@ import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-v
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260426m';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
-import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426f';
+import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260426g';
