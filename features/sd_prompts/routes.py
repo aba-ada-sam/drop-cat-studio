@@ -740,3 +740,22 @@ async def forge_progress():
     """Get current Forge generation progress."""
     from services.forge_client import get_progress
     return get_progress()
+
+
+@router.post("/openai/generate")
+async def openai_generate(request: Request):
+    """Generate an image via OpenAI DALL-E 3. SFW only."""
+    import asyncio
+    from services.openai_images import generate as _gen
+
+    body = await request.json()
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Prompt required")
+
+    path, err = await asyncio.to_thread(_gen, prompt, body.get("aspect", "1:1"), body.get("quality", "standard"))
+    if err:
+        raise HTTPException(500, err)
+
+    url = f"/output/{path.parent.name}/{path.name}"
+    return {"images": [{"path": str(path), "url": url, "seed": 0, "model": "dall-e-3"}]}

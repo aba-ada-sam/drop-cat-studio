@@ -38,13 +38,34 @@ export function init(panel) {
   topArea.appendChild(sidebar);
   topArea.appendChild(mainArea);
 
+  // ── Backend selector ─────────────────────────────────────────────────────
+  let _backend = 'forge';  // 'forge' | 'openai'
+  const backendBar = el('div', { style: 'display:flex; gap:2px; padding:3px; background:var(--bg-raised); border:1px solid var(--border-2); border-radius:6px; flex-shrink:0;' });
+  const btnForge  = el('button', { class: 'provider-pill active', text: 'Forge SD (local)' });
+  const btnOpenAI = el('button', { class: 'provider-pill', text: 'OpenAI  —  SFW only' });
+  backendBar.appendChild(btnForge);
+  backendBar.appendChild(btnOpenAI);
+  sidebar.appendChild(backendBar);
+
+  function _setBackend(b) {
+    _backend = b;
+    btnForge.classList.toggle('active', b === 'forge');
+    btnOpenAI.classList.toggle('active', b === 'openai');
+    forgeSettings.style.display  = b === 'forge'  ? '' : 'none';
+    openaiSettings.style.display = b === 'openai' ? '' : 'none';
+    if (b === 'openai') genBtn.disabled = false;
+    else if (!forgeStatus?.alive) genBtn.disabled = true;
+  }
+  btnForge.addEventListener('click',  () => _setBackend('forge'));
+  btnOpenAI.addEventListener('click', () => _setBackend('openai'));
+
   // ── Forge status ─────────────────────────────────────────────────────────
   const statusBar = el('div', { class: 'card', style: 'display:flex; align-items:center; gap:8px; padding:8px 12px; flex-shrink:0' });
   const forgeDot  = el('span', { class: 'dot' });
   const forgeMsg  = el('span', { style: 'font-size:.82rem; flex:1', text: 'Checking Forge…' });
   const modelSel  = el('select', { style: 'font-size:.8rem; max-width:180px; display:none' });
   statusBar.append(forgeDot, forgeMsg, modelSel);
-  sidebar.appendChild(statusBar);
+  sidebar.appendChild(statusBar);  // moved into forgeSettings below after it's created
 
   // ── Prompt card ──────────────────────────────────────────────────────────
   const promptCard = el('div', { class: 'card', style: 'flex-shrink:0' });
@@ -83,9 +104,35 @@ export function init(panel) {
   const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });
   composeRow.append(composeBtn, suffixInput, wildcardToggle, wcLabel);
 
+  // ── Forge settings wrapper (status + all forge-specific controls) ─────────
+  const forgeSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
+  forgeSettings.appendChild(statusBar);  // move statusBar into forgeSettings
+  sidebar.appendChild(forgeSettings);
+
+  // ── OpenAI settings ───────────────────────────────────────────────────────
+  const openaiSettings = el('div', { class: 'card', style: 'display:none; flex-shrink:0; padding:14px; display:none;' });
+  sidebar.appendChild(openaiSettings);
+  openaiSettings.appendChild(el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:10px;', text: 'DALL-E 3 generates one image at a time. All content is SFW (OpenAI policy).' }));
+  const oaiAspectSel = el('select', { style: 'width:100%; margin-bottom:8px; font-size:.85rem;' });
+  [['1:1','Square (1024×1024)'],['16:9','Landscape (1792×1024)'],['9:16','Portrait (1024×1792)']].forEach(([v,t]) => {
+    oaiAspectSel.appendChild(el('option', { value: v, text: t }));
+  });
+  openaiSettings.appendChild(el('div', {}, [
+    el('label', { text: 'Aspect ratio', style: 'display:block; font-size:.75rem; color:var(--text-3); margin-bottom:4px;' }),
+    oaiAspectSel,
+  ]));
+  const oaiQualSel = el('select', { style: 'width:100%; font-size:.85rem;' });
+  [['standard','Standard'],['hd','HD (slower, sharper)']].forEach(([v,t]) => {
+    oaiQualSel.appendChild(el('option', { value: v, text: t }));
+  });
+  openaiSettings.appendChild(el('div', {}, [
+    el('label', { text: 'Quality', style: 'display:block; font-size:.75rem; color:var(--text-3); margin-bottom:4px;' }),
+    oaiQualSel,
+  ]));
+
   // ── Settings ─────────────────────────────────────────────────────────────
   const settingsBody = el('div', { class: 'card', style: 'flex-shrink:0' });
-  sidebar.appendChild(settingsBody);
+  forgeSettings.appendChild(settingsBody);
 
   // Sampler + Scheduler
   const ssRow = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px' });
@@ -649,7 +696,31 @@ export function init(panel) {
   // ── Generate ─────────────────────────────────────────────────────────────
   genBtn.addEventListener('click', async () => {
     const prompt = promptArea.value.trim();
-    if (!prompt)         { toast('Enter a prompt', 'error'); return; }
+    if (!prompt) { toast('Enter a prompt', 'error'); return; }
+
+    // ── OpenAI path ───────────────────────────────────────────────────────
+    if (_backend === 'openai') {
+      genBtn.disabled = true;
+      genBtn.innerHTML = '<span class="spinner"></span> Generating…';
+      try {
+        const data = await api('/api/prompts/openai/generate', {
+          method: 'POST',
+          body: JSON.stringify({ prompt, aspect: oaiAspectSel.value, quality: oaiQualSel.value }),
+        });
+        if (data.images?.length) {
+          const img = data.images[0];
+          const entry = { src: img.url, seed: 0, prompt, path: img.path };
+          generatedImages.push(entry);
+          addThumb(entry);
+          if (img.path) pushToGallery('sd-prompts', img.path, prompt, 0, { model: 'dall-e-3' });
+          topArea.classList.add('has-result');
+          toast('Image generated', 'success');
+        }
+      } catch (e) { toast(e.message, 'error'); }
+      finally { genBtn.disabled = false; genBtn.textContent = 'Generate'; }
+      return;
+    }
+
     if (!forgeStatus?.alive) { toast('Forge is not running', 'error'); return; }
 
     genBtn.disabled          = true;

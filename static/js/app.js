@@ -5,9 +5,10 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
+import { init as initExpress  } from './tab-express.js?v=20260426l';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260426i';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260423e';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260426m';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426f';
 import { consumeHandoff } from './handoff.js?v=20260422a';
@@ -20,6 +21,7 @@ import { init as initPresets, promptAndSave as savePreset } from './shell/preset
 
 // ── Tab module map ──────────────────────────────────────────────────────────
 const TAB_INIT = {
+  'express':           initExpress,
   'pipeline':          initPipeline,
   'fun-videos':        initFunVideos,
   'bridges':           initBridges,
@@ -747,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
   // Boot default tab
-  switchTab('sd-prompts');
+  switchTab('express');
   loadConfig();
   pollServices();
   pollLogs();

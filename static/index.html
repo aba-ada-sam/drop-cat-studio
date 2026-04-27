@@ -83,13 +83,19 @@
       <!-- Left rail: Creative Pipeline Navigator -->
       <nav id="app-rail" aria-label="Creative Pipeline">
 
+        <!-- Express -->
+        <button class="rail-tab active" data-tab="express" title="Express — drop image, describe idea, create video">
+          <span>Create</span>
+          <span class="rail-tab-hint">Quick start</span>
+        </button>
+
         <!-- Gallery -->
         <button class="rail-tab" id="btn-gallery-rail" title="Toggle generation gallery">
           <span>Gallery</span>
           <span class="rail-tab-hint">View generations</span>
         </button>
 
-        <button class="rail-tab active" data-tab="sd-prompts" aria-current="page" title="Generate images from prompts">
+        <button class="rail-tab" data-tab="sd-prompts" title="Generate images from prompts">
           <span>Generate Images</span>
           <span class="rail-tab-hint">Prompts → Images</span>
         </button>
@@ -128,7 +134,8 @@
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
-            <section class="tab-panel active" id="panel-sd-prompts" aria-label="SD Prompts"></section>
+            <section class="tab-panel" id="panel-express" aria-label="Express"></section>
+            <section class="tab-panel" id="panel-sd-prompts" aria-label="SD Prompts"></section>
             <section class="tab-panel" id="panel-fun-videos" aria-label="Make Videos"></section>
             <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
             <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
@@ -321,6 +328,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260426k"></script>
+  <script type="module" src="/static/js/app.js?v=20260426n"></script>
 </body>
 </html>
