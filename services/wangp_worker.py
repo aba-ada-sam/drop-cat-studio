@@ -111,6 +111,7 @@ def _do_generate(params: dict) -> dict:
     seed = int(params.get("seed", -1))
     start_image = params.get("start_image")
     end_image = params.get("end_image")
+    start_video = params.get("start_video")      # video-to-video source
     activated_loras = params.get("activated_loras", [])
     loras_multipliers = params.get("loras_multipliers", "")
 
@@ -125,10 +126,13 @@ def _do_generate(params: dict) -> dict:
 
     start_images = []
     end_images = []
+    start_videos = []
     if start_image and os.path.isfile(start_image):
         start_images = [os.path.abspath(start_image)]
     if end_image and os.path.isfile(end_image):
         end_images = [os.path.abspath(end_image)]
+    if start_video and os.path.isfile(start_video):
+        start_videos = [os.path.abspath(start_video)]
 
     defaults = wgp.get_default_settings(model_type).copy()
     defaults.update({
@@ -155,13 +159,19 @@ def _do_generate(params: dict) -> dict:
     if activated_loras:
         defaults["activated_loras"] = activated_loras
         defaults["loras_multipliers"] = loras_multipliers
-    # Image settings must always override
-    defaults["image_start"] = start_images
-    defaults["image_end"] = end_images
-    defaults["image_prompt_type"] = (
-        "S"  if start_images and not end_images else
-        "SE" if start_images and end_images else ""
-    )
+    # Input mode — video-to-video takes priority over image inputs
+    if start_videos:
+        defaults["video_source"]      = start_videos
+        defaults["image_start"]       = []
+        defaults["image_end"]         = []
+        defaults["image_prompt_type"] = "V"
+    else:
+        defaults["image_start"] = start_images
+        defaults["image_end"]   = end_images
+        defaults["image_prompt_type"] = (
+            "S"  if start_images and not end_images else
+            "SE" if start_images and end_images else ""
+        )
 
     # server_config alone isn't enough — WanGP copies save_path into module-level
     # variables at import time. Override those directly so files land in output_dir.

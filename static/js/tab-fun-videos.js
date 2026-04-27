@@ -126,6 +126,41 @@ export function init(panel) {
     selectedCard.style.display = 'flex';
   };
 
+  // ── Start video (video-to-video) ──────────────────────────────────────────
+  let _startVideoPath = null;
+  const videoToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
+  root.appendChild(videoToggleRow);
+  const videoChk = el('input', { type: 'checkbox', id: 'fv-video-toggle' });
+  videoToggleRow.appendChild(videoChk);
+  videoToggleRow.appendChild(el('label', { for: 'fv-video-toggle', style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;', text: '+ Start video — use a video as the source instead of an image (video-to-video)' }));
+
+  const videoCard = el('div', { class: 'card', style: 'display:none; padding:12px;' });
+  root.appendChild(videoCard);
+
+  const videoFileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none' });
+  videoCard.appendChild(videoFileInput);
+  const videoOpenBtn = el('button', { class: 'btn btn-sm', text: 'Choose video...' });
+  const videoClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'display:none;' });
+  const videoName = el('div', { style: 'font-size:.78rem; color:var(--text-2); margin-top:6px;' });
+  videoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [videoOpenBtn, videoClearBtn]));
+  videoCard.appendChild(videoName);
+
+  videoOpenBtn.addEventListener('click', () => videoFileInput.click());
+  videoFileInput.addEventListener('change', async () => {
+    if (!videoFileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/fun/upload-video', Array.from(videoFileInput.files));
+      const f = data.files?.[0];
+      if (f) { _startVideoPath = f.path; videoName.textContent = f.name; videoClearBtn.style.display = ''; }
+    } catch (e) { toast(e.message, 'error'); }
+    videoFileInput.value = '';
+  });
+  videoClearBtn.addEventListener('click', () => { _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none'; });
+  videoChk.addEventListener('change', () => {
+    videoCard.style.display = videoChk.checked ? '' : 'none';
+    if (!videoChk.checked) { _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none'; }
+  });
+
   // ── End image (optional morph) ────────────────────────────────────────────
   const endToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
   root.appendChild(endToggleRow);
@@ -480,11 +515,11 @@ export function init(panel) {
 
     const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
     if (!promptTA.value.trim()) promptTA.value = prompt;
-    if (!_startImagePath) {
+    if (!_startImagePath && !_startVideoPath) {
       pickerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       pickerCard.style.outline = '2px solid var(--red)';
       setTimeout(() => { pickerCard.style.outline = ''; }, 2000);
-      toast('Select an image above first', 'error');
+      toast('Select an image or start video above first', 'error');
       return;
     }
 
@@ -509,10 +544,11 @@ export function init(panel) {
           steps:        parseInt(stepsSlider.value)     || 40,
           guidance:     parseFloat(guidanceSlider.value) || 8.5,
           seed:         parseInt(seedIn.value)           || -1,
-          skip_audio:     !audioChk.checked,
-          instrumental:   instrChk.checked,
-          lyric_direction: instrChk.checked ? '' : lyricGuideTA.value.trim(),
-          end_photo_path: _endImagePath || null,
+          skip_audio:       !audioChk.checked,
+          instrumental:     instrChk.checked,
+          lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
+          end_photo_path:   _endImagePath || null,
+          start_video_path: _startVideoPath || null,
         }),
       });
       _activeJobId = job_id;

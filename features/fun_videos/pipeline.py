@@ -108,6 +108,7 @@ def run_pipeline(job, photo_path, settings):
         guidance=float(settings.get("video_guidance", 7.5)),
         seed=int(settings.get("video_seed", -1)),
         end_image_path=settings.get("end_photo_path"),
+        start_video_path=settings.get("start_video_path"),
         loras=settings.get("loras", []),
         stop_check=_stopped,
         log_fn=_log,

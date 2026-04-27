@@ -23,6 +23,7 @@ router = APIRouter()
 
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
 MAX_IMAGE_MB = 15
 
 
@@ -97,6 +98,25 @@ async def upload_photo(files: list[UploadFile] = File(...)):
             "name": f.filename,
             "width": img.size[0],
             "height": img.size[1],
+            "url": f"/uploads/{dest.name}",
+        })
+    return {"files": saved}
+
+
+@router.post("/upload-video")
+async def upload_video(files: list[UploadFile] = File(...)):
+    """Upload a video file to use as WanGP video-to-video source."""
+    saved = []
+    for f in files:
+        ext = Path(f.filename or "").suffix.lower()
+        if ext not in VIDEO_EXTS:
+            continue
+        data = await f.read()
+        dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
+        dest.write_bytes(data)
+        saved.append({
+            "path": str(dest),
+            "name": f.filename,
             "url": f"/uploads/{dest.name}",
         })
     return {"files": saved}
@@ -269,6 +289,7 @@ async def make_it(request: Request):
         "bpm": body.get("bpm"),
         "skip_audio": body.get("skip_audio", False),
         "end_photo_path": body.get("end_photo_path"),
+        "start_video_path": _resolve_path(body.get("start_video_path", "")),
         "loras": body.get("loras", []),
     }
 
