@@ -213,12 +213,20 @@ def get_job_manager():
 
 # ── Global routes ────────────────────────────────────────────────────────────
 
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate", "Pragma": "no-cache"}
+
 @app.get("/")
 async def index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
+        return FileResponse(str(index_path), headers=_NO_CACHE)
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
+
+
+@app.get("/static/js/app.js")
+async def serve_app_js():
+    """Serve app.js with no-cache so the browser always picks up new code after restart."""
+    return FileResponse(str(STATIC_DIR / "js" / "app.js"), headers=_NO_CACHE)
 
 
 @app.get("/api/version")
