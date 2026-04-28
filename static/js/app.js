@@ -13,7 +13,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427b';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427c';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
@@ -313,6 +313,8 @@ const SERVICE_MESSAGES = {
 // Latest service state for service panel
 const _svcState = {};
 
+let _imageProvider = 'forge'; // synced from config; controls Image pill dot + label
+
 const _SVC_TO_TYPE = { forge: 'image', wangp: 'video', acestep: 'sound' };
 
 async function pollServices() {
@@ -325,8 +327,13 @@ async function pollServices() {
       // New AI-type pill dots
       const typeKey = _SVC_TO_TYPE[name];
       if (typeKey) {
-        const d = document.getElementById(`ap-${typeKey}-dot`);
-        if (d) { d.className = `dot ${dotClass}`; }
+        // Don't let forge state overwrite the image dot when OpenAI is selected
+        if (typeKey === 'image' && _imageProvider === 'openai') {
+          // dot managed by _applyImagePillState instead
+        } else {
+          const d = document.getElementById(`ap-${typeKey}-dot`);
+          if (d) { d.className = `dot ${dotClass}`; }
+        }
       }
 
       // Text dot: update when ollama state changes
@@ -352,11 +359,23 @@ async function pollServices() {
 function _updateTextDot(ollamaState) {
   const dot = document.getElementById('ap-text-dot');
   if (!dot) return;
-  // Cloud providers are always treated as ready if a key was found (badge will show it)
   const badge = document.getElementById('ai-badge');
   const isCloud = badge?.classList.contains('ai-cloud');
   const ok = isCloud || ollamaState === 'running';
   dot.className = `dot ${ok ? 'running' : 'unknown'}`;
+}
+
+function _applyImagePillState(provider, hasOpenAI) {
+  _imageProvider = provider || 'forge';
+  const label = document.querySelector('#ap-image .ap-label');
+  if (label) label.textContent = _imageProvider === 'openai' ? 'Image: OpenAI' : 'Image: Forge';
+  const dot = document.getElementById('ap-image-dot');
+  if (!dot) return;
+  if (_imageProvider === 'openai') {
+    dot.className = `dot ${hasOpenAI ? 'running' : 'unknown'}`;
+  } else {
+    dot.className = `dot ${_svcState.forge?.state || 'unknown'}`;
+  }
 }
 
 // ── Service panel ───────────────────────────────────────────────────────────
@@ -460,6 +479,7 @@ async function loadConfig() {
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
     _applyLLMState(llm);
+    _applyImagePillState(state.config.image_provider || 'forge', !!llm.openai_key_set);
   } catch (_) {}
 }
 
@@ -609,7 +629,7 @@ function initAIPills() {
     menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading…</div>`;
 
     if (type === 'text')  { await _renderTextMenu(menu); }
-    if (type === 'image') { _renderSvcMenu(menu, 'forge',   'Forge SD',  'Stable Diffusion image generation'); }
+    if (type === 'image') { await _renderImageMenu(menu); }
     if (type === 'video') { await _renderVideoMenu(menu); }
     if (type === 'sound') { _renderSvcMenu(menu, 'acestep', 'ACE-Step',  'AI music + lyrics generation'); }
   }
@@ -644,6 +664,53 @@ function initAIPills() {
     link.className = 'ap-menu-link'; link.textContent = '⚙ Settings →';
     link.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); closeAllMenus(); });
     menu.appendChild(link);
+  }
+
+  async function _renderImageMenu(menu) {
+    let configData = {}, llm = {};
+    try { configData = await apiFetch('/api/config', { context: 'pill.image.cfg' }); } catch (_) {}
+    try { llm = await apiFetch('/api/llm/config', { context: 'pill.image.llm' }); } catch (_) {}
+    const current = configData.image_provider || 'forge';
+    const hasOpenAI = !!llm.openai_key_set;
+    const forgeSvc = _svcState.forge || {};
+
+    const PROVIDERS = [
+      { value: 'forge',  label: 'Forge SD',      hint: 'Local Stable Diffusion' },
+      { value: 'openai', label: 'OpenAI DALL-E',  hint: hasOpenAI ? 'DALL-E 3 — key ready' : 'Needs OpenAI key in Settings' },
+    ];
+    menu.innerHTML = '<div class="ap-menu-title">Image</div>';
+    for (const p of PROVIDERS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-image-p" value="${p.value}"${p.value === current ? ' checked' : ''}>
+        <span class="ap-opt-label">${p.label}</span><span class="ap-opt-hint">${p.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: p.value }), context: 'pill.image.save' }).catch(() => {});
+        _applyImagePillState(p.value, hasOpenAI);
+        closeAllMenus();
+        toast(`Image → ${p.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    if (current === 'forge') {
+      const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '—';
+      menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${msg}</div>`);
+      const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+      acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="forge" data-act="start">Start</button>
+        <button class="btn btn-sm ap-ss" data-svc="forge" data-act="stop">Stop</button>
+        ${forgeSvc.url ? `<a href="${escHtml(forgeSvc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
+        <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+      acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+      acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+      menu.appendChild(acts);
+    } else {
+      const link = document.createElement('button');
+      link.className = 'ap-menu-link'; link.style.cssText = 'padding:6px 12px;display:block;';
+      link.textContent = '⚙ Configure OpenAI key in Settings →';
+      link.addEventListener('click', () => { loadConfig(); openModal('modal-settings'); closeAllMenus(); });
+      menu.appendChild(link);
+    }
   }
 
   async function _renderVideoMenu(menu) {
@@ -822,6 +889,14 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
+    // Seed pill labels from config on first load
+    Promise.all([
+      apiFetch('/api/config',     { context: 'startup.cfg' }),
+      apiFetch('/api/llm/config', { context: 'startup.llm' }),
+    ]).then(([cfg, llm]) => {
+      _applyLLMState(llm);
+      _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
+    }).catch(() => {});
   }, { once: true });
 
   runSplash();
