@@ -11,9 +11,9 @@ from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER  # re-exported 
 
 log = logging.getLogger(__name__)
 
-# Model selections per provider
+# Default model selections per provider (overridable via config ai_model_fast/balanced/power)
 _ANTHROPIC_MODELS = {
-    TIER_FAST:     "claude-haiku-4-5",
+    TIER_FAST:     "claude-haiku-4-5-20251001",
     TIER_BALANCED: "claude-sonnet-4-6",
     TIER_POWER:    "claude-sonnet-4-6",
 }
@@ -102,11 +102,12 @@ class LLMRouter:
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
         client = anthropic.Anthropic(api_key=get_key("anthropic"))
+        model = cfg.get(f"ai_model_{tier}") or _ANTHROPIC_MODELS.get(tier, _ANTHROPIC_MODELS[TIER_BALANCED])
         safe_msgs = [
             {**m, "content": sanitize(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
             for m in messages
         ]
-        kwargs = dict(model=_ANTHROPIC_MODELS[tier], max_tokens=max_tokens, messages=safe_msgs)
+        kwargs = dict(model=model, max_tokens=max_tokens, messages=safe_msgs)
         if system:
             kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
@@ -117,6 +118,7 @@ class LLMRouter:
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
         client = anthropic.Anthropic(api_key=get_key("anthropic"))
+        model = cfg.get(f"ai_model_{tier}") or _ANTHROPIC_MODELS.get(tier, _ANTHROPIC_MODELS[TIER_BALANCED])
         content = []
         for img in images_b64[:5]:  # Anthropic allows up to 5 images per message
             content.append({
@@ -125,7 +127,7 @@ class LLMRouter:
             })
         content.append({"type": "text", "text": sanitize(prompt)})
         kwargs = dict(
-            model=_ANTHROPIC_MODELS[tier],
+            model=model,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": content}],
         )

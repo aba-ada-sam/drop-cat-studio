@@ -80,7 +80,7 @@ SAFE_DEFAULTS: dict = {
     "loras_multipliers": [],
     "custom_settings": {},
     "self_refiner_plan": "",
-    "self_refiner_setting": "",
+    "self_refiner_setting": 0,     # WanGP compares >0; must be int not str
     "spatial_upsampling": "",
     "skip_steps_cache_type": "",
     "speakers_locations": "",
