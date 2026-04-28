@@ -31,6 +31,9 @@ DEFAULTS: dict = {
     # ── Image Provider ────────────────────────────────────────────────────
     "image_provider": "forge",        # forge | openai
 
+    # ── Audio Provider ────────────────────────────────────────────────────
+    "audio_provider": "acestep",      # acestep | ltx_native (LTX-2 MMAudio)
+
     # ── Image-to-Video (i2v_) ────────────────────────────────────────────
     "i2v_ken_burns_zoom": 5,        # 0-20 %
     "i2v_img_dur": 3.0,

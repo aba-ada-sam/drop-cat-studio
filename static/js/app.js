@@ -13,7 +13,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427c';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260427d';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
@@ -366,6 +366,28 @@ function _updateTextDot(ollamaState) {
   dot.className = `dot ${ok ? 'running' : 'unknown'}`;
 }
 
+function _videoModelShortLabel(name) {
+  if (!name) return 'Video';
+  const n = name.toLowerCase();
+  if (n.includes('ltx')) return 'Video: LTX-2';
+  if (n.includes('480p')) return 'Video: Wan 480P';
+  if (n.includes('720p')) return 'Video: Wan 720P';
+  if (n.includes('t2v') && n.includes('1.3')) return 'Video: Wan T2V 1.3B';
+  if (n.includes('t2v')) return 'Video: Wan T2V';
+  return `Video: ${name.split(' ')[0]}`;
+}
+
+function _applyVideoPillState(modelName) {
+  const label = document.querySelector('#ap-video .ap-label');
+  if (label) label.textContent = _videoModelShortLabel(modelName);
+}
+
+function _applySoundPillState(audioProvider) {
+  const label = document.querySelector('#ap-sound .ap-label');
+  if (!label) return;
+  label.textContent = (audioProvider === 'ltx_native') ? 'Sound: LTX-2' : 'Sound: ACE-Step';
+}
+
 function _applyImagePillState(provider, hasOpenAI) {
   _imageProvider = provider || 'forge';
   const label = document.querySelector('#ap-image .ap-label');
@@ -481,6 +503,8 @@ async function loadConfig() {
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
     _applyLLMState(llm);
     _applyImagePillState(state.config.image_provider || 'forge', !!llm.openai_key_set);
+    _applyVideoPillState(state.config.wan_model || '');
+    _applySoundPillState(state.config.audio_provider || 'acestep');
   } catch (_) {}
 }
 
@@ -632,7 +656,7 @@ function initAIPills() {
     if (type === 'text')  { await _renderTextMenu(menu); }
     if (type === 'image') { await _renderImageMenu(menu); }
     if (type === 'video') { await _renderVideoMenu(menu); }
-    if (type === 'sound') { _renderSvcMenu(menu, 'acestep', 'ACE-Step',  'AI music + lyrics generation'); }
+    if (type === 'sound') { await _renderSoundMenu(menu); }
   }
 
   async function _renderTextMenu(menu) {
@@ -731,6 +755,7 @@ function initAIPills() {
         <span class="ap-opt-label">${escHtml(name)}</span>${res ? `<span class="ap-opt-hint">${res}</span>` : ''}`;
       row.querySelector('input').addEventListener('change', async () => {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ wan_model: name }), context: 'pill.video.save' }).catch(() => {});
+        _applyVideoPillState(name);
         closeAllMenus();
         toast(`Video model → ${name}`, 'success');
       });
@@ -740,6 +765,49 @@ function initAIPills() {
     const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="wangp" data-act="start">Start</button>
       <button class="btn btn-sm ap-ss" data-svc="wangp" data-act="stop">Stop</button>
+      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  async function _renderSoundMenu(menu) {
+    let configData = {};
+    try { configData = await apiFetch('/api/config', { context: 'pill.sound.cfg' }); } catch (_) {}
+    const currentVideoModel = configData.wan_model || '';
+    const currentAudio = configData.audio_provider || 'acestep';
+    const isLTX = currentVideoModel.toLowerCase().includes('ltx');
+    const svc = _svcState.acestep || {};
+    const st = svc.state || 'unknown';
+    const msg = SERVICE_MESSAGES.acestep?.[svc.state] || svc.message || svc.state || '—';
+
+    const AUDIO_OPTIONS = [
+      { value: 'acestep', label: 'ACE-Step', hint: 'Full AI music + lyrics generation' },
+      ...(isLTX ? [{ value: 'ltx_native', label: 'LTX-2 native audio', hint: 'Built-in WanGP MMAudio — no ACE-Step needed' }] : []),
+    ];
+
+    menu.innerHTML = '<div class="ap-menu-title">Sound</div><div class="ap-menu-subtitle">Audio generation engine</div>';
+    for (const opt of AUDIO_OPTIONS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-sound-p" value="${opt.value}"${opt.value === currentAudio ? ' checked' : ''}>
+        <span class="ap-opt-label">${opt.label}</span><span class="ap-opt-hint">${opt.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ audio_provider: opt.value }), context: 'pill.sound.save' }).catch(() => {});
+        _applySoundPillState(opt.value);
+        closeAllMenus();
+        toast(`Audio → ${opt.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', `<div class="ap-menu-sep"></div>
+      <div class="ap-menu-title" style="font-size:.7rem;">ACE-Step <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${st}</span></div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${msg}</div>
+      <div class="ap-menu-sep"></div>`);
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="acestep" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="acestep" data-act="stop">Stop</button>
+      ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
       <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
     acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
     acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
@@ -903,6 +971,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ]).then(([cfg, llm]) => {
       _applyLLMState(llm);
       _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
+      _applyVideoPillState(cfg.wan_model || '');
+      _applySoundPillState(cfg.audio_provider || 'acestep');
     }).catch(() => {});
   }, { once: true });
 

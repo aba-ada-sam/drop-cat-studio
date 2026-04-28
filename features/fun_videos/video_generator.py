@@ -52,6 +52,7 @@ def generate_video(
     resolution: str = "580p",
     override_width: int | None = None,
     override_height: int | None = None,
+    mmaudio: bool = False,
     steps: int = 30,
     guidance: float = 7.5,
     seed: int = -1,
@@ -88,6 +89,7 @@ def generate_video(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
+            mmaudio=mmaudio,
         )
 
     # Fallback to subprocess
@@ -102,6 +104,7 @@ def _generate_via_worker(
     image_path, prompt, out_path, num_frames, width, height,
     steps, guidance, seed, model_name, end_image_path,
     start_video_path, loras, stop_check, log_fn, progress_fn=None,
+    mmaudio: bool = False,
 ) -> str | None:
     """Generate via persistent worker on port 7899."""
     payload = {
@@ -114,6 +117,7 @@ def _generate_via_worker(
         "steps": steps,
         "guidance_scale": guidance,
         "seed": seed,
+        "mmaudio": mmaudio,
     }
     if start_video_path and os.path.isfile(start_video_path):
         payload["start_video"] = os.path.abspath(start_video_path)

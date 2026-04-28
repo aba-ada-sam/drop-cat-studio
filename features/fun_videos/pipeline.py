@@ -136,6 +136,7 @@ def run_pipeline(job, photo_path, settings):
 
     ow = settings.get("override_width")
     oh = settings.get("override_height")
+    use_mmaudio = settings.get("audio_provider", "acestep") == "ltx_native"
 
     # Preprocess the source image to match output resolution so WanGP's VAE
     # encoder doesn't fail at step 0 when input and output sizes differ.
@@ -158,6 +159,7 @@ def run_pipeline(job, photo_path, settings):
         resolution=settings.get("resolution", "580p"),
         override_width=int(ow) if ow else None,
         override_height=int(oh) if oh else None,
+        mmaudio=use_mmaudio,
         steps=int(settings.get("video_steps", 30)),
         guidance=float(settings.get("video_guidance", 7.5)),
         seed=int(settings.get("video_seed", -1)),
@@ -183,6 +185,18 @@ def run_pipeline(job, photo_path, settings):
     if skip_audio:
         job.output = video_path
         job.message = "Video generated (no audio)"
+        return
+
+    # ── LTX-2 native audio (MMAudio) ─────────────────────────────────────
+    # WanGP already embedded audio via MMAudio — skip ACE-Step entirely.
+    if use_mmaudio:
+        job.output = video_path
+        job.message = "Video generated with LTX-2 native audio"
+        try:
+            from core.session import get_current as get_session
+            get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
+        except Exception as e:
+            log.warning("session.add_file failed: %s", e)
         return
 
     # ── Phase 2: Music Prompt Generation ─────────────────────────────────

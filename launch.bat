@@ -16,25 +16,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: -- Register in Windows Startup (one-time, silent) ---------------------
-:: After this the server starts automatically every time you log into Windows.
-:: You only ever need to click the PWA desktop icon to open the app.
+:: -- Remove startup folder entry if we accidentally created it before ----
 set "_STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\DropCatGoStudio.lnk"
-if not exist "%_STARTUP%" (
-    echo Registering Drop Cat Go Studio to start with Windows...
-    powershell -NoProfile -Command ^
-        "$ws=$([Runtime.InteropServices.Marshal]::GetActiveObject('WScript.Shell') 2>$null); if(-not $ws){$ws=New-Object -ComObject WScript.Shell}; $sc=$ws.CreateShortcut('%_STARTUP%'); $sc.TargetPath='%~dpnx0'; $sc.WorkingDirectory='%~dp0'; $sc.WindowStyle=7; $sc.Save()" 2>nul
-    if not exist "%_STARTUP%" (
-        :: Fallback if COM fails
-        powershell -NoProfile -Command ^
-            "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_STARTUP%'); $sc.TargetPath='%~dpnx0'; $sc.WorkingDirectory='%~dp0'; $sc.WindowStyle=7; $sc.Save()"
-    )
-    if exist "%_STARTUP%" (
-        echo Done. The server will now start automatically on login.
-    ) else (
-        echo [warn] Could not create startup entry -- you can run launch.bat manually.
-    )
+if exist "%_STARTUP%" (
+    echo Removing auto-startup entry ^(not needed^)...
+    del "%_STARTUP%" >nul 2>&1
 )
+
+:: -- Create / refresh the desktop shortcut pointing to this file --------
+:: This IS the right way: click the desktop icon -> git pull -> start server.
+set "_DESKTOP_LNK=%USERPROFILE%\Desktop\Drop Cat Go Studio.lnk"
+powershell -NoProfile -Command ^
+    "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='%~dpnx0'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
 
 :: -- Auto-update from GitHub --------------------------------------------
 set _GOT_UPDATE=0
@@ -45,7 +38,7 @@ if not errorlevel 1 (
     git -C "%~dp0" pull --ff-only origin master 2>&1
     for /f %%i in ('git -C "%~dp0" rev-parse HEAD 2^>nul') do set _SHA_AFTER=%%i
     if not "!_SHA_BEFORE!"=="!_SHA_AFTER!" (
-        echo New version pulled -- will restart server if it is running.
+        echo New version pulled -- restarting server if running.
         set _GOT_UPDATE=1
     ) else (
         echo Already up to date.
@@ -54,7 +47,7 @@ if not errorlevel 1 (
     echo [update] Git not on PATH -- skipping update check.
 )
 
-:: -- Install dependencies (only if updated) -----------------------------
+:: -- Install / update dependencies only when new code was pulled --------
 if "%_GOT_UPDATE%"=="1" (
     echo Updating dependencies...
     pip install -q -r "%~dp0requirements.txt" 2>nul
@@ -78,9 +71,8 @@ if not "!_RUNNING_PORT!"=="0" (
             )
             del "%~dp0.dcs-port" >nul 2>&1
         )
-        :: Fall through to start a fresh server below
     ) else (
-        echo Server is already running on port !_RUNNING_PORT! ^(no changes^).
+        echo Server running on port !_RUNNING_PORT! -- opening app.
         start "" /b "%~dp0open_browser.bat"
         exit /b 0
     )

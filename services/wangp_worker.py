@@ -155,6 +155,9 @@ def _do_generate(params: dict) -> dict:
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
+    # MMAudio: enable LTX-2 native audio when requested
+    if params.get("mmaudio"):
+        defaults["MMAudio_setting"] = 1
     # LoRA settings override defaults when provided
     if activated_loras:
         defaults["activated_loras"] = activated_loras

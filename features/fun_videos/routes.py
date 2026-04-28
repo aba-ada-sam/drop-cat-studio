@@ -290,6 +290,7 @@ async def make_it(request: Request):
         "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
         "bpm": body.get("bpm"),
         "skip_audio": body.get("skip_audio", False),
+        "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
         "end_photo_path": body.get("end_photo_path"),
         "start_video_path": _resolve_path(body.get("start_video_path", "")),
         "loras": body.get("loras", []),
