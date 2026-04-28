@@ -181,6 +181,7 @@
       <button class="log-toggle" id="log-toggle" aria-expanded="true" aria-controls="log-content">
         <span>Server Logs</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <span id="app-version" style="font-size:.6rem; color:var(--text-3); opacity:.55; margin-left:6px; font-weight:400; letter-spacing:.02em;"></span>
         <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log" onclick="event.stopPropagation()">&#128196; full log</a>
       </button>
       <div class="log-content" id="log-content">

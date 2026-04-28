@@ -319,6 +319,10 @@ export function init(panel) {
   fcCountSel.addEventListener('change', _rebuildFcEditor);
 
   // ── Generate button row ──────────────────────────────────────────────────
+  // ── Loop state ────────────────────────────────────────────────────────────
+  let _sdLooping = false;
+  let _sdLoopCount = 0;
+
   const genRow  = el('div', { style: 'display:flex; gap:8px; flex-shrink:0' });
   sidebar.appendChild(genRow);
 
@@ -328,6 +332,12 @@ export function init(panel) {
     style: 'flex:1; font-size:1rem; padding:10px 0',
     disabled: true,
   });
+  const sdLoopBtn = el('button', {
+    class: 'btn',
+    text: '∞',
+    title: 'Generate forever — click again to stop',
+    style: 'font-size:1rem; padding:10px 14px;',
+  });
   const stopBtn = el('button', {
     class: 'btn btn-sm', text: 'Stop',
     style: 'font-size:.85rem; display:none',
@@ -336,7 +346,25 @@ export function init(panel) {
       catch (_) {}
     },
   });
-  genRow.append(genBtn, stopBtn);
+  genRow.append(genBtn, sdLoopBtn, stopBtn);
+
+  sdLoopBtn.addEventListener('click', () => {
+    if (_sdLooping) {
+      _sdLooping = false;
+      _sdLoopCount = 0;
+      sdLoopBtn.textContent = '∞';
+      sdLoopBtn.classList.remove('btn-primary');
+      toast('Loop stopped', 'info');
+    } else {
+      if (genBtn.disabled) { toast('Wait for the current generation to finish', 'info'); return; }
+      _sdLooping = true;
+      _sdLoopCount = 0;
+      sdLoopBtn.textContent = '■';
+      sdLoopBtn.classList.add('btn-primary');
+      toast('Looping — click ■ to stop', 'info');
+      genBtn.click();
+    }
+  });
 
   const progressMsg = el('div', { style: 'display:none; font-size:.8rem; color:var(--accent); text-align:center; padding:4px 0; flex-shrink:0' });
   sidebar.appendChild(progressMsg);
@@ -759,8 +787,9 @@ export function init(panel) {
           topArea.classList.add('has-result');
           toast('Image generated', 'success');
         }
-      } catch (e) { toast(e.message, 'error'); }
+      } catch (e) { toast(e.message, 'error'); _sdLooping = false; sdLoopBtn.textContent = '∞'; sdLoopBtn.classList.remove('btn-primary'); }
       finally { genBtn.disabled = false; genBtn.textContent = 'Generate'; }
+      if (_sdLooping) { _sdLoopCount++; setTimeout(() => genBtn.click(), 1500); }
       return;
     }
 
@@ -825,13 +854,14 @@ export function init(panel) {
         });
         showImage(generatedImages.length - 1);
       }
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) { toast(e.message, 'error'); _sdLooping = false; sdLoopBtn.textContent = '∞'; sdLoopBtn.classList.remove('btn-primary'); }
 
     clearInterval(_progressTimer);
     progressMsg.style.display = 'none';
     stopBtn.style.display     = 'none';
     genBtn.disabled           = false;
     genBtn.textContent        = 'Generate';
+    if (_sdLooping) { _sdLoopCount++; setTimeout(() => genBtn.click(), 1500); }
   });
 
   promptArea.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); genBtn.click(); } });

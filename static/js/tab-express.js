@@ -304,7 +304,7 @@ export function init(panel) {
   const talkInput = el('textarea', {
     rows: '2',
     style: 'width:100%; resize:vertical; font-size:.85rem;',
-    placeholder: 'Describe what you\'re thinking — mood, story, vibe, anything. AI will update the fields above.',
+    placeholder: 'Describe what you\'re imagining — mood, story, vibe, references, anything. AI updates the fields above.',
   });
   const talkSendBtn  = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
   const talkReplyEl  = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); margin-top:6px; line-height:1.5; font-style:italic;' });
@@ -434,13 +434,35 @@ export function init(panel) {
     warnEl,
   ]));
 
-  // ── Create button ─────────────────────────────────────────────────────────
+  // ── Loop state ────────────────────────────────────────────────────────────
+  let _looping    = false;
+  let _varyPrompt = false;
+  let _loopCount  = 0;
+
+  // ── Create + Loop button row ──────────────────────────────────────────────
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Create',
-    style: 'width:100%; font-size:1.15rem; padding:16px; font-weight:700; letter-spacing:.04em;',
+    style: 'flex:1; font-size:1.1rem; padding:14px; font-weight:700; letter-spacing:.04em;',
   });
-  root.appendChild(createBtn);
+  const loopBtn = el('button', {
+    class: 'btn',
+    text: '∞  Loop',
+    title: 'Generate continuously until stopped',
+    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
+  });
+  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn]));
+
+  // Vary-prompt toggle (only visible when loop is active)
+  const varyChk   = el('input', { type: 'checkbox', id: 'express-vary-prompt', style: 'cursor:pointer;' });
+  const varyRow   = el('div', {
+    style: 'display:none; align-items:center; gap:6px; padding:0 2px;',
+  }, [
+    varyChk,
+    el('label', { for: 'express-vary-prompt', style: 'font-size:.76rem; color:var(--text-3); cursor:pointer; user-select:none;', text: 'Vary prompt each time (AI generates slight variation)' }),
+  ]);
+  root.appendChild(varyRow);
+  varyChk.addEventListener('change', () => { _varyPrompt = varyChk.checked; });
 
   // Subtle escape hatch to the full Create Videos tab
   const advLink = el('div', { style: 'text-align:center; margin-top:-10px;' });
@@ -540,8 +562,9 @@ export function init(panel) {
   resultActions.appendChild(tweakBtn);
 
   function _reset() {
+    _stopLoop();
     _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
-    _chatHistory = [];
+    _loopCount = 0; _chatHistory = [];
     preview.style.display = 'none'; preview.src = '';
     dropHint.style.display = '';
     clearImgBtn.style.display = 'none';
@@ -559,7 +582,152 @@ export function init(panel) {
     _loadRecent();
   }
 
-  // ── Create ────────────────────────────────────────────────────────────────
+  // ── Core generation (used by both Create and Loop) ───────────────────────
+  function _setProgress(msg, pct) {
+    progressLabel.style.color = '';
+    progressBar.querySelector('.express-bar').style.background = '';
+    if (pct != null) progressBar.querySelector('.express-bar').style.width = `${pct}%`;
+    progressLabel.textContent = msg;
+  }
+
+  // Returns Promise<boolean> — true = success, false = failure
+  async function _generateOne(fromLoop = false) {
+    createBtn.disabled = true;
+    progressArea.style.display = '';
+    _setProgress(fromLoop ? `Loop ${_loopCount} — starting…` : 'Submitting…', 5);
+
+    // Optionally vary the prompt on loop iterations
+    if (fromLoop && _varyPrompt && _loopCount > 1 && _imagePath) {
+      try {
+        _setProgress(`Loop ${_loopCount} — varying prompt…`, 8);
+        await _brainstorm('Create a slightly different variation — same subject and energy but change the action, timing, or camera movement');
+      } catch (_) {}
+    }
+
+    let motionPrompt = ideaInput.value.trim();
+    if (!motionPrompt) {
+      try {
+        _setProgress(fromLoop ? `Loop ${_loopCount} — reading image…` : 'Reading image…', 10);
+        const data = await api('/api/fun/generate-prompts', {
+          method: 'POST',
+          body: JSON.stringify({
+            image_path: _imagePath, num_prompts: 1, creativity: 9, max_tokens: 400,
+            user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
+          }),
+        });
+        const p = data.prompts?.[0];
+        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || 'Subject erupts into motion, energy bursts through the frame';
+      } catch (_) {
+        motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
+      }
+      ideaInput.value = motionPrompt;
+    }
+
+    _setProgress(fromLoop ? `Loop ${_loopCount} — generating…` : 'Generating video…', 15);
+
+    return new Promise(resolve => {
+      api('/api/fun/make-it', {
+        method: 'POST',
+        body: JSON.stringify({
+          photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
+          lyric_direction: lyricInput.value.trim(), model: _model, duration: _duration,
+          steps: 40, guidance: 8.5, seed: -1, skip_audio: false, instrumental: false,
+          output_width: _outW, output_height: _outH,
+        }),
+      }).then(({ job_id }) => {
+        _jobId = job_id;
+        pollJob(job_id,
+          j => {
+            const pct = Math.max(15, Math.min(95, j.progress || 0));
+            progressBar.querySelector('.express-bar').style.width = `${pct}%`;
+            const pfx = fromLoop ? `Loop ${_loopCount} — ` : '';
+            progressLabel.textContent = pfx + (j.message || (j.status === 'queued' ? 'Queued…' : 'Working…'));
+          },
+          j => {
+            createBtn.disabled = false;
+            if (j.output) {
+              const outputs = Array.isArray(j.output) ? j.output : [j.output];
+              _rawPath = outputs[0]; _mixPath = outputs.length > 1 ? outputs[1] : null;
+              const best = _mixPath || _rawPath;
+              resultArea.style.display = '';
+              if (_mixPath) { resultTabBar.style.display = 'flex'; _showTab('mix'); }
+              else { player.show(pathToUrl(_rawPath), _rawPath); }
+              pushToGallery('express', best, motionPrompt, null, {});
+              if (_looping) {
+                progressArea.style.display = 'none';
+              } else {
+                progressArea.style.display = 'none';
+                toast('Done!', 'success');
+              }
+            }
+            resolve(true);
+          },
+          err => {
+            progressLabel.style.color = 'var(--red, #c41e3a)';
+            progressLabel.textContent = `Failed: ${err}`;
+            progressBar.querySelector('.express-bar').style.background = 'var(--red, #c41e3a)';
+            createBtn.disabled = false;
+            toast(err, 'error');
+            setTimeout(() => {
+              progressArea.style.display = 'none';
+              progressLabel.style.color = '';
+              progressBar.querySelector('.express-bar').style.background = '';
+            }, 6000);
+            resolve(false);
+          },
+        );
+      }).catch(e => {
+        progressLabel.style.color = 'var(--red, #c41e3a)';
+        progressLabel.textContent = `Failed: ${e.message}`;
+        createBtn.disabled = false;
+        toast(e.message, 'error');
+        setTimeout(() => { progressArea.style.display = 'none'; progressLabel.style.color = ''; }, 6000);
+        resolve(false);
+      });
+    });
+  }
+
+  // ── Loop runner ───────────────────────────────────────────────────────────
+  async function _runLoop() {
+    while (_looping) {
+      _loopCount++;
+      const ok = await _generateOne(true);
+      if (!ok) { _stopLoop(); toast('Loop stopped — generation failed', 'error'); break; }
+      if (!_looping) break;
+      // Brief pause so the user can see the result before next run kicks in
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    if (!_looping) {
+      loopBtn.textContent = '∞  Loop';
+      loopBtn.classList.remove('btn-primary');
+      varyRow.style.display = 'none';
+    }
+  }
+
+  function _stopLoop() {
+    _looping = false;
+    loopBtn.textContent = '∞  Loop';
+    loopBtn.classList.remove('btn-primary');
+    varyRow.style.display = 'none';
+  }
+
+  loopBtn.addEventListener('click', async () => {
+    if (_looping) {
+      _stopLoop();
+      if (_jobId) stopJob(_jobId).catch(() => {});
+      toast('Loop stopped', 'info');
+    } else {
+      if (!_imagePath) { toast('Drop an image first', 'error'); return; }
+      _looping = true;
+      _loopCount = 0;
+      loopBtn.textContent = '■  Stop';
+      loopBtn.classList.add('btn-primary');
+      varyRow.style.display = 'flex';
+      _runLoop();
+    }
+  });
+
+  // ── Create (single run) ───────────────────────────────────────────────────
   createBtn.addEventListener('click', async () => {
     if (!_imagePath) {
       dropZone.style.borderColor = 'var(--red)';
@@ -567,8 +735,7 @@ export function init(panel) {
       toast('Drop an image first', 'error');
       return;
     }
-
-    // Are-you-sure: if both fields blank, offer AI suggestions first
+    // Are-you-sure: offer AI suggestions when both fields are blank
     if (!ideaInput.value.trim() && !lyricInput.value.trim()) {
       suggestBanner.style.display = '';
       const choice = await new Promise(res => { _suggestResolve = res; });
@@ -581,111 +748,10 @@ export function init(panel) {
           toast(d.reply || 'Suggestions ready — review and edit, then click Create', 'success');
         } catch (e) { toast(e.message, 'error'); }
         createBtn.disabled = false;
-        return; // let user review before clicking Create again
+        return;
       }
     }
-
-    createBtn.disabled = true;
-    progressArea.style.display = '';
-    progressLabel.textContent = 'Submitting…';
-    progressBar.querySelector('.express-bar').style.width = '5%';
-
-    // Auto-generate a motion prompt from the image + idea if not provided
-    let motionPrompt = ideaInput.value.trim();
-    if (!motionPrompt) {
-      try {
-        progressLabel.textContent = 'Reading image…';
-        const data = await api('/api/fun/generate-prompts', {
-          method: 'POST',
-          body: JSON.stringify({
-            image_path: _imagePath,
-            num_prompts: 1,
-            creativity: 9,
-            max_tokens: 400,
-            user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
-          }),
-        });
-        const p = data.prompts?.[0];
-        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || 'Subject erupts into motion, hair and clothes whipping in sudden wind, arms fly wide, explosive energy bursts through the frame';
-      } catch (_) {
-        motionPrompt = 'Subject erupts into motion, hair and clothes whipping in sudden wind, arms fly wide, explosive energy bursts through the frame';
-      }
-      // Show what was generated so the user can see it
-      ideaInput.value = motionPrompt;
-    }
-
-    progressBar.querySelector('.express-bar').style.width = '15%';
-    progressLabel.textContent = 'Generating video…';
-
-    try {
-      const { job_id } = await api('/api/fun/make-it', {
-        method: 'POST',
-        body: JSON.stringify({
-          photo_path:    _imagePath,
-          video_prompt:  motionPrompt,
-          music_prompt:  '',
-          lyric_direction: lyricInput.value.trim(),
-          model:         _model,
-          duration:      _duration,
-          steps:         40,
-          guidance:      8.5,
-          seed:          -1,
-          skip_audio:    false,
-          instrumental:  false,
-          output_width:  _outW,
-          output_height: _outH,
-        }),
-      });
-      _jobId = job_id;
-
-      pollJob(job_id,
-        j => {
-          const pct = Math.max(15, Math.min(95, j.progress || 0));
-          progressBar.querySelector('.express-bar').style.width = `${pct}%`;
-          progressLabel.textContent = j.message || (j.status === 'queued' ? 'Queued — waiting for GPU…' : 'Working…');
-        },
-        j => {
-          progressArea.style.display = 'none';
-          createBtn.disabled = false;
-          if (j.output) {
-            const outputs = Array.isArray(j.output) ? j.output : [j.output];
-            _rawPath = outputs[0];
-            _mixPath = outputs.length > 1 ? outputs[1] : null;
-            const best = _mixPath || _rawPath;
-            resultArea.style.display = '';
-            if (_mixPath) {
-              resultTabBar.style.display = 'flex';
-              _showTab('mix');
-            } else {
-              player.show(pathToUrl(_rawPath), _rawPath);
-            }
-            pushToGallery('express', best, motionPrompt, null, {});
-            toast('Done!', 'success');
-          }
-        },
-        err => {
-          // Show error in the progress area for a few seconds before hiding
-          progressLabel.style.color = 'var(--red, #c41e3a)';
-          progressLabel.textContent = `Failed: ${err}`;
-          progressBar.querySelector('.express-bar').style.background = 'var(--red, #c41e3a)';
-          createBtn.disabled = false;
-          toast(err, 'error');
-          setTimeout(() => {
-            progressArea.style.display = 'none';
-            progressLabel.style.color = '';
-            progressBar.querySelector('.express-bar').style.background = '';
-          }, 6000);
-        },
-      );
-    } catch (e) {
-      progressLabel.style.color = 'var(--red, #c41e3a)';
-      progressLabel.textContent = `Failed: ${e.message}`;
-      createBtn.disabled = false;
-      toast(e.message, 'error');
-      setTimeout(() => {
-        progressArea.style.display = 'none';
-        progressLabel.style.color = '';
-      }, 6000);
-    }
+    _loopCount = 0;
+    await _generateOne(false);
   });
 }

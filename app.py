@@ -80,6 +80,25 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
+def _read_git_version() -> str:
+    import subprocess as _sp
+    try:
+        date = _sp.check_output(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d"],
+            cwd=str(APP_DIR), text=True, stderr=_sp.DEVNULL, timeout=5,
+        ).strip()
+        sha = _sp.check_output(
+            ["git", "log", "-1", "--format=%h"],
+            cwd=str(APP_DIR), text=True, stderr=_sp.DEVNULL, timeout=5,
+        ).strip()
+        return f"{date} · {sha}" if date and sha else "unknown"
+    except Exception:
+        return "unknown"
+
+
+APP_VERSION = _read_git_version()
+
+
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -200,6 +219,11 @@ async def index():
     if index_path.exists():
         return FileResponse(str(index_path))
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
+
+
+@app.get("/api/version")
+async def get_version():
+    return {"version": APP_VERSION}
 
 
 @app.get("/manifest.json")

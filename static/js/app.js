@@ -5,10 +5,10 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260427j';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260427k';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260427c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427a';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427b';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
@@ -890,6 +890,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
+    // Version label
+    apiFetch('/api/version', { context: 'startup.version' }).then(d => {
+      const vEl = document.getElementById('app-version');
+      if (vEl && d.version) vEl.textContent = d.version;
+    }).catch(() => {});
+
     // Seed pill labels from config on first load
     Promise.all([
       apiFetch('/api/config',     { context: 'startup.cfg' }),
