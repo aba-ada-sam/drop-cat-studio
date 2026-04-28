@@ -60,9 +60,10 @@ export function init(panel) {
     if (rw === rh)      { w = h = qualityPx; }
     else if (rh > rw)   { w = qualityPx; h = Math.round(qualityPx * rh / rw); }
     else                 { h = qualityPx; w = Math.round(qualityPx * rw / rh); }
-    if (w % 2) w++;
-    if (h % 2) h++;
-    return [w, h];
+    // Round to nearest multiple of 32 — LTX-Video VAE requires 32-pixel alignment.
+    // Wan models also benefit; ensures no partial-stride artifacts.
+    const r32 = n => Math.max(32, Math.round(n / 32) * 32);
+    return [r32(w), r32(h)];
   }
 
   function _preferredModel(qualityPx) {

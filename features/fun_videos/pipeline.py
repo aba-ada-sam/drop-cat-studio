@@ -9,6 +9,8 @@ import shutil
 import time
 from pathlib import Path
 
+from PIL import Image as _Img
+
 from core import config as cfg
 from core.ffmpeg_utils import probe_duration, extract_frame_b64, sample_frames_temporal
 from core.wildcards import expand
@@ -23,6 +25,41 @@ _PROMPT_SUFFIXES = {
     "ltx":  "cinematic depth blur, shallow depth of field, film grain, high quality, photorealistic motion",
     "wan":  "cinematic motion, smooth animation, photorealistic, high quality, detailed",
 }
+
+def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
+    """Center-crop + resize src image to exactly target_w × target_h.
+
+    WanGP's LTX-2 VAE encoder fails or loops at step 0 when the input image
+    dimensions differ from the output resolution.  Pre-matching them here
+    prevents that failure without any quality loss (WanGP would resize anyway).
+    Falls back to the original path if anything goes wrong.
+    """
+    try:
+        img = _Img.open(src).convert("RGB")
+        iw, ih = img.size
+        if iw == target_w and ih == target_h:
+            return src
+        # Center-crop to target aspect ratio
+        tr = target_w / target_h
+        ir = iw / ih
+        if abs(ir - tr) > 0.02:
+            if ir > tr:            # wider — trim sides
+                nw = int(ih * tr)
+                x  = (iw - nw) // 2
+                img = img.crop((x, 0, x + nw, ih))
+            else:                   # taller — trim top/bottom
+                nh = int(iw / tr)
+                y  = (ih - nh) // 2
+                img = img.crop((0, y, iw, y + nh))
+        img = img.resize((target_w, target_h), _Img.LANCZOS)
+        out = job_dir / "input_prep.jpg"
+        img.save(str(out), "JPEG", quality=95)
+        log.info("Input image resized %dx%d → %dx%d for WanGP", iw, ih, target_w, target_h)
+        return str(out)
+    except Exception as e:
+        log.warning("Image prep failed, using original: %s", e)
+        return src
+
 
 def _finalize_prompt(prompt: str, model_name: str) -> str:
     """Append model-appropriate quality suffix to any video prompt."""
@@ -99,6 +136,19 @@ def run_pipeline(job, photo_path, settings):
 
     ow = settings.get("override_width")
     oh = settings.get("override_height")
+
+    # Preprocess the source image to match output resolution so WanGP's VAE
+    # encoder doesn't fail at step 0 when input and output sizes differ.
+    if photo_path and os.path.isfile(photo_path):
+        if ow and oh:
+            _tw, _th = int(ow), int(oh)
+        else:
+            _native = video_generator.MODELS.get(
+                settings.get("model_name", "LTX-2 Dev19B Distilled"), {}
+            ).get("res") or (1032, 580)
+            _tw, _th = _native
+        photo_path = _prep_photo(photo_path, _tw, _th, job_dir)
+
     video_path = video_generator.generate_video(
         image_path=photo_path,
         prompt=video_prompt,
