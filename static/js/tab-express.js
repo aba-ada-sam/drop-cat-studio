@@ -32,10 +32,10 @@ export function init(panel) {
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
   const QUALITIES = [
-    { label: '480P',  px: 480,  model: 'Wan2.1-I2V-14B-480P',   maxSec: 16 },
+    { label: '480P',  px: 480,  model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
     { label: '580P',  px: 580,  model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
-    { label: '720P',  px: 720,  model: 'Wan2.1-I2V-14B-720P',   maxSec: 12 },
-    { label: '1080P', px: 1080, model: 'Wan2.1-I2V-14B-720P',   maxSec: 8  },
+    { label: '720P',  px: 720,  model: 'LTX-2 Dev19B Distilled', maxSec: 16 },
+    { label: '1080P', px: 1080, model: 'LTX-2 Dev19B Distilled', maxSec: 8  },
   ];
 
   // Which ratios each model natively supports well.
