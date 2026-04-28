@@ -4,7 +4,7 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
 import { el, pathToUrl } from './components.js?v=20260427h';
-import { toast } from './shell/toast.js?v=20260421c';
+import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260427a';
 import { handoff } from './handoff.js?v=20260422a';
 
