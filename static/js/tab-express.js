@@ -285,21 +285,6 @@ export function init(panel) {
   ideaGenBtn.addEventListener('click',  () => _runGen(ideaGenBtn,  'Generate a video motion prompt based on this image'));
   lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image'));
 
-  // ── Are-you-sure banner ───────────────────────────────────────────────────
-  const suggestBanner = el('div', {
-    style: 'display:none; background:var(--surface-2); border:1px solid var(--border-2); border-radius:8px; padding:12px 14px; font-size:.84rem; color:var(--text-2);',
-  });
-  const suggestYesBtn = el('button', { class: 'btn btn-sm btn-primary', style: 'margin-right:8px;', text: '✦ AI Suggest first' });
-  const suggestNoBtn  = el('button', { class: 'btn btn-sm', text: 'No, create anyway →' });
-  suggestBanner.appendChild(el('div', { style: 'margin-bottom:8px;', text: 'No prompts set — want AI suggestions before generating?' }));
-  suggestBanner.appendChild(suggestYesBtn);
-  suggestBanner.appendChild(suggestNoBtn);
-  root.appendChild(suggestBanner);
-  // resolved by create-btn handler — see below
-  let _suggestResolve = null;
-  suggestYesBtn.addEventListener('click', () => { if (_suggestResolve) _suggestResolve('suggest'); });
-  suggestNoBtn.addEventListener('click',  () => { if (_suggestResolve) _suggestResolve('skip'); });
-
   // ── Talk to me ────────────────────────────────────────────────────────────
   const talkInput = el('textarea', {
     rows: '2',
@@ -519,7 +504,6 @@ export function init(panel) {
     lyricInput.value = '';
     talkInput.value = '';
     talkReplyEl.style.display = 'none';
-    suggestBanner.style.display = 'none';
     createBtn.disabled = false;
     _loadRecent();
   }
@@ -640,22 +624,6 @@ export function init(panel) {
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
       toast('Drop an image first', 'error');
       return;
-    }
-    // Are-you-sure: offer AI suggestions when both fields are blank
-    if (!ideaInput.value.trim() && !lyricInput.value.trim()) {
-      suggestBanner.style.display = '';
-      const choice = await new Promise(res => { _suggestResolve = res; });
-      suggestBanner.style.display = 'none';
-      _suggestResolve = null;
-      if (choice === 'suggest') {
-        createBtn.disabled = true;
-        try {
-          const d = await _brainstorm('Suggest a motion prompt and lyric direction based on this image');
-          toast(d.reply || 'Suggestions ready — review and edit, then click Create', 'success');
-        } catch (e) { toast(e.message, 'error'); }
-        createBtn.disabled = false;
-        return;
-      }
     }
     _loopCount = 0;
     await _generateOne(false);
