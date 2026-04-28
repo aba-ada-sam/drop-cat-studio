@@ -30,13 +30,17 @@ powershell -NoProfile -Command ^
     "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='%~dpnx0'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
 
 :: -- Auto-update from GitHub --------------------------------------------
+:: Strip trailing backslash from %~dp0 so git -C "path\" doesn't mis-parse the quote.
+set "_REPO=%~dp0"
+if "%_REPO:~-1%"=="\" set "_REPO=%_REPO:~0,-1%"
+
 set _GOT_UPDATE=0
 git --version >nul 2>&1
 if not errorlevel 1 (
     echo Checking for updates...
-    for /f %%i in ('git -C "%~dp0" rev-parse HEAD 2^>nul') do set _SHA_BEFORE=%%i
-    git -C "%~dp0" pull --ff-only origin master 2>&1
-    for /f %%i in ('git -C "%~dp0" rev-parse HEAD 2^>nul') do set _SHA_AFTER=%%i
+    for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_BEFORE=%%i
+    git -C "%_REPO%" pull --ff-only origin master 2>&1
+    for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_AFTER=%%i
     if not "!_SHA_BEFORE!"=="!_SHA_AFTER!" (
         echo New version pulled -- restarting server if running.
         set _GOT_UPDATE=1
