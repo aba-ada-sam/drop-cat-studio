@@ -623,38 +623,46 @@ export function init(panel) {
       _jobId = job_id;
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
 
-      // Always poll — show live progress and result/error right here in the tab
-      return new Promise(resolve => {
-        _showProgress(5, 'Queued…');
-        pollJob(job_id,
-          j => {
-            const pct = j.progress || 5;
-            _showProgress(pct, j.message || `${pct}%`);
-          },
-          j => {
-            const outputs = Array.isArray(j.output) ? j.output : [j.output];
-            const best = outputs.length > 1 ? outputs[1] : outputs[0];
-            if (best) _showResult(best);
-            else _hideProgress();
-            resolve(true);
-          },
-          err => {
-            _showError(err);
-            resolve(false);
-          },
-        );
-      });
+      // Start watching in the background — does NOT block the caller.
+      // The button re-enables immediately; user can queue more jobs while this runs.
+      _watchJob(job_id, motionPrompt);
+      return true;
     } catch (e) {
       toast(e.message, 'error');
       return false;
     }
   }
 
+  // Watch a job and update the progress/result area.
+  // Returns a Promise so loop mode can await completion; single-run ignores the return value.
+  function _watchJob(job_id, prompt) {
+    _showProgress(5, 'Queued…');
+    return new Promise(resolve => {
+      pollJob(job_id,
+        j => {
+          const pct = j.progress || 5;
+          _showProgress(pct, j.message || `${pct}%`);
+        },
+        j => {
+          const outputs = Array.isArray(j.output) ? j.output : [j.output];
+          const best = outputs.length > 1 ? outputs[1] : outputs[0];
+          if (best) _showResult(best);
+          else _hideProgress();
+          resolve(true);
+        },
+        err => { _showError(err); resolve(false); },
+      );
+    });
+  }
+
   // ── Loop runner ───────────────────────────────────────────────────────────
   async function _runLoop() {
     while (_looping) {
       _loopCount++;
-      const ok = await _generateOne(true);
+      // _generateOne returns as soon as the job is submitted; await the watch promise for completion
+      const submitted = await _generateOne(true);
+      if (!submitted) { _stopLoop(); toast('Loop stopped — failed to submit job', 'error'); break; }
+      const ok = await _watchJob(_jobId, ideaInput.value.trim());
       if (!ok) { _stopLoop(); toast('Loop stopped — generation failed', 'error'); break; }
       if (!_looping) break;
       // Brief pause so the user can see the result before next run kicks in
@@ -691,6 +699,8 @@ export function init(panel) {
   });
 
   // ── Create (single run) ───────────────────────────────────────────────────
+  // Button locks only for the brief AI-prep + submit phase, then unlocks so
+  // the user can immediately queue another job while the first one runs.
   createBtn.addEventListener('click', async () => {
     if (!_imagePath) {
       dropZone.style.borderColor = 'var(--red)';
@@ -699,7 +709,7 @@ export function init(panel) {
       return;
     }
     createBtn.disabled = true;
-    createBtn.textContent = 'Working…';
+    createBtn.textContent = 'Adding…';
     _loopCount = 0;
     try {
       await _generateOne(false);
