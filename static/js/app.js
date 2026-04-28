@@ -5,7 +5,8 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428e';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428f';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260428a';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260427c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427b';
@@ -28,6 +29,7 @@ const TAB_INIT = {
   'sd-prompts':        initSdPrompts,
   'video-tools':       initVideoTools,
   'video-tools-batch': initVideoToolsBatch,
+  'queue':             initQueue,
 };
 const TAB_HANDOFF = {
   'express':           expressHandoff,
@@ -298,6 +300,9 @@ function switchTab(tabId) {
       }
     }
   }
+
+  // Pause/resume queue polling based on visibility
+  if (tabId === 'queue') resumeQueue(); else pauseQueue();
 
   // Dispatch handoff
   const handoffData = consumeHandoff(tabId);

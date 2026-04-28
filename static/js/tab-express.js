@@ -3,8 +3,8 @@
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createVideoPlayer, el, pathToUrl } from './components.js?v=20260427h';
-import { toast, apiFetch } from './shell/toast.js?v=20260421c';
+import { el, pathToUrl } from './components.js?v=20260427h';
+import { toast } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260427a';
 import { handoff } from './handoff.js?v=20260422a';
 
@@ -505,101 +505,11 @@ export function init(panel) {
     document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
   });
 
-  // ── Progress ──────────────────────────────────────────────────────────────
-  const progressArea = el('div', { class: 'card', style: 'display:none; padding:16px;' });
-  root.appendChild(progressArea);
-
-  const progressLabel = el('div', { style: 'font-size:.85rem; color:var(--accent); margin-bottom:10px;' });
-  const progressBar   = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' }, [
-    el('div', { class: 'express-bar', style: 'height:100%; background:var(--accent); width:0%; transition:width .4s;' }),
-  ]);
-  const cancelBtn = el('button', { class: 'btn btn-sm', text: 'Cancel', style: 'margin-top:10px;' });
-  progressArea.appendChild(progressLabel);
-  progressArea.appendChild(progressBar);
-  progressArea.appendChild(cancelBtn);
-
   let _jobId = null;
-  cancelBtn.addEventListener('click', async () => {
-    if (_jobId) { await stopJob(_jobId).catch(() => {}); }
-    // Only tear down the in-flight generation — keep the image and prompts loaded
-    _stopLoop();
-    _jobId = null;
-    _loopCount = 0;
-    createBtn.disabled = false;
-    progressArea.style.display = 'none';
-    resultArea.style.display = 'none';
-    resultTabBar.style.display = 'none';
-    player.hide();
-  });
-
-  // ── Result ────────────────────────────────────────────────────────────────
-  const resultArea = el('div', { style: 'display:none;' });
-  root.appendChild(resultArea);
-
-  const resultTabBar = el('div', { class: 'result-tabs', style: 'display:none;' });
-  const tabMix = el('button', { class: 'result-tab active', text: 'With music' });
-  const tabRaw = el('button', { class: 'result-tab', text: 'Raw video' });
-  resultTabBar.appendChild(tabMix);
-  resultTabBar.appendChild(tabRaw);
-  resultArea.appendChild(resultTabBar);
-
-  const playerWrap = el('div');
-  resultArea.appendChild(playerWrap);
-  const player = createVideoPlayer(playerWrap);
-
-  let _rawPath = null, _mixPath = null;
-
-  function _showTab(which) {
-    tabMix.classList.toggle('active', which === 'mix');
-    tabRaw.classList.toggle('active', which === 'raw');
-    const p = which === 'mix' ? _mixPath : _rawPath;
-    if (p) player.show(pathToUrl(p), p);
-  }
-  tabMix.addEventListener('click', () => _showTab('mix'));
-  tabRaw.addEventListener('click', () => _showTab('raw'));
-
-  // Post-result action row
-  const resultActions = el('div', { style: 'display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;' });
-  resultArea.appendChild(resultActions);
-
-  const startOverBtn = el('button', { class: 'btn btn-sm', text: 'Start over' });
-  startOverBtn.addEventListener('click', _reset);
-  resultActions.appendChild(startOverBtn);
-
-  const clearResultBtn = el('button', { class: 'btn btn-sm', text: 'Clear' });
-  clearResultBtn.addEventListener('click', () => {
-    player.hide();
-    resultArea.style.display = 'none';
-    resultTabBar.style.display = 'none';
-    _rawPath = null; _mixPath = null;
-  });
-  resultActions.appendChild(clearResultBtn);
-
-  const deleteFileBtn = el('button', { class: 'btn btn-sm', style: 'color:var(--red,#c41e3a);', text: 'Delete file' });
-  deleteFileBtn.addEventListener('click', async () => {
-    if (!confirm('Permanently delete this output file?')) return;
-    const paths = [_mixPath, _rawPath].filter(Boolean);
-    await Promise.all(paths.map(p =>
-      apiFetch('/api/output/delete', { method: 'POST', body: JSON.stringify({ path: p }), context: 'express.delete' }).catch(() => {})
-    ));
-    player.hide();
-    resultArea.style.display = 'none';
-    resultTabBar.style.display = 'none';
-    _rawPath = null; _mixPath = null;
-    toast('File deleted', 'success');
-  });
-  resultActions.appendChild(deleteFileBtn);
-
-  const tweakBtn = el('button', { class: 'btn btn-sm', text: 'Tweak in Create Videos →' });
-  tweakBtn.addEventListener('click', () => {
-    if (_imagePath) handoff('fun-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
-    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
-  });
-  resultActions.appendChild(tweakBtn);
 
   function _reset() {
     _stopLoop();
-    _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
+    _jobId = null; _imagePath = null;
     _loopCount = 0; _chatHistory = [];
     preview.style.display = 'none'; preview.src = '';
     dropHint.style.display = '';
@@ -611,31 +521,15 @@ export function init(panel) {
     talkReplyEl.style.display = 'none';
     suggestBanner.style.display = 'none';
     createBtn.disabled = false;
-    progressArea.style.display = 'none';
-    resultArea.style.display = 'none';
-    resultTabBar.style.display = 'none';
-    player.hide();
     _loadRecent();
   }
 
-  // ── Core generation (used by both Create and Loop) ───────────────────────
-  function _setProgress(msg, pct) {
-    progressLabel.style.color = '';
-    progressBar.querySelector('.express-bar').style.background = '';
-    if (pct != null) progressBar.querySelector('.express-bar').style.width = `${pct}%`;
-    progressLabel.textContent = msg;
-  }
-
-  // Returns Promise<boolean> — true = success, false = failure
+  // ── Core generation ───────────────────────────────────────────────────────
+  // Returns Promise<boolean> — true = queued/success, false = failure
   async function _generateOne(fromLoop = false) {
-    createBtn.disabled = true;
-    progressArea.style.display = '';
-    _setProgress(fromLoop ? `Loop ${_loopCount} — starting…` : 'Submitting…', 5);
-
     // Optionally vary the prompt on loop iterations
     if (fromLoop && _varyPrompt && _loopCount > 1 && _imagePath) {
       try {
-        _setProgress(`Loop ${_loopCount} — varying prompt…`, 8);
         await _brainstorm('Create a slightly different variation — same subject and energy but change the action, timing, or camera movement');
       } catch (_) {}
     }
@@ -643,7 +537,6 @@ export function init(panel) {
     let motionPrompt = ideaInput.value.trim();
     if (!motionPrompt) {
       try {
-        _setProgress(fromLoop ? `Loop ${_loopCount} — reading image…` : 'Reading image…', 10);
         const data = await api('/api/fun/generate-prompts', {
           method: 'POST',
           body: JSON.stringify({
@@ -659,10 +552,8 @@ export function init(panel) {
       ideaInput.value = motionPrompt;
     }
 
-    _setProgress(fromLoop ? `Loop ${_loopCount} — generating…` : 'Generating video…', 15);
-
-    return new Promise(resolve => {
-      api('/api/fun/make-it', {
+    try {
+      const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
@@ -670,57 +561,36 @@ export function init(panel) {
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
         }),
-      }).then(({ job_id }) => {
-        _jobId = job_id;
+      });
+      _jobId = job_id;
+
+      if (!fromLoop) {
+        // Non-blocking — toast and return immediately
+        toast('Added to queue ✦', 'success');
+        // Dispatch to queue tab rail hint without switching tab
+        document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
+        return true;
+      }
+
+      // Loop mode — wait for this job to finish before starting next iteration
+      return new Promise(resolve => {
         pollJob(job_id,
+          () => {},   // progress visible in Queue tab
           j => {
-            const pct = Math.max(15, Math.min(95, j.progress || 0));
-            progressBar.querySelector('.express-bar').style.width = `${pct}%`;
-            const pfx = fromLoop ? `Loop ${_loopCount} — ` : '';
-            progressLabel.textContent = pfx + (j.message || (j.status === 'queued' ? 'Queued…' : 'Working…'));
-          },
-          j => {
-            createBtn.disabled = false;
             if (j.output) {
               const outputs = Array.isArray(j.output) ? j.output : [j.output];
-              _rawPath = outputs[0]; _mixPath = outputs.length > 1 ? outputs[1] : null;
-              const best = _mixPath || _rawPath;
-              resultArea.style.display = '';
-              if (_mixPath) { resultTabBar.style.display = 'flex'; _showTab('mix'); }
-              else { player.show(pathToUrl(_rawPath), _rawPath); }
+              const best = outputs.length > 1 ? outputs[1] : outputs[0];
               pushToGallery('express', best, motionPrompt, null, {});
-              if (_looping) {
-                progressArea.style.display = 'none';
-              } else {
-                progressArea.style.display = 'none';
-                toast('Done!', 'success');
-              }
             }
             resolve(true);
           },
-          err => {
-            progressLabel.style.color = 'var(--red, #c41e3a)';
-            progressLabel.textContent = `Failed: ${err}`;
-            progressBar.querySelector('.express-bar').style.background = 'var(--red, #c41e3a)';
-            createBtn.disabled = false;
-            toast(err, 'error');
-            setTimeout(() => {
-              progressArea.style.display = 'none';
-              progressLabel.style.color = '';
-              progressBar.querySelector('.express-bar').style.background = '';
-            }, 6000);
-            resolve(false);
-          },
+          () => resolve(false),
         );
-      }).catch(e => {
-        progressLabel.style.color = 'var(--red, #c41e3a)';
-        progressLabel.textContent = `Failed: ${e.message}`;
-        createBtn.disabled = false;
-        toast(e.message, 'error');
-        setTimeout(() => { progressArea.style.display = 'none'; progressLabel.style.color = ''; }, 6000);
-        resolve(false);
       });
-    });
+    } catch (e) {
+      toast(e.message, 'error');
+      return false;
+    }
   }
 
   // ── Loop runner ───────────────────────────────────────────────────────────

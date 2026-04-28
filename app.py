@@ -443,6 +443,33 @@ async def stop_job(job_id: str):
     return {"ok": found}
 
 
+@app.get("/api/jobs")
+async def list_jobs():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    return _g["job_manager"].queue_status()
+
+
+@app.get("/api/thumbnail")
+async def get_thumbnail(path: str, size: int = 120):
+    """Serve a scaled-down thumbnail of any image path."""
+    import io
+    from pathlib import Path as _Path
+    from fastapi.responses import Response as _Resp
+    try:
+        from PIL import Image as _Img
+        p = _Path(path)
+        if not p.is_file():
+            return JSONResponse({"error": "Not found"}, 404)
+        with _Img.open(p) as img:
+            img.thumbnail((size * 2, size * 2))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=75)
+        return _Resp(content=buf.getvalue(), media_type="image/jpeg")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, 500)
+
+
 @app.get("/output/{path:path}")
 async def serve_output_file(path: str):
     """Serve generated output files (videos, images) from nested subdirectories.

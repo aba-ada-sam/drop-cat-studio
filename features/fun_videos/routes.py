@@ -303,6 +303,11 @@ async def make_it(request: Request):
     job = job_manager.submit(
         JOB_FUN_VIDEO, run_pipeline, photo_path, settings, label=label,
     )
+    job.meta.update({
+        "source_image": photo_path or "",
+        "prompt": settings.get("video_prompt", "")[:120],
+        "model": settings.get("model_name", ""),
+    })
     return {"job_id": job.id}
 
 
