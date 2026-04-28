@@ -310,6 +310,96 @@ async def list_models():
     return {"models": {name: info for name, info in MODELS.items()}}
 
 
+@router.post("/brainstorm")
+async def brainstorm(request: Request):
+    """Natural-language session that refines video idea + lyric direction (or SD prompt).
+
+    Accepts:
+      image_path      – optional path to the source image for vision context
+      message         – user's latest message (required)
+      history         – [{role, content}] last N conversation turns
+      current_idea    – current idea / motion prompt text
+      current_lyric   – current lyric direction text
+      mode            – "video" (default) or "sd_prompt"
+    Returns JSON with updated fields plus a short reply sentence.
+    """
+    import json as _json, re as _re
+    from app import get_llm_router
+    llm_router = get_llm_router()
+
+    body = await request.json()
+    image_path = _resolve_path(body.get("image_path", ""))
+    message    = body.get("message", "").strip()
+    history    = body.get("history", [])
+    mode       = body.get("mode", "video")
+
+    if not message:
+        raise HTTPException(400, "message required")
+
+    if mode == "sd_prompt":
+        system = (
+            "You help users write Stable Diffusion image prompts. "
+            "Convert the user's plain-language description into a concise, comma-separated SD prompt "
+            "(subject, style, lighting, mood, quality tags). "
+            "Keep existing prompt context and refine it based on what the user asks. "
+            "Respond ONLY with valid JSON (no other text): "
+            '{"prompt": "...", "reply": "one sentence what you changed"}'
+        )
+    else:
+        system = (
+            "You help users create AI video generation prompts and ACE-Step music directions.\n\n"
+            "IDEA: 1-2 sentences describing what visually happens in the video.\n"
+            "LYRIC DIRECTION: ≤15 words. Format: \"[tempo/mood] [genre], [lyric theme]\". "
+            "Examples: \"upbeat pop, lyrics about joy and freedom\" | \"melancholic folk, lyrics about loss\" | \"epic orchestral, instrumental\".\n\n"
+            "Return ONLY valid JSON: "
+            '{"idea": "...", "lyric_direction": "...", "reply": "one sentence what you did"}\n'
+            "Set a field to null if the user did not ask to change it."
+        )
+
+    ctx_parts = []
+    if body.get("current_idea"):   ctx_parts.append(f"Current idea: {body['current_idea']}")
+    if body.get("current_lyric"):  ctx_parts.append(f"Current lyric direction: {body['current_lyric']}")
+    if body.get("current_prompt"): ctx_parts.append(f"Current SD prompt: {body['current_prompt']}")
+    context_str = "\n".join(ctx_parts) or "Nothing set yet."
+    user_content = f"{context_str}\n\nUser: {message}"
+
+    try:
+        if image_path and os.path.isfile(image_path):
+            b64 = await asyncio.to_thread(encode_image_b64, image_path)
+            result = await asyncio.to_thread(
+                llm_router.route_vision,
+                prompt=user_content,
+                images_b64=[b64] if b64 else [],
+                system=system,
+                tier="TIER_FAST",
+            )
+        else:
+            msgs = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
+            msgs.append({"role": "user", "content": user_content})
+            result = await asyncio.to_thread(
+                llm_router.route, messages=msgs, system=system, tier="TIER_FAST",
+            )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+    try:
+        m = _re.search(r'\{[^{}]*\}', result, _re.DOTALL)
+        data = _json.loads(m.group()) if m else {}
+    except Exception:
+        data = {}
+
+    if mode == "sd_prompt":
+        return {
+            "prompt": data.get("prompt") or None,
+            "reply":  data.get("reply")  or result[:120],
+        }
+    return {
+        "idea":            data.get("idea")            or None,
+        "lyric_direction": data.get("lyric_direction") or None,
+        "reply":           data.get("reply")           or result[:120],
+    }
+
+
 @router.post("/add-music")
 async def add_music(request: Request):
     """Analyze an existing video and add ACE-Step generated music to it.

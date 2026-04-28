@@ -6,7 +6,7 @@
  */
 import { api } from './api.js';
 import { createSlider, el } from './components.js';
-import { toast } from './shell/toast.js?v=20260421c';
+import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260420k';
 import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';
@@ -58,6 +58,49 @@ export function init(panel) {
   }
   btnForge.addEventListener('click',  () => _setBackend('forge'));
   btnOpenAI.addEventListener('click', () => _setBackend('openai'));
+
+  // ── Talk to me ────────────────────────────────────────────────────────────
+  let _sdChatHistory = [];
+  const sdTalkInput   = el('textarea', {
+    rows: '2',
+    style: 'width:100%; resize:vertical; font-size:.83rem;',
+    placeholder: 'Describe what you\'re imagining — any words, feelings, references. AI builds the prompt.',
+  });
+  const sdTalkSendBtn = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
+  const sdTalkReply   = el('div', { style: 'display:none; font-size:.75rem; color:var(--text-3); margin-top:5px; font-style:italic; line-height:1.5;' });
+
+  async function _sdSend() {
+    const msg = sdTalkInput.value.trim();
+    if (!msg) return;
+    sdTalkSendBtn.disabled = true; sdTalkSendBtn.textContent = '…';
+    sdTalkReply.style.display = 'none';
+    try {
+      const body = {
+        message:        msg,
+        mode:           'sd_prompt',
+        history:        _sdChatHistory.slice(-8),
+        current_prompt: promptArea.value.trim(),
+      };
+      const data = await apiFetch('/api/fun/brainstorm', {
+        method: 'POST', body: JSON.stringify(body), context: 'sd.brainstorm',
+      });
+      if (data.prompt) promptArea.value = data.prompt;
+      if (data.reply) { sdTalkReply.textContent = `AI: ${data.reply}`; sdTalkReply.style.display = ''; }
+      _sdChatHistory.push({ role: 'user', content: msg });
+      _sdChatHistory.push({ role: 'assistant', content: data.reply || '' });
+      sdTalkInput.value = '';
+    } catch (e) { toast(e.message, 'error'); }
+    finally { sdTalkSendBtn.disabled = false; sdTalkSendBtn.textContent = '→ Send'; }
+  }
+  sdTalkSendBtn.addEventListener('click', _sdSend);
+  sdTalkInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sdSend(); } });
+
+  sidebar.appendChild(el('div', { class: 'card', style: 'padding:10px 12px; flex-shrink:0;' }, [
+    el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:5px; text-transform:uppercase; letter-spacing:.05em;', text: 'Talk to me' }),
+    sdTalkInput,
+    el('div', { style: 'display:flex; justify-content:flex-end; margin-top:5px;' }, [sdTalkSendBtn]),
+    sdTalkReply,
+  ]));
 
   // ── Forge status ─────────────────────────────────────────────────────────
   const statusBar = el('div', { class: 'card', style: 'display:flex; align-items:center; gap:8px; padding:8px 12px; flex-shrink:0' });

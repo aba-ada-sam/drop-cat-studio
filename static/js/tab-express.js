@@ -236,17 +236,114 @@ export function init(panel) {
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
-    placeholder: 'Describe your idea, mood, or style — or leave blank to let AI decide.',
+    placeholder: 'Describe your idea, mood, or style — or leave blank.',
   });
   const lyricInput = el('input', {
     type: 'text',
-    style: 'width:100%; font-size:.82rem; margin-top:8px;',
-    placeholder: 'Lyric direction (optional) — e.g. "playful adventure, upbeat, about the dog"',
+    style: 'width:100%; font-size:.82rem;',
+    placeholder: 'e.g. "upbeat pop, lyrics about joy" | "epic orchestral, instrumental"',
   });
+
+  // Shared brainstorm call — updates fields, returns {idea, lyric_direction, reply}
+  let _chatHistory = [];
+  async function _brainstorm(message, { ideaOnly = false, lyricOnly = false } = {}) {
+    const body = {
+      image_path:    _imagePath || '',
+      message,
+      history:       _chatHistory.slice(-8),
+      current_idea:  ideaInput.value.trim(),
+      current_lyric: lyricInput.value.trim(),
+    };
+    const data = await apiFetch('/api/fun/brainstorm', {
+      method: 'POST', body: JSON.stringify(body), context: 'express.brainstorm',
+    });
+    if (data.idea            && !lyricOnly) ideaInput.value  = data.idea;
+    if (data.lyric_direction && !ideaOnly)  lyricInput.value = data.lyric_direction;
+    _chatHistory.push({ role: 'user', content: message });
+    _chatHistory.push({ role: 'assistant', content: data.reply || '' });
+    return data;
+  }
+
+  function _genBtn(title) {
+    return el('button', {
+      style: 'flex-shrink:0; font-size:.72rem; padding:2px 7px; border:1px solid var(--border-2); border-radius:5px; background:transparent; color:var(--accent); cursor:pointer; white-space:nowrap;',
+      title, text: '✦ Generate',
+    });
+  }
+
+  const ideaGenBtn  = _genBtn('Generate idea from image using AI');
+  const lyricGenBtn = _genBtn('Generate lyric direction from image using AI');
+
+  async function _runGen(btn, action) {
+    if (!_imagePath) { toast('Load an image first', 'info'); return; }
+    btn.disabled = true; btn.textContent = '…';
+    try { await _brainstorm(action, { ideaOnly: action.includes('idea'), lyricOnly: action.includes('lyric') }); }
+    catch (e) { toast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = '✦ Generate'; }
+  }
+  ideaGenBtn.addEventListener('click',  () => _runGen(ideaGenBtn,  'Generate a video motion prompt based on this image'));
+  lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image'));
+
+  // ── Are-you-sure banner ───────────────────────────────────────────────────
+  const suggestBanner = el('div', {
+    style: 'display:none; background:var(--surface-2); border:1px solid var(--border-2); border-radius:8px; padding:12px 14px; font-size:.84rem; color:var(--text-2);',
+  });
+  const suggestYesBtn = el('button', { class: 'btn btn-sm btn-primary', style: 'margin-right:8px;', text: '✦ AI Suggest first' });
+  const suggestNoBtn  = el('button', { class: 'btn btn-sm', text: 'No, create anyway →' });
+  suggestBanner.appendChild(el('div', { style: 'margin-bottom:8px;', text: 'No prompts set — want AI suggestions before generating?' }));
+  suggestBanner.appendChild(suggestYesBtn);
+  suggestBanner.appendChild(suggestNoBtn);
+  root.appendChild(suggestBanner);
+  // resolved by create-btn handler — see below
+  let _suggestResolve = null;
+  suggestYesBtn.addEventListener('click', () => { if (_suggestResolve) _suggestResolve('suggest'); });
+  suggestNoBtn.addEventListener('click',  () => { if (_suggestResolve) _suggestResolve('skip'); });
+
+  // ── Talk to me ────────────────────────────────────────────────────────────
+  const talkInput = el('textarea', {
+    rows: '2',
+    style: 'width:100%; resize:vertical; font-size:.85rem;',
+    placeholder: 'Describe what you\'re thinking — mood, story, vibe, anything. AI will update the fields above.',
+  });
+  const talkSendBtn  = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
+  const talkReplyEl  = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); margin-top:6px; line-height:1.5; font-style:italic;' });
+
+  async function _sendTalk() {
+    const msg = talkInput.value.trim();
+    if (!msg) return;
+    talkSendBtn.disabled = true; talkSendBtn.textContent = '…';
+    talkReplyEl.style.display = 'none';
+    try {
+      const data = await _brainstorm(msg);
+      if (data.reply) {
+        talkReplyEl.textContent = `AI: ${data.reply}`;
+        talkReplyEl.style.display = '';
+      }
+      talkInput.value = '';
+    } catch (e) { toast(e.message, 'error'); }
+    finally { talkSendBtn.disabled = false; talkSendBtn.textContent = '→ Send'; }
+  }
+  talkSendBtn.addEventListener('click', _sendTalk);
+  talkInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sendTalk(); } });
+
+  const talkCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
+    el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em;', text: 'Talk to me' }),
+    talkInput,
+    el('div', { style: 'display:flex; justify-content:flex-end; margin-top:6px;' }, [talkSendBtn]),
+    talkReplyEl,
+  ]);
+
+  root.appendChild(talkCard);
   root.appendChild(el('div', { class: 'card', style: 'padding:14px;' }, [
-    el('div', { style: 'font-size:.8rem; color:var(--text-3); margin-bottom:6px;', text: 'Your idea (optional)' }),
+    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;' }, [
+      el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Your idea (optional)' }),
+      ideaGenBtn,
+    ]),
     ideaInput,
-    el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:10px; margin-bottom:2px;', text: 'Lyric direction (optional)' }),
+    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:4px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3);', text: 'Lyric direction (optional)' }),
+      lyricGenBtn,
+    ]),
     lyricInput,
   ]));
 
@@ -443,12 +540,16 @@ export function init(panel) {
 
   function _reset() {
     _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
+    _chatHistory = [];
     preview.style.display = 'none'; preview.src = '';
     dropHint.style.display = '';
     clearImgBtn.style.display = 'none';
     dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     ideaInput.value = '';
     lyricInput.value = '';
+    talkInput.value = '';
+    talkReplyEl.style.display = 'none';
+    suggestBanner.style.display = 'none';
     createBtn.disabled = false;
     progressArea.style.display = 'none';
     resultArea.style.display = 'none';
@@ -464,6 +565,23 @@ export function init(panel) {
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
       toast('Drop an image first', 'error');
       return;
+    }
+
+    // Are-you-sure: if both fields blank, offer AI suggestions first
+    if (!ideaInput.value.trim() && !lyricInput.value.trim()) {
+      suggestBanner.style.display = '';
+      const choice = await new Promise(res => { _suggestResolve = res; });
+      suggestBanner.style.display = 'none';
+      _suggestResolve = null;
+      if (choice === 'suggest') {
+        createBtn.disabled = true;
+        try {
+          const d = await _brainstorm('Suggest a motion prompt and lyric direction based on this image');
+          toast(d.reply || 'Suggestions ready — review and edit, then click Create', 'success');
+        } catch (e) { toast(e.message, 'error'); }
+        createBtn.disabled = false;
+        return; // let user review before clicking Create again
+      }
     }
 
     createBtn.disabled = true;
@@ -545,15 +663,28 @@ export function init(panel) {
           }
         },
         err => {
-          progressArea.style.display = 'none';
+          // Show error in the progress area for a few seconds before hiding
+          progressLabel.style.color = 'var(--red, #c41e3a)';
+          progressLabel.textContent = `Failed: ${err}`;
+          progressBar.querySelector('.express-bar').style.background = 'var(--red, #c41e3a)';
           createBtn.disabled = false;
           toast(err, 'error');
+          setTimeout(() => {
+            progressArea.style.display = 'none';
+            progressLabel.style.color = '';
+            progressBar.querySelector('.express-bar').style.background = '';
+          }, 6000);
         },
       );
     } catch (e) {
-      progressArea.style.display = 'none';
+      progressLabel.style.color = 'var(--red, #c41e3a)';
+      progressLabel.textContent = `Failed: ${e.message}`;
       createBtn.disabled = false;
       toast(e.message, 'error');
+      setTimeout(() => {
+        progressArea.style.display = 'none';
+        progressLabel.style.color = '';
+      }, 6000);
     }
   });
 }
