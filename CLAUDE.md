@@ -10,7 +10,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Design philosophy:** simpleton path first. The Express tab ("Create") is the zero-friction entry — drop image, describe idea, get video with AI music + lyrics. Advanced users can go deeper through the per-step tabs (Generate Images → Create Videos → Audio). Never add infrastructure complexity (service names, LLM provider controls) to the header or primary UI.
 
-There are no tests, linting, or CI/CD configured. The app is tested manually through the UI.
+---
+
+## Commands
+
+```bash
+# Run the app
+python app.py
+
+# Smoke tests (in-process FastAPI TestClient, no GPU/Ollama needed)
+python tests/smoke.py
+
+# Check JS for silent syntax errors (ES module SyntaxErrors kill all JS silently)
+node --check static/js/app.js
+node --check static/js/tab-sd-prompts.js   # or any other module
+
+# Check Python syntax
+python -m py_compile features/fun_videos/routes.py
+```
+
+**Silent JS failure pattern:** If the splash shows raw HTML text ("Connecting to server..." not "Connecting…"), it means app.js never executed — an ES module import or syntax error killed the whole chain. Run `node --check` on every changed JS file. Common culprits: Unicode minus/dash characters instead of ASCII `-`, duplicate function declarations, bad import paths.
 
 ---
 
@@ -32,9 +51,19 @@ static/                 — Vanilla JS frontend (ES modules, no framework, no bu
   js/tab-*.js           — Per-tab controllers, lazy-inited on first visit
 ```
 
+### Feature API prefixes
+
+| Feature | Route prefix | GPU? |
+|---------|-------------|------|
+| Fun Videos | `/api/fun/*` | Yes (WanGP) |
+| Video Bridges | `/api/bridges/*` | Yes (WanGP) |
+| SD Prompts | `/api/prompts/*` | No |
+| Image-to-Video | `/api/i2v/*` | No |
+| Video Tools | `/api/tools/*` | No |
+
 ### Critical pattern: circular import avoidance
 
-`app.py` imports all feature routers at module level (lines 555-567). Features that need the LLM router or job manager **must use lazy getter functions**, never direct imports:
+`app.py` imports all feature routers at module level. Features that need the LLM router or job manager **must use lazy getter functions**, never direct imports:
 
 ```python
 # CORRECT — deferred to request time
@@ -45,7 +74,7 @@ llm_router = get_llm_router()
 from app import LLMRouter
 ```
 
-The `sys.modules` fix at the top of `app.py` (line 12) ensures `from app import ...` and `from __main__ import ...` resolve to the same module object with shared `_g` globals dict.
+The `sys.modules` fix at the top of `app.py` ensures `from app import ...` and `from __main__ import ...` resolve to the same module object with shared `_g` globals dict.
 
 ### GPU job queue (`core/job_manager.py`)
 
@@ -56,20 +85,32 @@ Worker functions receive a `Job` object and must:
 - Check `job.stop_event.is_set()` for cancellation
 - Set `job.output` on success
 
-GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s).
+```python
+def my_worker(job: Job, input_path, param):
+    job.update(status="running", progress=10, message="Starting…")
+    for step in work_steps:
+        if job.stop_event.is_set():
+            return
+        job.update(progress=step_pct, message=step_label)
+    job.update(status="done", progress=100, output=output_path)
+```
+
+GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s). Between GPU jobs, `gc.collect()` + `torch.cuda.empty_cache()` free VRAM.
 
 ### LLM routing (`core/llm_router.py`)
 
 All AI calls go through `LLMRouter.route()` or `LLMRouter.route_vision()`. The provider is read from config on each call (hot-switchable via Settings UI):
 - **auto** (default): tries Anthropic key → OpenAI key → Ollama
-- Three tiers: `TIER_FAST`, `TIER_BALANCED`, `TIER_POWER` — mapped to different models per provider
+- Three tiers: `TIER_FAST = "fast"`, `TIER_BALANCED = "balanced"`, `TIER_POWER = "power"` — always pass the constant, never its name as a string literal
 - Retry with exponential backoff; respects `Retry-After` on 429s; permanent errors fail immediately
+
+`core/llm_client.py` also exports `parse_json_response(text)` — strips markdown code fences and extracts the outermost JSON object/array from an LLM response. Use this instead of writing raw `re.search` for JSON extraction.
 
 ### Config system (`core/config.py`)
 
 Single `config.json` with 53+ namespaced keys (prefixes: `i2v_`, `fun_`, `bridge_`, `sd_`, `tools_`). Global keys shared across features. `DEFAULTS` dict is the canonical key registry — only keys present in `DEFAULTS` are accepted via the API.
 
-Thread-safe via `RLock` (allows nested `load()` inside `save()`). File mtime caching avoids repeated disk reads. Type validation runs once on first load.
+Thread-safe via `RLock` (allows nested `load()` inside `save()`). File mtime caching avoids repeated disk reads.
 
 ### Session tracking (`core/session.py`)
 
@@ -116,11 +157,11 @@ The header contains three zones:
 | Service | Port | Purpose | Startup |
 |---------|------|---------|---------|
 | WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
-| ACE-Step | 8019 | Music generation | Set path in Settings → auto-starts |
+| ACE-Step | 8019 | Music generation | Deferred — only starts when music is needed (keeps VRAM free for Ollama) |
 | Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
 | Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
 
-Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging.
+Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging. ACE-Step is intentionally deferred to avoid VRAM contention with Ollama.
 
 ---
 
@@ -137,6 +178,8 @@ Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `
 ## Theme & Layout
 
 **Circus theme** in `static/css/design-system.css`: dark crimson/gold palette (`#0d0606` bg, `#d4a017` gold, `#c41e3a` crimson, `#f0e6d0` cream text).
+
+Fix CSS directly — never build theme-switching UI or provider-switch controls in the header.
 
 **Responsive breakpoints** prepared for Andrew's 49" ultrawide (5120x1440):
 - `< 1100px` single column → `1100-1600px` sidebar + main → `> 2560px` 3-column with info panel → `> 4000px` ultrawide widths

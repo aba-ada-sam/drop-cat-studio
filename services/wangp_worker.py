@@ -212,13 +212,31 @@ def _do_generate(params: dict) -> dict:
         _update_status(step=n, total_steps=total, progress=f"Step {n}/{total}")
 
     _step_hook = _on_step
+
+    # Capture print() output during generation so WanGP errors are visible via /status
+    import builtins as _builtins
+    _captured_error_lines: list[str] = []
+    _orig_print = _builtins.print
+
+    def _capturing_print(*args, **kwargs):
+        text = " ".join(str(a) for a in args)
+        stripped = text.strip()
+        if stripped and ("[ERROR]" in stripped or "[SKIP]" in stripped or
+                        "Error" in stripped or "Traceback" in stripped or
+                        "TypeError" in stripped or "RuntimeError" in stripped):
+            _captured_error_lines.append(stripped[:300])
+        _orig_print(*args, **kwargs)
+
+    _builtins.print = _capturing_print
     try:
         success = wgp.process_tasks_cli(queue, state)
     finally:
+        _builtins.print = _orig_print
         _step_hook = None
 
     if not success:
-        return {"ok": False, "output": None, "error": "WanGP generation failed"}
+        detail = "; ".join(_captured_error_lines[-3:]) if _captured_error_lines else "WanGP generation failed (no error detail captured)"
+        return {"ok": False, "output": None, "error": detail}
 
     # Find output
     candidates = []
