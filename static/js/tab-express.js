@@ -38,6 +38,14 @@ export function init(panel) {
     { label: '1080P', px: 1080, model: 'Wan2.1-I2V-14B-720P',   maxSec: 8  },
   ];
 
+  // Which ratios each model natively supports well.
+  // LTX-2 was trained on variable aspect ratios; Wan models are 16:9 only.
+  const MODEL_RATIOS = {
+    'LTX-2 Dev19B Distilled': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    'LTX-2 Dev13B':           ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  };
+  const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
+
   let _model      = 'LTX-2 Dev19B Distilled';
   let _duration   = 8;
   let _allModels  = {};
@@ -63,10 +71,10 @@ export function init(panel) {
   }
 
   // Placeholders filled in when the UI section is built
-  let _dimsLabel = null;
-  let _warnEl    = null;
-  let _ratioChips   = {};
-  let _qualityChips = {};
+  let _dimsLabel  = null;
+  let _warnEl     = null;
+  let _ratioHint  = null;
+  let _ratioChips = {};
 
   function _refreshOutput() {
     [_outW, _outH] = _computeDims(_ratio, _qualityPx);
@@ -74,15 +82,34 @@ export function init(panel) {
     if (_warnEl) _warnEl.style.display = (_outW >= 1080 || _outH >= 1080) ? '' : 'none';
   }
 
+  function _updateRatioAvailability() {
+    const supported = MODEL_RATIOS[_model] || ['16:9'];
+    const allSupported = RATIOS.every(r => supported.includes(r.value));
+    for (const [val, btn] of Object.entries(_ratioChips)) {
+      const ok = supported.includes(val);
+      const isActive = val === _ratio;
+      btn.setAttribute('style', CHIP_BASE + (isActive && ok ? CHIP_ON : '') + (ok ? '' : CHIP_DISABLED));
+      btn.title = ok ? '' : 'Switch to LTX-2 (580P) for portrait, square & alternative ratios';
+      if (!ok && isActive) {
+        _ratio = '16:9';
+        _ratioChips['16:9']?.setAttribute('style', CHIP_BASE + CHIP_ON);
+      }
+    }
+    if (_ratioHint) {
+      _ratioHint.style.display = allSupported ? 'none' : '';
+    }
+    _refreshOutput();
+  }
+
   api('/api/fun/models').then(data => {
     _allModels = data.models || {};
     const models = Object.entries(_allModels);
     if (models.length) {
-      // Try to keep the current quality selection's preferred model; fall back to first loaded
       const pref = _preferredModel(_qualityPx);
       _model    = pref || models[0][0];
       _duration = Math.min(8, (_allModels[_model]?.max_sec || 8));
     }
+    _updateRatioAvailability();
   }).catch(() => {});
 
   // ── Heading ───────────────────────────────────────────────────────────────
@@ -220,11 +247,13 @@ export function init(panel) {
   });
   _warnEl = warnEl;
 
-  const { row: ratioRow } = _makeChipGroup(
+  const { row: ratioRow, chips: _rChips } = _makeChipGroup(
     RATIOS.map(r => ({ label: r.label, value: r.value })),
     _ratio,
     item => { _ratio = item.value; _refreshOutput(); },
   );
+  _ratioChips = _rChips;
+
   const { row: qualRow } = _makeChipGroup(
     QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
     String(_qualityPx),
@@ -232,15 +261,22 @@ export function init(panel) {
       _qualityPx = Number(item.value);
       _model     = _preferredModel(_qualityPx);
       _duration  = Math.min(8, QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 8);
-      _refreshOutput();
+      _updateRatioAvailability();
     },
   );
+
+  const ratioHintEl = el('div', {
+    style: 'display:none; font-size:.72rem; color:var(--text-3); padding-top:2px;',
+    text: 'Portrait, square & 4:3 ratios only available with LTX-2 (580P)',
+  });
+  _ratioHint = ratioHintEl;
 
   root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Aspect ratio' }),
       ratioRow,
     ]),
+    ratioHintEl,
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
       qualRow,
