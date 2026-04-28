@@ -3,7 +3,7 @@
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createVideoPlayer, el, pathToUrl } from './components.js?v=20260426c';
+import { createVideoPlayer, el, pathToUrl } from './components.js?v=20260427h';
 import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260427a';
 import { handoff } from './handoff.js?v=20260422a';
@@ -125,8 +125,27 @@ export function init(panel) {
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
   const dropHint = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' });
-  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative;' }, [preview, dropHint]);
+  const clearImgBtn = el('button', {
+    style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
+    title: 'Clear image', text: '×',
+  });
+  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative;' }, [preview, dropHint, clearImgBtn]);
   root.appendChild(dropZone);
+
+  function _autoSelectRatio(imgW, imgH) {
+    if (!imgW || !imgH) return;
+    const imgR = imgW / imgH;
+    const supported = MODEL_RATIOS[_model] || ['16:9'];
+    let best = '16:9', bestDiff = Infinity;
+    for (const r of RATIOS) {
+      if (!supported.includes(r.value)) continue;
+      const diff = Math.abs(imgR - r.rw / r.rh);
+      if (diff < bestDiff) { bestDiff = diff; best = r.value; }
+    }
+    if (best === _ratio) return;
+    _ratio = best;
+    _updateRatioAvailability(); // re-applies all chip styles with new active
+  }
 
   function _applyImage(path, url) {
     _imagePath = path;
@@ -134,8 +153,19 @@ export function init(panel) {
     preview.style.display = '';
     dropHint.style.display = 'none';
     dropZone.classList.add('drop-zone-loaded');
+    clearImgBtn.style.display = '';
+    preview.onload = () => _autoSelectRatio(preview.naturalWidth, preview.naturalHeight);
   }
   _applyImageFn = _applyImage;
+
+  clearImgBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    _imagePath = null;
+    preview.src = ''; preview.style.display = 'none';
+    dropHint.style.display = '';
+    dropZone.classList.remove('drop-zone-loaded', 'drag-over');
+    clearImgBtn.style.display = 'none';
+  });
 
   dropZone.addEventListener('click', () => imgInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -254,13 +284,26 @@ export function init(panel) {
   );
   _ratioChips = _rChips;
 
+  // Duration slider — declared here so quality chip handler can update it
+  const tierMax0  = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
+  const durSlider = el('input', { type: 'range', min: '1', max: String(tierMax0), value: String(_duration), step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const durLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: `${_duration}s` });
+  durSlider.addEventListener('input', () => {
+    _duration = parseInt(durSlider.value);
+    durLabel.textContent = `${_duration}s`;
+  });
+
   const { row: qualRow } = _makeChipGroup(
     QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
     String(_qualityPx),
     item => {
       _qualityPx = Number(item.value);
       _model     = _preferredModel(_qualityPx);
-      _duration  = Math.min(8, QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 8);
+      const tierMax = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
+      _duration  = Math.min(8, tierMax);
+      durSlider.max = String(tierMax);
+      durSlider.value = String(_duration);
+      durLabel.textContent = `${_duration}s`;
       _updateRatioAvailability();
     },
   );
@@ -280,6 +323,11 @@ export function init(panel) {
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
       qualRow,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Duration' }),
+      durSlider,
+      durLabel,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:2px;' }, [
       el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
@@ -362,6 +410,30 @@ export function init(panel) {
   startOverBtn.addEventListener('click', _reset);
   resultActions.appendChild(startOverBtn);
 
+  const clearResultBtn = el('button', { class: 'btn btn-sm', text: 'Clear' });
+  clearResultBtn.addEventListener('click', () => {
+    player.hide();
+    resultArea.style.display = 'none';
+    resultTabBar.style.display = 'none';
+    _rawPath = null; _mixPath = null;
+  });
+  resultActions.appendChild(clearResultBtn);
+
+  const deleteFileBtn = el('button', { class: 'btn btn-sm', style: 'color:var(--red,#c41e3a);', text: 'Delete file' });
+  deleteFileBtn.addEventListener('click', async () => {
+    if (!confirm('Permanently delete this output file?')) return;
+    const paths = [_mixPath, _rawPath].filter(Boolean);
+    await Promise.all(paths.map(p =>
+      apiFetch('/api/output/delete', { method: 'POST', body: JSON.stringify({ path: p }), context: 'express.delete' }).catch(() => {})
+    ));
+    player.hide();
+    resultArea.style.display = 'none';
+    resultTabBar.style.display = 'none';
+    _rawPath = null; _mixPath = null;
+    toast('File deleted', 'success');
+  });
+  resultActions.appendChild(deleteFileBtn);
+
   const tweakBtn = el('button', { class: 'btn btn-sm', text: 'Tweak in Create Videos →' });
   tweakBtn.addEventListener('click', () => {
     if (_imagePath) handoff('fun-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
@@ -373,6 +445,7 @@ export function init(panel) {
     _jobId = null; _imagePath = null; _rawPath = null; _mixPath = null;
     preview.style.display = 'none'; preview.src = '';
     dropHint.style.display = '';
+    clearImgBtn.style.display = 'none';
     dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     ideaInput.value = '';
     lyricInput.value = '';

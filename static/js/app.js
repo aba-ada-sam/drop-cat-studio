@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260427f';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260427g';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260427c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260426m';
@@ -265,6 +265,7 @@ const state = {
 // ── Tab routing ─────────────────────────────────────────────────────────────
 function switchTab(tabId) {
   state.activeTab = tabId;
+  if (state.galleryOpen) _galleryClose();
 
   // Update rail buttons (Gallery has no data-tab so it's handled separately)
   document.querySelectorAll('.rail-tab[data-tab]').forEach(btn => {

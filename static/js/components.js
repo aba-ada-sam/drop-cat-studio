@@ -171,7 +171,7 @@ export function createVideoPlayer(container) {
   const vlcBtn    = el('button', { class: 'btn btn-sm', text: '▶ VLC' });
   const revealBtn = el('button', { class: 'btn btn-sm', text: 'Show in folder' });
   const wrap = el('div', { class: 'card video-result', style: 'display:none' }, [
-    el('video', { controls: 'true', class: 'video-player' }),
+    el('video', { controls: 'true', preload: 'auto', class: 'video-player' }),
     el('div', { class: 'video-actions' }, [
       el('a', { class: 'btn btn-primary download-link', text: 'Download', download: '' }),
       vlcBtn,
