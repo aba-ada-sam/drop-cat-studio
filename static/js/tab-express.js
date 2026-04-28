@@ -304,7 +304,7 @@ export function init(panel) {
   const talkInput = el('textarea', {
     rows: '2',
     style: 'width:100%; resize:vertical; font-size:.85rem;',
-    placeholder: 'Describe what you\'re imagining — mood, story, vibe, references, anything. AI updates the fields above.',
+    placeholder: 'Describe what you\'re imagining — mood, story, vibe, references, anything. AI updates the fields below.',
   });
   const talkSendBtn  = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
   const talkReplyEl  = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); margin-top:6px; line-height:1.5; font-style:italic;' });
@@ -391,6 +391,15 @@ export function init(panel) {
     durLabel.textContent = `${_duration}s`;
   });
 
+  // Creativity (guidance_scale) slider
+  let _guidance = 8.5;
+  const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: '8.5', step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
+  const guidLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: '8.5' });
+  guidSlider.addEventListener('input', () => {
+    _guidance = parseFloat(guidSlider.value);
+    guidLabel.textContent = String(_guidance);
+  });
+
   const { row: qualRow } = _makeChipGroup(
     QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
     String(_qualityPx),
@@ -426,6 +435,11 @@ export function init(panel) {
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Duration' }),
       durSlider,
       durLabel,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Creativity' }),
+      guidSlider,
+      guidLabel,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:2px;' }, [
       el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
@@ -631,7 +645,7 @@ export function init(panel) {
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
           lyric_direction: lyricInput.value.trim(), model: _model, duration: _duration,
-          steps: 40, guidance: 8.5, seed: -1, skip_audio: false, instrumental: false,
+          steps: 40, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
         }),
       }).then(({ job_id }) => {
