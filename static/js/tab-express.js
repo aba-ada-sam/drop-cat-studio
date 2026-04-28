@@ -521,7 +521,15 @@ export function init(panel) {
   let _jobId = null;
   cancelBtn.addEventListener('click', async () => {
     if (_jobId) { await stopJob(_jobId).catch(() => {}); }
-    _reset();
+    // Only tear down the in-flight generation — keep the image and prompts loaded
+    _stopLoop();
+    _jobId = null;
+    _loopCount = 0;
+    createBtn.disabled = false;
+    progressArea.style.display = 'none';
+    resultArea.style.display = 'none';
+    resultTabBar.style.display = 'none';
+    player.hide();
   });
 
   // ── Result ────────────────────────────────────────────────────────────────
