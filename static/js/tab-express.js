@@ -446,7 +446,7 @@ export function init(panel) {
       durLabel,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Creativity' }),
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Guidance' }),
       guidSlider,
       guidLabel,
     ]),
