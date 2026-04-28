@@ -326,6 +326,7 @@ async def brainstorm(request: Request):
     """
     import json as _json, re as _re
     from app import get_llm_router
+    _TIER = "fast"   # TIER_FAST value — hardcoded to avoid late-import confusion
     llm_router = get_llm_router()
 
     body = await request.json()
@@ -372,19 +373,21 @@ async def brainstorm(request: Request):
                 prompt=user_content,
                 images_b64=[b64] if b64 else [],
                 system=system,
-                tier="TIER_FAST",
+                tier=_TIER,
             )
         else:
             msgs = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
             msgs.append({"role": "user", "content": user_content})
             result = await asyncio.to_thread(
-                llm_router.route, messages=msgs, system=system, tier="TIER_FAST",
+                llm_router.route, messages=msgs, system=system, tier=_TIER,
             )
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
     try:
-        m = _re.search(r'\{[^{}]*\}', result, _re.DOTALL)
+        # Strip markdown code fences if present, then grab outermost JSON object
+        cleaned = _re.sub(r'^```[a-z]*\n?|\n?```$', '', result.strip())
+        m = _re.search(r'\{.*\}', cleaned, _re.DOTALL)
         data = _json.loads(m.group()) if m else {}
     except Exception:
         data = {}
