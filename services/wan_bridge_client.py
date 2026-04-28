@@ -140,6 +140,8 @@ def main():
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
+    # WanGP compares self_refiner_setting > 0 — must be int, never str
+    defaults["self_refiner_setting"] = int(defaults.get("self_refiner_setting") or 0)
     # Image settings must always override
     defaults["image_start"] = start_images
     defaults["image_end"] = end_images
