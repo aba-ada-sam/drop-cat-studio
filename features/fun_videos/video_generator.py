@@ -132,37 +132,61 @@ def _generate_via_worker(
     if log_fn:
         log_fn(f"[info] Sending to WanGP worker (port {WANGP_WORKER_PORT})...")
 
-    try:
-        data = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{WANGP_WORKER_PORT}/generate",
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp = json.loads(r.read())
-        if not resp.get("ok"):
-            if log_fn:
-                log_fn(f"[error] Worker rejected: {resp.get('error')}")
+    # Submit with 409-retry: if worker is busy, wait until it's free then retry
+    submit_deadline = time.time() + 600
+    while True:
+        if stop_check and stop_check():
             return None
-    except Exception as e:
-        if log_fn:
-            log_fn(f"[error] Worker request failed: {e}")
-        return None
+        if time.time() > submit_deadline:
+            if log_fn:
+                log_fn("[error] Timed out waiting for worker to become available")
+            return None
+        try:
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{WANGP_WORKER_PORT}/generate",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                resp = json.loads(r.read())
+            if not resp.get("ok"):
+                if log_fn:
+                    log_fn(f"[error] Worker rejected: {resp.get('error')}")
+                return None
+            break  # submission accepted
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                if log_fn:
+                    log_fn("[info] Worker busy — waiting for current job to finish...")
+                # Poll /health until not busy
+                while time.time() < submit_deadline:
+                    if stop_check and stop_check():
+                        return None
+                    time.sleep(5)
+                    try:
+                        with urllib.request.urlopen(
+                            f"http://127.0.0.1:{WANGP_WORKER_PORT}/health", timeout=5
+                        ) as r:
+                            health = json.loads(r.read())
+                        if not health.get("busy", True):
+                            break
+                    except Exception:
+                        pass
+                # Loop back to retry submit
+                continue
+            if log_fn:
+                log_fn(f"[error] Worker request failed: {e}")
+            return None
+        except Exception as e:
+            if log_fn:
+                log_fn(f"[error] Worker request failed: {e}")
+            return None
 
     # Poll for completion
     deadline = time.time() + 600
     while time.time() < deadline:
         if stop_check and stop_check():
-            # Kill the worker so it restarts clean for the next job (watchdog revives it)
-            try:
-                urllib.request.urlopen(
-                    urllib.request.Request(
-                        f"http://127.0.0.1:{WANGP_WORKER_PORT}/shutdown",
-                        data=b"{}", headers={"Content-Type": "application/json"},
-                    ), timeout=3)
-            except Exception:
-                pass
             return None
         try:
             with urllib.request.urlopen(
