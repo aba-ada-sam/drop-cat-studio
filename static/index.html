@@ -4,10 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Drop Cat Go Studio</title>
+  <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/favicon.ico">
   <link rel="apple-touch-icon" href="/static/logo-192.png">
+  <meta name="theme-color" content="#d4a017">
+  <meta name="mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/static/css/design-system.css?v=20260426j">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
 </head>
 <body>
 

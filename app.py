@@ -202,6 +202,16 @@ async def index():
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
 
 
+@app.get("/manifest.json")
+async def serve_manifest():
+    return FileResponse(str(STATIC_DIR / "manifest.json"), media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def serve_sw():
+    return FileResponse(str(STATIC_DIR / "sw.js"), media_type="application/javascript")
+
+
 # ── Config ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/config")

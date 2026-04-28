@@ -1,0 +1,24 @@
+{
+  "name": "Drop Cat Go Studio",
+  "short_name": "Drop Cat",
+  "description": "Unified AI video production — photo to video with AI music",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d0606",
+  "theme_color": "#d4a017",
+  "icons": [
+    {
+      "src": "/static/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
