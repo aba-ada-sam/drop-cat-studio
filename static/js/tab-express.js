@@ -400,6 +400,15 @@ export function init(panel) {
     guidLabel.textContent = String(_guidance);
   });
 
+  // Steps slider
+  let _steps = 20;
+  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '20', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const stepsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: '20' });
+  stepsSlider.addEventListener('input', () => {
+    _steps = parseInt(stepsSlider.value);
+    stepsLabel.textContent = String(_steps);
+  });
+
   const { row: qualRow } = _makeChipGroup(
     QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
     String(_qualityPx),
@@ -440,6 +449,11 @@ export function init(panel) {
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Creativity' }),
       guidSlider,
       guidLabel,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Steps' }),
+      stepsSlider,
+      stepsLabel,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:2px;' }, [
       el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
@@ -645,7 +659,7 @@ export function init(panel) {
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
           lyric_direction: lyricInput.value.trim(), model: _model, duration: _duration,
-          steps: 40, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
+          steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
         }),
       }).then(({ job_id }) => {
