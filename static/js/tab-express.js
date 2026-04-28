@@ -477,6 +477,67 @@ export function init(panel) {
   root.appendChild(varyRow);
   varyChk.addEventListener('change', () => { _varyPrompt = varyChk.checked; });
 
+  // ── Progress + result area ────────────────────────────────────────────────
+  const progressWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
+  const progressBar  = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
+  const progressFill = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
+  progressBar.appendChild(progressFill);
+  const progressMsg  = el('div', { style: 'font-size:.8rem; color:var(--text-3); text-align:center;' });
+  progressWrap.appendChild(progressBar);
+  progressWrap.appendChild(progressMsg);
+  root.appendChild(progressWrap);
+
+  const resultWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
+  const resultVideo = el('video', { controls: '', loop: '', style: 'width:100%; border-radius:8px; background:#000;' });
+  const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center;' });
+  const newBtn  = el('button', { class: 'btn btn-sm', text: '+ New video' });
+  const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos →' });
+  resultActions.appendChild(newBtn);
+  resultActions.appendChild(sendBtn);
+  resultWrap.appendChild(resultVideo);
+  resultWrap.appendChild(resultActions);
+  root.appendChild(resultWrap);
+
+  function _showProgress(pct, msg) {
+    progressWrap.style.display = 'flex';
+    resultWrap.style.display   = 'none';
+    progressFill.style.width   = `${pct}%`;
+    progressMsg.textContent    = msg || '';
+  }
+
+  function _showResult(videoPath) {
+    progressWrap.style.display = 'none';
+    resultWrap.style.display   = 'flex';
+    resultVideo.src = pathToUrl(videoPath);
+    resultVideo.load();
+    resultVideo.play().catch(() => {});
+    pushToGallery('express', videoPath, ideaInput.value.trim(), null, {});
+  }
+
+  function _showError(msg) {
+    progressWrap.style.display = 'flex';
+    progressFill.style.width   = '100%';
+    progressFill.style.background = 'var(--red, #c41e3a)';
+    progressMsg.style.color    = 'var(--red, #c41e3a)';
+    progressMsg.textContent    = `Failed: ${msg}`;
+  }
+
+  function _hideProgress() {
+    progressWrap.style.display = 'none';
+    progressFill.style.background = 'var(--accent)';
+    progressMsg.style.color    = 'var(--text-3)';
+  }
+
+  newBtn.addEventListener('click', () => {
+    resultWrap.style.display = 'none';
+    resultVideo.src = '';
+  });
+  sendBtn.addEventListener('click', () => {
+    const src = resultVideo.src ? resultVideo.src.replace(location.origin, '') : null;
+    if (src) handoff('fun-videos', { type: 'video', path: src, url: src });
+    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+  });
+
   // Subtle escape hatch to the full Create Videos tab
   const advLink = el('div', { style: 'text-align:center; margin-top:-10px;' });
   const advBtn  = el('button', {
@@ -504,6 +565,9 @@ export function init(panel) {
     lyricInput.value = '';
     talkInput.value = '';
     talkReplyEl.style.display = 'none';
+    _hideProgress();
+    resultWrap.style.display = 'none';
+    resultVideo.src = '';
     createBtn.disabled = false;
     _loadRecent();
   }
@@ -557,28 +621,27 @@ export function init(panel) {
         }),
       });
       _jobId = job_id;
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
 
-      if (!fromLoop) {
-        // Non-blocking — toast and return immediately
-        toast('Added to queue ✦', 'success');
-        // Dispatch to queue tab rail hint without switching tab
-        document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
-        return true;
-      }
-
-      // Loop mode — wait for this job to finish before starting next iteration
+      // Always poll — show live progress and result/error right here in the tab
       return new Promise(resolve => {
+        _showProgress(5, 'Queued…');
         pollJob(job_id,
-          () => {},   // progress visible in Queue tab
           j => {
-            if (j.output) {
-              const outputs = Array.isArray(j.output) ? j.output : [j.output];
-              const best = outputs.length > 1 ? outputs[1] : outputs[0];
-              pushToGallery('express', best, motionPrompt, null, {});
-            }
+            const pct = j.progress || 5;
+            _showProgress(pct, j.message || `${pct}%`);
+          },
+          j => {
+            const outputs = Array.isArray(j.output) ? j.output : [j.output];
+            const best = outputs.length > 1 ? outputs[1] : outputs[0];
+            if (best) _showResult(best);
+            else _hideProgress();
             resolve(true);
           },
-          () => resolve(false),
+          err => {
+            _showError(err);
+            resolve(false);
+          },
         );
       });
     } catch (e) {
