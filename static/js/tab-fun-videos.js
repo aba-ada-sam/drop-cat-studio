@@ -481,36 +481,102 @@ export function init(panel) {
 
   const audioBody = el('div');
   audioCard.appendChild(audioBody);
-  const musicIn = el('input', { type: 'text', placeholder: 'Music style (optional — AI picks from your video if blank)', style: 'width:100%; margin-bottom:8px;' });
-  audioBody.appendChild(el('div', {}, [
+
+  // Music prompt + AI suggest
+  const musicIn = el('input', { type: 'text', style: 'flex:1;',
+    placeholder: 'Music style — genre, mood, tempo, instruments (blank = AI picks from video)',
+  });
+  const musicSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', title: 'AI suggests a music style from your motion prompt', style: 'flex-shrink:0;' });
+  audioBody.appendChild(el('div', { style: 'margin-bottom:8px;' }, [
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
-    musicIn,
+    el('div', { style: 'display:flex; gap:6px;' }, [musicIn, musicSuggestBtn]),
   ]));
+
+  // Song/instrumental — default is SONG (unchecked)
   const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
     instrChk,
-    el('label', { for: 'fv-instr', text: 'Instrumental only (no AI lyrics)', style: 'cursor:pointer; font-size:.85rem;' }),
+    el('label', { for: 'fv-instr', text: 'Instrumental (no vocals)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
 
+  // Lyric direction (visible when not instrumental)
   const lyricGuideWrap = el('div');
   const lyricGuideTA = el('textarea', {
     rows: '2',
-    placeholder: 'Lyric guideline (optional) — theme, mood, subject, tone, e.g. "playful adventure, celebrate the dog"',
+    placeholder: 'Lyric direction — theme, mood, subject, e.g. "uplifting, overcoming challenges, anthemic chorus"',
     style: 'width:100%; resize:vertical; font-size:.82rem;',
   });
   lyricGuideWrap.appendChild(el('div', {}, [
-    el('label', { text: 'Lyric Guideline', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
+    el('label', { text: 'Lyric Direction', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     lyricGuideTA,
   ]));
   audioBody.appendChild(lyricGuideWrap);
 
-  function _syncLyricGuide() {
-    lyricGuideWrap.style.display = instrChk.checked ? 'none' : '';
-  }
+  function _syncLyricGuide() { lyricGuideWrap.style.display = instrChk.checked ? 'none' : ''; }
   instrChk.addEventListener('change', _syncLyricGuide);
   _syncLyricGuide();
-
   audioChk.addEventListener('change', () => { audioBody.style.display = audioChk.checked ? '' : 'none'; });
+
+  // Suggest music from motion prompt text (no video yet at this point)
+  musicSuggestBtn.addEventListener('click', async () => {
+    musicSuggestBtn.disabled = true; musicSuggestBtn.textContent = '…';
+    try {
+      const hint = [promptTA.value.trim(), lyricGuideTA.value.trim()].filter(Boolean).join(' | ');
+      const data = await api('/api/fun/brainstorm', {
+        method: 'POST',
+        body: JSON.stringify({
+          message: `Suggest a music style for a video with this motion: "${hint || 'cinematic scene'}". Return a short music prompt (genre, mood, tempo, key instruments) and a lyric direction hint. Reply with JSON: {"music_prompt":"...","lyric_direction":"..."}`,
+          image_path: _startImagePath || '',
+          current_idea: promptTA.value.trim(),
+          current_lyric: '',
+        }),
+      });
+      // brainstorm returns reply field; parse JSON from it
+      let parsed = null;
+      try { parsed = JSON.parse((data.reply || '').replace(/```json|```/g, '').trim()); } catch (_) {}
+      if (parsed?.music_prompt) musicIn.value = parsed.music_prompt;
+      if (parsed?.lyric_direction && !instrChk.checked) lyricGuideTA.value = parsed.lyric_direction;
+      else if (!parsed && data.lyric_direction) lyricGuideTA.value = data.lyric_direction;
+    } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
+    finally { musicSuggestBtn.disabled = false; musicSuggestBtn.textContent = '✦ Suggest'; }
+  });
+
+  // ── Sync tool helper ────────────────────────────────────────────────────────
+  function _buildSyncTool(getVideoPath, onSynced) {
+    const wrap = el('div', { class: 'card', style: 'padding:12px; margin-top:8px; background:var(--surface-1);' });
+    wrap.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:4px; color:var(--text-2);', text: 'Audio Sync' }));
+    wrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:8px;', text: 'Shift audio earlier (−) or later (+). Apply, watch, repeat until it locks.' }));
+    const offsetLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); min-width:64px; text-align:right;', text: '0 ms' });
+    const offsetSlider = el('input', { type: 'range', min: '-2000', max: '2000', step: '10', value: '0', style: 'flex:1; cursor:pointer;' });
+    offsetSlider.addEventListener('input', () => {
+      const v = parseInt(offsetSlider.value);
+      offsetLabel.textContent = `${v > 0 ? '+' : ''}${v} ms`;
+    });
+    const applyBtn   = el('button', { class: 'btn btn-sm btn-primary', text: 'Apply' });
+    const syncStatus = el('span', { style: 'font-size:.75rem; color:var(--text-3);' });
+    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center; margin-bottom:8px;' }, [offsetSlider, offsetLabel]));
+    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [applyBtn, syncStatus]));
+    applyBtn.addEventListener('click', async () => {
+      const videoPath = getVideoPath();
+      if (!videoPath) return;
+      const offset = parseInt(offsetSlider.value);
+      if (offset === 0) { syncStatus.textContent = 'Offset is 0 — nothing to apply'; return; }
+      applyBtn.disabled = true; syncStatus.textContent = 'Applying…';
+      try {
+        const data = await api('/api/fun/sync-audio', {
+          method: 'POST',
+          body: JSON.stringify({ video_path: videoPath, offset_ms: offset }),
+        });
+        offsetSlider.value = '0'; offsetLabel.textContent = '0 ms';
+        syncStatus.textContent = `Done (${offset > 0 ? '+' : ''}${offset} ms applied)`;
+        onSynced(data.output);
+      } catch (e) {
+        syncStatus.textContent = e.message || 'Failed';
+        toast(e.message || 'Sync failed', 'error');
+      } finally { applyBtn.disabled = false; }
+    });
+    return wrap;
+  }
 
   // ── Generate ──────────────────────────────────────────────────────────────
   const genBtn = el('button', {
@@ -531,7 +597,7 @@ export function init(panel) {
   root.appendChild(vidWrap);
 
   const resultTabBar = el('div', { class: 'result-tabs', style: 'display:none;' });
-  const tabMix = el('button', { class: 'result-tab active', text: 'With ACE-Step music' });
+  const tabMix = el('button', { class: 'result-tab active', text: 'With Music' });
   const tabRaw = el('button', { class: 'result-tab', text: 'Raw video' });
   resultTabBar.appendChild(tabMix);
   resultTabBar.appendChild(tabRaw);
@@ -559,7 +625,6 @@ export function init(panel) {
   });
 
   genBtn.addEventListener('click', async () => {
-    // Cancel any in-flight auto-prompt — we don't need it anymore
     if (_autoPromptAbort) { _autoPromptAbort.abort(); _autoPromptAbort = null; }
     promptStatus.style.display = 'none';
 
@@ -586,14 +651,14 @@ export function init(panel) {
       const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
         body: JSON.stringify({
-          photo_path:   _startImagePath,
-          video_prompt: prompt,
-          music_prompt: musicIn.value.trim(),
-          model:        modelSel.value,
+          photo_path:       _startImagePath,
+          video_prompt:     prompt,
+          music_prompt:     musicIn.value.trim(),
+          model:            modelSel.value,
           duration,
-          steps:        parseInt(stepsSlider.value)     || 40,
-          guidance:     parseFloat(guidanceSlider.value) || 8.5,
-          seed:         parseInt(seedIn.value)           || -1,
+          steps:            parseInt(stepsSlider.value)     || 40,
+          guidance:         parseFloat(guidanceSlider.value) || 8.5,
+          seed:             parseInt(seedIn.value)           || -1,
           skip_audio:       !audioChk.checked,
           instrumental:     instrChk.checked,
           lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
@@ -633,37 +698,92 @@ export function init(panel) {
               duration_sec: Number(durSlider.value),
             });
 
-            // Redo Audio panel (shown after generation)
-            if (!vidWrap.querySelector('.redo-audio-card')) {
-              const redoCard = el('div', { class: 'card redo-audio-card', style: 'padding:12px; margin-top:10px;' });
+            // Redo Audio + Sync — build once, update paths on each generation
+            let redoCard = vidWrap.querySelector('.redo-audio-card');
+            if (!redoCard) {
+              redoCard = el('div', { class: 'card redo-audio-card', style: 'padding:12px; margin-top:10px;' });
               redoCard.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:8px; color:var(--text-2);', text: 'Redo Audio' }));
-              const redoMusicIn = el('input', { type: 'text', placeholder: 'Music style (blank = AI picks from video)', style: 'width:100%; margin-bottom:6px; font-size:.82rem;' });
-              const redoLyricIn = el('input', { type: 'text', placeholder: 'Lyric direction (optional)', style: 'width:100%; margin-bottom:8px; font-size:.82rem;' });
-              const redoBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Regenerate Audio' });
-              const redoProg = el('div', { style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:6px;' });
-              redoCard.appendChild(redoMusicIn);
-              redoCard.appendChild(redoLyricIn);
+
+              const redoMusicIn  = el('input', { type: 'text', style: 'flex:1; font-size:.82rem;',
+                placeholder: 'Music style (blank = AI picks from video)',
+              });
+              const redoSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', style: 'flex-shrink:0;' });
+              redoCard.appendChild(el('div', { style: 'margin-bottom:6px;' }, [
+                el('label', { text: 'Music Prompt', style: 'display:block; font-size:.75rem; color:var(--text-3); margin-bottom:3px;' }),
+                el('div', { style: 'display:flex; gap:6px;' }, [redoMusicIn, redoSuggestBtn]),
+              ]));
+
+              const redoInstrChk = el('input', { type: 'checkbox', id: 'fv-redo-instr' });
+              const redoLyricWrap = el('div', { style: 'margin-bottom:8px;' });
+              const redoLyricIn = el('textarea', { rows: '2', style: 'width:100%; font-size:.82rem; resize:vertical;',
+                placeholder: 'Lyric direction (optional)',
+              });
+              redoLyricWrap.appendChild(el('label', { text: 'Lyric Direction', style: 'display:block; font-size:.75rem; color:var(--text-3); margin-bottom:3px;' }));
+              redoLyricWrap.appendChild(redoLyricIn);
+
+              redoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:6px;' }, [
+                redoInstrChk,
+                el('label', { for: 'fv-redo-instr', text: 'Instrumental', style: 'cursor:pointer; font-size:.82rem;' }),
+              ]));
+              redoCard.appendChild(redoLyricWrap);
+
+              function _syncRedoLyric() { redoLyricWrap.style.display = redoInstrChk.checked ? 'none' : ''; }
+              redoInstrChk.addEventListener('change', _syncRedoLyric);
+              _syncRedoLyric();
+
+              const redoBtn  = el('button', { class: 'btn btn-sm btn-primary', text: 'Regenerate Audio' });
+              const redoProg = el('div', { style: 'display:none; font-size:.75rem; color:var(--accent);' });
               redoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [redoBtn, redoProg]));
+
+              // Sync tool for the result (uses current _mixPath / _rawPath)
+              const syncTool = _buildSyncTool(
+                () => _mixPath || _rawPath,
+                (newPath) => {
+                  _mixPath = newPath;
+                  resultTabBar.style.display = 'flex';
+                  _showResultTab('mix');
+                  toast('Sync applied — playing adjusted video', 'success');
+                },
+              );
+              redoCard.appendChild(syncTool);
+
               vidWrap.appendChild(redoCard);
+
+              // AI suggest for redo (has real video path)
+              redoSuggestBtn.addEventListener('click', async () => {
+                if (!_rawPath) { toast('Generate a video first', 'info'); return; }
+                redoSuggestBtn.disabled = true; redoSuggestBtn.textContent = '…';
+                try {
+                  const data = await api('/api/fun/suggest-music', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      video_path: _rawPath,
+                      user_direction: redoLyricIn.value.trim(),
+                      instrumental: redoInstrChk.checked,
+                    }),
+                  });
+                  if (data.music_prompt) redoMusicIn.value = data.music_prompt;
+                  if (data.lyric_direction && !redoInstrChk.checked) redoLyricIn.value = data.lyric_direction;
+                } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
+                finally { redoSuggestBtn.disabled = false; redoSuggestBtn.textContent = '✦ Suggest'; }
+              });
 
               redoBtn.addEventListener('click', async () => {
                 if (!_rawPath) return;
-                redoBtn.disabled = true;
-                redoProg.style.display = '';
-                redoProg.textContent = 'Submitting…';
+                redoBtn.disabled = true; redoProg.style.display = ''; redoProg.textContent = 'Submitting…';
                 try {
-                  const { job_id } = await api('/api/fun/add-music', {
+                  const { job_id: rid } = await api('/api/fun/add-music', {
                     method: 'POST',
                     body: JSON.stringify({
                       video_path:      _rawPath,
                       music_prompt:    redoMusicIn.value.trim(),
-                      lyric_direction: redoLyricIn.value.trim(),
-                      instrumental:    false,
+                      lyric_direction: redoInstrChk.checked ? '' : redoLyricIn.value.trim(),
+                      instrumental:    redoInstrChk.checked,
                     }),
                   });
-                  pollJob(job_id,
-                    j => { redoProg.textContent = j.message || 'Working…'; },
-                    j => {
+                  pollJob(rid,
+                    (j) => { redoProg.textContent = j.message || 'Working…'; },
+                    (j) => {
                       redoBtn.disabled = false; redoProg.style.display = 'none';
                       if (j.output) {
                         _mixPath = j.output;
@@ -672,12 +792,13 @@ export function init(panel) {
                         toast('Audio regenerated!', 'success');
                       }
                     },
-                    err => { redoBtn.disabled = false; redoProg.style.display = 'none'; toast(err, 'error'); },
+                    (err) => { redoBtn.disabled = false; redoProg.style.display = 'none'; toast(err, 'error'); },
                   );
                 } catch (e) { redoBtn.disabled = false; redoProg.style.display = 'none'; toast(e.message, 'error'); }
               });
             }
 
+            // Sequence button
             const existing = vidWrap.querySelector('.to-seq-btn');
             const seqBtn = existing || (() => {
               const b = el('button', { class: 'btn btn-sm to-seq-btn', text: '+ Add to sequence', style: 'margin-top:8px;' });
@@ -708,6 +829,195 @@ export function init(panel) {
       genBtn.disabled = false;
       toast(e.message, 'error');
     }
+  });
+
+  // ── Add Audio to Any Video ─────────────────────────────────────────────────
+  // Lets the user add AI-generated music to any video — newly generated, uploaded,
+  // or anything from the gallery — without running a new video generation.
+  const extAudioToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:4px;' });
+  root.appendChild(extAudioToggleRow);
+  const extAudioToggle = el('input', { type: 'checkbox', id: 'fv-ext-audio-toggle' });
+  extAudioToggleRow.appendChild(extAudioToggle);
+  extAudioToggleRow.appendChild(el('label', {
+    for: 'fv-ext-audio-toggle',
+    style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;',
+    text: 'Add audio to a different video',
+  }));
+
+  const extAudioSection = el('div', { class: 'card', style: 'display:none; padding:14px;' });
+  root.appendChild(extAudioSection);
+  extAudioToggle.addEventListener('change', () => {
+    extAudioSection.style.display = extAudioToggle.checked ? '' : 'none';
+  });
+
+  extAudioSection.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:10px;', text: 'Add Audio to a Video' }));
+
+  // Video picker
+  let _extVideoPath = null;
+  const extVideoPreview = el('video', {
+    controls: 'true',
+    style: 'display:none; width:100%; max-height:220px; border-radius:6px; margin-bottom:8px; background:#000;',
+  });
+  extAudioSection.appendChild(extVideoPreview);
+
+  const extPickRow = el('div', { style: 'display:flex; gap:8px; margin-bottom:10px;' });
+  const extFileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none;' });
+  extAudioSection.appendChild(extFileInput);
+  const extOpenBtn = el('button', { class: 'btn btn-sm', text: 'Browse video file…' });
+  extPickRow.appendChild(extOpenBtn);
+  const extFromGalleryBtn = el('button', { class: 'btn btn-sm', text: 'Pick from Recent Media' });
+  extPickRow.appendChild(extFromGalleryBtn);
+  extAudioSection.appendChild(extPickRow);
+
+  const extGalleryList = el('div', { style: 'display:none; max-height:160px; overflow-y:auto; margin-bottom:10px; border:1px solid var(--border-2); border-radius:6px;' });
+  extAudioSection.appendChild(extGalleryList);
+
+  function _setExtVideo(path, url) {
+    _extVideoPath = path;
+    extVideoPreview.src = url || pathToUrl(path);
+    extVideoPreview.style.display = '';
+    extGalleryList.style.display = 'none';
+  }
+
+  extOpenBtn.addEventListener('click', () => extFileInput.click());
+  extFileInput.addEventListener('change', async () => {
+    if (!extFileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/fun/upload-video', Array.from(extFileInput.files));
+      const path = data.paths?.[0] || data.path;
+      _setExtVideo(path, pathToUrl(path));
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  extFromGalleryBtn.addEventListener('click', async () => {
+    const isVisible = extGalleryList.style.display !== 'none';
+    if (isVisible) { extGalleryList.style.display = 'none'; return; }
+    extGalleryList.innerHTML = '<div style="padding:8px;font-size:.8rem;color:var(--text-3);">Loading…</div>';
+    extGalleryList.style.display = '';
+    try {
+      const data = await apiFetch('/api/gallery?limit=48');
+      const videos = (data.items || []).filter(i => /\.(mp4|webm|mov)/i.test(i.url));
+      extGalleryList.innerHTML = '';
+      if (!videos.length) {
+        extGalleryList.innerHTML = '<div style="padding:8px;font-size:.8rem;color:var(--text-3);">No videos in gallery yet</div>';
+        return;
+      }
+      for (const v of videos) {
+        const row = el('div', {
+          style: 'padding:6px 10px; cursor:pointer; font-size:.8rem; border-bottom:1px solid var(--border-1);',
+          text: v.url.split('/').pop().replace(/\?.*/, ''),
+        });
+        row.addEventListener('click', () => {
+          const path = v.metadata?.path || v.url;
+          _setExtVideo(path, v.url);
+        });
+        row.addEventListener('mouseenter', () => { row.style.background = 'var(--surface-2)'; });
+        row.addEventListener('mouseleave', () => { row.style.background = ''; });
+        extGalleryList.appendChild(row);
+      }
+    } catch (e) { extGalleryList.innerHTML = '<div style="padding:8px;font-size:.8rem;color:var(--red);">Failed to load gallery</div>'; }
+  });
+
+  // Music prompt + AI suggest
+  const extMusicIn = el('input', { type: 'text', style: 'flex:1;',
+    placeholder: 'Music style (blank = AI picks from video)',
+  });
+  const extSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', style: 'flex-shrink:0;' });
+  extAudioSection.appendChild(el('div', { style: 'margin-bottom:8px;' }, [
+    el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
+    el('div', { style: 'display:flex; gap:6px;' }, [extMusicIn, extSuggestBtn]),
+  ]));
+
+  const extInstrChk = el('input', { type: 'checkbox', id: 'fv-ext-instr' });
+  const extLyricWrap = el('div', { style: 'margin-bottom:10px;' });
+  const extLyricTA = el('textarea', { rows: '2', style: 'width:100%; font-size:.82rem; resize:vertical;',
+    placeholder: 'Lyric direction — theme, mood, subject',
+  });
+  extLyricWrap.appendChild(el('label', { text: 'Lyric Direction', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }));
+  extLyricWrap.appendChild(extLyricTA);
+
+  extAudioSection.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
+    extInstrChk,
+    el('label', { for: 'fv-ext-instr', text: 'Instrumental (no vocals)', style: 'cursor:pointer; font-size:.85rem;' }),
+  ]));
+  extAudioSection.appendChild(extLyricWrap);
+
+  function _syncExtLyric() { extLyricWrap.style.display = extInstrChk.checked ? 'none' : ''; }
+  extInstrChk.addEventListener('change', _syncExtLyric);
+  _syncExtLyric();
+
+  extSuggestBtn.addEventListener('click', async () => {
+    if (!_extVideoPath) { toast('Pick a video first', 'info'); return; }
+    extSuggestBtn.disabled = true; extSuggestBtn.textContent = '…';
+    try {
+      const data = await api('/api/fun/suggest-music', {
+        method: 'POST',
+        body: JSON.stringify({ video_path: _extVideoPath, user_direction: extLyricTA.value.trim(), instrumental: extInstrChk.checked }),
+      });
+      if (data.music_prompt) extMusicIn.value = data.music_prompt;
+      if (data.lyric_direction && !extInstrChk.checked) extLyricTA.value = data.lyric_direction;
+    } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
+    finally { extSuggestBtn.disabled = false; extSuggestBtn.textContent = '✦ Suggest'; }
+  });
+
+  const extGenBtn  = el('button', { class: 'btn btn-primary', text: 'Generate Audio', style: 'width:100%;' });
+  const extProgRow = el('div', { style: 'display:none; font-size:.8rem; color:var(--accent); margin-top:6px;' });
+  extAudioSection.appendChild(extGenBtn);
+  extAudioSection.appendChild(extProgRow);
+
+  // Result area for external video
+  const extResultWrap = el('div', { style: 'margin-top:10px;' });
+  extAudioSection.appendChild(extResultWrap);
+
+  let _extResultPath = null;
+  const extPlayer = createVideoPlayer(extResultWrap);
+
+  // Sync tool for the external video result
+  const extSyncTool = _buildSyncTool(
+    () => _extResultPath,
+    (newPath) => {
+      _extResultPath = newPath;
+      extPlayer.show(pathToUrl(newPath), newPath);
+      toast('Sync applied', 'success');
+    },
+  );
+  extSyncTool.style.display = 'none';
+  extResultWrap.appendChild(extSyncTool);
+
+  extGenBtn.addEventListener('click', async () => {
+    if (!_extVideoPath) {
+      toast('Pick a video to add audio to first', 'error');
+      extAudioSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    extGenBtn.disabled = true;
+    extProgRow.style.display = '';
+    extProgRow.textContent = 'Submitting…';
+    try {
+      const { job_id } = await api('/api/fun/add-music', {
+        method: 'POST',
+        body: JSON.stringify({
+          video_path:      _extVideoPath,
+          music_prompt:    extMusicIn.value.trim(),
+          lyric_direction: extInstrChk.checked ? '' : extLyricTA.value.trim(),
+          instrumental:    extInstrChk.checked,
+        }),
+      });
+      pollJob(job_id,
+        (j) => { extProgRow.textContent = j.message || 'Working…'; },
+        (j) => {
+          extGenBtn.disabled = false; extProgRow.style.display = 'none';
+          if (j.output) {
+            _extResultPath = j.output;
+            extPlayer.show(pathToUrl(j.output), j.output);
+            extSyncTool.style.display = '';
+            pushToGallery('fun-videos', j.output, extMusicIn.value.trim() || 'AI music', null, {});
+            toast('Audio added!', 'success');
+          }
+        },
+        (err) => { extGenBtn.disabled = false; extProgRow.style.display = 'none'; toast(err, 'error'); },
+      );
+    } catch (e) { extGenBtn.disabled = false; extProgRow.style.display = 'none'; toast(e.message, 'error'); }
   });
 
   // ── Sequence builder (multi-clip with transitions) ────────────────────────

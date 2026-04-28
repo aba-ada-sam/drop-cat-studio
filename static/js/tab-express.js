@@ -201,26 +201,52 @@ export function init(panel) {
 
   async function _loadRecent() {
     try {
-      const data = await apiFetch('/api/gallery?limit=16', { context: 'express.recent' });
-      const images = (data.items || []).filter(i => !/\.(mp4|webm|mov)/i.test(i.url));
-      if (!images.length) return;
+      // Gather images from gallery + source images used in recent video jobs
+      const [galleryData, jobsData] = await Promise.allSettled([
+        apiFetch('/api/gallery?limit=24', { context: 'express.recent' }),
+        apiFetch('/api/jobs', { context: 'express.recent.jobs' }),
+      ]);
+
+      const seen = new Set();
+      const items = []; // {url, path, title}
+
+      // Gallery images (exclude videos)
+      if (galleryData.status === 'fulfilled') {
+        for (const i of (galleryData.value.items || [])) {
+          if (/\.(mp4|webm|mov)/i.test(i.url)) continue;
+          const path = i.metadata?.path || i.url;
+          if (!seen.has(path)) { seen.add(path); items.push({ url: i.url, path, title: i.prompt || '' }); }
+        }
+      }
+
+      // Source images from recent completed video jobs
+      if (jobsData.status === 'fulfilled') {
+        for (const job of (jobsData.value.completed || [])) {
+          const src = job.meta?.source_image;
+          if (!src || seen.has(src)) continue;
+          seen.add(src);
+          const url = src.startsWith('/') ? src : `/output/${src.split('/output/').pop()}`;
+          items.push({ url: `/api/thumbnail?path=${encodeURIComponent(src)}&size=120`, path: src, title: job.label || 'Used in video' });
+        }
+      }
+
+      if (!items.length) return;
       recentRow.innerHTML = '';
-      for (const item of images.slice(0, 12)) {
+      for (const item of items.slice(0, 16)) {
         const thumb = el('img', {
-          src: item.thumbnail || item.url,
+          src: item.url,
           class: 'gallery-thumb',
-          title: item.prompt || 'Use this image',
+          title: item.title || 'Use this image',
+          style: 'width:72px;height:48px;object-fit:cover;border-radius:4px;cursor:pointer;',
         });
+        thumb.onerror = () => { thumb.style.display = 'none'; };
         const removeBtn = el('button', {
           style: 'position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;',
           title: 'Remove from list',
           text: '×',
         });
         const thumbWrap = el('div', { style: 'position:relative;flex-shrink:0;' }, [thumb, removeBtn]);
-        thumb.addEventListener('click', () => {
-          const path = item.metadata?.path || item.url;
-          _applyImage(path, item.url);
-        });
+        thumb.addEventListener('click', () => _applyImage(item.path, item.url));
         removeBtn.addEventListener('click', e => {
           e.stopPropagation();
           thumbWrap.remove();

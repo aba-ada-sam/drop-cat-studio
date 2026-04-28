@@ -535,3 +535,90 @@ async def add_music(request: Request):
     label = f"Add music: {Path(video_path).stem[:24]}"
     job = job_manager.submit(JOB_FUN_VIDEO, _worker, video_path, settings, label=label)
     return {"job_id": job.id}
+
+
+@router.post("/suggest-music")
+async def suggest_music(request: Request):
+    """LLM-derives a music prompt (and optional lyric direction) from video frames.
+
+    Accepts:
+        video_path      — path to video file
+        user_direction  — optional free-text hint from the user
+        instrumental    — bool, default False
+    Returns:
+        { music_prompt, lyric_direction, bpm }
+    """
+    body = await request.json()
+    video_path = _resolve_path(body.get("video_path", ""))
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, f"Video not found: {video_path}")
+
+    user_direction = body.get("user_direction", "")
+    instrumental   = bool(body.get("instrumental", False))
+
+    def _run():
+        from app import get_llm_router; llm_router = get_llm_router()
+        from features.fun_videos import analyzer
+        from core.ffmpeg_utils import sample_frames_temporal
+
+        frames = sample_frames_temporal(video_path)
+        result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
+        music_prompt = result.get("music_prompt", "")
+        bpm = result.get("bpm")
+
+        lyric_direction = ""
+        if not instrumental and frames:
+            try:
+                lyric_direction = analyzer.generate_lyrics(llm_router, frames, music_prompt, user_direction)
+                # Return just the direction hint, not full lyrics
+                lyric_direction = (lyric_direction or "").split("\n")[0][:120]
+            except Exception:
+                pass
+
+        return {"music_prompt": music_prompt, "lyric_direction": lyric_direction, "bpm": bpm}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/sync-audio")
+async def sync_audio(request: Request):
+    """Shift the audio track of a video by offset_ms milliseconds.
+
+    Positive offset_ms: audio starts later (delays the audio).
+    Negative offset_ms: audio starts earlier (advances the audio).
+
+    Accepts:
+        video_path  — path to merged video file
+        offset_ms   — integer milliseconds, range -5000..5000
+    Returns:
+        { output }
+    """
+    import subprocess
+    import time as _time
+    body = await request.json()
+    video_path = _resolve_path(body.get("video_path", ""))
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, f"Video not found: {video_path}")
+
+    offset_ms = int(body.get("offset_ms", 0))
+    if abs(offset_ms) > 5000:
+        raise HTTPException(400, "offset_ms must be between -5000 and 5000")
+    if offset_ms == 0:
+        return {"output": video_path}
+
+    def _run():
+        p = Path(video_path)
+        out = str(p.parent / f"{p.stem}_sync{offset_ms:+d}ms_{int(_time.time())}.mp4")
+        if offset_ms > 0:
+            af = f"adelay={offset_ms}|{offset_ms}"
+        else:
+            sec = abs(offset_ms) / 1000.0
+            af = f"atrim=start={sec:.3f},apad"
+        cmd = ["ffmpeg", "-y", "-i", video_path, "-af", af, "-c:v", "copy", "-c:a", "aac", out]
+        r = subprocess.run(cmd, capture_output=True, timeout=120)
+        if r.returncode != 0:
+            raise RuntimeError(f"ffmpeg sync failed: {r.stderr.decode()[-400:]}")
+        return out
+
+    out_path = await asyncio.to_thread(_run)
+    return {"output": out_path}

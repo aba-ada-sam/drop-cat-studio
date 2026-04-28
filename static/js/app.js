@@ -5,9 +5,9 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428k';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428m';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260428b';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260428l';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260428n';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427b';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
@@ -42,13 +42,11 @@ const TAB_HANDOFF = {
 const _tabInitialized = new Set();
 
 // ── Pipeline breadcrumb ───────────────────────────────────────────────────────
-// Injected once into each of the 4 pipeline panels so users always know
-// where they are and what comes next.
+// Injected into Generate Images and Create Videos panels.
+// Audio lives inside Create Videos; Batch Processing is its own standalone tool.
 const PIPELINE_STEPS = [
-  { id: 'sd-prompts',        num: '01', label: 'Generate Images'  },
-  { id: 'fun-videos',        num: '02', label: 'Create Videos'    },
-  { id: 'video-tools',       num: '03', label: 'Audio'            },
-  { id: 'video-tools-batch', num: '04', label: 'Batch Processing' },
+  { id: 'sd-prompts', num: '01', label: 'Generate Images' },
+  { id: 'fun-videos', num: '02', label: 'Create Videos'   },
 ];
 
 function _buildPipelineBar(activeTabId) {
@@ -894,11 +892,10 @@ function initShortcuts() {
       document.getElementById('gallery-detail-overlay')?.classList.remove('open');
       document.getElementById('error-log-overlay')?.classList.remove('open');
     }, description: 'Close / cancel' },
-    { key: '0', action: () => switchTab('pipeline'),   description: 'Studio Home' },
-    { key: '1', action: () => switchTab('sd-prompts'),  description: 'Generate Images (Step 01)' },
-    { key: '2', action: () => switchTab('fun-videos'),  description: 'Create Videos (Step 02)' },
-    { key: '3', action: () => switchTab('video-tools'),       description: 'Audio (Step 03)' },
-    { key: '4', action: () => switchTab('video-tools-batch'), description: 'Batch Processing (Step 04)' },
+    { key: '0', action: () => switchTab('pipeline'),          description: 'Studio Home' },
+    { key: '1', action: () => switchTab('sd-prompts'),         description: 'Generate Images' },
+    { key: '2', action: () => switchTab('fun-videos'),         description: 'Create Videos' },
+    { key: '4', action: () => switchTab('video-tools-batch'),  description: 'Batch Processing' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
   ];
@@ -923,9 +920,9 @@ function initShortcuts() {
 function initPaletteItems() {
   registerItems([
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
+    { label: 'Quick Video',      group: 'Tabs',   hint: 'Q', action: () => switchTab('express') },
     { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
     { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('fun-videos') },
-    { label: 'Audio',            group: 'Tabs',   hint: '3', action: () => switchTab('video-tools') },
     { label: 'Batch Processing', group: 'Tabs',   hint: '4', action: () => switchTab('video-tools-batch') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
