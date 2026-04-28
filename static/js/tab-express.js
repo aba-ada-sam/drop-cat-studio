@@ -519,7 +519,16 @@ export function init(panel) {
     }
 
     let motionPrompt = ideaInput.value.trim();
-    if (!motionPrompt) {
+    const needIdea   = !motionPrompt;
+    const needLyric  = !lyricInput.value.trim();
+
+    if (needIdea && needLyric && _imagePath) {
+      // Both blank + image present — brainstorm fills both fields at once
+      try {
+        await _brainstorm('Generate a video motion prompt and a brief lyric direction based on this image');
+        motionPrompt = ideaInput.value.trim();
+      } catch (_) {}
+    } else if (needIdea) {
       try {
         const data = await api('/api/fun/generate-prompts', {
           method: 'POST',
@@ -529,11 +538,12 @@ export function init(panel) {
           }),
         });
         const p = data.prompts?.[0];
-        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || 'Subject erupts into motion, energy bursts through the frame';
-      } catch (_) {
-        motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
-      }
+        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || '';
+      } catch (_) {}
+      if (!motionPrompt) motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
       ideaInput.value = motionPrompt;
+    } else {
+      motionPrompt = ideaInput.value.trim();
     }
 
     try {
@@ -625,7 +635,14 @@ export function init(panel) {
       toast('Drop an image first', 'error');
       return;
     }
+    createBtn.disabled = true;
+    createBtn.textContent = 'Working…';
     _loopCount = 0;
-    await _generateOne(false);
+    try {
+      await _generateOne(false);
+    } finally {
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create';
+    }
   });
 }
