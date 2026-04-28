@@ -84,10 +84,6 @@ function _render(data) {
   _root.innerHTML = '';
 
   if (total === 0 && completed.length === 0) {
-    _root.appendChild(el('div', {
-      style: 'color:var(--text-3); font-size:.9rem; padding:40px 0; text-align:center;',
-      text: 'No jobs yet — click Create on the Quick Start tab to add one.',
-    }));
     return;
   }
 

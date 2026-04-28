@@ -15,7 +15,13 @@ let _models         = {};
 let _applyStart     = null;
 
 export function receiveHandoff(data) {
-  if (data.type === 'image' && data.path) {
+  if (!data.path) return;
+  if (data.type === 'video') {
+    if (_applyStart) {
+      // _applyVideo isn't module-level; trigger via a custom event the tab listens for
+      document.dispatchEvent(new CustomEvent('fv-handoff-video', { detail: data }));
+    }
+  } else if (data.type === 'image') {
     if (_applyStart) _applyStart(data.path, data.url || '');
     else toast('Open Create Videos tab first', 'info');
   }
@@ -30,101 +36,145 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:860px; margin:0 auto;' });
   panel.appendChild(root);
 
-  // ── Image picker ──────────────────────────────────────────────────────────
+  // ── Recent Media picker ───────────────────────────────────────────────────
   const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(pickerCard);
 
   const pickerHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
   pickerCard.appendChild(pickerHeader);
-  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Your Generated Images' }));
+  pickerHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Recent Media' }));
 
   const refreshBtn = el('button', { class: 'btn btn-sm', text: 'Refresh' });
   pickerHeader.appendChild(refreshBtn);
 
-  const fileInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none' });
   pickerCard.appendChild(fileInput);
-  const openFileBtn = el('button', { class: 'btn btn-sm', text: 'Open file...' });
+  const openFileBtn = el('button', { class: 'btn btn-sm', text: 'Open file…' });
   pickerHeader.appendChild(openFileBtn);
   openFileBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async () => {
     if (!fileInput.files?.length) return;
+    const f0 = fileInput.files[0];
+    const isVid = f0.type.startsWith('video/');
     try {
-      const data = await apiUpload('/api/fun/upload', Array.from(fileInput.files));
+      const data = await apiUpload(isVid ? '/api/fun/upload-video' : '/api/fun/upload', Array.from(fileInput.files));
       const f = data.files?.[0];
-      if (f) _applyStart(f.path, f.url || pathToUrl(f.path));
+      if (f) {
+        if (isVid) _applyVideo(f.path, f.url || pathToUrl(f.path));
+        else        _applyStart(f.path, f.url || pathToUrl(f.path));
+      }
     } catch (e) { toast(e.message, 'error'); }
     fileInput.value = '';
   });
 
-  const imageGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:6px; max-height:280px; overflow-y:auto;' });
-  pickerCard.appendChild(imageGrid);
+  const mediaGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); gap:6px; max-height:280px; overflow-y:auto;' });
+  pickerCard.appendChild(mediaGrid);
 
   let _selectedThumb = null;
 
-  async function loadSessionImages() {
+  function _isVideo(url) { return /(\.mp4|\.webm|\.mov)$/i.test(url || ''); }
+
+  async function loadRecentMedia() {
     try {
-      // Use gallery (persists across restarts) filtered to images only
       const data = await api('/api/gallery?limit=60');
-      const items = (data.items || data || []).filter(i =>
-        !/(\.mp4|\.webm|\.mov)$/i.test(i.url || '')
-      ).slice(0, 36);
-      imageGrid.innerHTML = '';
+      const items = (data.items || data || []).slice(0, 48);
+      mediaGrid.innerHTML = '';
       _selectedThumb = null;
       if (!items.length) {
-        imageGrid.appendChild(el('div', {
-          style: 'grid-column:1/-1; text-align:center; padding:32px 0; color:var(--text-3); font-size:.82rem; line-height:1.6;',
-          text: 'No generated images yet — go to Generate Images first.',
+        mediaGrid.appendChild(el('div', {
+          style: 'grid-column:1/-1; text-align:center; padding:32px 0; color:var(--text-3); font-size:.82rem;',
+          text: 'Nothing yet — generate something first.',
         }));
         return;
       }
       for (const item of items) {
         const url  = item.url;
         const path = item.metadata?.path || url;
+        const vid  = _isVideo(url);
+
+        const wrap = el('div', { style: 'position:relative; cursor:pointer;' });
         const thumb = el('img', {
-          src: url, title: item.prompt || url.split('/').pop(),
-          style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:2px solid transparent; transition:border-color .15s;',
+          src: item.thumbnail || url,
+          title: item.prompt || url.split('/').pop(),
+          style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
         });
-        thumb.addEventListener('click', () => {
+        wrap.appendChild(thumb);
+        if (vid) {
+          wrap.appendChild(el('div', {
+            style: 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;',
+          }, [el('div', { style: 'background:rgba(0,0,0,.55); border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff;', text: '▶' })]));
+        }
+        wrap.addEventListener('click', () => {
           if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
           thumb.style.borderColor = 'var(--accent)';
           _selectedThumb = thumb;
-          _applyStart(path, url);
+          if (vid) _applyVideo(path, url);
+          else     _applyStart(path, url);
         });
-        imageGrid.appendChild(thumb);
+        mediaGrid.appendChild(wrap);
       }
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  refreshBtn.addEventListener('click', loadSessionImages);
-  loadSessionImages();
+  refreshBtn.addEventListener('click', loadRecentMedia);
+  loadRecentMedia();
 
-  // ── Selected image strip ──────────────────────────────────────────────────
-  const selectedCard = el('div', { class: 'card', style: 'display:none; padding:10px 14px; align-items:center; gap:12px;' });
-  root.appendChild(selectedCard);
+  // ── Selected media preview ─────────────────────────────────────────────────
+  const previewCard = el('div', { class: 'drop-zone', style: 'display:none; position:relative; overflow:hidden; padding:0;' });
+  root.appendChild(previewCard);
 
-  const selectedPreview = el('img', { style: 'width:72px; height:72px; object-fit:cover; border-radius:6px; flex-shrink:0;' });
-  const selectedName    = el('div', { style: 'font-size:.74rem; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px;' });
-  const clearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'margin-left:auto; flex-shrink:0;',
-    onclick() {
-      _startImagePath = null;
-      selectedCard.style.display = 'none';
-      if (_selectedThumb) { _selectedThumb.style.borderColor = 'transparent'; _selectedThumb = null; }
-    },
+  const previewImg   = el('img',   { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised); display:block;' });
+  const previewVid   = el('video', { controls: '', style: 'display:none; width:100%; max-height:260px; border-radius:8px; background:#000; display:block;' });
+  const previewClear = el('button', {
+    style: 'position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
+    title: 'Clear', text: '×',
   });
+  previewCard.appendChild(previewImg);
+  previewCard.appendChild(previewVid);
+  previewCard.appendChild(previewClear);
 
-  selectedCard.appendChild(selectedPreview);
-  selectedCard.appendChild(el('div', { style: 'flex:1; min-width:0;' }, [
-    el('div', { style: 'font-size:.82rem; font-weight:600; color:var(--text-2);', text: 'Selected for video' }),
-    selectedName,
-  ]));
-  selectedCard.appendChild(clearBtn);
+  previewImg.style.display = 'none';
+  previewVid.style.display = 'none';
+
+  previewClear.addEventListener('click', () => {
+    _startImagePath = null;
+    _startVideoPath = null;
+    previewCard.style.display = 'none';
+    previewImg.style.display = 'none'; previewImg.src = '';
+    previewVid.style.display = 'none'; previewVid.src = '';
+    if (_selectedThumb) { _selectedThumb.style.borderColor = 'transparent'; _selectedThumb = null; }
+    // Un-check video toggle
+    videoChk.checked = false;
+    videoCard.style.display = 'none';
+  });
 
   _applyStart = (path, url) => {
     _startImagePath = path;
-    selectedPreview.src = url || pathToUrl(path);
-    selectedName.textContent = path.split(/[\\/]/).pop();
-    selectedCard.style.display = 'flex';
+    _startVideoPath = null;
+    previewImg.src = url || pathToUrl(path);
+    previewImg.style.display = 'block';
+    previewVid.style.display = 'none'; previewVid.src = '';
+    previewCard.style.display = '';
+    // Un-check video toggle if switching from video to image
+    videoChk.checked = false;
+    videoCard.style.display = 'none';
   };
+
+  function _applyVideo(path, url) {
+    _startVideoPath = path;
+    _startImagePath = null;
+    previewVid.src = url || pathToUrl(path);
+    previewVid.style.display = 'block';
+    previewImg.style.display = 'none'; previewImg.src = '';
+    previewCard.style.display = '';
+    // Auto-enable the video-to-video toggle
+    videoChk.checked = true;
+    videoCard.style.display = '';
+    videoName.textContent = path.split(/[\\/]/).pop();
+    videoClearBtn.style.display = '';
+  }
+
+  document.addEventListener('fv-handoff-video', e => _applyVideo(e.detail.path, e.detail.url || ''), { once: false });
 
   // ── Start video (video-to-video) ──────────────────────────────────────────
   let _startVideoPath = null;
