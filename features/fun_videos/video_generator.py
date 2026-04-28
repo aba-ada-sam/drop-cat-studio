@@ -154,6 +154,15 @@ def _generate_via_worker(
     deadline = time.time() + 600
     while time.time() < deadline:
         if stop_check and stop_check():
+            # Kill the worker so it restarts clean for the next job (watchdog revives it)
+            try:
+                urllib.request.urlopen(
+                    urllib.request.Request(
+                        f"http://127.0.0.1:{WANGP_WORKER_PORT}/shutdown",
+                        data=b"{}", headers={"Content-Type": "application/json"},
+                    ), timeout=3)
+            except Exception:
+                pass
             return None
         try:
             with urllib.request.urlopen(
