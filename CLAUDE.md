@@ -126,6 +126,10 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 - **`components.js`** — shared UI factory (`el()`, `toast()`, `createDropZone()`, `createSlider()`, etc.)
 - **`handoff.js`** — cross-tab data passing (e.g., Fun Videos output → Bridges input)
 
+### Express tab (`tab-express.js`) — inline polling model
+
+The Express tab polls its own job and renders progress + output inline. Non-loop single-run jobs must follow this pattern: show a progress bar on submit, call `pollJob()`, update the bar on each tick, render the video player on done, show the error in red on failure. **Do not fire-and-forget.** The user has no other place to see what is happening unless the Queue tab is open.
+
 ### Shell layer (`static/js/shell/`)
 
 Cross-cutting concerns owned by the shell, not per-tab:
@@ -162,6 +166,18 @@ The header contains three zones:
 | Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
 
 Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging. ACE-Step is intentionally deferred to avoid VRAM contention with Ollama.
+
+### WanGP worker (`services/wangp_worker.py`)
+
+The worker runs as a persistent subprocess on port 7899. DCS communicates via HTTP (`POST /generate`, `GET /status`, `GET /health`). Key behaviour:
+
+- **After DCS restarts**, the old worker stays alive on 7899 but DCS loses its stdout pipe. The `[wangp-worker]` log lines only appear while DCS owns the pipe from the original `subprocess.Popen`. Restart the worker via `POST /api/services/restart/wangp` to get a fresh pipe and fresh error capture.
+- **Error capture:** `process_tasks_cli` in WanGP returns `False` when `generate_video` raises internally. The actual error is printed to worker stdout but only visible if the drain thread is active. The worker monkey-patches `builtins.print` during `process_tasks_cli` to capture `[ERROR]` / traceback lines and exposes them in the `/status` error field — so the real WanGP error propagates back to the job failure message.
+- **SAFE_DEFAULTS** in `core/wangp_models.py` is the single source of truth for required WanGP input keys. When WanGP is updated (Pinokio pulls), new keys may appear in `models/_settings.json`; add them to `SAFE_DEFAULTS` if WanGP raises `KeyError` on them.
+
+### `_resolve_path` caveat (`features/fun_videos/routes.py`)
+
+`_resolve_path(raw)` only resolves URL-style paths starting with `/output/...` into absolute filesystem paths. It does **not** handle `/uploads/...` paths. The upload endpoint returns the absolute filesystem path in `f.path` — always send that absolute path (not the URL) as `photo_path` in make-it requests.
 
 ---
 
@@ -201,6 +217,7 @@ Schemas live inline in `app.py` via `CREATE TABLE IF NOT EXISTS`. No migration s
 2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works. The watchdog in `services/manager.py` re-checks externally-launched Forge every 30s.
 3. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
 4. **First AI intent call** takes ~14s because Ollama cold-loads the model. Subsequent calls are ~3s. The palette shows a "Thinking…" spinner for the duration.
+5. **`launch.bat` `%~dp0` trailing backslash** — `%~dp0` expands to `C:\DropCat-Studio\` (trailing `\`). Wrapping it in quotes as `"%~dp0"` makes `\"` an escaped quote, breaking the argument. Strip it: `set "_X=%~dp0"` then `if "%_X:~-1%"=="\" set "_X=%_X:~0,-1%"` before using in commands like `git -C`.
 
 ---
 
