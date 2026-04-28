@@ -39,7 +39,7 @@ git --version >nul 2>&1
 if not errorlevel 1 (
     echo Checking for updates...
     for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_BEFORE=%%i
-    git -C "%_REPO%" pull --ff-only origin master 2>&1
+    git -C "%_REPO%" pull --ff-only origin master >nul 2>&1
     for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_AFTER=%%i
     if not "!_SHA_BEFORE!"=="!_SHA_AFTER!" (
         echo New version pulled -- restarting server if running.
