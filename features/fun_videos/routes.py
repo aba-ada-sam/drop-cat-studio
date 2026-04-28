@@ -443,7 +443,8 @@ async def add_music(request: Request):
         from app import get_llm_router; llm_router = get_llm_router()
         from features.fun_videos import analyzer, audio_generator
         from features.fun_videos.video_generator import merge_video_audio
-        from core.ffmpeg_utils import probe_duration, sample_frames_temporal
+        from features.fun_videos.pipeline import _sample_music_frames
+        from core.ffmpeg_utils import probe_duration
         import time as _time
         from pathlib import Path as _Path
 
@@ -454,7 +455,7 @@ async def add_music(request: Request):
 
         if not music_prompt:
             try:
-                frames = sample_frames_temporal(vpath)
+                frames = _sample_music_frames(vpath, llm_router)
                 if frames:
                     result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
                     music_prompt = result.get("music_prompt", "")
@@ -471,7 +472,7 @@ async def add_music(request: Request):
         if not instrumental:
             job.update(progress=15, message="Writing lyrics…")
             try:
-                frames_lyr = sample_frames_temporal(vpath)
+                frames_lyr = _sample_music_frames(vpath, llm_router)
                 lyric_direction = cfg_settings.get("lyric_direction", "") or cfg_settings.get("user_direction", "")
                 lyrics = analyzer.generate_lyrics(llm_router, frames_lyr, music_prompt, lyric_direction)
             except Exception as e:
@@ -559,9 +560,9 @@ async def suggest_music(request: Request):
     def _run():
         from app import get_llm_router; llm_router = get_llm_router()
         from features.fun_videos import analyzer
-        from core.ffmpeg_utils import sample_frames_temporal
+        from features.fun_videos.pipeline import _sample_music_frames
 
-        frames = sample_frames_temporal(video_path)
+        frames = _sample_music_frames(video_path, llm_router)
         result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
         music_prompt = result.get("music_prompt", "")
         bpm = result.get("bpm")

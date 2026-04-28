@@ -19,6 +19,18 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
+
+def _sample_music_frames(video_path: str, llm_router) -> list:
+    """Sample video frames optimised for music/lyric analysis.
+
+    Cloud vision APIs (Anthropic, OpenAI) handle 8 frames at 256px cleanly.
+    Ollama context windows are tight — cap at 3 frames so we don't blow them.
+    256px is plenty for mood, color, and motion analysis; fine detail wastes tokens.
+    """
+    is_ollama = llm_router._provider() == "ollama"
+    n = 3 if is_ollama else 8
+    return sample_frames_temporal(video_path, max_frames=n, max_dim=256)
+
 # Quality suffixes appended to every video prompt before sending to WanGP.
 # These are model-family specific tags the models were trained on.
 _PROMPT_SUFFIXES = {
@@ -204,7 +216,7 @@ def run_pipeline(job, photo_path, settings):
 
     if not music_prompt:
         try:
-            frames = sample_frames_temporal(video_path)
+            frames = _sample_music_frames(video_path, llm_router)
             if frames:
                 music_result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
                 music_prompt = music_result.get("music_prompt", "cinematic ambient, warm strings")
@@ -223,7 +235,7 @@ def run_pipeline(job, photo_path, settings):
     if not instrumental:
         job.update(progress=68, message="Writing lyrics...")
         try:
-            frames = sample_frames_temporal(video_path)
+            frames = _sample_music_frames(video_path, llm_router)
             if frames:
                 lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, lyric_direction or user_direction)
                 if lyrics:

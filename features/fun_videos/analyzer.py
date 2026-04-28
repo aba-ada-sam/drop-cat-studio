@@ -222,7 +222,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
     try:
         text = router.route_vision(
             prompt,
-            video_frames_b64[:6],  # Limit frames for token budget
+            video_frames_b64,  # caller controls count via _sample_music_frames
             tier=TIER_BALANCED,
             system=MUSIC_PROMPT_SYSTEM,
         )

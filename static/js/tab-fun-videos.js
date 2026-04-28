@@ -541,40 +541,98 @@ export function init(panel) {
     finally { musicSuggestBtn.disabled = false; musicSuggestBtn.textContent = '✦ Suggest'; }
   });
 
-  // ── Sync tool helper ────────────────────────────────────────────────────────
+  // ── Real-time sync tool ────────────────────────────────────────────────────
+  // Plays a muted <video> for visual + separate <audio> element offset by the
+  // slider value. Adjusts in real-time while playing; "Lock In + Export" bakes
+  // the offset to disk via /api/fun/sync-audio.
   function _buildSyncTool(getVideoPath, onSynced) {
     const wrap = el('div', { class: 'card', style: 'padding:12px; margin-top:8px; background:var(--surface-1);' });
-    wrap.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:4px; color:var(--text-2);', text: 'Audio Sync' }));
-    wrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:8px;', text: 'Shift audio earlier (−) or later (+). Apply, watch, repeat until it locks.' }));
-    const offsetLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); min-width:64px; text-align:right;', text: '0 ms' });
+    wrap.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:3px; color:var(--text-2);', text: 'Audio Sync' }));
+    wrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:10px;',
+      text: 'Hit play, drag the slider to shift audio earlier (−) or later (+). Adjust until it locks, then export.' }));
+
+    // Dual-element player: video is muted visually, audio plays from a shadow audio el
+    const videoEl = document.createElement('video');
+    videoEl.controls = true;
+    videoEl.muted = true;
+    videoEl.style.cssText = 'display:none; width:100%; max-height:200px; border-radius:6px; margin-bottom:8px; background:#000;';
+    const audioEl = document.createElement('audio');
+    audioEl.preload = 'auto';
+    wrap.appendChild(videoEl);
+    wrap.appendChild(audioEl);
+
+    let _offsetMs = 0;
+
+    function _resync() {
+      const targetAudioTime = videoEl.currentTime - _offsetMs / 1000;
+      if (targetAudioTime < 0) {
+        audioEl.pause();
+        return;
+      }
+      if (Math.abs(audioEl.currentTime - targetAudioTime) > 0.05) {
+        audioEl.currentTime = targetAudioTime;
+      }
+      if (audioEl.paused && !videoEl.paused) audioEl.play().catch(() => {});
+    }
+
+    videoEl.addEventListener('play',    () => { _resync(); audioEl.play().catch(() => {}); });
+    videoEl.addEventListener('pause',   () => audioEl.pause());
+    videoEl.addEventListener('seeked',  () => _resync());
+    videoEl.addEventListener('ended',   () => { audioEl.pause(); audioEl.currentTime = 0; });
+    videoEl.addEventListener('timeupdate', _resync);
+
+    // Slider
+    const offsetLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); min-width:72px; text-align:right;', text: '0 ms' });
     const offsetSlider = el('input', { type: 'range', min: '-2000', max: '2000', step: '10', value: '0', style: 'flex:1; cursor:pointer;' });
     offsetSlider.addEventListener('input', () => {
-      const v = parseInt(offsetSlider.value);
-      offsetLabel.textContent = `${v > 0 ? '+' : ''}${v} ms`;
+      _offsetMs = parseInt(offsetSlider.value);
+      offsetLabel.textContent = `${_offsetMs > 0 ? '+' : ''}${_offsetMs} ms`;
+      if (!videoEl.paused) _resync();
     });
-    const applyBtn   = el('button', { class: 'btn btn-sm btn-primary', text: 'Apply' });
+    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center; margin-bottom:10px;' }, [offsetSlider, offsetLabel]));
+
+    // Buttons
+    const exportBtn  = el('button', { class: 'btn btn-sm btn-primary', text: 'Lock In + Export' });
+    const resetBtn   = el('button', { class: 'btn btn-sm', text: 'Reset' });
     const syncStatus = el('span', { style: 'font-size:.75rem; color:var(--text-3);' });
-    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center; margin-bottom:8px;' }, [offsetSlider, offsetLabel]));
-    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [applyBtn, syncStatus]));
-    applyBtn.addEventListener('click', async () => {
+    wrap.appendChild(el('div', { style: 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;' }, [exportBtn, resetBtn, syncStatus]));
+
+    resetBtn.addEventListener('click', () => {
+      _offsetMs = 0; offsetSlider.value = '0'; offsetLabel.textContent = '0 ms';
+      if (!videoEl.paused) _resync();
+    });
+
+    exportBtn.addEventListener('click', async () => {
       const videoPath = getVideoPath();
       if (!videoPath) return;
-      const offset = parseInt(offsetSlider.value);
-      if (offset === 0) { syncStatus.textContent = 'Offset is 0 — nothing to apply'; return; }
-      applyBtn.disabled = true; syncStatus.textContent = 'Applying…';
+      if (_offsetMs === 0) { syncStatus.textContent = 'No offset — nothing to export'; return; }
+      exportBtn.disabled = true; syncStatus.textContent = 'Baking…';
       try {
         const data = await api('/api/fun/sync-audio', {
           method: 'POST',
-          body: JSON.stringify({ video_path: videoPath, offset_ms: offset }),
+          body: JSON.stringify({ video_path: videoPath, offset_ms: _offsetMs }),
         });
-        offsetSlider.value = '0'; offsetLabel.textContent = '0 ms';
-        syncStatus.textContent = `Done (${offset > 0 ? '+' : ''}${offset} ms applied)`;
+        const url = pathToUrl(data.output);
+        _offsetMs = 0; offsetSlider.value = '0'; offsetLabel.textContent = '0 ms';
+        syncStatus.textContent = `Done (+${data.output.split(/[\\/]/).pop()})`;
+        // Update both elements so the preview reflects the baked file
+        videoEl.src = url; audioEl.src = url;
         onSynced(data.output);
       } catch (e) {
-        syncStatus.textContent = e.message || 'Failed';
-        toast(e.message || 'Sync failed', 'error');
-      } finally { applyBtn.disabled = false; }
+        syncStatus.textContent = e.message || 'Export failed';
+        toast(e.message || 'Sync export failed', 'error');
+      } finally { exportBtn.disabled = false; }
     });
+
+    // Call this when a video is ready to preview
+    wrap.load = (videoPath) => {
+      const url = pathToUrl(videoPath);
+      videoEl.src = url; audioEl.src = url;
+      videoEl.style.display = '';
+      _offsetMs = 0; offsetSlider.value = '0'; offsetLabel.textContent = '0 ms';
+      syncStatus.textContent = '';
+    };
+
     return wrap;
   }
 
@@ -700,6 +758,8 @@ export function init(panel) {
 
             // Redo Audio + Sync — build once, update paths on each generation
             let redoCard = vidWrap.querySelector('.redo-audio-card');
+            // Load sync preview whenever we have a new mix (even on repeat generations)
+            if (redoCard?._syncTool && _mixPath) redoCard._syncTool.load(_mixPath);
             if (!redoCard) {
               redoCard = el('div', { class: 'card redo-audio-card', style: 'padding:12px; margin-top:10px;' });
               redoCard.appendChild(el('div', { style: 'font-size:.8rem; font-weight:600; margin-bottom:8px; color:var(--text-2);', text: 'Redo Audio' }));
@@ -746,6 +806,7 @@ export function init(panel) {
                 },
               );
               redoCard.appendChild(syncTool);
+              redoCard._syncTool = syncTool;  // store ref for load() calls below
 
               vidWrap.appendChild(redoCard);
 
@@ -789,6 +850,7 @@ export function init(panel) {
                         _mixPath = j.output;
                         resultTabBar.style.display = 'flex';
                         _showResultTab('mix');
+                        syncTool.load(_mixPath);
                         toast('Audio regenerated!', 'success');
                       }
                     },
@@ -1011,6 +1073,7 @@ export function init(panel) {
             _extResultPath = j.output;
             extPlayer.show(pathToUrl(j.output), j.output);
             extSyncTool.style.display = '';
+            extSyncTool.load(j.output);
             pushToGallery('fun-videos', j.output, extMusicIn.value.trim() || 'AI music', null, {});
             toast('Audio added!', 'success');
           }
