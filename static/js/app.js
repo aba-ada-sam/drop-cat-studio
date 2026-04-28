@@ -711,6 +711,21 @@ function initAIPills() {
   document.addEventListener('click', closeAllMenus);
 }
 
+// ── PWA install prompt ────────────────────────────────────────────────────────
+let _pwaPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _pwaPrompt = e;
+  const btn = document.getElementById('btn-pwa-install');
+  if (btn) btn.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('btn-pwa-install');
+  if (btn) btn.style.display = 'none';
+  _pwaPrompt = null;
+  toast('Drop Cat Go Studio installed — check your taskbar!', 'success');
+});
+
 // ── Rail collapse ─────────────────────────────────────────────────────────────
 function initRailToggle() {
   const rail = document.getElementById('app-rail');
@@ -854,6 +869,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-gallery-close')?.addEventListener('click', _galleryClose);
 
   initAIPills();
+
+  document.getElementById('btn-pwa-install')?.addEventListener('click', async () => {
+    if (!_pwaPrompt) return;
+    _pwaPrompt.prompt();
+    await _pwaPrompt.userChoice;
+    _pwaPrompt = null;
+    document.getElementById('btn-pwa-install').style.display = 'none';
+  });
 
   document.getElementById('btn-close-svc-panel')?.addEventListener('click', closeServicePanel);
   document.getElementById('service-panel-overlay')?.addEventListener('click', e => {

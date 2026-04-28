@@ -17,6 +17,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: -- Auto-update from GitHub --------------------------------------------
+git --version >nul 2>&1
+if not errorlevel 1 (
+    echo Checking for updates...
+    git -C "%~dp0" pull --ff-only origin master 2>&1
+    if errorlevel 1 (
+        echo [update] Could not fast-forward -- local changes or no network. Continuing with current version.
+    )
+) else (
+    echo [update] Git not on PATH -- skipping update check.
+)
+
 :: -- Install dependencies -----------------------------------------------
 echo Checking dependencies...
 pip install -q -r "%~dp0requirements.txt" 2>nul
