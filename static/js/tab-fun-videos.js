@@ -12,24 +12,42 @@ import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 // Returns a data-URL string, or null on failure.
 function _videoThumb(videoUrl) {
   return new Promise(resolve => {
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      video.src = '';     // release the network request
+      resolve(val);
+    };
+
     const video = document.createElement('video');
-    video.muted = true;
-    video.preload = 'metadata';
-    video.src = videoUrl;
-    const done = (val) => { video.src = ''; resolve(val); };
-    video.addEventListener('loadeddata', () => {
-      video.currentTime = Math.min(1, video.duration * 0.1 || 0);
+    video.muted    = true;
+    video.preload  = 'auto';  // must actually buffer data, not just metadata
+    video.playsInline = true;
+
+    // loadedmetadata fires once dimensions + duration are known.
+    // Seek to 5% of duration (or 0.5s, whichever is smaller) so we don't
+    // wait for the whole file to buffer.
+    video.addEventListener('loadedmetadata', () => {
+      video.currentTime = Math.min(0.5, (video.duration || 10) * 0.05);
     }, { once: true });
+
+    // seeked fires when the browser has decoded the frame at currentTime.
     video.addEventListener('seeked', () => {
       try {
+        const w = video.videoWidth  || 320;
+        const h = video.videoHeight || 180;
         const c = document.createElement('canvas');
-        c.width = 160; c.height = 90;
-        c.getContext('2d').drawImage(video, 0, 0, 160, 90);
-        done(c.toDataURL('image/jpeg', 0.7));
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(video, 0, 0, w, h);
+        done(c.toDataURL('image/jpeg', 0.75));
       } catch { done(null); }
     }, { once: true });
+
     video.addEventListener('error', () => done(null), { once: true });
-    setTimeout(() => done(null), 6000);
+    setTimeout(() => done(null), 10000);
+
+    video.src = videoUrl;
   });
 }
 
