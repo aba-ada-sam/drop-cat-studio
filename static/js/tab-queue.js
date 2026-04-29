@@ -292,7 +292,7 @@ function _jobCard(job, active) {
 
   if (isRunning) {
     const barWrap = el('div', { style: 'height:4px; background:var(--surface-3); border-radius:2px; overflow:hidden; margin-top:2px;' });
-    const bar     = el('div', { style: `height:100%; border-radius:2px; background:var(--accent); width:${job.progress || 2}%; transition:width .5s ease;` });
+    const bar     = el('div', { style: `height:100%; border-radius:2px; background:var(--accent); width:${job.progress || 0}%; transition:width .5s ease;` });
     barWrap.appendChild(bar);
     body.appendChild(barWrap);
     if (job.message) body.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3);', text: job.message }));

@@ -407,6 +407,7 @@ export function init(panel) {
     const timeout = setTimeout(() => {
       _autoPromptAbort?.abort();
       promptStatus.style.display = 'none';
+      toast('Motion prompt timed out — type one manually or click Create Story to retry', 'warn');
     }, 30000);
 
     try {
@@ -1032,8 +1033,8 @@ export function init(panel) {
     if (!extFileInput.files?.length) return;
     try {
       const data = await apiUpload('/api/fun/upload-video', Array.from(extFileInput.files));
-      const path = data.paths?.[0] || data.path;
-      _setExtVideo(path, pathToUrl(path));
+      const f = data.files?.[0];
+      if (f) _setExtVideo(f.path, f.url || pathToUrl(f.path));
     } catch (e) { toast(e.message, 'error'); }
   });
 
