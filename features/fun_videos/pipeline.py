@@ -14,6 +14,7 @@ from PIL import Image as _Img
 
 from core import config as cfg
 from core.ffmpeg_utils import probe_duration, extract_frame_b64, sample_frames_temporal
+from core.llm_client import encode_image_b64
 from core.wildcards import expand
 
 log = logging.getLogger(__name__)
@@ -136,10 +137,13 @@ def run_pipeline(job, photo_path, settings):
 
     video_prompt = settings.get("video_prompt", "")
     music_prompt = settings.get("music_prompt", "")
-    lyric_direction = settings.get("lyric_direction", "")  # user's lyric theme/guideline
+    lyric_direction = settings.get("lyric_direction", "")
     use_wildcards = settings.get("use_wildcards", False)
     skip_audio = settings.get("skip_audio", False)
+    use_mmaudio_early = settings.get("audio_provider", "acestep") == "ltx_native"
     user_direction = settings.get("user_direction", "")
+    instrumental = settings.get("instrumental", False)
+    lyrics = ""
 
     _last_error = [None]
 
@@ -163,6 +167,37 @@ def run_pipeline(job, photo_path, settings):
         video_prompt = expand(video_prompt, fs_root)
     if use_wildcards and music_prompt:
         music_prompt = expand(music_prompt, fs_root)
+
+    # ── Phase 0: Pre-analysis — ALL Ollama calls happen HERE, before WanGP ──
+    # Running Ollama concurrently with WanGP causes VRAM thrashing: both models
+    # fight for the same GPU memory and denoising steps balloon from 3s to 15s+.
+    # By finishing all AI analysis on the SOURCE IMAGE before WanGP starts we
+    # give WanGP a completely clear GPU for the entire video generation phase.
+    needs_audio = not skip_audio and not use_mmaudio_early
+    if needs_audio and (not music_prompt or not instrumental):
+        job.update(progress=5, message="Analyzing image for music direction...")
+        try:
+            src_b64 = encode_image_b64(photo_path) if photo_path and os.path.isfile(photo_path) else None
+            if src_b64:
+                pre_frames = [src_b64]
+                if not music_prompt:
+                    music_result = analyzer.generate_music_prompt(llm_router, pre_frames, user_direction)
+                    music_prompt = music_result.get("music_prompt", "")
+                    if not settings.get("bpm") and music_result.get("bpm"):
+                        settings["bpm"] = music_result["bpm"]
+                    _log(f"[info] Music direction: {music_prompt[:80]}")
+                if not instrumental:
+                    job.update(progress=7, message="Writing lyrics...")
+                    lyrics = analyzer.generate_lyrics(
+                        llm_router, pre_frames, music_prompt, lyric_direction or user_direction
+                    )
+                    if lyrics:
+                        _log("[info] Lyrics pre-generated from source image")
+        except Exception as e:
+            _log(f"[warning] Pre-analysis failed: {e} — will retry after video")
+
+    if _stopped():
+        return
 
     # ── Phase 1: Video Generation ────────────────────────────────────────
     # Unload Forge SD model from VRAM before WanGP starts so they don't compete
@@ -256,9 +291,9 @@ def run_pipeline(job, photo_path, settings):
         return
 
     # ── Phase 2: Music Prompt Generation ─────────────────────────────────
-    job.update(progress=65, message="Analyzing video for music...")
-
+    # Skip if pre-analysis (Phase 0) already produced a music prompt.
     if not music_prompt:
+        job.update(progress=65, message="Analyzing video for music...")
         try:
             frames = _sample_music_frames(video_path, llm_router)
             if frames:
@@ -269,31 +304,32 @@ def run_pipeline(job, photo_path, settings):
         except Exception as e:
             _log(f"[warning] Music analysis failed: {e}")
             music_prompt = "cinematic ambient, warm strings, gentle piano"
+    else:
+        job.update(progress=65, message="Using pre-generated music direction...")
 
     if use_wildcards and music_prompt:
         music_prompt = expand(music_prompt, fs_root)
 
     # ── Phase 2b: Auto-generate lyrics if needed ──────────────────────────
-    instrumental = settings.get("instrumental", False)
-    lyrics = ""
-    if not instrumental:
+    # Skip if pre-analysis (Phase 0) already produced lyrics.
+    if not instrumental and not lyrics:
         job.update(progress=68, message="Writing lyrics...")
         try:
+            # Reuse a single frame sample for lyrics — no need to re-sample
             frames = _sample_music_frames(video_path, llm_router)
             if frames:
                 lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, lyric_direction or user_direction)
                 if lyrics:
-                    _log("[info] Auto-generated lyrics")
+                    _log("[info] Auto-generated lyrics from video")
         except Exception as e:
             _log(f"[warning] Lyrics generation failed: {e}")
-        # Fallback: minimal structure so ACE-Step still renders vocals
-        if not lyrics:
-            lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
-            _log("[info] Using fallback lyrics")
+
+    if not instrumental and not lyrics:
+        lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
+        _log("[info] Using fallback lyrics")
 
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")
-
     # Unload Forge again for ACE-Step (it may have reloaded after WanGP finished)
     forge_was_unloaded = unload_checkpoint()
 

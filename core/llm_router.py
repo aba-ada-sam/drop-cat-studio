@@ -186,16 +186,23 @@ class LLMRouter:
             except Exception as exc:
                 last_exc = exc
                 self._stats["errors"] += 1
-                # BUG-07: don't retry permanent errors (wrong key, model not found).
-                # These will never succeed — fail immediately instead of wasting 6s.
+                exc_str  = str(exc).lower()
                 exc_type = type(exc).__name__
+                # Never retry permanent errors (wrong key, model not found).
                 if any(t in exc_type for t in ("AuthenticationError", "NotFoundError",
                                                "PermissionDeniedError", "InvalidRequestError")):
                     log.error("LLM permanent error (will not retry): %s", exc)
                     raise
+                # Never retry timeouts for Ollama — the model is already running; a
+                # second queued call just adds to the backlog and makes things worse.
+                # (Cloud providers are different: they can accept parallel requests.)
+                is_timeout = ("timeout" in exc_str or "timed out" in exc_str
+                              or "ReadTimeout" in exc_type or "ConnectTimeout" in exc_type)
+                if is_timeout and self._provider() == "ollama":
+                    log.warning("Ollama timeout (no retry — Ollama is busy): %s", exc)
+                    raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1
-                    # Respect Retry-After header on rate limit errors
                     wait = 2 ** attempt
                     if "RateLimitError" in exc_type:
                         retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("retry-after")

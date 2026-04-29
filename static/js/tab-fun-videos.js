@@ -396,6 +396,9 @@ export function init(panel) {
   // force=true: regenerates even if prompt textarea already has content.
   async function _autoGeneratePrompt(imagePath, force = false) {
     if (!force && promptTA.value.trim()) return;
+    // Don't fire Ollama while a video job is running — it competes for VRAM.
+    // The user can still click "Create Story" manually (force=true bypasses this).
+    if (!force && _activeJobId) return;
     if (_autoPromptAbort) _autoPromptAbort.abort();
     _autoPromptAbort = new AbortController();
     const { signal } = _autoPromptAbort;
