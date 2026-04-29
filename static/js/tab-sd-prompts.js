@@ -56,8 +56,8 @@ export function init(panel) {
     if (b === 'openai') genBtn.disabled = false;
     else if (!forgeStatus?.alive) genBtn.disabled = true;
   }
-  btnForge.addEventListener('click',  () => _setBackend('forge'));
-  btnOpenAI.addEventListener('click', () => _setBackend('openai'));
+  btnForge.addEventListener('click',  () => { _setBackend('forge');  api('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: 'forge'  }) }).catch(() => {}); });
+  btnOpenAI.addEventListener('click', () => { _setBackend('openai'); api('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: 'openai' }) }).catch(() => {}); });
 
   // ── Talk to me ────────────────────────────────────────────────────────────
   let _sdChatHistory = [];
@@ -882,4 +882,6 @@ export function init(panel) {
 
   loadDefaults();
   checkForge();
+  // Sync backend pill with the header Image pill (image_provider config key)
+  api('/api/config').then(cfg => { if (cfg.image_provider === 'openai') _setBackend('openai'); }).catch(() => {});
 }
