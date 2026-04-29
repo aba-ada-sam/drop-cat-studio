@@ -27,7 +27,7 @@ if exist "%_STARTUP%" (
 :: This IS the right way: click the desktop icon -> git pull -> start server.
 set "_DESKTOP_LNK=%USERPROFILE%\Desktop\Drop Cat Go Studio.lnk"
 powershell -NoProfile -Command ^
-    "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='%~dpnx0'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+    "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='wscript.exe'; $sc.Arguments='\"%~dp0launch_silent.vbs\"'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
 
 :: -- Auto-update from GitHub --------------------------------------------
 :: Strip trailing backslash from %~dp0 so git -C "path\" doesn't mis-parse the quote.
