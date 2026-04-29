@@ -2124,6 +2124,69 @@ textarea:focus { border-color: var(--accent); }
 #app-rail.collapsed .rail-tab span { display: none; }
 #app-rail.collapsed .rail-tab { justify-content: center; padding: 12px; }
 
+/* ── Sidebar job feed ─────────────────────────────────────────────────────── */
+#job-feed {
+  margin: 4px 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+#job-feed:empty { display: none; }
+#app-rail.collapsed #job-feed { display: none; }
+
+.jf-card {
+  background: var(--surface-2, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.06));
+  border-radius: 6px;
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 6px 7px;
+  min-width: 0;
+  transition: border-color .2s;
+}
+.jf-card.jf-running { border-color: var(--accent, #d4a017); }
+.jf-card.jf-done    { border-color: rgba(74,222,128,.35); }
+.jf-card.jf-error   { border-color: rgba(196,30,58,.5); }
+
+.jf-thumb {
+  width: 44px; height: 44px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-raised, #1a0e0e);
+}
+.jf-thumb-placeholder {
+  width: 44px; height: 44px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--bg-raised, #1a0e0e);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: var(--text-3);
+}
+
+.jf-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.jf-label {
+  font-size: .68rem; font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.jf-status {
+  font-size: .62rem; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.jf-bar-wrap {
+  height: 3px; background: var(--border, rgba(255,255,255,.06)); border-radius: 2px; overflow: hidden;
+}
+.jf-bar { height: 100%; border-radius: 2px; background: var(--accent, #d4a017); transition: width .5s; }
+.jf-card.jf-done  .jf-bar { background: #4ade80; width: 100% !important; }
+.jf-card.jf-error .jf-bar { background: var(--red, #c41e3a); width: 100% !important; }
+
 .rail-section-label {
   font-size: .62rem;
   font-weight: 800;

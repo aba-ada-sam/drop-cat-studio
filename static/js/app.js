@@ -1080,4 +1080,129 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
+
+  // ── Sidebar job feed ──────────────────────────────────────────────────────
+  const _feedEl = document.getElementById('job-feed');
+  const _feedCards = new Map(); // job_id → card element
+  const _feedDone  = [];        // completed job ids, newest-first (capped at 5)
+
+  function _thumbUrl(job) {
+    const src = job.meta?.source_image;
+    if (src) return `/api/thumbnail?path=${encodeURIComponent(src)}&size=88`;
+    const out = Array.isArray(job.output) ? job.output[0] : job.output;
+    if (out && /\.(png|jpg|jpeg|webp)/i.test(out))
+      return `/api/thumbnail?path=${encodeURIComponent(out)}&size=88`;
+    return null;
+  }
+
+  function _makeCard(job) {
+    const card = document.createElement('div');
+    card.className = 'jf-card';
+
+    const thumbUrl = _thumbUrl(job);
+    if (thumbUrl) {
+      const img = document.createElement('img');
+      img.className = 'jf-thumb';
+      img.src = thumbUrl;
+      img.onerror = () => { img.replaceWith(ph()); };
+      card.appendChild(img);
+    } else {
+      card.appendChild(ph());
+    }
+
+    const body = document.createElement('div');
+    body.className = 'jf-body';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'jf-label';
+    lbl.textContent = job.label || job.type || 'Job';
+    body.appendChild(lbl);
+
+    const sta = document.createElement('div');
+    sta.className = 'jf-status';
+    body.appendChild(sta);
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'jf-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'jf-bar';
+    bar.style.width = '0%';
+    barWrap.appendChild(bar);
+    body.appendChild(barWrap);
+
+    card.appendChild(body);
+    card._sta = sta;
+    card._bar = bar;
+    return card;
+  }
+
+  function ph() {
+    const d = document.createElement('div');
+    d.className = 'jf-thumb-placeholder';
+    d.textContent = '🎬';
+    return d;
+  }
+
+  function _updateCard(card, job) {
+    const pct = job.progress || 0;
+    card._bar.style.width = pct + '%';
+    card._sta.textContent = job.message || job.status;
+
+    card.classList.remove('jf-running', 'jf-done', 'jf-error', 'jf-queued');
+    if (job.status === 'running')  card.classList.add('jf-running');
+    else if (job.status === 'done') card.classList.add('jf-done');
+    else if (job.status === 'error' || job.status === 'stopped') card.classList.add('jf-error');
+  }
+
+  async function _pollFeed() {
+    if (!_feedEl) return;
+    try {
+      const data = await fetch('/api/queue').then(r => r.json());
+      const active = [...(data.running || []), ...(data.queued || [])];
+      const done   = (data.completed || []).slice(0, 5);
+
+      // Update/create active cards (running first, then queued)
+      const seen = new Set();
+      for (const job of active) {
+        seen.add(job.id);
+        if (!_feedCards.has(job.id)) {
+          const card = _makeCard(job);
+          _feedEl.prepend(card);
+          _feedCards.set(job.id, card);
+        }
+        _updateCard(_feedCards.get(job.id), job);
+      }
+
+      // Add freshly completed jobs to top (newest-first, max 5)
+      for (const job of done) {
+        if (_feedDone.includes(job.id)) continue;
+        _feedDone.unshift(job.id);
+        if (_feedDone.length > 5) {
+          const old = _feedDone.pop();
+          const el = _feedCards.get(old);
+          if (el) { el.remove(); _feedCards.delete(old); }
+        }
+        const card = _makeCard(job);
+        _updateCard(card, job);
+        _feedEl.prepend(card);
+        _feedCards.set(job.id, card);
+      }
+
+      // Remove cards for jobs no longer active or in recent completed
+      const keep = new Set([...seen, ..._feedDone]);
+      for (const [id, el] of _feedCards) {
+        if (!keep.has(id)) { el.remove(); _feedCards.delete(id); }
+      }
+
+      // Update Queue hint
+      const hint = document.getElementById('queue-rail-hint');
+      if (hint) {
+        const n = active.length;
+        hint.textContent = n ? `${n} job${n > 1 ? 's' : ''}` : 'Idle';
+      }
+    } catch (_) {}
+  }
+
+  _pollFeed();
+  setInterval(_pollFeed, 2500);
 });
