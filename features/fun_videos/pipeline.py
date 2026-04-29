@@ -91,8 +91,24 @@ def run_pipeline(job, photo_path, settings):
         audio_steps, audio_guidance, instrumental, audio_format,
         bpm, skip_audio, end_photo_path
     """
-    from app import get_llm_router; llm_router = get_llm_router()
+    from app import get_llm_router, gallery_push; llm_router = get_llm_router()
     from features.fun_videos import analyzer, video_generator, audio_generator
+
+    def _norm_url(p):
+        """Convert absolute Windows path to /output/... URL."""
+        norm = str(p).replace("\\", "/")
+        idx  = norm.lower().find("/output/")
+        return norm[idx:] if idx != -1 else f"/output/{Path(p).name}"
+
+    def _gallery(path, extra_meta=None):
+        url = _norm_url(path)
+        meta = {"path": str(path), "job_id": job.id, **job.meta}
+        if extra_meta:
+            meta.update(extra_meta)
+        gallery_push(url, tab="fun-videos",
+                     prompt=job.meta.get("prompt", ""),
+                     model=job.meta.get("model", ""),
+                     metadata=meta)
 
     # Setup
     ts = time.strftime("%Y-%m-%d")
@@ -210,6 +226,7 @@ def run_pipeline(job, photo_path, settings):
     if skip_audio:
         job.output = video_path
         job.message = "Video generated (no audio)"
+        _gallery(video_path)
         return
 
     # ── LTX-2 native audio (MMAudio) ─────────────────────────────────────
@@ -217,6 +234,7 @@ def run_pipeline(job, photo_path, settings):
     if use_mmaudio:
         job.output = video_path
         job.message = "Video generated with LTX-2 native audio"
+        _gallery(video_path)
         try:
             from core.session import get_current as get_session
             get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
@@ -299,6 +317,7 @@ def run_pipeline(job, photo_path, settings):
         _log(f"[warning] Audio failed: {audio_err} — returning video only")
         job.output = video_path
         job.message = f"Video generated (audio failed: {audio_err})"
+        _gallery(video_path)
         return
 
     job.update(progress=85, message="Audio generated!")
@@ -319,6 +338,7 @@ def run_pipeline(job, photo_path, settings):
         job.output = [video_path, merged]
         job.meta["final_path"] = merged
         job.message = "Complete!"
+        _gallery(merged, {"music_prompt": music_prompt})
         try:
             get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
         except Exception as e:
@@ -326,6 +346,7 @@ def run_pipeline(job, photo_path, settings):
     else:
         job.output = video_path
         job.message = "Video generated (audio merge failed)"
+        _gallery(video_path)
         try:
             get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
         except Exception as e:
