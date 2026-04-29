@@ -136,6 +136,11 @@ def run_pipeline(job, photo_path, settings):
         music_prompt = expand(music_prompt, fs_root)
 
     # ── Phase 1: Video Generation ────────────────────────────────────────
+    # Unload Forge SD model from VRAM before WanGP starts so they don't compete
+    # for GPU memory during inference.
+    from services.forge_client import unload_checkpoint, reload_checkpoint
+    forge_unloaded_for_video = unload_checkpoint()
+
     job.update(progress=10, message="Generating video...")
 
     def _video_progress(step, total_steps):
@@ -184,10 +189,18 @@ def run_pipeline(job, photo_path, settings):
     )
 
     if _stopped():
+        if forge_unloaded_for_video:
+            reload_checkpoint()
         return
     if not video_path:
+        if forge_unloaded_for_video:
+            reload_checkpoint()
         reason = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
         raise RuntimeError(f"Video generation failed: {reason}")
+
+    # Forge can reload now — WanGP is done with the GPU
+    if forge_unloaded_for_video:
+        reload_checkpoint()
 
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path
@@ -250,7 +263,7 @@ def run_pipeline(job, photo_path, settings):
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")
 
-    from services.forge_client import unload_checkpoint, reload_checkpoint
+    # Unload Forge again for ACE-Step (it may have reloaded after WanGP finished)
     forge_was_unloaded = unload_checkpoint()
 
     video_dur = probe_duration(video_path)
