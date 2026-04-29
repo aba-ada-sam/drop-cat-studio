@@ -13,7 +13,7 @@ import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260429d';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260428a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';

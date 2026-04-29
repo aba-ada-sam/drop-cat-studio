@@ -3,10 +3,10 @@
  * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260426c';
-import { toast, apiFetch } from './shell/toast.js?v=20260421c';
+import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260429b';
+import { toast, apiFetch } from './shell/toast.js?v=20260429d';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 
 // Concurrency limiter for thumbnail extraction — caps parallel <video> preloads.
 const _thumbQueue = { running: 0, max: 4, pending: [] };

@@ -4,7 +4,7 @@
  * Free-text queries also surface an "Ask AI" row that sends the query to
  * /api/ai-intent for the active tab.
  */
-import { askAI, activeTabHasApplier, getHistory, clearHistory, undoLast, hasUndo } from './ai-intent.js?v=20260419i';
+import { askAI, activeTabHasApplier, getHistory, clearHistory, undoLast, hasUndo } from './ai-intent.js?v=20260421c';
 
 const _items = [];
 let _selected = 0;

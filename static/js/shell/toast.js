@@ -38,11 +38,10 @@ function _updateBadge() {
  * @returns {object} controller { update(pct), dismiss() }
  */
 export function toast(msg, level = 'info', opts = {}) {
-  // No popups ever. Errors go silently to the Errors log panel.
   if (level === 'error') _logError(msg, opts.context, opts.details);
-  return { update() {}, dismiss() {} };
+  if (_inStartup()) return { update() {}, dismiss() {} };
 
-  const wrap = _getWrap(); // unreachable — kept so apiFetch still compiles
+  const wrap = _getWrap();
 
   // Deduplicate by id
   if (opts.id) {

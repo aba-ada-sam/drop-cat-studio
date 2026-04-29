@@ -47,9 +47,8 @@ export function formatDuration(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// ── Toast ────────────────────────────────────────────────────────────────────
-
-export function toast(_msg, _level) { /* no popups */ }
+// ── Toast re-export (convenience for panels that only import components.js) ──
+export { toast } from './shell/toast.js?v=20260429d';
 
 // ── DropZone ─────────────────────────────────────────────────────────────────
 

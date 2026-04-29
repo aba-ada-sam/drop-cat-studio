@@ -3,10 +3,10 @@
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
 
-import { apiFetch, toast } from './toast.js?v=20260419h';
-import { applySettingsToTab } from './ai-intent.js?v=20260419h';
+import { apiFetch, toast } from './toast.js?v=20260429d';
+import { applySettingsToTab } from './ai-intent.js?v=20260421c';
 import { handoff } from '../handoff.js?v=20260422a';
-import { pathToUrl } from '../components.js?v=20260426c';
+import { pathToUrl } from '../components.js?v=20260429b';
 
 let _items = [];
 let _filters = { tab: '', search: '' };

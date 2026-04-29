@@ -4,7 +4,7 @@
  * free text in the command palette and picks "Ask AI", we dispatch to the
  * currently active tab's applier.
  */
-import { apiFetch, toast } from './toast.js?v=20260419i';
+import { apiFetch, toast } from './toast.js?v=20260429d';
 
 const _appliers = {};
 const _HISTORY_KEY = 'dropcat_ai_intent_history';

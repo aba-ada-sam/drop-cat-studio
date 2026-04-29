@@ -3,9 +3,9 @@
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { el, pathToUrl } from './components.js?v=20260427h';
-import { toast, apiFetch } from './shell/toast.js?v=20260421c';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260427a';
+import { el, pathToUrl } from './components.js?v=20260429b';
+import { toast, apiFetch } from './shell/toast.js?v=20260429d';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 import { handoff } from './handoff.js?v=20260422a';
 
 // Module-level so receiveHandoff can call _applyImageFn even after init

@@ -3,7 +3,8 @@
  * AI-powered wildcard file curation: prune, expand, merge, audit.
  */
 import { api } from './api.js?v=20260414';
-import { toast, createSlider, createSelect, el } from './components.js?v=20260414';
+import { createSlider, createSelect, el } from './components.js?v=20260429b';
+import { toast } from './shell/toast.js?v=20260429d';
 
 export function init(panel) {
   panel.innerHTML = '';

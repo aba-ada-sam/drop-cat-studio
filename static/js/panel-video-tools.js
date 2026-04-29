@@ -4,9 +4,9 @@
  * Section 2: Batch video transforms (reverse, flip, speed, upscale…)
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260426c';
-import { toast } from './shell/toast.js?v=20260421c';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
+import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260429b';
+import { toast } from './shell/toast.js?v=20260429d';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 
 export function init(panel) {
   panel.innerHTML = '';
