@@ -748,12 +748,14 @@ async def openai_generate(request: Request):
     import asyncio
     from services.openai_images import generate as _gen
 
+    from core.nsfw_sanitizer import sanitize as _sanitize
     body = await request.json()
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(400, "Prompt required")
+    safe_prompt = _sanitize(prompt)
 
-    path, err = await asyncio.to_thread(_gen, prompt, body.get("aspect", "1:1"), body.get("quality", "standard"))
+    path, err = await asyncio.to_thread(_gen, safe_prompt, body.get("aspect", "1:1"), body.get("quality", "standard"))
     if err:
         raise HTTPException(500, err)
 

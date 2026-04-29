@@ -404,12 +404,13 @@ export function init(panel) {
     storyBtn.disabled = true;
     storyBtn.textContent = '…';
 
-    // Safety timeout — give up after 30s and let the user proceed
+    // Safety timeout — give up after 90s and let the user proceed
+    // (Ollama vision cold-start can take 60s+)
     const timeout = setTimeout(() => {
       _autoPromptAbort?.abort();
       promptStatus.style.display = 'none';
       toast('Motion prompt timed out — type one manually or click Create Story to retry', 'warn');
-    }, 30000);
+    }, 90000);
 
     try {
       const data = await apiFetch('/api/fun/generate-prompts', {
