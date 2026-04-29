@@ -578,6 +578,7 @@ export function init(panel) {
   });
 
   let _jobId = null;
+  let _activePoller = null;  // stop() handle — ensures only one watcher runs at a time
 
   function _reset() {
     _stopLoop();
@@ -651,7 +652,7 @@ export function init(panel) {
 
       // Start watching in the background — does NOT block the caller.
       // The button re-enables immediately; user can queue more jobs while this runs.
-      _watchJob(job_id, motionPrompt);
+      _watchJob(job_id);
       return true;
     } catch (e) {
       toast(e.message, 'error');
@@ -661,23 +662,27 @@ export function init(panel) {
 
   // Watch a job and update the progress/result area.
   // Returns a Promise so loop mode can await completion; single-run ignores the return value.
-  function _watchJob(job_id, prompt) {
+  // Cancels any previously running watcher so only one job's progress shows at a time.
+  function _watchJob(job_id) {
+    if (_activePoller) { _activePoller.stop(); _activePoller = null; }
     _showProgress(5, 'Queued…');
     return new Promise(resolve => {
-      pollJob(job_id,
+      const poller = pollJob(job_id,
         j => {
           const pct = j.progress || 5;
           _showProgress(pct, j.message || `${pct}%`);
         },
         j => {
+          _activePoller = null;
           const outputs = Array.isArray(j.output) ? j.output : [j.output];
           const best = outputs.length > 1 ? outputs[1] : outputs[0];
           if (best) _showResult(best);
           else _hideProgress();
           resolve(true);
         },
-        err => { _showError(err); resolve(false); },
+        err => { _activePoller = null; _showError(err); resolve(false); },
       );
+      _activePoller = poller;
     });
   }
 
@@ -688,7 +693,7 @@ export function init(panel) {
       // _generateOne returns as soon as the job is submitted; await the watch promise for completion
       const submitted = await _generateOne(true);
       if (!submitted) { _stopLoop(); toast('Loop stopped — failed to submit job', 'error'); break; }
-      const ok = await _watchJob(_jobId, ideaInput.value.trim());
+      const ok = await _watchJob(_jobId);
       if (!ok) { _stopLoop(); toast('Loop stopped — generation failed', 'error'); break; }
       if (!_looping) break;
       // Brief pause so the user can see the result before next run kicks in

@@ -77,7 +77,7 @@ if not "!_RUNNING_PORT!"=="0" (
         )
     ) else (
         echo Server running on port !_RUNNING_PORT! -- opening app.
-        start "" "http://127.0.0.1:!_RUNNING_PORT!/"
+        start chrome --app=http://127.0.0.1:!_RUNNING_PORT!/
         exit /b 0
     )
 )

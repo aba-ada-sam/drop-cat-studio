@@ -18,7 +18,7 @@ exit /b 1
 :read_port
 for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"port\"" "%PORT_FILE%" 2^>nul') do (
     for /f "tokens=* delims= " %%q in ("%%p") do (
-        start chrome http://127.0.0.1:%%q
+        start chrome --app=http://127.0.0.1:%%q/
         exit /b 0
     )
 )

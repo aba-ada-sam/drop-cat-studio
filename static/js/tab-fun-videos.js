@@ -903,7 +903,7 @@ export function init(panel) {
   extAudioToggleRow.appendChild(el('label', {
     for: 'fv-ext-audio-toggle',
     style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;',
-    text: 'Add audio to a different video',
+    text: 'Select video for audio addition',
   }));
 
   const extAudioSection = el('div', { class: 'card', style: 'display:none; padding:14px;' });
