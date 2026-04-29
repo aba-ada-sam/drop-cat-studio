@@ -220,8 +220,16 @@ def run_pipeline(job, photo_path, settings):
     if _stopped():
         return
     if not video_path:
-        reason = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
-        raise RuntimeError(f"Video generation failed: {reason}")
+        raw = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
+        if "out of memory" in raw.lower() or "cuda error" in raw.lower():
+            import threading
+            from services import manager as _svc
+            threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
+            raise RuntimeError(
+                "CUDA out of memory — WanGP is restarting. "
+                "Try fewer steps (≤30), shorter duration (≤8s), or a smaller model, then generate again."
+            )
+        raise RuntimeError(f"Video generation failed: {raw}")
 
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path

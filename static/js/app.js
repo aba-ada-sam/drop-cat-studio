@@ -6,7 +6,7 @@
 
 // tab-imports.js removed — import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428p';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260429b';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260429b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260429b';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260429a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427b';
@@ -1076,6 +1076,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function _makeCard(job) {
     const card = document.createElement('div');
     card.className = 'jf-card';
+    card.style.cursor = 'pointer';
+    card.title = 'Click to see details';
+    card._job = job;
+    card.addEventListener('click', () => openJobModal(card._job));
 
     const thumbUrl = _thumbUrl(job);
     if (thumbUrl) {
@@ -1122,6 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function _updateCard(card, job) {
+    card._job = job;  // keep modal data fresh on every poll
     const pct = job.progress || 0;
     card._bar.style.width = pct + '%';
     card._sta.textContent = job.message || job.status;

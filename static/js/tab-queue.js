@@ -25,6 +25,9 @@ export function init(panel) {
 export function pause()  { _stopPoll(); }
 export function resume() { _startPoll(); }
 
+// Called from the sidebar job feed so clicking a mini-card opens the detail modal.
+export function openJobModal(job) { _showModal(job); }
+
 // ── Polling ───────────────────────────────────────────────────────────────────
 
 function _startPoll() {
