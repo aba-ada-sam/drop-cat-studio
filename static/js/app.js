@@ -6,7 +6,7 @@
 
 // tab-imports.js removed — import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260428p';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260428b';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260428c';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260428p';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260426e';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260427b';
@@ -1194,11 +1194,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!keep.has(id)) { el.remove(); _feedCards.delete(id); }
       }
 
-      // Update Queue hint
-      const hint = document.getElementById('queue-rail-hint');
-      if (hint) {
-        const n = active.length;
-        hint.textContent = n ? `${n} job${n > 1 ? 's' : ''}` : 'Idle';
+      // Update Queue hint (only when Queue tab is not open — tab-queue.js owns it then)
+      if (!document.querySelector('.rail-tab.active[data-tab="queue"]')) {
+        const hint = document.getElementById('queue-rail-hint');
+        if (hint) {
+          const n = active.length;
+          if (n === 0)      hint.textContent = '(no items processing)';
+          else if (n === 1) hint.textContent = '(1 item processing)';
+          else              hint.textContent = `(${n} items processing)`;
+        }
       }
     } catch (_) {}
   }

@@ -2124,6 +2124,27 @@ textarea:focus { border-color: var(--accent); }
 #app-rail.collapsed .rail-tab span { display: none; }
 #app-rail.collapsed .rail-tab { justify-content: center; padding: 12px; }
 
+/* ── Queue clear bar ─────────────────────────────────────────────────────── */
+#queue-clear-bar {
+  display: none;
+  padding: 0 10px 4px;
+  text-align: right;
+}
+#queue-clear-bar.visible { display: block; }
+#btn-clear-completed {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .62rem;
+  color: var(--text-3);
+  padding: 2px 4px;
+  letter-spacing: .02em;
+  opacity: .7;
+  transition: opacity .15s;
+}
+#btn-clear-completed:hover { opacity: 1; color: var(--accent); }
+#app-rail.collapsed #queue-clear-bar { display: none !important; }
+
 /* ── Sidebar job feed ─────────────────────────────────────────────────────── */
 #job-feed {
   margin: 4px 6px;
