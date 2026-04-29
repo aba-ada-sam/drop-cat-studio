@@ -955,6 +955,35 @@ def _gallery_db() -> sqlite3.Connection:
     return conn
 
 
+def gallery_push(url: str, tab: str = "", prompt: str = "", model: str = "", metadata: dict | None = None):
+    """Insert a completed generation into gallery.db from server-side code.
+
+    Called by pipelines so items appear in the gallery regardless of which
+    browser tab is open when the job completes.  Silently skips duplicates
+    (same url already in the db).
+    """
+    import uuid as _uuid
+    meta = metadata or {}
+    try:
+        conn = _gallery_db()
+        existing = conn.execute("SELECT id FROM gallery WHERE url=?", (url,)).fetchone()
+        if existing:
+            conn.close()
+            return
+        conn.execute("""
+            INSERT INTO gallery (id, tab, url, thumbnail, prompt, model, seed, metadata, favorite, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+            _uuid.uuid4().hex[:8], tab, url, "",
+            prompt or meta.get("prompt", ""),
+            model  or meta.get("model",  ""),
+            None, _json_std.dumps(meta), 0, time.time(),
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning("gallery_push failed: %s", e)
+
+
 def _row_to_dict(row) -> dict:
     d = dict(row)
     try:

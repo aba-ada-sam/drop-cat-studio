@@ -91,8 +91,36 @@ def run_pipeline(job, photo_path, settings):
         audio_steps, audio_guidance, instrumental, audio_format,
         bpm, skip_audio, end_photo_path
     """
-    from app import get_llm_router; llm_router = get_llm_router()
+    from app import get_llm_router, gallery_push; llm_router = get_llm_router()
     from features.fun_videos import analyzer, video_generator, audio_generator
+
+    def _norm_url(p):
+        """Convert absolute Windows path to /output/... URL."""
+        norm = str(p).replace("\\", "/")
+        idx  = norm.lower().find("/output/")
+        return norm[idx:] if idx != -1 else f"/output/{Path(p).name}"
+
+    def _gallery(path, extra_meta=None):
+        url = _norm_url(path)
+        # Map pipeline settings to the keys applySettings in tab-fun-videos.js expects,
+        # so Branch & Tweak can replay the exact generation.
+        replay_settings = {
+            "steps":        settings.get("video_steps"),
+            "guidance":     settings.get("video_guidance"),
+            "duration_sec": settings.get("video_duration"),
+            "model":        settings.get("model_name"),
+            "seed":         settings.get("video_seed"),
+            "prompt":       settings.get("video_prompt", ""),
+            "source_image": photo_path or "",
+        }
+        replay_settings = {k: v for k, v in replay_settings.items() if v is not None}
+        meta = {"path": str(path), "job_id": job.id, "settings": replay_settings, **job.meta}
+        if extra_meta:
+            meta.update(extra_meta)
+        gallery_push(url, tab="fun-videos",
+                     prompt=job.meta.get("prompt", ""),
+                     model=job.meta.get("model", ""),
+                     metadata=meta)
 
     # Setup
     ts = time.strftime("%Y-%m-%d")
@@ -136,11 +164,14 @@ def run_pipeline(job, photo_path, settings):
         music_prompt = expand(music_prompt, fs_root)
 
     # ── Phase 1: Video Generation ────────────────────────────────────────
+    # Unload Forge SD model from VRAM before WanGP starts so they don't compete
+    # for GPU memory during inference.
+    from services.forge_client import unload_checkpoint, reload_checkpoint
+    forge_unloaded_for_video = unload_checkpoint()
+
     job.update(progress=10, message="Generating video...")
 
     def _video_progress(step, total_steps):
-        # Map inference steps into the 10–58% range so we don't collide with
-        # the hard 60% marker set when generation finishes.
         pct = 10 + int(step / total_steps * 48) if total_steps > 0 else 10
         job.update(progress=pct, message=f"Generating video... step {step}/{total_steps}")
 
@@ -150,8 +181,6 @@ def run_pipeline(job, photo_path, settings):
     oh = settings.get("override_height")
     use_mmaudio = settings.get("audio_provider", "acestep") == "ltx_native"
 
-    # Preprocess the source image to match output resolution so WanGP's VAE
-    # encoder doesn't fail at step 0 when input and output sizes differ.
     if photo_path and os.path.isfile(photo_path):
         if ow and oh:
             _tw, _th = int(ow), int(oh)
@@ -162,26 +191,31 @@ def run_pipeline(job, photo_path, settings):
             _tw, _th = _native
         photo_path = _prep_photo(photo_path, _tw, _th, job_dir)
 
-    video_path = video_generator.generate_video(
-        image_path=photo_path,
-        prompt=video_prompt,
-        out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
-        duration=float(settings.get("video_duration", 14.0)),
-        model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
-        resolution=settings.get("resolution", "580p"),
-        override_width=int(ow) if ow else None,
-        override_height=int(oh) if oh else None,
-        mmaudio=use_mmaudio,
-        steps=int(settings.get("video_steps", 30)),
-        guidance=float(settings.get("video_guidance", 7.5)),
-        seed=int(settings.get("video_seed", -1)),
-        end_image_path=settings.get("end_photo_path"),
-        start_video_path=settings.get("start_video_path"),
-        loras=settings.get("loras", []),
-        stop_check=_stopped,
-        log_fn=_log,
-        progress_fn=_video_progress,
-    )
+    try:
+        video_path = video_generator.generate_video(
+            image_path=photo_path,
+            prompt=video_prompt,
+            out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
+            duration=float(settings.get("video_duration", 14.0)),
+            model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
+            resolution=settings.get("resolution", "580p"),
+            override_width=int(ow) if ow else None,
+            override_height=int(oh) if oh else None,
+            mmaudio=use_mmaudio,
+            steps=int(settings.get("video_steps", 30)),
+            guidance=float(settings.get("video_guidance", 7.5)),
+            seed=int(settings.get("video_seed", -1)),
+            end_image_path=settings.get("end_photo_path"),
+            start_video_path=settings.get("start_video_path"),
+            loras=settings.get("loras", []),
+            stop_check=_stopped,
+            log_fn=_log,
+            progress_fn=_video_progress,
+        )
+    finally:
+        # Always reload Forge — even if generate_video() raises unexpectedly.
+        if forge_unloaded_for_video:
+            reload_checkpoint()
 
     if _stopped():
         return
@@ -197,6 +231,7 @@ def run_pipeline(job, photo_path, settings):
     if skip_audio:
         job.output = video_path
         job.message = "Video generated (no audio)"
+        _gallery(video_path)
         return
 
     # ── LTX-2 native audio (MMAudio) ─────────────────────────────────────
@@ -204,6 +239,7 @@ def run_pipeline(job, photo_path, settings):
     if use_mmaudio:
         job.output = video_path
         job.message = "Video generated with LTX-2 native audio"
+        _gallery(video_path)
         try:
             from core.session import get_current as get_session
             get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
@@ -250,7 +286,7 @@ def run_pipeline(job, photo_path, settings):
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")
 
-    from services.forge_client import unload_checkpoint, reload_checkpoint
+    # Unload Forge again for ACE-Step (it may have reloaded after WanGP finished)
     forge_was_unloaded = unload_checkpoint()
 
     video_dur = probe_duration(video_path)
@@ -286,6 +322,7 @@ def run_pipeline(job, photo_path, settings):
         _log(f"[warning] Audio failed: {audio_err} — returning video only")
         job.output = video_path
         job.message = f"Video generated (audio failed: {audio_err})"
+        _gallery(video_path)
         return
 
     job.update(progress=85, message="Audio generated!")
@@ -306,6 +343,7 @@ def run_pipeline(job, photo_path, settings):
         job.output = [video_path, merged]
         job.meta["final_path"] = merged
         job.message = "Complete!"
+        _gallery(merged, {"music_prompt": music_prompt})
         try:
             get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
         except Exception as e:
@@ -313,6 +351,7 @@ def run_pipeline(job, photo_path, settings):
     else:
         job.output = video_path
         job.message = "Video generated (audio merge failed)"
+        _gallery(video_path)
         try:
             get_session().add_file(Path(video_path).name, "video", "fun_videos", path=video_path)
         except Exception as e:

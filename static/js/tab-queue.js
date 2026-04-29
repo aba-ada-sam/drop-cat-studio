@@ -78,18 +78,19 @@ function _notifyCompletions(data) {
 }
 
 // ── Clear completed ────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('btn-clear-completed')?.addEventListener('click', () => {
-    // Mark all currently visible completed jobs as cleared
-    if (_root) {
-      const cards = _root.querySelectorAll('[data-job-id][data-done]');
-      cards.forEach(c => _clearedIds.add(c.dataset.jobId));
-    }
-    // Force immediate re-render
-    _poll();
-  });
-});
+// Wire up immediately — ES modules execute after DOM is parsed, so no DOMContentLoaded needed.
+{
+  const btn = document.getElementById('btn-clear-completed');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      if (_root) {
+        _root.querySelectorAll('[data-job-id][data-done]')
+          .forEach(c => _clearedIds.add(c.dataset.jobId));
+      }
+      _poll();
+    });
+  }
+}
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
@@ -134,29 +135,104 @@ function _bestOutput(job) {
   return outputs.length > 1 ? outputs[1] : outputs[0];
 }
 
-function _openOutput(job) {
-  const out = _bestOutput(job);
-  if (!out) { toast('No output file', 'info'); return; }
-  const url = pathToUrl(out);
-  if (!url) { toast('Could not resolve path', 'error'); return; }
-  window.open(url, '_blank');
+function _showModal(job) {
+  document.getElementById('queue-job-modal')?.remove();
+
+  const isDone   = job.status === 'done';
+  const isActive = job.status === 'running' || job.status === 'queued';
+
+  const overlay = el('div', {
+    id: 'queue-job-modal',
+    style: 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.82); display:flex; align-items:center; justify-content:center;',
+  });
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const box = el('div', {
+    style: 'background:var(--surface-1); border-radius:12px; padding:20px; max-width:min(860px,90vw); width:100%; display:flex; flex-direction:column; gap:14px; max-height:90vh; overflow:auto;',
+  });
+
+  // Header row
+  const hdr = el('div', { style: 'display:flex; align-items:center; gap:10px;' });
+  hdr.appendChild(el('span', { style: 'font-size:.95rem; font-weight:700; flex:1; color:var(--text-1);', text: job.label || job.type }));
+  hdr.appendChild(_statusChip(job.status, job.queue_position));
+  const closeX = el('button', { class: 'btn btn-sm', text: '✕', style: 'padding:2px 8px;' });
+  closeX.addEventListener('click', () => overlay.remove());
+  hdr.appendChild(closeX);
+  box.appendChild(hdr);
+
+  // Video player for completed jobs
+  if (isDone) {
+    const out = _bestOutput(job);
+    const url = out ? pathToUrl(out) : null;
+    if (url) {
+      const vid = document.createElement('video');
+      vid.controls = true;
+      vid.autoplay = true;
+      vid.style.cssText = 'width:100%; max-height:60vh; border-radius:8px; background:#000;';
+      vid.src = url;
+      box.appendChild(vid);
+    } else {
+      box.appendChild(el('div', { style: 'color:var(--text-3); font-size:.85rem;', text: 'No output file recorded.' }));
+    }
+  }
+
+  // Progress bar for running jobs
+  if (isActive) {
+    const pct = job.progress || 0;
+    const barWrap = el('div', { style: 'height:8px; background:var(--surface-3); border-radius:4px; overflow:hidden;' });
+    const bar     = el('div', { style: `height:100%; background:var(--accent); width:${pct}%; border-radius:4px; transition:width .5s;` });
+    barWrap.appendChild(bar);
+    box.appendChild(barWrap);
+  }
+
+  // Current message / step
+  if (job.message) {
+    box.appendChild(el('div', {
+      style: 'font-size:.85rem; color:var(--text-2); padding:8px 10px; background:var(--surface-2); border-radius:6px;',
+      text: job.message,
+    }));
+  }
+
+  // Prompt
+  if (job.meta?.prompt) {
+    const p = el('div', { style: 'display:flex; flex-direction:column; gap:4px;' });
+    p.appendChild(el('span', { style: 'font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Prompt' }));
+    p.appendChild(el('span', { style: 'font-size:.82rem; color:var(--text-2);', text: job.meta.prompt }));
+    box.appendChild(p);
+  }
+
+  // Source image thumbnail for active jobs
+  if (isActive && job.meta?.source_image) {
+    const src = `/api/thumbnail?path=${encodeURIComponent(job.meta.source_image)}&size=240`;
+    const img = el('img', { style: 'max-width:160px; border-radius:6px; align-self:flex-start;' });
+    img.src = src;
+    img.onerror = () => img.remove();
+    box.appendChild(img);
+  }
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 function _jobCard(job, active) {
   const isRunning = job.status === 'running';
   const isFailed  = job.status === 'error' || job.status === 'stopped';
   const isDone    = job.status === 'done';
+  const isClickable = isDone || isRunning || job.status === 'queued';
 
   const card = el('div', {
     style: `display:flex; gap:12px; align-items:flex-start; background:var(--surface-2);
             border:1px solid var(--border-2); border-radius:8px; padding:10px 12px;
             opacity:${isFailed ? '.5' : '1'};
-            ${isDone ? 'cursor:pointer; transition:border-color .15s, background .15s;' : ''}`,
+            ${isClickable ? 'cursor:pointer; transition:border-color .15s, background .15s;' : ''}`,
   });
-  if (isDone) {
+  if (isClickable) {
     card.dataset.jobId = job.id;
-    card.dataset.done  = '1';
-    card.addEventListener('click', () => _openOutput(job));
+    if (isDone) card.dataset.done = '1';
+    card.addEventListener('click', e => {
+      if (e.target.closest('button')) return; // don't open modal when clicking Cancel
+      _showModal(job);
+    });
     card.addEventListener('mouseenter', () => {
       card.style.borderColor = 'var(--accent)';
       card.style.background  = 'var(--surface-3, rgba(255,255,255,.07))';
@@ -225,7 +301,13 @@ function _jobCard(job, active) {
   if (isDone) {
     body.appendChild(el('div', {
       style: 'font-size:.72rem; color:var(--accent); opacity:.8;',
-      text: '↗ click to open',
+      text: '▶ click to watch',
+    }));
+  }
+  if (job.status === 'queued') {
+    body.appendChild(el('div', {
+      style: 'font-size:.72rem; color:var(--text-3); opacity:.7;',
+      text: 'click for details',
     }));
   }
 

@@ -174,8 +174,14 @@ class JobManager:
         """Return current queue state."""
         with self._lock:
             all_jobs = list(self._jobs.values())
-        running = [j.to_dict() for j in all_jobs if j.status == "running"]
-        queued = [j.to_dict() for j in all_jobs if j.status == "queued"]
+        running = sorted(
+            [j.to_dict() for j in all_jobs if j.status == "running"],
+            key=lambda j: j["created_at"],
+        )
+        queued = sorted(
+            [j.to_dict() for j in all_jobs if j.status == "queued"],
+            key=lambda j: j["created_at"],  # oldest first = next-to-run at top
+        )
         recent = [
             j.to_dict() for j in all_jobs
             if j.status in ("done", "error", "stopped")
