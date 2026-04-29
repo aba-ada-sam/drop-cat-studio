@@ -5,6 +5,7 @@ AI services that multiple features depend on.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import os
@@ -20,6 +21,91 @@ import sys
 from core import config as cfg
 
 log = logging.getLogger(__name__)
+
+# ── Windows Job Object — kill GPU children when DCS dies for any reason ───────
+# A Job Object with KILL_ON_JOB_CLOSE is the OS-level guarantee: when the DCS
+# Python process exits (clean, crash, or Task Manager kill), Windows closes the
+# job handle and immediately terminates every process assigned to it.
+# This prevents WanGP / ACE-Step from surviving as orphan GPU hogs.
+
+_JOB_HANDLE: ctypes.c_void_p | None = None
+
+def _init_job_object() -> None:
+    global _JOB_HANDLE
+    if sys.platform != "win32" or _JOB_HANDLE is not None:
+        return
+    try:
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+        JobObjectExtendedLimitInformation   = 9
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit",     ctypes.c_int64),
+                ("LimitFlags",             ctypes.c_uint32),
+                ("MinimumWorkingSetSize",   ctypes.c_size_t),
+                ("MaximumWorkingSetSize",   ctypes.c_size_t),
+                ("ActiveProcessLimit",      ctypes.c_uint32),
+                ("Affinity",               ctypes.c_size_t),
+                ("PriorityClass",           ctypes.c_uint32),
+                ("SchedulingClass",         ctypes.c_uint32),
+            ]
+
+        class _IO(ctypes.Structure):
+            _fields_ = [(f, ctypes.c_uint64) for f in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount",  "WriteTransferCount",  "OtherTransferCount",
+            )]
+
+        class _EXT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BASIC),
+                ("IoInfo",                _IO),
+                ("ProcessMemoryLimit",    ctypes.c_size_t),
+                ("JobMemoryLimit",        ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed",     ctypes.c_size_t),
+            ]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            log.warning("Job Object: CreateJobObjectW failed (%s)", ctypes.get_last_error())
+            return
+
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ok = k32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info),
+        )
+        if not ok:
+            log.warning("Job Object: SetInformationJobObject failed (%s)", ctypes.get_last_error())
+            k32.CloseHandle(job)
+            return
+
+        _JOB_HANDLE = job
+        log.info("Job Object armed — GPU subprocesses will die with DCS (any exit)")
+    except Exception as exc:
+        log.warning("Job Object setup failed (non-fatal): %s", exc)
+
+
+def _assign_to_job(proc: subprocess.Popen) -> None:
+    """Assign a subprocess to the DCS Job Object so it dies when DCS dies."""
+    if _JOB_HANDLE is None or sys.platform != "win32":
+        return
+    try:
+        PROCESS_ALL_ACCESS = 0x001F0FFF
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = k32.OpenProcess(PROCESS_ALL_ACCESS, False, proc.pid)
+        if handle:
+            k32.AssignProcessToJobObject(_JOB_HANDLE, handle)
+            k32.CloseHandle(handle)
+    except Exception as exc:
+        log.debug("Could not assign PID %s to Job Object: %s", proc.pid, exc)
+
+
+_init_job_object()
 
 
 def _popen_flags() -> dict:
@@ -141,6 +227,7 @@ def start_acestep() -> tuple[bool, str | None]:
             text=True, encoding="utf-8", errors="replace",
             **_popen_flags(),
         )
+        _assign_to_job(proc)
         _acestep_proc = proc
 
         def _drain(p):
@@ -292,6 +379,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
                 text=True, encoding="utf-8", errors="replace",
                 **_popen_flags(),
             )
+            _assign_to_job(proc)
             _wangp_worker_proc = proc
 
             def _drain(p):
