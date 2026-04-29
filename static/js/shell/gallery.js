@@ -326,11 +326,21 @@ function _openDetail(item) {
     toast('Settings loaded from gallery item', 'success');
   });
   overlay.querySelector('#gd-branch')?.addEventListener('click', () => {
-    _loadItemSettings(item);
     overlay.classList.remove('open');
-    // Branch & Tweak jumps to the source tab so you can immediately edit+regen.
-    if (item.tab) document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
-    toast('Branched: settings loaded — tweak and re-generate', 'info');
+    // Close the main gallery overlay so the tab is visible
+    document.getElementById('btn-gallery-close')?.click();
+    if (item.tab) {
+      // Navigate first so the tab initialises (lazy init on first visit)
+      document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
+      // Apply settings after the tab's async registerTabAI() Promise resolves
+      setTimeout(() => {
+        const ok = _loadItemSettings(item);
+        if (!ok) toast(`Open the ${item.tab} tab first`, 'info');
+      }, 80);
+    } else {
+      _loadItemSettings(item);
+    }
+    toast('Branched — tweak and re-generate', 'info');
   });
   overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
     if (!confirm('Delete this file permanently? This cannot be undone.')) return;
@@ -353,9 +363,11 @@ function _openDetail(item) {
 }
 
 function _loadItemSettings(item) {
-  if (!item.metadata?.settings || !item.tab) return;
-  const ok = applySettingsToTab(item.tab, item.metadata.settings);
-  if (!ok) toast(`Can't load settings — ${item.tab} tab not initialized yet`, 'info');
+  if (!item.metadata?.settings || !item.tab) return false;
+  const settings = item.metadata.settings;
+  if (!Object.keys(settings).length) return false;
+  const ok = applySettingsToTab(item.tab, settings);
+  return ok;
 }
 
 function _esc(s) {

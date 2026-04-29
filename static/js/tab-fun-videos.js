@@ -1373,9 +1373,19 @@ export function init(panel) {
         if (typeof s.steps        === 'number') stepsSlider.value    = Math.max(4, Math.min(50, s.steps));
         if (typeof s.guidance     === 'number') guidanceSlider.value = Math.max(1, Math.min(20, s.guidance));
         if (typeof s.duration_sec === 'number') durSlider.value      = Math.max(2, Math.min(20, s.duration_sec));
+        // Restore the original prompt (before quality suffixes were appended)
+        if (typeof s.prompt === 'string' && s.prompt.trim()) {
+          promptTA.value = s.prompt.trim();
+        }
         if (typeof s.prompt_append === 'string' && s.prompt_append.trim()) {
           const cur = promptTA.value.trim();
           promptTA.value = cur ? `${cur}, ${s.prompt_append.trim()}` : s.prompt_append.trim();
+        }
+        // Restore the source image into the start drop zone
+        if (typeof s.source_image === 'string' && s.source_image.trim() && _applyStart) {
+          const imgPath = s.source_image;
+          const imgUrl  = pathToUrl(imgPath) || imgPath;
+          _applyStart(imgPath, imgUrl);
         }
       },
     });

@@ -102,7 +102,19 @@ def run_pipeline(job, photo_path, settings):
 
     def _gallery(path, extra_meta=None):
         url = _norm_url(path)
-        meta = {"path": str(path), "job_id": job.id, **job.meta}
+        # Map pipeline settings to the keys applySettings in tab-fun-videos.js expects,
+        # so Branch & Tweak can replay the exact generation.
+        replay_settings = {
+            "steps":        settings.get("video_steps"),
+            "guidance":     settings.get("video_guidance"),
+            "duration_sec": settings.get("video_duration"),
+            "model":        settings.get("model_name"),
+            "seed":         settings.get("video_seed"),
+            "prompt":       settings.get("video_prompt", ""),
+            "source_image": photo_path or "",
+        }
+        replay_settings = {k: v for k, v in replay_settings.items() if v is not None}
+        meta = {"path": str(path), "job_id": job.id, "settings": replay_settings, **job.meta}
         if extra_meta:
             meta.update(extra_meta)
         gallery_push(url, tab="fun-videos",
