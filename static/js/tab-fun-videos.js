@@ -8,9 +8,29 @@ import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
+// Concurrency limiter for thumbnail extraction — caps parallel <video> preloads.
+const _thumbQueue = { running: 0, max: 4, pending: [] };
+function _thumbSlot(fn) {
+  return new Promise(resolve => {
+    const run = () => {
+      _thumbQueue.running++;
+      fn().then(v => {
+        resolve(v);
+        _thumbQueue.running--;
+        if (_thumbQueue.pending.length) _thumbQueue.pending.shift()();
+      });
+    };
+    if (_thumbQueue.running < _thumbQueue.max) run();
+    else _thumbQueue.pending.push(run);
+  });
+}
+
 // Extract a video frame client-side via hidden <video> + canvas.
 // Returns a data-URL string, or null on failure.
 function _videoThumb(videoUrl) {
+  return _thumbSlot(() => _videoThumbInner(videoUrl));
+}
+function _videoThumbInner(videoUrl) {
   return new Promise(resolve => {
     let settled = false;
     const done = (val) => {

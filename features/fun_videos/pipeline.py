@@ -172,8 +172,6 @@ def run_pipeline(job, photo_path, settings):
     job.update(progress=10, message="Generating video...")
 
     def _video_progress(step, total_steps):
-        # Map inference steps into the 10–58% range so we don't collide with
-        # the hard 60% marker set when generation finishes.
         pct = 10 + int(step / total_steps * 48) if total_steps > 0 else 10
         job.update(progress=pct, message=f"Generating video... step {step}/{total_steps}")
 
@@ -183,8 +181,6 @@ def run_pipeline(job, photo_path, settings):
     oh = settings.get("override_height")
     use_mmaudio = settings.get("audio_provider", "acestep") == "ltx_native"
 
-    # Preprocess the source image to match output resolution so WanGP's VAE
-    # encoder doesn't fail at step 0 when input and output sizes differ.
     if photo_path and os.path.isfile(photo_path):
         if ow and oh:
             _tw, _th = int(ow), int(oh)
@@ -195,40 +191,37 @@ def run_pipeline(job, photo_path, settings):
             _tw, _th = _native
         photo_path = _prep_photo(photo_path, _tw, _th, job_dir)
 
-    video_path = video_generator.generate_video(
-        image_path=photo_path,
-        prompt=video_prompt,
-        out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
-        duration=float(settings.get("video_duration", 14.0)),
-        model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
-        resolution=settings.get("resolution", "580p"),
-        override_width=int(ow) if ow else None,
-        override_height=int(oh) if oh else None,
-        mmaudio=use_mmaudio,
-        steps=int(settings.get("video_steps", 30)),
-        guidance=float(settings.get("video_guidance", 7.5)),
-        seed=int(settings.get("video_seed", -1)),
-        end_image_path=settings.get("end_photo_path"),
-        start_video_path=settings.get("start_video_path"),
-        loras=settings.get("loras", []),
-        stop_check=_stopped,
-        log_fn=_log,
-        progress_fn=_video_progress,
-    )
+    try:
+        video_path = video_generator.generate_video(
+            image_path=photo_path,
+            prompt=video_prompt,
+            out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
+            duration=float(settings.get("video_duration", 14.0)),
+            model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
+            resolution=settings.get("resolution", "580p"),
+            override_width=int(ow) if ow else None,
+            override_height=int(oh) if oh else None,
+            mmaudio=use_mmaudio,
+            steps=int(settings.get("video_steps", 30)),
+            guidance=float(settings.get("video_guidance", 7.5)),
+            seed=int(settings.get("video_seed", -1)),
+            end_image_path=settings.get("end_photo_path"),
+            start_video_path=settings.get("start_video_path"),
+            loras=settings.get("loras", []),
+            stop_check=_stopped,
+            log_fn=_log,
+            progress_fn=_video_progress,
+        )
+    finally:
+        # Always reload Forge — even if generate_video() raises unexpectedly.
+        if forge_unloaded_for_video:
+            reload_checkpoint()
 
     if _stopped():
-        if forge_unloaded_for_video:
-            reload_checkpoint()
         return
     if not video_path:
-        if forge_unloaded_for_video:
-            reload_checkpoint()
         reason = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
         raise RuntimeError(f"Video generation failed: {reason}")
-
-    # Forge can reload now — WanGP is done with the GPU
-    if forge_unloaded_for_video:
-        reload_checkpoint()
 
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path
