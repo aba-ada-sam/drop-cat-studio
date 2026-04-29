@@ -450,6 +450,8 @@ async def list_jobs():
     return _g["job_manager"].queue_status()
 
 
+_THUMBNAIL_NO_SUPPORT = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, size: int = 120):
     """Serve a scaled-down thumbnail of any image path."""
@@ -460,14 +462,16 @@ async def get_thumbnail(path: str, size: int = 120):
         from PIL import Image as _Img
         p = _Path(path)
         if not p.is_file():
-            return JSONResponse({"error": "Not found"}, 404)
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        if p.suffix.lower() in _THUMBNAIL_NO_SUPPORT:
+            return JSONResponse({"error": "No thumbnail for this file type"}, status_code=415)
         with _Img.open(p) as img:
             img.thumbnail((size * 2, size * 2))
             buf = io.BytesIO()
             img.convert("RGB").save(buf, format="JPEG", quality=75)
         return _Resp(content=buf.getvalue(), media_type="image/jpeg")
     except Exception as e:
-        return JSONResponse({"error": str(e)}, 500)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/output/{path:path}")

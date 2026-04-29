@@ -74,6 +74,7 @@ function _videoThumbInner(videoUrl) {
 let _startImagePath = null;
 let _endImagePath   = null;
 let _activeJobId    = null;
+let _activePoller   = null;
 let _models         = {};
 let _applyStart     = null;
 
@@ -738,6 +739,7 @@ export function init(panel) {
   root.appendChild(progWrap);
   const prog = createProgressCard(progWrap);
   prog.onCancel(async () => {
+    if (_activePoller) { _activePoller.stop(); _activePoller = null; }
     if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping…', 'info'); }
   });
 
@@ -814,15 +816,17 @@ export function init(panel) {
           start_video_path: _startVideoPath || null,
         }),
       });
+      if (_activePoller) { _activePoller.stop(); _activePoller = null; }
       _activeJobId = job_id;
 
-      pollJob(
+      _activePoller = pollJob(
         job_id,
         (j) => {
           const msg = j.message || (j.status === 'queued' ? 'Queued — waiting for GPU...' : 'Working...');
           prog.update(j.progress || 0, msg);
         },
         (j) => {
+          _activePoller = null;
           prog.hide();
           genBtn.disabled = false;
           _activeJobId = null;
@@ -967,6 +971,7 @@ export function init(panel) {
           }
         },
         (err) => {
+          _activePoller = null;
           prog.hide();
           genBtn.disabled = false;
           _activeJobId = null;

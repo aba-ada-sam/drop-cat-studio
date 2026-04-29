@@ -255,7 +255,8 @@ function _jobCard(job, active) {
 
   const srcImg = job.meta?.source_image;
   const outPath = isDone ? _bestOutput(job) : null;
-  const thumbSrc = outPath
+  const isVideoOut = outPath && /\.(mp4|webm|mov|avi|mkv)$/i.test(outPath);
+  const thumbSrc = (!isVideoOut && outPath)
     ? `/api/thumbnail?path=${encodeURIComponent(outPath)}&size=120`
     : srcImg
       ? `/api/thumbnail?path=${encodeURIComponent(srcImg)}&size=120`

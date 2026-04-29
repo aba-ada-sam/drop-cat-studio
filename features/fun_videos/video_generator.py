@@ -183,8 +183,14 @@ def _generate_via_worker(
                 log_fn(f"[error] Worker request failed: {e}")
             return None
 
+    # Brief pause before first poll — worker needs a moment to flip busy=True after
+    # accepting the /generate request. Without this, the first poll can see busy=False
+    # and return None before the job even starts.
+    time.sleep(3)
+
     # Poll for completion
-    deadline = time.time() + 600
+    _poll_start = time.time()
+    deadline = _poll_start + 600
     while time.time() < deadline:
         if stop_check and stop_check():
             return None
@@ -201,6 +207,11 @@ def _generate_via_worker(
                 result_path = status.get("result")
                 if result_path and os.path.isfile(result_path):
                     return result_path
+                # Guard: if we've polled for < 6s and there's no result yet,
+                # the worker may not have started our job — keep waiting.
+                if time.time() - _poll_start < 6:
+                    time.sleep(2)
+                    continue
                 return None
             if log_fn and status.get("progress"):
                 log_fn(f"[info] {status['progress']}")
