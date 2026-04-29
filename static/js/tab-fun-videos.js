@@ -8,6 +8,31 @@ import { toast, apiFetch } from './shell/toast.js?v=20260421c';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
 
+// Extract a video frame client-side via hidden <video> + canvas.
+// Returns a data-URL string, or null on failure.
+function _videoThumb(videoUrl) {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    video.src = videoUrl;
+    const done = (val) => { video.src = ''; resolve(val); };
+    video.addEventListener('loadeddata', () => {
+      video.currentTime = Math.min(1, video.duration * 0.1 || 0);
+    }, { once: true });
+    video.addEventListener('seeked', () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 160; c.height = 90;
+        c.getContext('2d').drawImage(video, 0, 0, 160, 90);
+        done(c.toDataURL('image/jpeg', 0.7));
+      } catch { done(null); }
+    }, { once: true });
+    video.addEventListener('error', () => done(null), { once: true });
+    setTimeout(() => done(null), 6000);
+  });
+}
+
 let _startImagePath = null;
 let _endImagePath   = null;
 let _activeJobId    = null;
@@ -104,35 +129,38 @@ export function init(panel) {
           style: 'position:relative; cursor:pointer; background:var(--surface-2); border-radius:6px; overflow:hidden;',
         });
 
-        // For videos use source_image as thumb (we can't render a frame from mp4 in <img>)
-        const thumbSrc = vid
-          ? (item.metadata?.source_image ? pathToUrl(item.metadata.source_image) : null)
-          : (pathToUrl(item.thumbnail) || url);
+        // Images: use thumbnail/url directly. Videos: canvas-extract a frame.
+        const imgThumbSrc = vid ? null : (pathToUrl(item.thumbnail) || url);
 
-        if (thumbSrc) {
-          const thumb = el('img', {
-            style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
-          });
-          thumb.src = thumbSrc;
-          thumb.onerror = () => {
-            thumb.remove();
-            wrap.appendChild(_mediaFallback(vid));
-          };
-          wrap.appendChild(thumb);
-          wrap.addEventListener('click', () => {
-            wrap.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; });
-            if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
-            const img = wrap.querySelector('img');
-            if (img) { img.style.borderColor = 'var(--accent)'; _selectedThumb = img; }
-            if (vid) _applyVideo(path, url);
-            else     _applyStart(path, url);
-          });
-        } else {
-          wrap.appendChild(_mediaFallback(vid));
-          wrap.addEventListener('click', () => {
-            if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
-            if (vid) _applyVideo(path, url);
-            else     _applyStart(path, url);
+        const thumb = el('img', {
+          style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
+        });
+        wrap.appendChild(thumb);
+
+        const applyClick = () => {
+          wrap.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; });
+          if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
+          thumb.style.borderColor = 'var(--accent)';
+          _selectedThumb = thumb;
+          if (vid) _applyVideo(path, url);
+          else     _applyStart(path, url);
+        };
+        wrap.addEventListener('click', applyClick);
+
+        if (imgThumbSrc) {
+          thumb.src = imgThumbSrc;
+          thumb.onerror = () => { thumb.replaceWith(_mediaFallback(false)); };
+        } else if (vid) {
+          // Async frame extraction — show fallback until it resolves
+          const fb = _mediaFallback(true);
+          wrap.insertBefore(fb, thumb);
+          thumb.style.display = 'none';
+          _videoThumb(url).then(dataUrl => {
+            if (dataUrl) {
+              fb.remove();
+              thumb.src = dataUrl;
+              thumb.style.display = '';
+            }
           });
         }
 
