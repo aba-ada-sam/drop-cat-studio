@@ -1,6 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
+
+:: -- Immediate visual feedback (fires before git pull and server start) -----
+:: pythonw suppresses the console window; splash closes when .dcs-port appears.
+where pythonw >nul 2>&1 && start "" pythonw "%~dp0pre_splash.py"
+
 title Drop Cat Go Studio
 
 echo ============================================
