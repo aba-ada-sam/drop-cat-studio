@@ -78,18 +78,19 @@ function _notifyCompletions(data) {
 }
 
 // ── Clear completed ────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('btn-clear-completed')?.addEventListener('click', () => {
-    // Mark all currently visible completed jobs as cleared
-    if (_root) {
-      const cards = _root.querySelectorAll('[data-job-id][data-done]');
-      cards.forEach(c => _clearedIds.add(c.dataset.jobId));
-    }
-    // Force immediate re-render
-    _poll();
-  });
-});
+// Wire up immediately — ES modules execute after DOM is parsed, so no DOMContentLoaded needed.
+{
+  const btn = document.getElementById('btn-clear-completed');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      if (_root) {
+        _root.querySelectorAll('[data-job-id][data-done]')
+          .forEach(c => _clearedIds.add(c.dataset.jobId));
+      }
+      _poll();
+    });
+  }
+}
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
