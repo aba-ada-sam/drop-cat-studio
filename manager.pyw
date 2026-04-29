@@ -281,6 +281,56 @@ class ServerManager:
             self._spawn()
 
 
+# ── Opening splash (already-running path) ─────────────────────────────────────
+
+def _show_opening_splash() -> None:
+    """Show 'Opening...' window while finding + opening the existing server.
+    Gives immediate visual feedback so the user doesn't retry clicking."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        existing = find_running_server()
+        if existing:
+            open_app_window(existing)
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    root.attributes("-topmost", True)
+
+    W, H = 320, 140
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 20, "bold")).pack(pady=(28, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+    tk.Label(root, text="Opening…", bg="#0d0606", fg="#6a5a4a",
+             font=("Arial", 9)).pack(pady=(14, 0))
+
+    _done = threading.Event()
+
+    def _bg():
+        existing = find_running_server()
+        if existing:
+            open_app_window(existing)
+        _done.set()
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+    def _poll():
+        if _done.is_set():
+            root.after(500, root.destroy)
+        else:
+            root.after(200, _poll)
+
+    root.after(100, _poll)
+    root.after(8000, root.destroy)  # failsafe
+    root.mainloop()
+
+
 # ── Loading splash (tkinter) ──────────────────────────────────────────────────
 
 def show_splash(srv: ServerManager) -> None:
@@ -410,10 +460,8 @@ def main() -> None:
     _k32 = _ct.WinDLL("kernel32", use_last_error=True)
     _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
     if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS — another manager owns it
-        log.info("Already running — opening app window")
-        existing = find_running_server()
-        if existing:
-            open_app_window(existing)
+        log.info("Already running — showing opening splash then exiting")
+        _show_opening_splash()
         sys.exit(0)
 
     try:
