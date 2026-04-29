@@ -191,10 +191,10 @@
     <!-- Log panel footer -->
     <footer id="log-panel">
       <button class="log-toggle" id="log-toggle" aria-expanded="true" aria-controls="log-content">
-        <span>Server Logs</span>
+        <span>Activity Log</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         <span id="app-version" style="font-size:.6rem; color:var(--text-3); opacity:.55; margin-left:6px; font-weight:400; letter-spacing:.02em;"></span>
-        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log" onclick="event.stopPropagation()">&#128196; full log</a>
+        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full app log in browser — paste this to your AI when troubleshooting" onclick="event.stopPropagation()">&#128196; copy for AI</a>
       </button>
       <div class="log-content" id="log-content">
         <div class="log-entries" id="log-entries" aria-live="polite" aria-atomic="false"></div>

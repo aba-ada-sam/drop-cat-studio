@@ -1058,16 +1058,68 @@ async def gallery_delete(item_id: str):
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
-class _PollFilter(logging.Filter):
-    """Drop access-log noise from high-frequency internal polling endpoints."""
-    _SKIP = ("/api/logs", "/api/services", "/api/jobs/")
+class _NoiseFilter(logging.Filter):
+    """Drop high-frequency polling and harmless TCP noise from all log handlers.
+
+    Two categories of noise:
+    1. HTTP access-log entries from endpoints that poll every 1-3s — no
+       diagnostic value and drown out real events.
+    2. ConnectionResetError / WinError 10054 — asyncio TCP teardown when
+       Chrome closes a video-stream connection.  Not an error; fires a
+       10-line traceback for every 206 Partial Content response.
+    """
+
+    _SKIP_PATHS = (
+        "/api/queue",
+        "/api/jobs",
+        "/api/logs",
+        "/api/services",
+        "/api/gallery?limit=",
+        "/api/fun/models",
+        "/api/llm/config",
+        "/api/prompts/forge/status",
+        "/api/version",
+        "/api/system",
+        "/manifest.json",
+        "/sw.js",
+    )
+
+    _SKIP_MSGS = (
+        "ConnectionResetError",
+        "WinError 10054",
+        "_call_connection_lost",
+        "socket.SHUT_RDWR",
+        "NoneType: None",   # bare exception-with-no-value that asyncio emits alongside the above
+    )
 
     def filter(self, record):
-        msg = record.getMessage()
-        return not any(s in msg for s in self._SKIP)
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if any(s in msg for s in self._SKIP_PATHS):
+            return False
+        if any(s in msg for s in self._SKIP_MSGS):
+            return False
+        # Also suppress exception info that is a ConnectionResetError
+        if record.exc_info:
+            exc_type = record.exc_info[0]
+            if exc_type is not None and issubclass(exc_type, ConnectionResetError):
+                return False
+        return True
 
 
-logging.getLogger("uvicorn.access").addFilter(_PollFilter())
+_noise_filter = _NoiseFilter()
+
+# Attach to every handler so records propagated from child loggers are
+# also filtered (Python only checks logger-level filters for that logger's
+# own handlers, not for parent handlers that receive propagated records).
+for _h in logging.root.handlers:
+    _h.addFilter(_noise_filter)
+
+# Also filter at the source loggers so the records never propagate at all
+logging.getLogger("uvicorn.access").addFilter(_noise_filter)
+logging.getLogger("asyncio").addFilter(_noise_filter)
 
 
 if __name__ == "__main__":
