@@ -6,6 +6,7 @@ into a single job that the job manager can execute.
 import logging
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 
@@ -222,7 +223,6 @@ def run_pipeline(job, photo_path, settings):
     if not video_path:
         raw = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
         if "out of memory" in raw.lower() or "cuda error" in raw.lower():
-            import threading
             from services import manager as _svc
             threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
             raise RuntimeError(

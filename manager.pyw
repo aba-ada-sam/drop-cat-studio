@@ -433,9 +433,9 @@ def run_tray(srv: ServerManager) -> None:
         # Kill GPU subprocesses before the server stops so they don't linger.
         try:
             from services import manager as svc
-            for _svc_name in ("wangp", "acestep"):
+            for svc_name in ("wangp", "acestep"):
                 try:
-                    svc.stop_service(_svc_name)
+                    svc.stop_service(svc_name)
                 except Exception:
                     pass
         except Exception:
