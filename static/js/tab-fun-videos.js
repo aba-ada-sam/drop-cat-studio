@@ -74,6 +74,13 @@ export function init(panel) {
 
   function _isVideo(url) { return /(\.mp4|\.webm|\.mov)$/i.test(url || ''); }
 
+  function _mediaFallback(isVid) {
+    return el('div', {
+      style: 'width:100%; aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:1.6rem; color:var(--text-3); background:var(--surface-2); border-radius:6px;',
+      text: isVid ? '🎬' : '🖼',
+    });
+  }
+
   async function loadRecentMedia() {
     try {
       const data = await api('/api/gallery?limit=60');
@@ -88,29 +95,53 @@ export function init(panel) {
         return;
       }
       for (const item of items) {
-        const url  = item.url;
-        const path = item.metadata?.path || url;
-        const vid  = _isVideo(url);
+        const rawUrl = item.url;
+        const url    = pathToUrl(rawUrl) || rawUrl;   // convert Windows paths → /output/...
+        const path   = item.metadata?.path || rawUrl;
+        const vid    = _isVideo(rawUrl);
 
-        const wrap = el('div', { style: 'position:relative; cursor:pointer;' });
-        const thumb = el('img', {
-          src: item.thumbnail || url,
-          title: item.prompt || url.split('/').pop(),
-          style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
+        const wrap = el('div', {
+          style: 'position:relative; cursor:pointer; background:var(--surface-2); border-radius:6px; overflow:hidden;',
         });
-        wrap.appendChild(thumb);
+
+        // For videos use source_image as thumb (we can't render a frame from mp4 in <img>)
+        const thumbSrc = vid
+          ? (item.metadata?.source_image ? pathToUrl(item.metadata.source_image) : null)
+          : (pathToUrl(item.thumbnail) || url);
+
+        if (thumbSrc) {
+          const thumb = el('img', {
+            style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
+          });
+          thumb.src = thumbSrc;
+          thumb.onerror = () => {
+            thumb.remove();
+            wrap.appendChild(_mediaFallback(vid));
+          };
+          wrap.appendChild(thumb);
+          wrap.addEventListener('click', () => {
+            wrap.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; });
+            if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
+            const img = wrap.querySelector('img');
+            if (img) { img.style.borderColor = 'var(--accent)'; _selectedThumb = img; }
+            if (vid) _applyVideo(path, url);
+            else     _applyStart(path, url);
+          });
+        } else {
+          wrap.appendChild(_mediaFallback(vid));
+          wrap.addEventListener('click', () => {
+            if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
+            if (vid) _applyVideo(path, url);
+            else     _applyStart(path, url);
+          });
+        }
+
         if (vid) {
           wrap.appendChild(el('div', {
             style: 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;',
           }, [el('div', { style: 'background:rgba(0,0,0,.55); border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff;', text: '▶' })]));
         }
-        wrap.addEventListener('click', () => {
-          if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
-          thumb.style.borderColor = 'var(--accent)';
-          _selectedThumb = thumb;
-          if (vid) _applyVideo(path, url);
-          else     _applyStart(path, url);
-        });
+
         mediaGrid.appendChild(wrap);
       }
     } catch (e) { toast(e.message, 'error'); }
