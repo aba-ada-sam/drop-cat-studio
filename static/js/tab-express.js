@@ -284,8 +284,10 @@ export function init(panel) {
     const data = await apiFetch('/api/fun/brainstorm', {
       method: 'POST', body: JSON.stringify(body), context: 'express.brainstorm',
     });
+    const updated = (data.idea && !lyricOnly) || (data.lyric_direction && !ideaOnly);
     if (data.idea            && !lyricOnly) ideaInput.value  = data.idea;
     if (data.lyric_direction && !ideaOnly)  lyricInput.value = data.lyric_direction;
+    if (!updated && data.reply) toast(data.reply, 'info');  // LLM responded but changed nothing
     _chatHistory.push({ role: 'user', content: message });
     _chatHistory.push({ role: 'assistant', content: data.reply || '' });
     return data;

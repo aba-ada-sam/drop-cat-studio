@@ -355,12 +355,13 @@ async def brainstorm(request: Request):
     else:
         system = (
             "You help users create AI video generation prompts and ACE-Step music directions.\n\n"
-            "IDEA: 1-2 sentences describing what visually happens in the video.\n"
+            "IDEA: 1-2 sentences describing vivid physical action in the video (what the subject DOES).\n"
             "LYRIC DIRECTION: ≤15 words. Format: \"[tempo/mood] [genre], [lyric theme]\". "
             "Examples: \"upbeat pop, lyrics about joy and freedom\" | \"melancholic folk, lyrics about loss\" | \"epic orchestral, instrumental\".\n\n"
-            "Return ONLY valid JSON: "
-            '{"idea": "...", "lyric_direction": "...", "reply": "one sentence what you did"}\n'
-            "Set a field to null if the user did not ask to change it."
+            "Always return BOTH fields with concrete values — never null, never empty strings. "
+            "If the user asks to change only one field, keep the other consistent with the current context. "
+            "Return ONLY valid JSON (no preamble, no explanation outside the JSON): "
+            '{"idea": "...", "lyric_direction": "...", "reply": "one sentence what you changed"}'
         )
 
     ctx_parts = []
