@@ -289,13 +289,7 @@ export function init(panel) {
   // ── Create Story row ──────────────────────────────────────────────────────
   const storyRow = el('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
   const storyBtn = el('button', { class: 'btn btn-sm btn-primary', text: '✦ Create Story', title: 'Generate a motion prompt from your image using AI' });
-  const storyProviderSel = el('select', { style: 'font-size:.78rem; padding:2px 6px;', title: 'LLM used to write the story' });
-  for (const [val, label] of [['auto','Auto'], ['anthropic','Anthropic'], ['openai','OpenAI'], ['ollama','Ollama']]) {
-    storyProviderSel.appendChild(el('option', { value: val, text: label }));
-  }
   storyRow.appendChild(storyBtn);
-  storyRow.appendChild(el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: 'via' }));
-  storyRow.appendChild(storyProviderSel);
   promptCard.appendChild(storyRow);
 
   let _autoPromptAbort = null;
@@ -310,6 +304,7 @@ export function init(panel) {
 
     promptStatus.style.display = 'flex';
     storyBtn.disabled = true;
+    storyBtn.textContent = '…';
 
     // Safety timeout — give up after 30s and let the user proceed
     const timeout = setTimeout(() => {
@@ -318,24 +313,21 @@ export function init(panel) {
     }, 30000);
 
     try {
-      const provider = storyProviderSel.value || 'auto';
-      const data = await api('/api/fun/generate-prompts', {
+      const data = await apiFetch('/api/fun/generate-prompts', {
         method: 'POST',
-        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400, provider }),
+        body: JSON.stringify({ image_path: imagePath, num_prompts: 1, creativity: 7, max_tokens: 400 }),
         signal,
       });
       const prompts = data.prompts || [];
       const text = typeof prompts[0] === 'string' ? prompts[0] : prompts[0]?.prompt;
       if (text) promptTA.value = text;
     } catch (e) {
-      if (e?.name !== 'AbortError') {
-        console.warn('[auto-prompt] failed:', e?.message);
-        apiFetch('/api/logs/client', { method: 'POST', body: JSON.stringify({ message: `auto-prompt failed: ${e?.message} | path: ${imagePath}`, source: 'tab-fun-videos', lineno: 0 }) }).catch(() => {});
-      }
+      if (e?.name !== 'AbortError') toast(e.message || 'Story generation failed', 'error');
     } finally {
       clearTimeout(timeout);
       promptStatus.style.display = 'none';
       storyBtn.disabled = false;
+      storyBtn.textContent = '✦ Create Story';
       _autoPromptAbort = null;
     }
   }
