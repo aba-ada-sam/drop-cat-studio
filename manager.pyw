@@ -430,6 +430,16 @@ def run_tray(srv: ServerManager) -> None:
 
     def _exit(icon, item=None):
         log.info("Exit from tray")
+        # Kill GPU subprocesses before the server stops so they don't linger.
+        try:
+            from services import manager as svc
+            for _svc_name in ("wangp", "acestep"):
+                try:
+                    svc.stop_service(_svc_name)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         srv.stop()
         clear_port_file()
         try:
