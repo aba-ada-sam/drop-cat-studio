@@ -949,20 +949,17 @@ export function init(panel) {
               });
             }
 
-            // Sequence button
+            // Send to Bridges tab for sequence building
             const existing = vidWrap.querySelector('.to-seq-btn');
             const seqBtn = existing || (() => {
-              const b = el('button', { class: 'btn btn-sm to-seq-btn', text: '+ Add to sequence', style: 'margin-top:8px;' });
+              const b = el('button', { class: 'btn btn-sm to-seq-btn', text: '+ Add to Transitions', style: 'margin-top:8px;' });
               vidWrap.appendChild(b);
               return b;
             })();
             seqBtn.onclick = () => {
-              const name = bestPath.split(/[\\/]/).pop();
-              _seqAddItem({ path: bestPath, name });
-              seqToggle.checked = true;
-              seqSection.style.display = '';
-              seqSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              toast(`Added "${name}" to sequence`, 'success');
+              handoff('bridges', { type: 'video', path: bestPath, url: pathToUrl(bestPath) });
+              document.querySelector('.rail-tab[data-tab="bridges"]')?.click();
+              toast('Clip sent to Add Transitions tab', 'success');
             };
           } else {
             toast('Generation finished but no output file found — check server logs', 'error');
@@ -1170,214 +1167,6 @@ export function init(panel) {
         (err) => { extGenBtn.disabled = false; extProgRow.style.display = 'none'; toast(err, 'error'); },
       );
     } catch (e) { extGenBtn.disabled = false; extProgRow.style.display = 'none'; toast(e.message, 'error'); }
-  });
-
-  // ── Sequence builder (multi-clip with transitions) ────────────────────────
-  const seqToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:4px;' });
-  root.appendChild(seqToggleRow);
-  const seqToggle = el('input', { type: 'checkbox', id: 'fv-seq-toggle' });
-  seqToggleRow.appendChild(seqToggle);
-  seqToggleRow.appendChild(el('label', {
-    for: 'fv-seq-toggle',
-    style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;',
-    text: 'Build a sequence — arrange multiple clips with AI transitions',
-  }));
-
-  const seqSection = el('div', { class: 'card', style: 'display:none; padding:14px;' });
-  root.appendChild(seqSection);
-  seqToggle.addEventListener('change', () => {
-    seqSection.style.display = seqToggle.checked ? '' : 'none';
-  });
-
-  // Sequence state
-  let _seqItems = [];  // [{path, name, gap}]  gap = transition duration after this clip
-  let _dragSrcIdx = null;
-
-  const seqHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
-  seqSection.appendChild(seqHeader);
-  const seqTitle = el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;' });
-  seqHeader.appendChild(seqTitle);
-
-  const seqFileInput = el('input', { type: 'file', accept: 'video/*', multiple: 'true', style: 'display:none' });
-  seqSection.appendChild(seqFileInput);
-  const seqAddBtn = el('button', { class: 'btn btn-sm', text: 'Add files...' });
-  seqHeader.appendChild(seqAddBtn);
-  seqAddBtn.addEventListener('click', () => seqFileInput.click());
-
-  const seqList = el('div', { style: 'display:flex; flex-direction:column; gap:0;' });
-  seqSection.appendChild(seqList);
-
-  // Drop zone for dragging files in
-  const seqDrop = el('div', {
-    style: 'border:2px dashed var(--border-2); border-radius:6px; padding:14px; text-align:center; font-size:.8rem; color:var(--text-3); margin-top:8px; cursor:pointer; transition:border-color .15s;',
-    text: 'Drop video files here or use Add files...',
-  });
-  seqSection.appendChild(seqDrop);
-  seqDrop.addEventListener('click', () => seqFileInput.click());
-  seqDrop.addEventListener('dragover', e => { e.preventDefault(); seqDrop.style.borderColor = 'var(--accent)'; });
-  seqDrop.addEventListener('dragleave', () => { seqDrop.style.borderColor = 'var(--border-2)'; });
-  seqDrop.addEventListener('drop', async e => {
-    e.preventDefault();
-    seqDrop.style.borderColor = 'var(--border-2)';
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('video/'));
-    if (files.length) await _seqUpload(files);
-  });
-
-  seqFileInput.addEventListener('change', async () => {
-    if (!seqFileInput.files?.length) return;
-    await _seqUpload(Array.from(seqFileInput.files));
-    seqFileInput.value = '';
-  });
-
-  async function _seqUpload(files) {
-    try {
-      const data = await apiUpload('/api/bridges/upload', files);
-      for (const f of data.files || []) _seqAddItem({ path: f.path, name: f.name || f.path.split(/[\\/]/).pop() });
-    } catch (e) { toast(e.message, 'error'); }
-  }
-
-  function _seqAddItem(item) {
-    if (_seqItems.find(i => i.path === item.path)) { toast('Already in sequence', 'info'); return; }
-    _seqItems.push({ ...item, gap: 8 });
-    _renderSeq();
-  }
-
-  function _renderSeq() {
-    seqList.innerHTML = '';
-    const n = _seqItems.length;
-    seqTitle.textContent = n
-      ? `Sequence — ${n} clip${n !== 1 ? 's' : ''}${n > 1 ? `, ${n - 1} transition${n - 1 !== 1 ? 's' : ''}` : ''}`
-      : 'Sequence';
-
-    if (!n) return;
-
-    _seqItems.forEach((item, i) => {
-      // ── Clip row ──────────────────────────────────────────────────────────
-      const row = el('div', {
-        draggable: 'true',
-        style: 'display:flex; align-items:center; gap:8px; padding:8px 10px; background:var(--bg-raised); border:1px solid var(--border-2); border-radius:6px; cursor:grab; user-select:none;',
-      });
-
-      // Drag handle
-      row.appendChild(el('span', { style: 'color:var(--text-3); font-size:.8rem; flex-shrink:0;', text: '⠿' }));
-      row.appendChild(el('span', {
-        style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;',
-        text: `${i + 1}. ${item.name}`,
-      }));
-      const removeBtn = el('button', { class: 'btn-icon-xs remove', text: '✕', title: 'Remove',
-        onclick(e) { e.stopPropagation(); _seqItems.splice(i, 1); _renderSeq(); },
-      });
-      row.appendChild(removeBtn);
-
-      // HTML5 drag-to-reorder
-      row.addEventListener('dragstart', e => {
-        _dragSrcIdx = i;
-        setTimeout(() => { row.style.opacity = '0.35'; }, 0);
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      row.addEventListener('dragend', () => { row.style.opacity = ''; _dragSrcIdx = null; });
-      row.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        row.style.borderColor = 'var(--accent)';
-      });
-      row.addEventListener('dragleave', () => { row.style.borderColor = 'var(--border-2)'; });
-      row.addEventListener('drop', e => {
-        e.preventDefault();
-        row.style.borderColor = 'var(--border-2)';
-        if (_dragSrcIdx === null || _dragSrcIdx === i) return;
-        const [moved] = _seqItems.splice(_dragSrcIdx, 1);
-        _seqItems.splice(i, 0, moved);
-        _renderSeq();
-      });
-
-      seqList.appendChild(row);
-
-      // ── Gap control between clips ─────────────────────────────────────────
-      if (i < _seqItems.length - 1) {
-        const gapRow = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:4px 12px; color:var(--text-3); font-size:.72rem;' });
-        const gapLabel = el('span', { text: `Transition: ${item.gap}s` });
-        const gapSlider = el('input', {
-          type: 'range', min: '3', max: '20', step: '1', value: String(item.gap),
-          style: 'flex:1; cursor:pointer;',
-        });
-        gapSlider.addEventListener('input', () => {
-          item.gap = Number(gapSlider.value);
-          gapLabel.textContent = `Transition: ${item.gap}s`;
-        });
-        gapRow.appendChild(el('div', { style: 'width:1px; height:20px; background:var(--border-2); flex-shrink:0;' }));
-        gapRow.appendChild(gapLabel);
-        gapRow.appendChild(gapSlider);
-        gapRow.appendChild(el('div', { style: 'width:1px; height:20px; background:var(--border-2); flex-shrink:0;' }));
-        seqList.appendChild(gapRow);
-      }
-    });
-  }
-  _renderSeq();
-
-  // ── Sequence generate ──────────────────────────────────────────────────────
-  const seqGenBtn = el('button', {
-    class: 'btn btn-primary btn-generate',
-    text: 'Generate Transitions & Stitch',
-    style: 'width:100%; font-size:1rem; padding:12px; font-weight:700; margin-top:10px;',
-  });
-  seqSection.appendChild(seqGenBtn);
-
-  const seqProgWrap = el('div');
-  seqSection.appendChild(seqProgWrap);
-  const seqProg = createProgressCard(seqProgWrap);
-
-  const seqVidWrap = el('div');
-  seqSection.appendChild(seqVidWrap);
-  const seqPlayer = createVideoPlayer(seqVidWrap);
-  seqPlayer.onStartOver(() => seqPlayer.hide());
-
-  seqGenBtn.addEventListener('click', async () => {
-    if (_seqItems.length < 2) {
-      seqDrop.style.outline = '2px solid var(--red)';
-      setTimeout(() => { seqDrop.style.outline = ''; }, 2000);
-      toast('Add at least 2 clips to the sequence', 'error');
-      return;
-    }
-    seqGenBtn.disabled = true;
-    seqProg.show();
-    seqProg.update(0, 'Submitting...');
-    seqPlayer.hide();
-
-    try {
-      const { job_id } = await api('/api/bridges/generate', {
-        method: 'POST',
-        body: JSON.stringify({
-          items: _seqItems.map(it => ({ path: it.path, kind: 'video', prompt: '', analysis: null })),
-          settings: {
-            model:           'LTX-2 Dev19B Distilled',
-            resolution:      '480p',
-            transition_mode: 'cinematic',
-            prompt_mode:     'ai_informed',
-            duration:        Math.round(_seqItems.slice(0, -1).reduce((s, i) => s + i.gap, 0) / Math.max(1, _seqItems.length - 1)),
-            steps:           20,
-            guidance:        10,
-            creativity:      8,
-          },
-        }),
-      });
-
-      seqProg.onCancel(async () => { await stopJob(job_id).catch(() => {}); seqGenBtn.disabled = false; });
-      pollJob(job_id,
-        j => seqProg.update(j.progress || 0, j.status === 'queued' ? 'Queued — waiting for GPU...' : (j.message || 'Working...')),
-        j => {
-          seqProg.hide();
-          seqGenBtn.disabled = false;
-          if (j.output) {
-            const out = Array.isArray(j.output) ? j.output[0] : j.output;
-            seqPlayer.show(pathToUrl(out), out);
-            pushToGallery('fun-videos', out, `Sequence (${_seqItems.length} clips)`, null, {});
-            toast('Sequence complete!', 'success');
-          }
-        },
-        err => { seqProg.hide(); seqGenBtn.disabled = false; toast(err, 'error'); },
-      );
-    } catch (e) { seqProg.hide(); seqGenBtn.disabled = false; toast(e.message, 'error'); }
   });
 
   // ── Palette AI intent ─────────────────────────────────────────────────────
