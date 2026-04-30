@@ -47,6 +47,10 @@ current_model = None
 _lock = threading.Lock()
 _job_status = {"busy": False, "progress": "", "step": 0, "total_steps": 0, "result": None, "error": None}
 
+# Monotonic generation counter — incremented on each accepted /generate.
+# DCS pollers embed the expected token so stale threads can't steal a new job's result.
+_generation_token = 0
+
 # Hook called by the tqdm patch on each step update: (step: int, total: int) -> None
 _step_hook = None
 
@@ -90,9 +94,11 @@ def _update_status(**kwargs):
 
 
 def _get_status_snapshot() -> dict:
-    """Return a copy of _job_status under the lock. BUG-04: lock on reads too."""
+    """Return a copy of _job_status (+ current token) under the lock."""
     with _lock:
-        return dict(_job_status)
+        snap = dict(_job_status)
+        snap["token"] = _generation_token
+        return snap
 
 
 # ── Generation logic ─────────────────────────────────────────────────────────
@@ -323,25 +329,42 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid JSON"}, 400)
                 return
 
-            if _get_status_snapshot()["busy"]:
-                self._send_json({"error": "Worker is busy"}, 409)
-                return
+            # Atomically check-and-set busy under _lock so concurrent requests
+            # from ThreadingHTTPServer can't both pass the busy check (TOCTOU fix).
+            global _generation_token
+            with _lock:
+                if _job_status["busy"]:
+                    self._send_json({"error": "Worker is busy"}, 409)
+                    return
+                _generation_token += 1
+                my_token = _generation_token
+                _job_status.update(busy=True, progress="Starting...",
+                                   result=None, error=None,
+                                   step=0, total_steps=0)
 
-            _update_status(busy=True, progress="Starting...", result=None, error=None)
-
-            def _run():
+            def _run(token):
                 try:
                     result = _do_generate(params)
-                    _update_status(busy=False, result=result.get("output"),
-                                   error=result.get("error"),
-                                   progress="Done" if result["ok"] else "Failed")
+                    with _lock:
+                        # Only write back if we still own the slot (paranoia guard)
+                        if _generation_token == token:
+                            _job_status.update(
+                                busy=False,
+                                result=result.get("output"),
+                                error=result.get("error"),
+                                progress="Done" if result["ok"] else "Failed",
+                            )
                 except Exception as e:
                     tb = traceback.format_exc()
-                    _update_status(busy=False, error=f"{e}\n{tb}", progress="Error")
+                    with _lock:
+                        if _generation_token == token:
+                            _job_status.update(busy=False, error=f"{e}\n{tb}",
+                                               progress="Error")
                     print(tb, flush=True)
 
-            threading.Thread(target=_run, daemon=True).start()
-            self._send_json({"ok": True, "message": "Generation started"})
+            threading.Thread(target=_run, args=(my_token,), daemon=True).start()
+            self._send_json({"ok": True, "message": "Generation started",
+                             "token": my_token})
 
         elif self.path == "/shutdown":
             self._send_json({"ok": True, "message": "Shutting down"})

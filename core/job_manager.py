@@ -238,10 +238,20 @@ class JobManager:
                     job.error = f"Job timed out after {timeout} seconds"
                     job.message = f"Timed out after {timeout}s"
                     log.error("Job %s timed out after %ds", job.id, timeout)
+                    # Wait for the thread to actually exit before starting the next
+                    # GPU job. Without this wait, the old thread can still be blocking
+                    # on a WanGP HTTP call when the next job submits, causing two
+                    # simultaneous WanGP generations and guaranteed VRAM OOM.
+                    log.info("Waiting up to 30s for timed-out job thread to exit...")
+                    worker.join(timeout=30)
+                    if worker.is_alive():
+                        log.warning("Job %s thread did not exit within 30s — "
+                                    "proceeding anyway (may cause WanGP contention)",
+                                    job.id)
 
                 self._gpu_queue.popleft()
 
-                # Brief pause between GPU jobs for VRAM cleanup
+                # VRAM cleanup between GPU jobs
                 import gc
                 gc.collect()
                 try:

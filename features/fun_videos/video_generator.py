@@ -132,8 +132,11 @@ def _generate_via_worker(
     if log_fn:
         log_fn(f"[info] Sending to WanGP worker (port {WANGP_WORKER_PORT})...")
 
-    # Submit with 409-retry: if worker is busy, wait until it's free then retry
+    # Submit with 409-retry: if worker is busy, wait until it's free then retry.
+    # On success, capture the generation token so we can reject stale results if
+    # this thread outlives its DCS job (e.g. after a timeout).
     submit_deadline = time.time() + 600
+    my_token = None
     while True:
         if stop_check and stop_check():
             return None
@@ -154,16 +157,17 @@ def _generate_via_worker(
                 if log_fn:
                     log_fn(f"[error] Worker rejected: {resp.get('error')}")
                 return None
+            my_token = resp.get("token")
             break  # submission accepted
         except urllib.error.HTTPError as e:
             if e.code == 409:
                 if log_fn:
                     log_fn("[info] Worker busy — waiting for current job to finish...")
-                # Poll /health until not busy
+                # Poll /health until not busy, checking stop_check each iteration
                 while time.time() < submit_deadline:
                     if stop_check and stop_check():
                         return None
-                    time.sleep(5)
+                    time.sleep(2)
                     try:
                         with urllib.request.urlopen(
                             f"http://127.0.0.1:{WANGP_WORKER_PORT}/health", timeout=5
@@ -173,8 +177,7 @@ def _generate_via_worker(
                             break
                     except Exception:
                         pass
-                # Loop back to retry submit
-                continue
+                continue  # retry submit
             if log_fn:
                 log_fn(f"[error] Worker request failed: {e}")
             return None
@@ -183,12 +186,8 @@ def _generate_via_worker(
                 log_fn(f"[error] Worker request failed: {e}")
             return None
 
-    # Brief pause before first poll — worker needs a moment to flip busy=True after
-    # accepting the /generate request. Without this, the first poll can see busy=False
-    # and return None before the job even starts.
-    time.sleep(3)
-
-    # Poll for completion
+    # Poll for completion. We verify the token on each poll so a stale thread
+    # can't claim results that belong to the next job.
     _poll_start = time.time()
     deadline = _poll_start + 600
     while time.time() < deadline:
@@ -199,6 +198,13 @@ def _generate_via_worker(
                 f"http://127.0.0.1:{WANGP_WORKER_PORT}/status", timeout=5
             ) as r:
                 status = json.loads(r.read())
+
+            # Reject this status if the worker has moved on to a newer job
+            if my_token is not None and status.get("token") != my_token:
+                if log_fn:
+                    log_fn("[error] Worker token mismatch — our job was superseded")
+                return None
+
             if not status.get("busy"):
                 if status.get("error"):
                     if log_fn:
@@ -207,8 +213,7 @@ def _generate_via_worker(
                 result_path = status.get("result")
                 if result_path and os.path.isfile(result_path):
                     return result_path
-                # Guard: if we've polled for < 6s and there's no result yet,
-                # the worker may not have started our job — keep waiting.
+                # Guard: if we've polled for < 6s, worker may not have started yet
                 if time.time() - _poll_start < 6:
                     time.sleep(2)
                     continue
