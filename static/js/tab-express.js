@@ -515,7 +515,7 @@ export function init(panel) {
   root.appendChild(progressWrap);
 
   const resultWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
-  const resultVideo = el('video', { controls: '', loop: '', style: 'width:100%; border-radius:8px; background:#000;' });
+  const resultVideo = el('video', { controls: '', style: 'width:100%; border-radius:8px; background:#000;' });
   const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap;' });
   const newBtn  = el('button', { class: 'btn btn-sm', text: '+ New video' });
   const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos →' });
@@ -746,8 +746,6 @@ export function init(panel) {
   });
 
   // ── Create (single run) ───────────────────────────────────────────────────
-  // Button locks only for the brief AI-prep + submit phase, then unlocks so
-  // the user can immediately queue another job while the first one runs.
   createBtn.addEventListener('click', async () => {
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
@@ -756,10 +754,11 @@ export function init(panel) {
       return;
     }
     createBtn.disabled = true;
-    createBtn.textContent = 'Adding…';
+    createBtn.textContent = 'Working…';
     _loopCount = 0;
     try {
-      await _generateOne(false);
+      const submitted = await _generateOne(false);
+      if (submitted && _jobId) await _watchJob(_jobId);
     } finally {
       createBtn.disabled = false;
       createBtn.textContent = 'Create';

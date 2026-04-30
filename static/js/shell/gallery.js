@@ -289,7 +289,7 @@ function _openDetail(item) {
     <div class="gallery-detail">
       <div class="gallery-detail-media">
         ${isVideo
-          ? `<video src="${item.url}" controls autoplay style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
+          ? `<video src="${item.url}" controls style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
           : `<img src="${item.url}" alt="${item.prompt || ''}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
       </div>
       <div class="gallery-detail-sidebar">

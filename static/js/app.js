@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260429g';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260429h';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260429g';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260429e';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260429a';
@@ -14,7 +14,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
 import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260429d';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260428a';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260429a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
@@ -276,9 +276,11 @@ function switchTab(tabId) {
   // Keep gallery button state in sync with overlay state
   document.getElementById('btn-gallery-rail')?.classList.toggle('active', state.galleryOpen);
 
-  // Update panels
+  // Update panels — pause any playing videos in panels being hidden
   document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === `panel-${tabId}`);
+    const becoming = panel.id === `panel-${tabId}`;
+    if (!becoming) panel.querySelectorAll('video').forEach(v => v.pause());
+    panel.classList.toggle('active', becoming);
   });
 
   // Initialize on first visit
@@ -1029,6 +1031,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Modals
   document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
+
+  // Global mute toggle — silences every video element on the page
+  let _globalMuted = false;
+  document.getElementById('btn-mute-all')?.addEventListener('click', () => {
+    _globalMuted = !_globalMuted;
+    document.querySelectorAll('video').forEach(v => { v.muted = _globalMuted; });
+    const lbl = document.getElementById('mute-label');
+    const btn = document.getElementById('btn-mute-all');
+    if (lbl) lbl.textContent = _globalMuted ? 'Unmute' : 'Mute';
+    if (btn) btn.title = _globalMuted ? 'Unmute all videos' : 'Mute all videos';
+  });
   document.querySelectorAll('.modal-close').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.closest('.modal-overlay') || btn.closest('[id$="-overlay"]');
