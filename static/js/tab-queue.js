@@ -458,13 +458,3 @@ function _showModal(job) {
   document.body.appendChild(overlay);
 }
 
-// ── Wire up Clear All in HTML (kept for HTML button compatibility) ─────────────
-{
-  const btn = document.getElementById('btn-clear-completed');
-  if (btn) {
-    btn.addEventListener('click', async () => {
-      await api('/api/jobs', { method: 'DELETE' }).catch(() => {});
-      _poll();
-    });
-  }
-}

@@ -275,7 +275,7 @@ class JobManager:
         )
         recent = [
             j.to_dict() for j in all_jobs
-            if j.status in ("done", "error", "stopped")
+            if j.status in ("done", "error", "stopped", "cancelled")
         ]
         recent.sort(key=lambda j: j["created_at"], reverse=True)
         return {
