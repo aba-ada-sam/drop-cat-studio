@@ -304,7 +304,6 @@ export function init(panel) {
   const lyricGenBtn = _genBtn('Generate lyric direction from image using AI');
 
   async function _runGen(btn, action) {
-    if (!_imagePath) { toast('Load an image first', 'info'); return; }
     btn.disabled = true; btn.textContent = '…';
     try { await _brainstorm(action, { ideaOnly: action.includes('idea'), lyricOnly: action.includes('lyric') }); }
     catch (e) { toast(e.message, 'error'); }
@@ -517,11 +516,17 @@ export function init(panel) {
 
   const resultWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   const resultVideo = el('video', { controls: '', loop: '', style: 'width:100%; border-radius:8px; background:#000;' });
-  const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center;' });
+  const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap;' });
   const newBtn  = el('button', { class: 'btn btn-sm', text: '+ New video' });
   const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos →' });
+  const muteBtn = el('button', { class: 'btn btn-sm', text: '🔊 Mute', title: 'Toggle mute' });
+  muteBtn.addEventListener('click', () => {
+    resultVideo.muted = !resultVideo.muted;
+    muteBtn.textContent = resultVideo.muted ? '🔇 Unmute' : '🔊 Mute';
+  });
   resultActions.appendChild(newBtn);
   resultActions.appendChild(sendBtn);
+  resultActions.appendChild(muteBtn);
   resultWrap.appendChild(resultVideo);
   resultWrap.appendChild(resultActions);
   root.appendChild(resultWrap);
