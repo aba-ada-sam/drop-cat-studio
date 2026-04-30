@@ -157,6 +157,28 @@ class JobManager:
                 pass
         return True
 
+    def dismiss(self, job_id: str) -> bool:
+        """Permanently remove a finished/failed job from memory. Returns True if removed."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if job.status in ("running", "queued"):
+                return False  # refuse to remove active jobs
+            del self._jobs[job_id]
+            return True
+
+    def dismiss_all_finished(self) -> int:
+        """Remove all completed/failed/cancelled jobs. Returns count removed."""
+        with self._lock:
+            removable = [
+                jid for jid, j in self._jobs.items()
+                if j.status in ("done", "error", "stopped", "cancelled")
+            ]
+            for jid in removable:
+                del self._jobs[jid]
+            return len(removable)
+
     def queue_position(self, job_id: str) -> int | None:
         """Return queue position for a GPU job. 0 = running, 1+ = waiting. None if not queued."""
         try:

@@ -443,6 +443,24 @@ async def stop_job(job_id: str):
     return {"ok": found}
 
 
+@app.delete("/api/jobs/{job_id}")
+async def dismiss_job(job_id: str):
+    """Remove a completed/failed job from the queue entirely."""
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    removed = _g["job_manager"].dismiss(job_id)
+    return {"ok": removed}
+
+
+@app.delete("/api/jobs")
+async def dismiss_all_finished():
+    """Remove all completed/failed/cancelled jobs from the queue."""
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = _g["job_manager"].dismiss_all_finished()
+    return {"ok": True, "dismissed": count}
+
+
 @app.get("/api/jobs")
 async def list_jobs():
     if _g["job_manager"] is None:

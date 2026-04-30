@@ -88,11 +88,9 @@ function _notifyCompletions(data) {
 {
   const btn = document.getElementById('btn-clear-completed');
   if (btn) {
-    btn.addEventListener('click', () => {
-      if (_root) {
-        _root.querySelectorAll('[data-job-id][data-clearable]')
-          .forEach(c => _clearedIds.add(c.dataset.jobId));
-      }
+    btn.addEventListener('click', async () => {
+      await api('/api/jobs', { method: 'DELETE' }).catch(() => {});
+      _clearedIds.clear();
       _poll();
     });
   }
@@ -348,16 +346,16 @@ function _jobCard(job, active) {
 
   // Right-side action button
   if (isClearable) {
-    // X to dismiss finished/failed jobs
+    // X to dismiss finished/failed jobs — calls server so it survives page refresh
     const xBtn = el('button', {
       class: 'btn btn-sm', text: '✕', title: 'Dismiss',
       style: 'flex-shrink:0; padding:4px 8px; font-size:.8rem; opacity:.6;',
     });
-    xBtn.addEventListener('click', e => {
+    xBtn.addEventListener('click', async e => {
       e.stopPropagation();
-      _clearedIds.add(job.id);
+      xBtn.disabled = true;
+      await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => {});
       card.remove();
-      _updateClearBtn({ completed: [] }); // re-evaluate (poll will refresh)
     });
     card.appendChild(xBtn);
   } else if (active) {
