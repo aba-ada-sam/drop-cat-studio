@@ -192,21 +192,33 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
     }
 
 
-def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "", user_direction: str = "") -> str:
-    """Auto-generate ironic/satirical lyrics for a video using Claude."""
-    parts = ["Write fun, sardonic song lyrics for this AI-generated video."]
+def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "", user_direction: str = "",
+                    scene_description: str = "") -> str:
+    """Auto-generate ironic/satirical lyrics for a video.
+
+    Uses text-only routing (fast, no vision model) — the music_prompt and
+    scene_description provide enough context. Passing frames triggers qwen3-vl
+    which is 4-5x slower due to thinking-mode overhead.
+    """
+    parts = ["Write fun, sardonic song lyrics matching this music and scene."]
     if music_prompt:
         parts.append(f'Music style: "{music_prompt}"')
-    if user_direction:
+    if scene_description:
+        parts.append(f'Scene: "{scene_description}"')
+    elif user_direction:
         parts.append(f'Creative direction: "{user_direction}"')
-    parts.append("Look at these frames from the video and write lyrics that are SPECIFIC to what you see — the subject, their expression, what they're doing, the setting. Make it feel written FOR this video, not generic.")
+    if user_direction and scene_description:
+        parts.append(f'Creative direction: "{user_direction}"')
+    parts.append("Make the lyrics specific to the mood and energy of the music. Be sardonic, witty, and a little absurdist.")
 
     prompt = "\n\n".join(parts)
     try:
-        if video_frames_b64:
-            text = router.route_vision(prompt, video_frames_b64, tier=TIER_FAST, system=LYRICS_SYSTEM)
-        else:
-            text = router.route([{"role": "user", "content": prompt}], tier=TIER_FAST, system=LYRICS_SYSTEM)
+        text = router.route(
+            [{"role": "user", "content": prompt}],
+            tier=TIER_FAST,
+            system=LYRICS_SYSTEM,
+            max_tokens=500,
+        )
         return text.strip() if text else ""
     except Exception as e:
         log.warning("Lyrics generation failed: %s", e)

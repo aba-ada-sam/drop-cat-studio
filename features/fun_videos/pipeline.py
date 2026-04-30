@@ -180,19 +180,23 @@ def run_pipeline(job, photo_path, settings):
             src_b64 = encode_image_b64(photo_path) if photo_path and os.path.isfile(photo_path) else None
             if src_b64:
                 pre_frames = [src_b64]
+                scene_desc = ""
                 if not music_prompt:
                     music_result = analyzer.generate_music_prompt(llm_router, pre_frames, user_direction)
                     music_prompt = music_result.get("music_prompt", "")
+                    scene_desc  = music_result.get("reasoning", "")  # reasoning field describes the scene
                     if not settings.get("bpm") and music_result.get("bpm"):
                         settings["bpm"] = music_result["bpm"]
                     _log(f"[info] Music direction: {music_prompt[:80]}")
                 if not instrumental:
                     job.update(progress=7, message="Writing lyrics...")
                     lyrics = analyzer.generate_lyrics(
-                        llm_router, pre_frames, music_prompt, lyric_direction or user_direction
+                        llm_router, [],  # text-only: faster, avoids qwen3-vl thinking mode
+                        music_prompt, lyric_direction or user_direction,
+                        scene_description=scene_desc,
                     )
                     if lyrics:
-                        _log("[info] Lyrics pre-generated from source image")
+                        _log("[info] Lyrics generated")
         except Exception as e:
             _log(f"[warning] Pre-analysis failed: {e} — will retry after video")
 

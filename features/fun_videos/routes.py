@@ -476,9 +476,8 @@ async def add_music(request: Request):
         if not instrumental:
             job.update(progress=15, message="Writing lyrics…")
             try:
-                frames_lyr = _sample_music_frames(vpath, llm_router)
                 lyric_direction = cfg_settings.get("lyric_direction", "") or cfg_settings.get("user_direction", "")
-                lyrics = analyzer.generate_lyrics(llm_router, frames_lyr, music_prompt, lyric_direction)
+                lyrics = analyzer.generate_lyrics(llm_router, [], music_prompt, lyric_direction)
             except Exception as e:
                 log.warning("Lyrics generation failed: %s", e)
             if not lyrics:
@@ -575,9 +574,9 @@ async def suggest_music(request: Request):
         bpm = result.get("bpm")
 
         lyric_direction = ""
-        if not instrumental and frames:
+        if not instrumental:
             try:
-                lyric_direction = analyzer.generate_lyrics(llm_router, frames, music_prompt, user_direction)
+                lyric_direction = analyzer.generate_lyrics(llm_router, [], music_prompt, user_direction)
                 # Return just the direction hint, not full lyrics
                 lyric_direction = (lyric_direction or "").split("\n")[0][:120]
             except Exception:
