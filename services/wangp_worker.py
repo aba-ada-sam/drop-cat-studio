@@ -171,8 +171,9 @@ def _do_generate(params: dict) -> dict:
         defaults["activated_loras"] = activated_loras
         defaults["loras_multipliers"] = loras_multipliers
     # Input mode — video-to-video takes priority over image inputs
+    # WanGP expects video_source as a plain string path, not a list
     if start_videos:
-        defaults["video_source"]      = start_videos
+        defaults["video_source"]      = start_videos[0]
         defaults["image_start"]       = []
         defaults["image_end"]         = []
         defaults["image_prompt_type"] = "V"

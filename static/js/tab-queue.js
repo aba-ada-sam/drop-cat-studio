@@ -64,7 +64,9 @@ function _updateRailHint(data) {
 function _updateClearBtn(data) {
   const bar = document.getElementById('queue-clear-bar');
   if (!bar) return;
-  const visible = (data.completed || []).some(j => !_clearedIds.has(j.id));
+  // Include failed jobs in the "anything to clear?" check
+  const all = [...(data.completed || []), ...(data.running || []).filter(j => j.status === 'error'), ...(data.queued || []).filter(j => j.status === 'error')];
+  const visible = all.some(j => !_clearedIds.has(j.id));
   bar.classList.toggle('visible', visible);
 }
 
@@ -83,13 +85,12 @@ function _notifyCompletions(data) {
 }
 
 // ── Clear completed ────────────────────────────────────────────────────────────
-// Wire up immediately — ES modules execute after DOM is parsed, so no DOMContentLoaded needed.
 {
   const btn = document.getElementById('btn-clear-completed');
   if (btn) {
     btn.addEventListener('click', () => {
       if (_root) {
-        _root.querySelectorAll('[data-job-id][data-done]')
+        _root.querySelectorAll('[data-job-id][data-clearable]')
           .forEach(c => _clearedIds.add(c.dataset.jobId));
       }
       _poll();
@@ -129,9 +130,13 @@ function _render(data) {
     }
   }
 
-  // ── Completed ──────────────────────────────────────────────────────────
+  // ── Completed / Failed ─────────────────────────────────────────────────
   if (completed.length > 0) {
-    _root.appendChild(_sectionHead('Completed — click to open'));
+    const nFailed = completed.filter(j => j.status !== 'done').length;
+    const label = nFailed > 0
+      ? `Completed · ${nFailed} failed — ✕ to dismiss`
+      : 'Completed — click to open';
+    _root.appendChild(_sectionHead(label));
     for (const job of completed) {
       _root.appendChild(_jobCard(job, false));
     }
@@ -231,30 +236,33 @@ function _showModal(job) {
 }
 
 function _jobCard(job, active) {
-  const isRunning = job.status === 'running';
-  const isFailed  = job.status === 'error' || job.status === 'stopped';
-  const isDone    = job.status === 'done';
+  const isRunning   = job.status === 'running';
+  const isFailed    = job.status === 'error' || job.status === 'stopped' || job.status === 'cancelled';
+  const isDone      = job.status === 'done';
+  const isClearable = isDone || isFailed;
   const isClickable = isDone || isRunning || job.status === 'queued';
+  const borderColor = isFailed ? 'var(--red, #c41e3a)' : 'var(--border-2)';
 
   const card = el('div', {
     style: `display:flex; gap:12px; align-items:flex-start; background:var(--surface-2);
-            border:1px solid var(--border-2); border-radius:8px; padding:10px 12px;
-            opacity:${isFailed ? '.5' : '1'};
+            border:1px solid ${borderColor}; border-radius:8px; padding:10px 12px;
             ${isClickable ? 'cursor:pointer; transition:border-color .15s, background .15s;' : ''}`,
   });
+  card.dataset.jobId = job.id;
+  if (isClearable) card.dataset.clearable = '1';
+  if (isDone)      card.dataset.done      = '1';
+
   if (isClickable) {
-    card.dataset.jobId = job.id;
-    if (isDone) card.dataset.done = '1';
     card.addEventListener('click', e => {
-      if (e.target.closest('button')) return; // don't open modal when clicking Cancel
+      if (e.target.closest('button')) return;
       _showModal(job);
     });
     card.addEventListener('mouseenter', () => {
-      card.style.borderColor = 'var(--accent)';
+      card.style.borderColor = isDone ? 'var(--accent)' : 'var(--red, #c41e3a)';
       card.style.background  = 'var(--surface-3, rgba(255,255,255,.07))';
     });
     card.addEventListener('mouseleave', () => {
-      card.style.borderColor = 'var(--border-2)';
+      card.style.borderColor = borderColor;
       card.style.background  = 'var(--surface-2)';
     });
   }
@@ -324,13 +332,35 @@ function _jobCard(job, active) {
   if (job.status === 'queued') {
     body.appendChild(el('div', {
       style: 'font-size:.72rem; color:var(--text-3); opacity:.7;',
-      text: 'click for details',
+      text: 'waiting in queue…',
+    }));
+  }
+  if (isFailed && (job.error || job.message)) {
+    const errText = (job.error || job.message || '').split(';')[0].trim().slice(0, 120);
+    body.appendChild(el('div', {
+      style: 'font-size:.72rem; color:var(--red, #c41e3a); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;',
+      text: errText,
+      title: job.error || job.message,
     }));
   }
 
   card.appendChild(body);
 
-  if (active) {
+  // Right-side action button
+  if (isClearable) {
+    // X to dismiss finished/failed jobs
+    const xBtn = el('button', {
+      class: 'btn btn-sm', text: '✕', title: 'Dismiss',
+      style: 'flex-shrink:0; padding:4px 8px; font-size:.8rem; opacity:.6;',
+    });
+    xBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      _clearedIds.add(job.id);
+      card.remove();
+      _updateClearBtn({ completed: [] }); // re-evaluate (poll will refresh)
+    });
+    card.appendChild(xBtn);
+  } else if (active) {
     const cancelBtn = el('button', {
       class: 'btn btn-sm', text: '✕', title: 'Cancel',
       style: 'flex-shrink:0; padding:4px 8px; font-size:.8rem;',
