@@ -53,10 +53,12 @@ async function _poll() {
 function _updateRailHint(data) {
   const hint = document.getElementById('queue-rail-hint');
   if (!hint) return;
-  const n = (data.running?.length || 0) + (data.queued?.length || 0);
-  if (n === 0)      hint.textContent = '(no items processing)';
-  else if (n === 1) hint.textContent = '(1 item processing)';
-  else              hint.textContent = `(${n} items processing)`;
+  const nr = data.running?.length || 0;
+  const nq = data.queued?.length  || 0;
+  if (nr === 0 && nq === 0)    hint.textContent = '(idle)';
+  else if (nr > 0 && nq === 0) hint.textContent = '(generating)';
+  else if (nr > 0)             hint.textContent = `(generating + ${nq} waiting)`;
+  else                         hint.textContent = `(${nq} queued)`;
 }
 
 function _updateClearBtn(data) {
@@ -104,19 +106,30 @@ function _render(data) {
   const completed = (data.completed || [])
     .filter(j => !_clearedIds.has(j.id))
     .slice(0, 12);
-  const total = running.length + queued.length;
 
   _root.innerHTML = '';
 
-  if (total === 0 && completed.length === 0) return;
+  if (running.length === 0 && queued.length === 0 && completed.length === 0) return;
 
-  if (total > 0) {
-    _root.appendChild(_sectionHead(`Active  ·  ${total} job${total !== 1 ? 's' : ''}`));
-    for (const job of [...running, ...queued]) {
+  // ── Now Generating (max 1) ─────────────────────────────────────────────
+  if (running.length > 0) {
+    _root.appendChild(_sectionHead('▶  Now Generating'));
+    for (const job of running) {
       _root.appendChild(_jobCard(job, true));
     }
   }
 
+  // ── In Queue ───────────────────────────────────────────────────────────
+  if (queued.length > 0) {
+    _root.appendChild(_sectionHead(
+      `⋯  In Queue · ${queued.length} waiting${running.length === 0 ? ' (no job running yet)' : ''}`,
+    ));
+    for (const job of queued) {
+      _root.appendChild(_jobCard(job, true));
+    }
+  }
+
+  // ── Completed ──────────────────────────────────────────────────────────
   if (completed.length > 0) {
     _root.appendChild(_sectionHead('Completed — click to open'));
     for (const job of completed) {

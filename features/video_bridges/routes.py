@@ -312,8 +312,11 @@ async def start_generation(request: Request):
     }
     merged.update(settings)
 
-    job = job_manager.submit(
-        JOB_BRIDGE, _bridges_worker, items, merged,
-        label=f"{len(items)} clips, {len(items)-1} bridges",
-    )
+    try:
+        job = job_manager.submit(
+            JOB_BRIDGE, _bridges_worker, items, merged,
+            label=f"{len(items)} clips, {len(items)-1} bridges",
+        )
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
     return {"job_id": job.id}

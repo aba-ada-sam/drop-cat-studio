@@ -95,6 +95,8 @@ class JobManager:
     ) -> Job:
         """Submit a new job. Returns the Job immediately.
 
+        Raises RuntimeError if the GPU queue is full (GPU job types only).
+
         worker_fn signature: worker_fn(job: Job, *args, **kwargs)
         The function should update job.progress, job.message, etc.
         It should check job.stop_event.is_set() periodically.
@@ -105,10 +107,22 @@ class JobManager:
         job._worker_kwargs = kwargs
 
         with self._lock:
+            if job_type in GPU_JOB_TYPES:
+                max_depth = int(cfg.get("gpu_queue_max_depth") or 3)
+                active_gpu = sum(
+                    1 for j in self._jobs.values()
+                    if j.type in GPU_JOB_TYPES and j.status in ("running", "queued")
+                )
+                if active_gpu >= max_depth:
+                    raise RuntimeError(
+                        f"Queue is full ({active_gpu}/{max_depth} video jobs) — "
+                        f"wait for a video to finish before adding more"
+                    )
             self._jobs[job.id] = job
+            if job_type in GPU_JOB_TYPES:
+                self._gpu_queue.append(job.id)
 
         if job_type in GPU_JOB_TYPES:
-            self._gpu_queue.append(job.id)
             self._gpu_event.set()
             log.info("Job %s (%s) queued for GPU — position %d",
                      job.id, job_type, len(self._gpu_queue))

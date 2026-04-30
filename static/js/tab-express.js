@@ -661,7 +661,11 @@ export function init(panel) {
       _watchJob(job_id);
       return true;
     } catch (e) {
-      toast(e.message, 'error');
+      if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
+        toast('Queue is full — wait for the current video to finish', 'error');
+      } else {
+        toast(e.message, 'error');
+      }
       return false;
     }
   }
@@ -671,12 +675,18 @@ export function init(panel) {
   // Cancels any previously running watcher so only one job's progress shows at a time.
   function _watchJob(job_id) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
-    _showProgress(5, 'Queued…');
+    _showProgress(2, 'Added to queue…');
     return new Promise(resolve => {
       const poller = pollJob(job_id,
         j => {
-          const pct = j.progress || 5;
-          _showProgress(pct, j.message || `${pct}%`);
+          if (j.status === 'queued') {
+            const pos = j.queue_position;
+            const label = pos === 0 ? 'up next' : `position ${pos + 1}`;
+            _showProgress(2, `In queue — ${label}…`);
+          } else {
+            const pct = j.progress || 5;
+            _showProgress(pct, j.message || `${pct}%`);
+          }
         },
         j => {
           _activePoller = null;

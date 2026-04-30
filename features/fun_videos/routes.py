@@ -300,9 +300,12 @@ async def make_it(request: Request):
         label = f"Fun Video: {Path(photo_path).stem[:20]}"
     else:
         label = f"T2V: {settings.get('video_prompt', '')[:24]}"
-    job = job_manager.submit(
-        JOB_FUN_VIDEO, run_pipeline, photo_path, settings, label=label,
-    )
+    try:
+        job = job_manager.submit(
+            JOB_FUN_VIDEO, run_pipeline, photo_path, settings, label=label,
+        )
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
     job.meta.update({
         "source_image": photo_path or "",
         "prompt": settings.get("video_prompt", "")[:120],
@@ -535,7 +538,10 @@ async def add_music(request: Request):
         job.message = f"Done — music prompt: {music_prompt[:60]}"
 
     label = f"Add music: {Path(video_path).stem[:24]}"
-    job = job_manager.submit(JOB_FUN_VIDEO, _worker, video_path, settings, label=label)
+    try:
+        job = job_manager.submit(JOB_FUN_VIDEO, _worker, video_path, settings, label=label)
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
     return {"job_id": job.id}
 
 
