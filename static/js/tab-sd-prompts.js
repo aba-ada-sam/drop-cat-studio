@@ -38,26 +38,16 @@ export function init(panel) {
   topArea.appendChild(sidebar);
   topArea.appendChild(mainArea);
 
-  // ── Backend selector ─────────────────────────────────────────────────────
+  // Backend is read from config on init; switch via Settings → image_provider
   let _backend = 'forge';  // 'forge' | 'openai'
-  const backendBar = el('div', { style: 'display:flex; gap:2px; padding:3px; background:var(--bg-raised); border:1px solid var(--border-2); border-radius:6px; flex-shrink:0;' });
-  const btnForge  = el('button', { class: 'provider-pill active', text: 'Forge SD (local)' });
-  const btnOpenAI = el('button', { class: 'provider-pill', text: 'OpenAI  —  SFW only' });
-  backendBar.appendChild(btnForge);
-  backendBar.appendChild(btnOpenAI);
-  sidebar.appendChild(backendBar);
 
   function _setBackend(b) {
     _backend = b;
-    btnForge.classList.toggle('active', b === 'forge');
-    btnOpenAI.classList.toggle('active', b === 'openai');
     forgeSettings.style.display  = b === 'forge'  ? '' : 'none';
     openaiSettings.style.display = b === 'openai' ? '' : 'none';
     if (b === 'openai') genBtn.disabled = false;
     else if (!forgeStatus?.alive) genBtn.disabled = true;
   }
-  btnForge.addEventListener('click',  () => { _setBackend('forge');  api('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: 'forge'  }) }).catch(() => {}); });
-  btnOpenAI.addEventListener('click', () => { _setBackend('openai'); api('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: 'openai' }) }).catch(() => {}); });
 
   // ── Talk to me ────────────────────────────────────────────────────────────
   let _sdChatHistory = [];
@@ -882,6 +872,5 @@ export function init(panel) {
 
   loadDefaults();
   checkForge();
-  // Sync backend pill with the header Image pill (image_provider config key)
   api('/api/config').then(cfg => { if (cfg.image_provider === 'openai') _setBackend('openai'); }).catch(() => {});
 }
