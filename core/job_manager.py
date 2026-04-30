@@ -76,6 +76,7 @@ class JobManager:
     def __init__(self):
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._paused = False   # when True, GPU worker finishes current job then idles
 
         # GPU queue
         self._gpu_queue: deque[str] = deque()
@@ -179,6 +180,60 @@ class JobManager:
                 del self._jobs[jid]
             return len(removable)
 
+    def pause(self):
+        """Pause the GPU queue — current job finishes, no new jobs start until resume()."""
+        self._paused = True
+
+    def resume(self):
+        """Resume the GPU queue."""
+        self._paused = False
+        self._gpu_event.set()
+
+    def cancel_all_queued(self) -> int:
+        """Cancel every waiting (not yet running) GPU job. Returns count cancelled."""
+        with self._lock:
+            count = 0
+            for jid in list(self._gpu_queue):
+                job = self._jobs.get(jid)
+                if job and job.status == "queued":
+                    job.status = "cancelled"
+                    job.message = "Cancelled by user"
+                    job.stop_event.set()
+                    count += 1
+            self._gpu_queue.clear()
+            return count
+
+    def retry(self, job_id: str):
+        """Re-submit a failed/stopped job with the same worker and arguments."""
+        with self._lock:
+            original = self._jobs.get(job_id)
+            if original is None or original.status in ("running", "queued"):
+                return None
+            if original._worker_fn is None:
+                return None
+        # Submit outside the lock to avoid deadlock in submit()
+        try:
+            new_job = self.submit(
+                original.type,
+                original._worker_fn,
+                *original._worker_args,
+                label=original.label,
+                **original._worker_kwargs,
+            )
+            new_job.meta.update(original.meta)
+            return new_job
+        except RuntimeError:
+            return None
+
+    def promote(self, job_id: str) -> bool:
+        """Move a queued job to the front of the GPU queue. Returns True if moved."""
+        with self._lock:
+            if job_id not in self._gpu_queue:
+                return False
+            self._gpu_queue.remove(job_id)
+            self._gpu_queue.appendleft(job_id)
+            return True
+
     def queue_position(self, job_id: str) -> int | None:
         """Return queue position for a GPU job. 0 = running, 1+ = waiting. None if not queued."""
         try:
@@ -228,6 +283,7 @@ class JobManager:
             "queued": queued,
             "completed": recent[:20],
             "gpu_queue_length": len(self._gpu_queue),
+            "paused": self._paused,
         }
 
     def cleanup(self, max_age_hours: int = 24):
@@ -250,7 +306,7 @@ class JobManager:
             self._gpu_event.wait()
             self._gpu_event.clear()
 
-            while self._gpu_queue:
+            while self._gpu_queue and not self._paused:
                 job_id = self._gpu_queue[0]
                 job = self.get(job_id)
 

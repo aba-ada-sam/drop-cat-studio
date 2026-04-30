@@ -461,6 +461,48 @@ async def dismiss_all_finished():
     return {"ok": True, "dismissed": count}
 
 
+@app.post("/api/jobs/pause")
+async def pause_queue():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    _g["job_manager"].pause()
+    return {"ok": True, "paused": True}
+
+
+@app.post("/api/jobs/resume")
+async def resume_queue():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    _g["job_manager"].resume()
+    return {"ok": True, "paused": False}
+
+
+@app.post("/api/jobs/cancel-queued")
+async def cancel_all_queued():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = _g["job_manager"].cancel_all_queued()
+    return {"ok": True, "cancelled": count}
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def retry_job(job_id: str):
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    new_job = _g["job_manager"].retry(job_id)
+    if new_job is None:
+        return JSONResponse({"error": "Cannot retry this job"}, 400)
+    return {"ok": True, "job_id": new_job.id}
+
+
+@app.post("/api/jobs/{job_id}/promote")
+async def promote_job(job_id: str):
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    ok = _g["job_manager"].promote(job_id)
+    return {"ok": ok}
+
+
 @app.get("/api/jobs")
 async def list_jobs():
     if _g["job_manager"] is None:
