@@ -28,11 +28,22 @@ if exist "%_STARTUP%" (
     del "%_STARTUP%" >nul 2>&1
 )
 
-:: -- Create / refresh the desktop shortcut pointing to this file --------
-:: This IS the right way: click the desktop icon -> git pull -> start server.
+:: -- Create / refresh the desktop shortcut pointing to manager.pyw ------
+:: manager.pyw owns git pull, splash, server start, tray, and single-instance mutex.
+:: The shortcut is also self-healed by manager.pyw on each run.
 set "_DESKTOP_LNK=%USERPROFILE%\Desktop\Drop Cat Go Studio.lnk"
-powershell -NoProfile -Command ^
-    "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='wscript.exe'; $sc.Arguments='\"%~dp0launch_silent.vbs\"'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+for /f "delims=" %%i in ('where pythonw 2^>nul') do set "_PYTHONW=%%i" & goto :have_pythonw
+:have_pythonw
+if not defined _PYTHONW (
+    for /f "delims=" %%i in ('where python 2^>nul') do (
+        if exist "%%~dpi\pythonw.exe" (set "_PYTHONW=%%~dpi\pythonw.exe" & goto :have_pythonw2)
+    )
+)
+:have_pythonw2
+if defined _PYTHONW (
+    powershell -NoProfile -Command ^
+        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='%_PYTHONW%'; $sc.Arguments='\"\"\"^%~dp0manager.pyw\"\"\"'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+)
 
 :: -- Auto-update from GitHub --------------------------------------------
 :: Strip trailing backslash from %~dp0 so git -C "path\" doesn't mis-parse the quote.
@@ -62,12 +73,14 @@ if "%_GOT_UPDATE%"=="1" (
     pip install -q -r "%~dp0requirements.txt" 2>nul
 )
 
-:: -- Check if server is already running ---------------------------------
+:: -- Check if server is already running (read .dcs-port first, no blind scan) -
 set _RUNNING_PORT=0
-for /l %%P in (7860,1,7879) do (
-    if "!_RUNNING_PORT!"=="0" (
-        python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:%%P/api/system', timeout=1)" >nul 2>&1
-        if not errorlevel 1 set _RUNNING_PORT=%%P
+if exist "%~dp0.dcs-port" (
+    for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"port\"" "%~dp0.dcs-port" 2^>nul') do (
+        for /f "tokens=* delims= " %%q in ("%%p") do (
+            python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:%%q/api/system', timeout=2)" >nul 2>&1
+            if not errorlevel 1 set _RUNNING_PORT=%%q
+        )
     )
 )
 

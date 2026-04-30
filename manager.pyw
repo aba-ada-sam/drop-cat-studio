@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -106,6 +107,92 @@ def kill_pid(pid: int | None) -> None:
         log.info("Killed PID %d", pid)
     except Exception as exc:
         log.warning("taskkill %d failed: %s", pid, exc)
+
+
+# ── Auto-update (git pull + pip install) ─────────────────────────────────────
+
+def _do_git_pull(on_status=None) -> None:
+    """Pull latest code; pip-install deps only if the commit changed. Non-fatal."""
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+
+    if not shutil.which("git"):
+        log.info("git not on PATH — skipping update check")
+        return
+
+    _status("Checking for updates…")
+    try:
+        sha_before = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+    except Exception:
+        sha_before = ""
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(ROOT), "pull", "--ff-only", "origin", "master"],
+            capture_output=True, timeout=30,
+        )
+    except Exception as exc:
+        log.warning("git pull skipped: %s", exc)
+        return
+
+    try:
+        sha_after = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+    except Exception:
+        sha_after = sha_before
+
+    if sha_before and sha_after and sha_before != sha_after:
+        log.info("New code pulled (%s → %s); updating dependencies", sha_before[:7], sha_after[:7])
+        _status("Updating dependencies…")
+        try:
+            req = ROOT / "requirements.txt"
+            if req.exists():
+                subprocess.run(
+                    ["pip", "install", "-q", "-r", str(req)],
+                    capture_output=True, timeout=180,
+                )
+        except Exception as exc:
+            log.warning("pip install failed (non-fatal): %s", exc)
+    else:
+        log.info("Already up to date")
+
+
+# ── Desktop shortcut self-update ──────────────────────────────────────────────
+
+def _ensure_shortcut() -> None:
+    """Point the desktop shortcut at manager.pyw (pythonw.exe) instead of launch.bat."""
+    try:
+        desktop_lnk = Path(os.environ["USERPROFILE"]) / "Desktop" / "Drop Cat Go Studio.lnk"
+        pythonw = Path(sys.executable)
+        if pythonw.stem.lower() != "pythonw":
+            candidate = pythonw.with_name("pythonw.exe")
+            pythonw = candidate if candidate.is_file() else pythonw
+        mgr = ROOT / "manager.pyw"
+        ico = ROOT / "static" / "favicon.ico"
+        ico_str = f"{ico},0" if ico.exists() else ""
+        ps = (
+            f"$ws=New-Object -ComObject WScript.Shell;"
+            f"$sc=$ws.CreateShortcut('{desktop_lnk}');"
+            f"$sc.TargetPath='{pythonw}';"
+            f"$sc.Arguments='\"\"\"' + '{mgr}' + '\"\"\"';"
+            f"$sc.WorkingDirectory='{ROOT}';"
+            f"$sc.IconLocation='{ico_str}';"
+            f"$sc.Description='Drop Cat Go Studio';"
+            f"$sc.Save()"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, timeout=15,
+        )
+        log.info("Desktop shortcut updated → manager.pyw")
+    except Exception as exc:
+        log.warning("_ensure_shortcut failed (non-fatal): %s", exc)
 
 
 # ── Open app window ───────────────────────────────────────────────────────────
@@ -334,10 +421,16 @@ def _show_opening_splash() -> None:
 # ── Loading splash (tkinter) ──────────────────────────────────────────────────
 
 def show_splash(srv: ServerManager) -> None:
-    """Frameless loading window that closes when the server is ready."""
+    """Frameless loading window: pulls updates → starts server → closes.
+
+    Drives the full startup sequence in a background thread so the window
+    appears immediately. srv.start() is called from here, not from main().
+    """
     try:
         import tkinter as tk
     except ImportError:
+        _do_git_pull()
+        srv.start()
         srv.wait_ready(timeout=120)
         return
 
@@ -355,7 +448,7 @@ def show_splash(srv: ServerManager) -> None:
     tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
              font=("Arial", 8)).pack()
 
-    status = tk.StringVar(value="Starting…")
+    status = tk.StringVar(value="Checking for updates…")
     tk.Label(root, textvariable=status, bg="#0d0606", fg="#6a5a4a",
              font=("Arial", 9)).pack(pady=(16, 0))
 
@@ -369,18 +462,18 @@ def show_splash(srv: ServerManager) -> None:
     def _tick():
         idx[0] = (idx[0] + 1) % 4
         dot_var.set(dots[idx[0]])
-        if idx[0] > 6:
-            status.set("Loading model…")
         root.after(260, _tick)
 
-    def _poll():
-        if srv.ready:
-            root.destroy()
-        else:
-            root.after(400, _poll)
+    def _bg():
+        _do_git_pull(on_status=lambda s: root.after(0, lambda: status.set(s)))
+        root.after(0, lambda: status.set("Starting server…"))
+        srv.start()
+        while not srv.ready and not srv._gave_up:
+            time.sleep(0.4)
+        root.after(0, root.destroy)
 
     _tick()
-    root.after(400, _poll)
+    threading.Thread(target=_bg, daemon=True).start()
     root.mainloop()
 
 
@@ -490,6 +583,9 @@ def main() -> None:
             pass
         sys.exit(1)
 
+    # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)
+    _ensure_shortcut()
+
     srv = ServerManager()
 
     # Fast check: is a server already recorded in .dcs-port and alive?
@@ -501,11 +597,9 @@ def main() -> None:
         srv._ready_event.set()
         open_app_window(existing_port)
     else:
-        # Start the server first, then show the splash immediately.
-        # Do NOT scan all 20 ports — that adds up to 30s of silence.
-        log.info("Starting app.py")
-        srv.start()
-        show_splash(srv)   # appears within ~1s of double-click
+        # show_splash drives the full startup: git pull → srv.start() → wait ready
+        log.info("Starting fresh — splash will handle git pull + server start")
+        show_splash(srv)
         if srv.port:
             open_app_window(srv.port)
         else:
