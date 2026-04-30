@@ -720,7 +720,7 @@ export function init(panel) {
       if (_jobId) stopJob(_jobId).catch(() => {});
       toast('Loop stopped', 'info');
     } else {
-      if (!_imagePath) { toast('Drop an image first', 'error'); return; }
+      if (!_imagePath && !ideaInput.value.trim()) { toast('Drop an image or type a video idea first', 'error'); return; }
       _looping = true;
       _loopCount = 0;
       loopBtn.textContent = '■  Stop';
@@ -734,10 +734,10 @@ export function init(panel) {
   // Button locks only for the brief AI-prep + submit phase, then unlocks so
   // the user can immediately queue another job while the first one runs.
   createBtn.addEventListener('click', async () => {
-    if (!_imagePath) {
+    if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
-      toast('Drop an image first', 'error');
+      toast('Drop an image or type a video idea first', 'error');
       return;
     }
     createBtn.disabled = true;

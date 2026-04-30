@@ -65,7 +65,7 @@ SAFE_DEFAULTS: dict = {
     "image_guide": [],
     "image_mask": [],
     "video_guide": [],
-    "video_source": [],
+    "video_source": None,
     "video_mask": [],
     "video_guide_outpainting": [],
     "audio_source": None,
