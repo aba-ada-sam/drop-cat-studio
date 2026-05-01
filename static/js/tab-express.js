@@ -199,6 +199,16 @@ export function init(panel) {
   recentWrap.appendChild(recentRow);
   root.appendChild(recentWrap);
 
+  const _DISMISSED_KEY = 'express_dismissed_images';
+  function _getDismissed() {
+    try { return new Set(JSON.parse(localStorage.getItem(_DISMISSED_KEY) || '[]')); }
+    catch (_) { return new Set(); }
+  }
+  function _saveDismissed(set) {
+    try { localStorage.setItem(_DISMISSED_KEY, JSON.stringify([...set].slice(-200))); }
+    catch (_) {}
+  }
+
   async function _loadRecent() {
     try {
       // Gather images from gallery + source images used in recent video jobs
@@ -207,6 +217,7 @@ export function init(panel) {
         apiFetch('/api/jobs', { context: 'express.recent.jobs' }),
       ]);
 
+      const dismissed = _getDismissed();
       const seen = new Set();
       const items = []; // {url, path, title}
 
@@ -215,7 +226,7 @@ export function init(panel) {
         for (const i of (galleryData.value.items || [])) {
           if (/\.(mp4|webm|mov)/i.test(i.url)) continue;
           const path = i.metadata?.path || i.url;
-          if (!seen.has(path)) { seen.add(path); items.push({ url: i.url, path, title: i.prompt || '' }); }
+          if (!seen.has(path) && !dismissed.has(path)) { seen.add(path); items.push({ url: i.url, path, title: i.prompt || '' }); }
         }
       }
 
@@ -223,7 +234,7 @@ export function init(panel) {
       if (jobsData.status === 'fulfilled') {
         for (const job of (jobsData.value.completed || [])) {
           const src = job.meta?.source_image;
-          if (!src || seen.has(src)) continue;
+          if (!src || seen.has(src) || dismissed.has(src)) continue;
           seen.add(src);
           const url = src.startsWith('/') ? src : `/output/${src.split('/output/').pop()}`;
           items.push({ url: `/api/thumbnail?path=${encodeURIComponent(src)}&size=120`, path: src, title: job.label || 'Used in video' });
@@ -251,6 +262,9 @@ export function init(panel) {
           e.stopPropagation();
           thumbWrap.remove();
           if (!recentRow.children.length) recentWrap.style.display = 'none';
+          const d = _getDismissed();
+          d.add(item.path);
+          _saveDismissed(d);
         });
         recentRow.appendChild(thumbWrap);
       }
