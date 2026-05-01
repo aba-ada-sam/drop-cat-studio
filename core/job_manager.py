@@ -242,6 +242,14 @@ class JobManager:
         except ValueError:
             return None
 
+    def is_gpu_busy(self) -> bool:
+        """Return True if a GPU job is currently running (not just queued)."""
+        with self._lock:
+            return any(
+                j.type in GPU_JOB_TYPES and j.status == "running"
+                for j in self._jobs.values()
+            )
+
     def get_job_info(self, job_id: str) -> dict | None:
         """Get job dict with queue position included."""
         job = self.get(job_id)

@@ -77,14 +77,20 @@ async def upload_media(files: list[UploadFile] = File(...)):
 
 @router.post("/analyze")
 async def analyze_media_endpoint(request: Request):
-    from app import get_llm_router; llm_router = get_llm_router()
+    import asyncio
+    from app import get_llm_router, get_job_manager
+    llm_router = get_llm_router()
     from features.video_bridges.analyzer import analyze_media
 
     body = await request.json()
     path = body.get("path", "")
     if not path or not os.path.isfile(path):
         raise HTTPException(400, "File not found")
-    return analyze_media(llm_router, path)
+
+    if get_job_manager().is_gpu_busy():
+        raise HTTPException(503, "GPU is busy with a video job — wait for it to finish before analyzing clips")
+
+    return await asyncio.to_thread(analyze_media, llm_router, path)
 
 
 @router.post("/bridge-preview")

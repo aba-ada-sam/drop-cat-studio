@@ -4,9 +4,14 @@ Analyzes clips and generates creative transition prompts between them.
 Ported from DropCatGo-Video-BRIDGES/analyzer.py.
 """
 import logging
+import threading
 
 from core.llm_client import TIER_BALANCED, TIER_POWER, parse_json_response
 from core.ffmpeg_utils import extract_frame_b64
+
+# One Ollama/vision call at a time — prevents VRAM explosions when multiple
+# clips are analyzed concurrently or analysis overlaps with WanGP generation.
+_vision_lock = threading.Lock()
 
 log = logging.getLogger(__name__)
 
@@ -64,12 +69,13 @@ def analyze_media(router, media_path: str, frames_b64: list[str] | None = None) 
         return {"error": "Could not extract frames", "title": "Unknown",
                 "scene_description": "Unknown content", "mood": "neutral"}
 
-    text = router.route_vision(
-        "Analyze this video/image clip for a transition project.",
-        frames_b64,
-        tier=TIER_BALANCED,
-        system=ANALYSIS_SYSTEM,
-    )
+    with _vision_lock:
+        text = router.route_vision(
+            "Analyze this video/image clip for a transition project.",
+            frames_b64,
+            tier=TIER_BALANCED,
+            system=ANALYSIS_SYSTEM,
+        )
     result = parse_json_response(text)
     if not result:
         raise RuntimeError("AI returned unparseable response for clip analysis")
@@ -129,18 +135,19 @@ from Clip A to Clip B. Focus on MOTION and CHANGE only. No static descriptions."
         images.append(frame_b64_b)
 
     try:
-        if images:
-            text = router.route_vision(
-                context, images,
-                tier=TIER_POWER,
-                system=BRIDGE_PROMPT_SYSTEM,
-            )
-        else:
-            text = router.route(
-                [{"role": "user", "content": context}],
-                tier=TIER_POWER,
-                system=BRIDGE_PROMPT_SYSTEM,
-            )
+        with _vision_lock:
+            if images:
+                text = router.route_vision(
+                    context, images,
+                    tier=TIER_POWER,
+                    system=BRIDGE_PROMPT_SYSTEM,
+                )
+            else:
+                text = router.route(
+                    [{"role": "user", "content": context}],
+                    tier=TIER_POWER,
+                    system=BRIDGE_PROMPT_SYSTEM,
+                )
         return text.strip()
     except Exception as e:
         log.warning("Bridge prompt generation failed: %s", e)
