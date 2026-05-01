@@ -106,6 +106,7 @@ DEFAULTS: dict = {
     "ollama_fast_model":     "gemma4:e4b",
     "ollama_balanced_model": "gemma4:e4b",
     "ollama_power_model":    "gemma4:26b",
+    "ollama_vision_model":   "gemma4:e4b",
 
     # ── AI model aliases (mapped to Ollama) ───────────────────────────────
     "ai_model_fast":     "gemma4:e4b",
