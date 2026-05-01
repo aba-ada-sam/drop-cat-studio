@@ -196,7 +196,7 @@ def _ensure_shortcut() -> None:
             f"$ws=New-Object -ComObject WScript.Shell;"
             f"$sc=$ws.CreateShortcut('{desktop_lnk}');"
             f"$sc.TargetPath='{pythonw}';"
-            f"$sc.Arguments='\"\"\"' + '{mgr}' + '\"\"\"';"
+            f"$sc.Arguments='\"{mgr}\"';"
             f"$sc.WorkingDirectory='{ROOT}';"
             f"$sc.IconLocation='{ico_str}';"
             f"$sc.Description='Drop Cat Go Studio';"
