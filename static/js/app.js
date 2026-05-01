@@ -1126,6 +1126,23 @@ document.addEventListener('DOMContentLoaded', () => {
     body.appendChild(barWrap);
 
     card.appendChild(body);
+
+    const dismiss = document.createElement('button');
+    dismiss.className = 'jf-dismiss';
+    dismiss.textContent = '×';
+    dismiss.title = 'Dismiss';
+    dismiss.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = card._job?.id;
+      card.remove();
+      if (id) {
+        _feedCards.delete(id);
+        const idx = _feedDone.indexOf(id);
+        if (idx !== -1) _feedDone.splice(idx, 1);
+      }
+    });
+    card.appendChild(dismiss);
+
     card._sta = sta;
     card._bar = bar;
     return card;
