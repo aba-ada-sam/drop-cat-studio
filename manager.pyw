@@ -148,17 +148,33 @@ def _do_git_pull(on_status=None) -> None:
         sha_after = sha_before
 
     if sha_before and sha_after and sha_before != sha_after:
-        log.info("New code pulled (%s → %s); updating dependencies", sha_before[:7], sha_after[:7])
-        _status("Updating dependencies…")
+        log.info("New code pulled (%s → %s)", sha_before[:7], sha_after[:7])
+        # Only pip-install if requirements.txt itself changed — avoids a
+        # 30-60s dep-resolution crawl on every code-only update.
+        req_changed = False
         try:
-            req = ROOT / "requirements.txt"
-            if req.exists():
-                subprocess.run(
-                    ["pip", "install", "-q", "-r", str(req)],
-                    capture_output=True, timeout=180,
-                )
-        except Exception as exc:
-            log.warning("pip install failed (non-fatal): %s", exc)
+            diff = subprocess.run(
+                ["git", "-C", str(ROOT), "diff", "--name-only", sha_before, sha_after, "--", "requirements.txt"],
+                capture_output=True, text=True, timeout=10,
+            )
+            req_changed = bool(diff.stdout.strip())
+        except Exception:
+            req_changed = True  # can't tell — be safe and install
+
+        if req_changed:
+            log.info("requirements.txt changed — updating dependencies")
+            _status("Updating dependencies…")
+            try:
+                req = ROOT / "requirements.txt"
+                if req.exists():
+                    subprocess.run(
+                        ["pip", "install", "-q", "-r", str(req)],
+                        capture_output=True, timeout=180,
+                    )
+            except Exception as exc:
+                log.warning("pip install failed (non-fatal): %s", exc)
+        else:
+            log.info("requirements.txt unchanged — skipping pip install")
     else:
         log.info("Already up to date")
 
