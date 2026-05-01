@@ -190,7 +190,7 @@ def _ensure_shortcut() -> None:
             candidate = pythonw.with_name("pythonw.exe")
             pythonw = candidate if candidate.is_file() else pythonw
         mgr = ROOT / "manager.pyw"
-        ico = ROOT / "static" / "favicon.ico"
+        ico = ROOT / "dropcat.ico"
         ico_str = f"{ico},0" if ico.exists() else ""
         ps = (
             f"$ws=New-Object -ComObject WScript.Shell;"
