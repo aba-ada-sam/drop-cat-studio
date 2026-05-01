@@ -569,7 +569,17 @@ def run_tray(srv: ServerManager) -> None:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _diag(msg: str) -> None:
+    """Append a timestamped line to manager_diag.txt for silent-crash diagnosis."""
+    try:
+        with open(ROOT / "manager_diag.txt", "a", encoding="utf-8") as _f:
+            _f.write(f"{time.strftime('%H:%M:%S')} PID={os.getpid()} {msg}\n")
+    except Exception:
+        pass
+
+
 def main() -> None:
+    _diag("main() entered")
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
 
     # Single-instance: Windows named mutex held for the lifetime of the process.
@@ -617,6 +627,7 @@ def main() -> None:
             _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
             # Fall through to normal startup
 
+    _diag("pystray/PIL import check")
     try:
         import pystray
         from PIL import Image
@@ -633,30 +644,42 @@ def main() -> None:
             pass
         sys.exit(1)
 
+    _diag("pystray/PIL OK — calling _ensure_shortcut")
     # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)
     _ensure_shortcut()
 
+    _diag("_ensure_shortcut done — finding server")
     srv = ServerManager()
 
     # Fast check: is a server already recorded in .dcs-port and alive?
     existing_port = find_running_server()
 
     if existing_port:
+        _diag(f"server already on port {existing_port} — opening window")
         log.info("Server already on port %d", existing_port)
         srv._port = existing_port
         srv._ready_event.set()
         open_app_window(existing_port)
     else:
         # show_splash drives the full startup: git pull → srv.start() → wait ready
+        _diag("no server found — calling show_splash")
         log.info("Starting fresh — splash will handle git pull + server start")
         show_splash(srv)
+        _diag(f"show_splash returned — srv.port={srv.port}")
         if srv.port:
             open_app_window(srv.port)
         else:
             log.error("Server never became ready")
 
+    _diag("calling run_tray")
     run_tray(srv)
 
 
 if __name__ == "__main__":
+    # Module-level diag: proves the process started and imports succeeded
+    try:
+        with open(ROOT / "manager_diag.txt", "a", encoding="utf-8") as _f:
+            _f.write(f"{time.strftime('%H:%M:%S')} PID={os.getpid()} __main__ block reached\n")
+    except Exception:
+        pass
     main()
