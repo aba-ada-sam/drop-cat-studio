@@ -16,8 +16,8 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 DEFAULTS: dict = {
     # ── Global (shared across features) ──────────────────────────────────
     "debug_mode": False,            # show service terminal windows when True
-    "gpu_job_timeout_seconds": 600, # max seconds before a GPU job is killed
-    "gpu_queue_max_depth": 3,       # max GPU jobs allowed at once (1 running + N-1 waiting)
+    "gpu_job_timeout_seconds": 1800, # max seconds before a GPU job is killed (30 min)
+    "gpu_queue_max_depth": 1,        # one GPU job at a time — no queue buildup
     "wan2gp_root": "",
     "wan2gp_python": "",            # auto-detected if blank
     "wan_model": "LTX-2 Dev19B Distilled",
