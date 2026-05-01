@@ -579,9 +579,43 @@ def main() -> None:
     _k32 = _ct.WinDLL("kernel32", use_last_error=True)
     _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
     if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS — another manager owns it
-        log.info("Already running — showing opening splash then exiting")
-        _show_opening_splash()
-        sys.exit(0)
+        # Find the other manager's PID and check if its server is still alive.
+        # If the server is dead the old manager is a zombie — kill it and take over.
+        other_pid = None
+        try:
+            import psutil
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    if proc.info["name"] and "pythonw" in proc.info["name"].lower():
+                        cl = " ".join(proc.info["cmdline"] or [])
+                        if "manager.pyw" in cl and proc.pid != os.getpid():
+                            other_pid = proc.pid
+                            break
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+
+        port, _ = read_port_file()
+        server_alive = port and server_responds(port)
+
+        if server_alive:
+            log.info("Already running on port %d — re-opening window", port)
+            _show_opening_splash()
+            sys.exit(0)
+        else:
+            # Stale manager holding mutex but server is dead — kill it and take over.
+            if other_pid:
+                log.info("Stale manager PID %d (server dead) — taking over", other_pid)
+                kill_pid(other_pid)
+                time.sleep(0.5)
+            else:
+                log.info("Mutex held but no manager found and server dead — taking over")
+            clear_port_file()
+            # Release and re-acquire the mutex under our PID
+            _k32.ReleaseMutex(_MUTEX_HANDLE)
+            _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
+            # Fall through to normal startup
 
     try:
         import pystray
