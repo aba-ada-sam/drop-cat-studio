@@ -3,6 +3,7 @@
 Batch video transforms: reverse, mirror, flip, speed, upscale, sharpen.
 Also includes the music mixer from Github Video Editor.
 """
+import asyncio
 import logging
 import os
 import uuid
@@ -31,21 +32,24 @@ async def add_paths(request: Request):
     from core.ffmpeg_utils import probe_file
     body = await request.json()
     paths = body.get("paths", [])
-    result = []
-    for path in paths:
-        p = Path(path)
-        if p.is_dir():
-            # Add all video files from folder
-            for fp in sorted(p.iterdir()):
-                if fp.suffix.lower() in VIDEO_EXTS:
-                    info = probe_file(str(fp))
-                    result.append({"path": str(fp), "name": fp.name, **info})
-        elif p.is_file() and p.suffix.lower() in VIDEO_EXTS:
-            info = probe_file(str(p))
-            result.append({"path": str(p), "name": p.name, **info})
-        else:
-            result.append({"path": path, "name": p.name, "error": "File not found or not a video"})
-    return {"files": result}
+
+    def _scan():
+        result = []
+        for path in paths:
+            p = Path(path)
+            if p.is_dir():
+                for fp in sorted(p.iterdir()):
+                    if fp.suffix.lower() in VIDEO_EXTS:
+                        info = probe_file(str(fp))
+                        result.append({"path": str(fp), "name": fp.name, **info})
+            elif p.is_file() and p.suffix.lower() in VIDEO_EXTS:
+                info = probe_file(str(p))
+                result.append({"path": str(p), "name": p.name, **info})
+            else:
+                result.append({"path": path, "name": p.name, "error": "File not found or not a video"})
+        return result
+
+    return {"files": await asyncio.to_thread(_scan)}
 
 
 @router.post("/upload")
@@ -59,7 +63,7 @@ async def upload_videos(files: list[UploadFile] = File(...)):
         data = await f.read()
         dest.write_bytes(data)
         from core.ffmpeg_utils import probe_file
-        info = probe_file(str(dest))
+        info = await asyncio.to_thread(probe_file, str(dest))
         saved.append({
             "path": str(dest),
             "name": f.filename,

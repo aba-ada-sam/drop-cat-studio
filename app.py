@@ -403,9 +403,9 @@ async def client_log(request: Request):
         msg  = body.get("message", "unknown client error")
         src  = body.get("source", "")
         line = body.get("lineno", "")
-        logger.error("CLIENT JS: %s  (%s:%s)", msg, src, line)
-    except Exception:
-        pass
+        log.error("CLIENT JS: %s  (%s:%s)", msg, src, line)
+    except Exception as e:
+        log.warning("client_log endpoint failed: %s", e)
     return {"ok": True}
 
 

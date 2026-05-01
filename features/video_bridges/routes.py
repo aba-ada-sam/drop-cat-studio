@@ -29,32 +29,37 @@ async def add_paths(request: Request):
 
     Accepts video files, image files, or folders. Returns metadata for each.
     """
-    from core.ffmpeg_utils import probe_file
+    import asyncio
     body = await request.json()
     paths = body.get("paths", [])
-    result = []
-    for path in paths:
-        p = Path(path)
-        if p.is_dir():
-            for fp in sorted(p.iterdir()):
-                if fp.suffix.lower() in MEDIA_EXTS:
-                    info = probe_file(str(fp))
-                    kind = "image" if fp.suffix.lower() in IMAGE_EXTS else "video"
-                    result.append({"path": str(fp), "name": fp.name, "kind": kind, **info})
-        elif p.is_file():
-            if p.suffix.lower() in MEDIA_EXTS:
-                info = probe_file(str(p))
-                kind = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
-                result.append({"path": str(p), "name": p.name, "kind": kind, **info})
+
+    def _scan():
+        result = []
+        for path in paths:
+            p = Path(path)
+            if p.is_dir():
+                for fp in sorted(p.iterdir()):
+                    if fp.suffix.lower() in MEDIA_EXTS:
+                        info = probe_file(str(fp))
+                        kind = "image" if fp.suffix.lower() in IMAGE_EXTS else "video"
+                        result.append({"path": str(fp), "name": fp.name, "kind": kind, **info})
+            elif p.is_file():
+                if p.suffix.lower() in MEDIA_EXTS:
+                    info = probe_file(str(p))
+                    kind = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
+                    result.append({"path": str(p), "name": p.name, "kind": kind, **info})
+                else:
+                    result.append({"path": path, "name": p.name, "error": "Unsupported file type"})
             else:
-                result.append({"path": path, "name": p.name, "error": "Unsupported file type"})
-        else:
-            result.append({"path": path, "name": p.name, "error": "Path not found"})
-    return {"files": result}
+                result.append({"path": path, "name": p.name, "error": "Path not found"})
+        return result
+
+    return {"files": await asyncio.to_thread(_scan)}
 
 
 @router.post("/upload")
 async def upload_media(files: list[UploadFile] = File(...)):
+    import asyncio
     saved = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
@@ -63,7 +68,7 @@ async def upload_media(files: list[UploadFile] = File(...)):
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
         dest.write_bytes(data)
-        info = probe_file(str(dest))
+        info = await asyncio.to_thread(probe_file, str(dest))
         kind = "image" if ext in IMAGE_EXTS else "video"
         saved.append({
             "path": str(dest),
@@ -96,6 +101,7 @@ async def analyze_media_endpoint(request: Request):
 @router.post("/bridge-preview")
 async def bridge_preview(request: Request):
     """Preview a bridge prompt for a specific pair (no generation)."""
+    import asyncio
     from app import get_llm_router; llm_router = get_llm_router()
     from features.video_bridges.analyzer import generate_bridge_prompt
 
@@ -106,18 +112,21 @@ async def bridge_preview(request: Request):
     path_b = body.get("path_b", "")
 
     config = cfg.load()
-    frame_a = extract_frame_b64(path_a, position=0.97) if path_a else None
-    frame_b = extract_frame_b64(path_b, position=0.03) if path_b else None
 
-    prompt = generate_bridge_prompt(
-        llm_router,
-        analysis_a, analysis_b,
-        frame_a, frame_b,
-        transition_mode=body.get("transition_mode", config.get("bridge_transition_mode", "cinematic")),
-        prompt_mode=body.get("prompt_mode", config.get("bridge_prompt_mode", "ai_informed")),
-        creativity=float(body.get("creativity", config.get("bridge_creativity", 9.0))),
-        user_guidance=body.get("user_guidance", ""),
-    )
+    def _run():
+        frame_a = extract_frame_b64(path_a, position=0.97) if path_a else None
+        frame_b = extract_frame_b64(path_b, position=0.03) if path_b else None
+        return generate_bridge_prompt(
+            llm_router,
+            analysis_a, analysis_b,
+            frame_a, frame_b,
+            transition_mode=body.get("transition_mode", config.get("bridge_transition_mode", "cinematic")),
+            prompt_mode=body.get("prompt_mode", config.get("bridge_prompt_mode", "ai_informed")),
+            creativity=float(body.get("creativity", config.get("bridge_creativity", 9.0))),
+            user_guidance=body.get("user_guidance", ""),
+        )
+
+    prompt = await asyncio.to_thread(_run)
     return {"prompt": prompt}
 
 

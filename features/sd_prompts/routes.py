@@ -3,8 +3,10 @@
 Image → SD prompt generation with wildcard support and iterative refinement.
 Ported from DropCatGo-SD-Prompts (Gradio → FastAPI REST).
 """
+import asyncio
 import logging
 import os
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -36,14 +38,16 @@ router = APIRouter()
 
 def _store_conv_state(session_id: str, state: dict):
     """Save conversation state, evicting the oldest entry when at capacity."""
-    if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
-        del _conv_states[next(iter(_conv_states))]
-    _conv_states[session_id] = state
+    with _conv_lock:
+        if len(_conv_states) >= _MAX_CONV_STATES and session_id not in _conv_states:
+            del _conv_states[next(iter(_conv_states))]
+        _conv_states[session_id] = state
 
 
 # Server-side conversation state keyed by session (capped to prevent memory leak)
 _MAX_CONV_STATES = 100
 _conv_states: dict[str, dict] = {}
+_conv_lock = threading.Lock()
 
 
 def _get_llm_router():
@@ -98,7 +102,8 @@ async def gen_prompts(request: Request):
     if selected:
         wc_labels = [l for l in wc_labels if l in selected]
 
-    parsed, conv_state = generate_prompts(
+    parsed, conv_state = await asyncio.to_thread(
+        generate_prompts,
         llm_router,
         image_path=image_path,
         concept=concept,
@@ -129,13 +134,14 @@ async def refine(request: Request):
     session_id = body.get("session_id", "default")
     model = body.get("model", cfg.get("sd_model") or "claude-sonnet-4-6")
 
-    conv_state = _conv_states.get(session_id)
+    with _conv_lock:
+        conv_state = _conv_states.get(session_id)
     if not conv_state:
         raise HTTPException(400, "No active session — generate prompts first")
     if not feedback:
         raise HTTPException(400, "Feedback required")
 
-    parsed, new_state = refine_prompts(llm_router, conv_state, feedback, model)
+    parsed, new_state = await asyncio.to_thread(refine_prompts, llm_router, conv_state, feedback, model)
     _store_conv_state(session_id, new_state)
 
     return {
@@ -231,7 +237,7 @@ async def grow_wildcard(request: Request):
     if not wc_dir:
         raise HTTPException(400, "Wildcards directory not configured in Settings")
 
-    entries = ai_grow(llm_router, concept, count, model)
+    entries = await asyncio.to_thread(ai_grow, llm_router, concept, count, model)
 
     path = Path(wc_dir) / f"{name}.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,7 +270,7 @@ async def prune_wildcard(request: Request):
 
     entries = _read_file_lines(path)
     label = Path(path).stem
-    result = ai_prune(llm_router, label, entries, level, model)
+    result = await asyncio.to_thread(ai_prune, llm_router, label, entries, level, model)
 
     if body.get("apply", False) and result["kept"]:
         _write_entries(path, result["kept"])
@@ -286,7 +292,7 @@ async def expand_wildcard(request: Request):
 
     entries = _read_file_lines(path)
     label = Path(path).stem
-    new_entries = ai_expand(llm_router, label, entries, count, model)
+    new_entries = await asyncio.to_thread(ai_expand, llm_router, label, entries, count, model)
 
     if body.get("apply", False) and new_entries:
         all_entries = entries + new_entries
@@ -312,7 +318,7 @@ async def merge_wildcards(request: Request):
             raise HTTPException(400, f"File not found: {p}")
         files_data.append((Path(p).stem, _read_file_lines(p)))
 
-    merged = ai_merge(llm_router, files_data, model)
+    merged = await asyncio.to_thread(ai_merge, llm_router, files_data, model)
 
     output_path = body.get("output_path")
     if output_path and merged:
@@ -330,7 +336,7 @@ async def audit_library(request: Request):
 
     wc_dir = _get_wildcards_dir()
     summary = _build_entries_summary(wc_dir)
-    report = ai_audit(llm_router, summary, model)
+    report = await asyncio.to_thread(ai_audit, llm_router, summary, model)
     return {"report": report}
 
 
@@ -345,7 +351,7 @@ async def curator_analyze_endpoint(request: Request):
 
     wc_dir = _get_wildcards_dir()
     summary = _build_entries_summary(wc_dir)
-    analysis = curator_analyze(llm_router, summary, instructions, model)
+    analysis = await asyncio.to_thread(curator_analyze, llm_router, summary, instructions, model)
     return {"analysis": analysis}
 
 
@@ -361,7 +367,7 @@ async def curator_plan_endpoint(request: Request):
     answers = body.get("answers", "")
     instructions = body.get("instructions", "")
 
-    plan_text = curator_plan(llm_router, summary, analysis, answers, instructions, model)
+    plan_text = await asyncio.to_thread(curator_plan, llm_router, summary, analysis, answers, instructions, model)
     actions = parse_plan_actions(plan_text)
     return {"plan_text": plan_text, "actions": actions}
 
@@ -385,35 +391,35 @@ def _save_and_register(images_b64: list[str]) -> list[str]:
 @router.get("/forge/status")
 async def forge_status():
     """Return Forge availability plus all live option lists."""
-    from services.forge_client import (
-        forge_alive, get_models, get_samplers, get_schedulers,
-        get_loras, get_upscalers, get_current_model, _forge_url,
-    )
-    alive = forge_alive()
-    forge_url = _forge_url()
-    if not alive:
+    def _fetch():
+        from services.forge_client import (
+            forge_alive, get_models, get_samplers, get_schedulers,
+            get_loras, get_upscalers, get_current_model, _forge_url,
+        )
+        from core.config import get as cfg_get
+        forge_url = _forge_url()
+        if not forge_alive():
+            return {
+                "alive": False,
+                "url": forge_url,
+                "warning": "Forge is not running. Start Forge with the --api flag for SD image generation.",
+            }
         return {
-            "alive": False,
+            "alive": True,
             "url": forge_url,
-            "warning": "Forge is not running. Start Forge with the --api flag for SD image generation.",
+            "current_model": get_current_model(),
+            "models": [
+                {"title": m.get("title", ""), "name": m.get("model_name", "")}
+                for m in get_models()
+            ],
+            "samplers": get_samplers(),
+            "schedulers": get_schedulers(),
+            "default_sampler": cfg_get("forge_default_sampler"),
+            "default_scheduler": cfg_get("forge_default_scheduler"),
+            "loras": [{"name": lora.get("name", ""), "alias": lora.get("alias", "")} for lora in get_loras()],
+            "upscalers": get_upscalers(),
         }
-
-    from core.config import get as cfg_get
-    return {
-        "alive": True,
-        "url": forge_url,
-        "current_model": get_current_model(),
-        "models": [
-            {"title": m.get("title", ""), "name": m.get("model_name", "")}
-            for m in get_models()
-        ],
-        "samplers": get_samplers(),
-        "schedulers": get_schedulers(),
-        "default_sampler": cfg_get("forge_default_sampler"),
-        "default_scheduler": cfg_get("forge_default_scheduler"),
-        "loras": [{"name": lora.get("name", ""), "alias": lora.get("alias", "")} for lora in get_loras()],
-        "upscalers": get_upscalers(),
-    }
+    return await asyncio.to_thread(_fetch)
 
 
 @router.post("/forge/set-model")
@@ -424,7 +430,7 @@ async def forge_set_model(request: Request):
     name = body.get("model", "")
     if not name:
         raise HTTPException(400, "Model name required")
-    ok = set_model(name)
+    ok = await asyncio.to_thread(set_model, name)
     return {"ok": ok}
 
 
@@ -499,7 +505,8 @@ async def enhance_prompt(request: Request):
 
     llm_router = _get_llm_router()
     try:
-        result = enhance_idea(
+        result = await asyncio.to_thread(
+            enhance_idea,
             llm_router,
             idea=idea,
             regional=regional,
@@ -630,7 +637,8 @@ async def forge_txt2img(request: Request):
         background_weight=float(body.get("forge_couple_bg_weight", 0.5)),
     ) if use_forge_couple else None
 
-    result = txt2img(
+    result = await asyncio.to_thread(
+        txt2img,
         prompt=prompt,
         negative_prompt=negative_prompt,
         width=int(body.get("width", 1440)),
@@ -642,13 +650,11 @@ async def forge_txt2img(request: Request):
         seed=int(body.get("seed", -1)),
         batch_size=int(body.get("batch_size", 1)),
         restore_faces=bool(body.get("restore_faces", False)),
-        # HiRes Fix
         enable_hr=bool(body.get("enable_hr", False)),
         hr_scale=float(body.get("hr_scale", 2.0)),
         hr_upscaler=body.get("hr_upscaler", "ESRGAN_4x"),
         hr_second_pass_steps=int(body.get("hr_steps", 10)),
         hr_denoising_strength=float(body.get("hr_denoise", 0.3)),
-        # Extensions
         adetailer=adetailer_args,
         forge_couple=forge_couple_args,
     )
@@ -697,7 +703,8 @@ async def forge_img2img(request: Request):
     else:
         adetailer_args = None
 
-    result = img2img(
+    result = await asyncio.to_thread(
+        img2img,
         init_image_b64=init_image,
         prompt=prompt,
         negative_prompt=body.get("negative_prompt", ""),
@@ -731,7 +738,7 @@ async def forge_img2img(request: Request):
 async def forge_interrupt():
     """Cancel the current Forge generation."""
     from services.forge_client import interrupt
-    ok = interrupt()
+    ok = await asyncio.to_thread(interrupt)
     return {"ok": ok}
 
 
@@ -739,7 +746,7 @@ async def forge_interrupt():
 async def forge_progress():
     """Get current Forge generation progress."""
     from services.forge_client import get_progress
-    return get_progress()
+    return await asyncio.to_thread(get_progress)
 
 
 @router.post("/openai/generate")
