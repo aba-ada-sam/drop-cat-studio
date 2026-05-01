@@ -98,20 +98,17 @@ DEFAULTS: dict = {
     "tools_out_dir": "",
 
     # ── Ollama (local AI — no API keys required) ─────────────────────────
-    # Gemma 4 models for RTX 5080 (16GB VRAM):
-    #   gemma4:e4b  (4B, ~9.6 GB)  -- fast, multimodal vision, fits easily
-    #   gemma4:26b  (MoE, ~18 GB)  -- power; active params ~4B, may need offload
-    # Switch to qwen3-vl:8b / qwen3-vl:30b if Gemma 4 not yet pulled in Ollama.
+    # qwen3-vl supports vision (images) and text; swap for any installed model.
     "ollama_host":           "http://localhost:11434",
-    "ollama_fast_model":     "gemma4:e4b",
-    "ollama_balanced_model": "gemma4:e4b",
-    "ollama_power_model":    "gemma4:26b",
-    "ollama_vision_model":   "gemma4:e4b",
+    "ollama_fast_model":     "qwen3-vl:8b",
+    "ollama_balanced_model": "qwen3-vl:8b",
+    "ollama_power_model":    "qwen3-vl:30b",
+    "ollama_vision_model":   "qwen3-vl:8b",
 
     # ── AI model aliases (mapped to Ollama) ───────────────────────────────
-    "ai_model_fast":     "gemma4:e4b",
-    "ai_model_balanced": "gemma4:e4b",
-    "ai_model_power":    "gemma4:26b",
+    "ai_model_fast":     "qwen3-vl:8b",
+    "ai_model_balanced": "qwen3-vl:8b",
+    "ai_model_power":    "qwen3-vl:30b",
 
 }
 
