@@ -108,6 +108,52 @@ def _assign_to_job(proc: subprocess.Popen) -> None:
 _init_job_object()
 
 
+def _kill_stale_gpu_processes() -> None:
+    """Kill orphan WanGP / ACE-Step processes left over from a previous DCS session.
+
+    When DCS restarts but _assign_to_job() failed (e.g. because Pinokio puts its
+    Python process in its own Job Object), GPU workers survive as orphans that
+    consume VRAM without serving requests.  We scan by command-line pattern and
+    kill any matches before starting fresh workers.
+    """
+    if sys.platform != "win32":
+        return
+    own_pid = os.getpid()
+    patterns = [
+        ("wangp_worker.py", "WanGP worker"),
+        ("api_server.py", "ACE-Step"),
+    ]
+    for pattern, label in patterns:
+        try:
+            result = subprocess.run(
+                ["wmic", "process", "where",
+                 f"commandline like '%{pattern}%'",
+                 "get", "processid,commandline", "/format:csv"],
+                capture_output=True, text=True, timeout=10,
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line or line.startswith("Node,"):
+                    continue
+                parts = line.split(",")
+                # CSV format: Node,CommandLine,ProcessId
+                if len(parts) < 2:
+                    continue
+                pid_str = parts[-1].strip()
+                if not pid_str.isdigit():
+                    continue
+                pid = int(pid_str)
+                if pid == 0 or pid == own_pid:
+                    continue
+                log.info("Killing stale %s orphan (PID %d)", label, pid)
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, timeout=5,
+                )
+        except Exception as e:
+            log.debug("Could not scan for stale %s processes: %s", label, e)
+
+
 def _popen_flags() -> dict:
     """Return creationflags to hide console windows on Windows (unless debug mode)."""
     if sys.platform == "win32" and not cfg.get("debug_mode"):
@@ -362,6 +408,10 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             _set_status("wangp", state="error", message=msg)
             return False, msg
 
+        # Kill any lingering worker processes before starting a new one so we
+        # don't leak orphan GPU processes across restarts.
+        _kill_stale_gpu_processes()
+
         _set_status("wangp", state="starting",
                     message="Starting WanGP worker (loading model)...")
         log.info("Starting WanGP worker -- loading model into VRAM...")
@@ -479,6 +529,7 @@ def quick_detect():
 
 def startup_all():
     """Detect and start services concurrently on app startup."""
+    _kill_stale_gpu_processes()  # evict orphan GPU workers before starting fresh ones
     quick_detect()
     log.info("Checking services...")
     threads = []

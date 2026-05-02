@@ -345,9 +345,28 @@ class JobManager:
                     log.info("Waiting up to 30s for timed-out job thread to exit...")
                     worker.join(timeout=30)
                     if worker.is_alive():
-                        log.warning("Job %s thread did not exit within 30s — "
-                                    "proceeding anyway (may cause WanGP contention)",
-                                    job.id)
+                        # Thread is stuck — most likely blocked on a WanGP HTTP call
+                        # (e.g. polling /status or /generate while WanGP is mid-generation).
+                        # Restarting the WanGP worker closes the listening socket, which
+                        # causes the blocked HTTP call to raise a ConnectionError and lets
+                        # the thread exit on its next stop_check iteration.
+                        log.warning(
+                            "Job %s thread still alive after 30s grace — "
+                            "restarting WanGP worker to unblock stuck connection",
+                            job.id,
+                        )
+                        try:
+                            from services import manager as _svc
+                            _svc.stop_service("wangp")
+                        except Exception as _e:
+                            log.warning("Could not stop WanGP to unblock stuck thread: %s", _e)
+                        worker.join(timeout=15)
+                        if worker.is_alive():
+                            log.error(
+                                "Job %s thread STILL alive after WanGP stop — "
+                                "proceeding anyway; VRAM contention possible",
+                                job.id,
+                            )
 
                 self._gpu_queue.popleft()
 

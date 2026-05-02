@@ -269,7 +269,9 @@ def _generate_via_subprocess(
     if log_fn:
         log_fn(f"[info] Launching WanGP subprocess ({model_name})...")
 
+    import queue as _queue
     import re
+    import threading as _threading
     _TQDM_STEP_RE = re.compile(r'(\d+)/(\d+)\s*\[')
 
     env = os.environ.copy()
@@ -281,7 +283,33 @@ def _generate_via_subprocess(
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
         )
-        for line in proc.stdout:
+
+        # Drain stdout in a background thread so the main thread can check
+        # stop_check every second instead of blocking on stdout reads.
+        _line_q: _queue.Queue = _queue.Queue()
+
+        def _drain(p, q):
+            try:
+                for line in p.stdout:
+                    q.put(line)
+            except Exception:
+                pass
+            q.put(None)  # sentinel
+
+        _threading.Thread(target=_drain, args=(proc, _line_q), daemon=True).start()
+
+        while True:
+            if stop_check and stop_check():
+                proc.terminate()
+                return None
+            try:
+                line = _line_q.get(timeout=1)
+            except _queue.Empty:
+                if proc.poll() is not None:
+                    break  # process exited, queue will drain
+                continue
+            if line is None:
+                break  # sentinel — subprocess stdout closed
             stripped = line.strip()
             if stripped and log_fn:
                 log_fn(f"[info] {stripped}")
@@ -292,10 +320,10 @@ def _generate_via_subprocess(
                     n, total = int(m.group(1)), int(m.group(2))
                     if total >= 5:
                         progress_fn(n, total)
-            if stop_check and stop_check():
-                proc.terminate()
-                return None
+
         proc.wait()
+        if stop_check and stop_check():
+            return None
         if proc.returncode != 0:
             if log_fn:
                 log_fn(f"[error] WanGP subprocess exited with code {proc.returncode}")
