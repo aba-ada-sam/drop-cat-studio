@@ -1158,13 +1158,25 @@ document.addEventListener('DOMContentLoaded', () => {
   function _updateCard(card, job) {
     card._job = job;  // keep modal data fresh on every poll
     const pct = job.progress || 0;
-    card._bar.style.width = pct + '%';
-    card._sta.textContent = job.message || job.status;
 
     card.classList.remove('jf-running', 'jf-done', 'jf-error', 'jf-queued');
-    if (job.status === 'running')  card.classList.add('jf-running');
-    else if (job.status === 'done') card.classList.add('jf-done');
-    else if (job.status === 'error' || job.status === 'stopped') card.classList.add('jf-error');
+    if (job.status === 'running') {
+      card.classList.add('jf-running');
+      card._bar.style.width = pct + '%';
+      card._sta.textContent = job.message || 'Running…';
+    } else if (job.status === 'queued') {
+      card.classList.add('jf-queued');
+      card._bar.style.width = '0%';
+      card._sta.textContent = 'Waiting in queue…';
+    } else if (job.status === 'done') {
+      card.classList.add('jf-done');
+      card._bar.style.width = '100%';
+      card._sta.textContent = job.message || 'Done';
+    } else if (job.status === 'error' || job.status === 'stopped') {
+      card.classList.add('jf-error');
+      card._bar.style.width = '100%';
+      card._sta.textContent = job.message || job.status;
+    }
   }
 
   async function _pollFeed() {
