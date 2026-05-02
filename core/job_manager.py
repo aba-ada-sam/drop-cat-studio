@@ -309,77 +309,92 @@ class JobManager:
     # ── Internal ──────────────────────────────────────────────────────────
 
     def _gpu_queue_worker(self):
-        """Background thread that processes GPU jobs sequentially."""
+        """Background thread that processes GPU jobs sequentially.
+
+        The outer while True is wrapped in a broad except so no exception —
+        including CUDA RuntimeErrors from torch.cuda.empty_cache() — can ever
+        kill this thread.  A dead worker means every subsequent GPU job hangs
+        as 'queued' forever, which is far worse than logging and continuing.
+        """
         while True:
-            self._gpu_event.wait()
-            self._gpu_event.clear()
+            try:
+                self._gpu_event.wait()
+                self._gpu_event.clear()
 
-            while self._gpu_queue and not self._paused:
-                job_id = self._gpu_queue[0]
-                job = self.get(job_id)
+                while self._gpu_queue and not self._paused:
+                    job_id = self._gpu_queue[0]
+                    job = self.get(job_id)
 
-                if job is None or job.status == "cancelled":
-                    self._gpu_queue.popleft()
-                    continue
+                    if job is None or job.status == "cancelled":
+                        self._gpu_queue.popleft()
+                        continue
 
-                job.status = "running"
-                job.message = "Starting..."
-                log.info("GPU job %s (%s) starting", job.id, job.type)
+                    job.status = "running"
+                    job.message = "Starting..."
+                    log.info("GPU job %s (%s) starting", job.id, job.type)
 
-                timeout = cfg.get("gpu_job_timeout_seconds") or 600
-                worker = threading.Thread(
-                    target=self._run_job, args=(job,), daemon=True,
-                )
-                worker.start()
-                worker.join(timeout=timeout)
-                if worker.is_alive():
-                    job.stop_event.set()
-                    job.status = "error"
-                    job.error = f"Job timed out after {timeout} seconds"
-                    job.message = f"Timed out after {timeout}s"
-                    log.error("Job %s timed out after %ds", job.id, timeout)
-                    # Wait for the thread to actually exit before starting the next
-                    # GPU job. Without this wait, the old thread can still be blocking
-                    # on a WanGP HTTP call when the next job submits, causing two
-                    # simultaneous WanGP generations and guaranteed VRAM OOM.
-                    log.info("Waiting up to 30s for timed-out job thread to exit...")
-                    worker.join(timeout=30)
+                    timeout = cfg.get("gpu_job_timeout_seconds") or 600
+                    worker = threading.Thread(
+                        target=self._run_job, args=(job,), daemon=True,
+                    )
+                    worker.start()
+                    worker.join(timeout=timeout)
                     if worker.is_alive():
-                        # Thread is stuck — most likely blocked on a WanGP HTTP call
-                        # (e.g. polling /status or /generate while WanGP is mid-generation).
-                        # Restarting the WanGP worker closes the listening socket, which
-                        # causes the blocked HTTP call to raise a ConnectionError and lets
-                        # the thread exit on its next stop_check iteration.
-                        log.warning(
-                            "Job %s thread still alive after 30s grace — "
-                            "restarting WanGP worker to unblock stuck connection",
-                            job.id,
-                        )
-                        try:
-                            from services import manager as _svc
-                            _svc.stop_service("wangp")
-                        except Exception as _e:
-                            log.warning("Could not stop WanGP to unblock stuck thread: %s", _e)
-                        worker.join(timeout=15)
+                        job.stop_event.set()
+                        job.status = "error"
+                        job.error = f"Job timed out after {timeout} seconds"
+                        job.message = f"Timed out after {timeout}s"
+                        log.error("Job %s timed out after %ds", job.id, timeout)
+                        # Wait for the thread to actually exit before starting the next
+                        # GPU job. Without this wait, the old thread can still be blocking
+                        # on a WanGP HTTP call when the next job submits, causing two
+                        # simultaneous WanGP generations and guaranteed VRAM OOM.
+                        log.info("Waiting up to 30s for timed-out job thread to exit...")
+                        worker.join(timeout=30)
                         if worker.is_alive():
-                            log.error(
-                                "Job %s thread STILL alive after WanGP stop — "
-                                "proceeding anyway; VRAM contention possible",
+                            # Thread is stuck — most likely blocked on a WanGP HTTP call
+                            # (e.g. polling /status or /generate while WanGP is mid-generation).
+                            # Restarting the WanGP worker closes the listening socket, which
+                            # causes the blocked HTTP call to raise a ConnectionError and lets
+                            # the thread exit on its next stop_check iteration.
+                            log.warning(
+                                "Job %s thread still alive after 30s grace — "
+                                "restarting WanGP worker to unblock stuck connection",
                                 job.id,
                             )
+                            try:
+                                from services import manager as _svc
+                                _svc.stop_service("wangp")
+                            except Exception as _e:
+                                log.warning("Could not stop WanGP to unblock stuck thread: %s", _e)
+                            worker.join(timeout=15)
+                            if worker.is_alive():
+                                log.error(
+                                    "Job %s thread STILL alive after WanGP stop — "
+                                    "proceeding anyway; VRAM contention possible",
+                                    job.id,
+                                )
 
-                self._gpu_queue.popleft()
+                    self._gpu_queue.popleft()
 
-                # VRAM cleanup between GPU jobs
-                import gc
-                gc.collect()
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except ImportError:
-                    pass
-                time.sleep(1)
+                    # VRAM cleanup between GPU jobs
+                    import gc
+                    gc.collect()
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass  # CUDA RuntimeError must not kill the worker thread
+                    time.sleep(1)
+
+            except Exception as _worker_exc:
+                log.exception(
+                    "GPU queue worker caught unexpected exception — "
+                    "continuing after 2s (job %s may need retry): %s",
+                    job_id if "job_id" in dir() else "?", _worker_exc,
+                )
+                time.sleep(2)
 
     def _run_job(self, job: Job):
         """Execute a job's worker function with error handling."""
