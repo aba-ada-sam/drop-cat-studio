@@ -83,6 +83,57 @@ def _finalize_prompt(prompt: str, model_name: str) -> str:
     return f"{base}, {suffix}" if base else suffix
 
 
+def run_prep(job, photo_path, settings):
+    """Phase 0: AI pre-analysis — LLM calls only, no GPU.
+
+    Runs outside the GPU queue so it executes concurrently while the GPU
+    is busy with a prior job. Results are written into settings so that
+    run_pipeline can skip Phase 0 entirely and go straight to WanGP.
+    """
+    from app import get_llm_router; llm_router = get_llm_router()
+    from features.fun_videos import analyzer
+
+    music_prompt    = settings.get("music_prompt", "")
+    lyric_direction = settings.get("lyric_direction", "")
+    user_direction  = settings.get("user_direction", "")
+    instrumental    = settings.get("instrumental", False)
+    skip_audio      = settings.get("skip_audio", False)
+    use_mmaudio     = settings.get("audio_provider", "acestep") == "ltx_native"
+
+    needs_audio = not skip_audio and not use_mmaudio
+    if not needs_audio or (music_prompt and instrumental):
+        return
+
+    job.update(progress=5, message="Analyzing image for music direction…")
+    try:
+        src_b64 = encode_image_b64(photo_path) if photo_path and os.path.isfile(photo_path) else None
+        if src_b64:
+            scene_desc = ""
+            if not music_prompt:
+                music_result = analyzer.generate_music_prompt(llm_router, [src_b64], user_direction)
+                music_prompt = music_result.get("music_prompt", "")
+                scene_desc   = music_result.get("reasoning", "")
+                if not settings.get("bpm") and music_result.get("bpm"):
+                    settings["bpm"] = music_result["bpm"]
+                log.info("[info] Music direction: %s", music_prompt[:80])
+            if not instrumental:
+                job.update(progress=8, message="Writing lyrics…")
+                lyrics = analyzer.generate_lyrics(
+                    llm_router, [],
+                    music_prompt, lyric_direction or user_direction,
+                    scene_description=scene_desc,
+                )
+                if lyrics:
+                    log.info("[info] Lyrics generated")
+                    settings["_prepped_lyrics"] = lyrics
+        if music_prompt:
+            settings["_prepped_music_prompt"] = music_prompt
+    except Exception as e:
+        log.warning("[warning] Pre-analysis failed: %s — will retry during GPU phase", e)
+
+    job.update(progress=9, message="Analysis complete, waiting for GPU…")
+
+
 def run_pipeline(job, photo_path, settings):
     """Full pipeline worker function for JobManager.
 
@@ -136,14 +187,14 @@ def run_pipeline(job, photo_path, settings):
     job_dir.mkdir(parents=True, exist_ok=True)
 
     video_prompt = settings.get("video_prompt", "")
-    music_prompt = settings.get("music_prompt", "")
+    music_prompt = settings.get("music_prompt", "") or settings.pop("_prepped_music_prompt", "")
     lyric_direction = settings.get("lyric_direction", "")
     use_wildcards = settings.get("use_wildcards", False)
     skip_audio = settings.get("skip_audio", False)
     use_mmaudio_early = settings.get("audio_provider", "acestep") == "ltx_native"
     user_direction = settings.get("user_direction", "")
     instrumental = settings.get("instrumental", False)
-    lyrics = ""
+    lyrics = settings.pop("_prepped_lyrics", "")
 
     _last_error = [None]
 
@@ -231,6 +282,7 @@ def run_pipeline(job, photo_path, settings):
             _tw, _th = _native
         photo_path = _prep_photo(photo_path, _tw, _th, job_dir)
 
+    _video_succeeded = False
     try:
         video_path = video_generator.generate_video(
             image_path=photo_path,
@@ -252,10 +304,15 @@ def run_pipeline(job, photo_path, settings):
             log_fn=_log,
             progress_fn=_video_progress,
         )
+        _video_succeeded = bool(video_path)
     finally:
-        # Always reload Forge — even if generate_video() raises unexpectedly.
         if forge_unloaded_for_video:
-            reload_checkpoint()
+            # Only reload Forge immediately if audio won't follow — when ACE-Step
+            # is coming next, keep Forge unloaded so we avoid a pointless
+            # reload→unload cycle (saves ~6s and a VRAM spike).
+            audio_will_follow = _video_succeeded and not skip_audio and not use_mmaudio
+            if not audio_will_follow:
+                reload_checkpoint()
 
     if _stopped():
         return
@@ -334,8 +391,10 @@ def run_pipeline(job, photo_path, settings):
 
     # ── Phase 3: Audio Generation ────────────────────────────────────────
     job.update(progress=70, message="Generating audio...")
-    # Unload Forge again for ACE-Step (it may have reloaded after WanGP finished)
-    forge_was_unloaded = unload_checkpoint()
+    # Forge may already be unloaded (we skipped the reload after WanGP to save
+    # time). Call unload anyway — it's idempotent and ensures a clean state.
+    # Track whether it was running so we know to reload at the end.
+    forge_was_unloaded = forge_unloaded_for_video or unload_checkpoint()
 
     video_dur = probe_duration(video_path)
     audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0

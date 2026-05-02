@@ -260,7 +260,7 @@ async def refine_prompt(request: Request):
 @router.post("/make-it")
 async def make_it(request: Request):
     from app import get_job_manager; job_manager = get_job_manager()
-    from features.fun_videos.pipeline import run_pipeline
+    from features.fun_videos.pipeline import run_prep, run_pipeline
 
     body = await request.json()
     photo_path = _resolve_path(body.get("photo_path") or "")
@@ -301,8 +301,8 @@ async def make_it(request: Request):
     else:
         label = f"T2V: {settings.get('video_prompt', '')[:24]}"
     try:
-        job = job_manager.submit(
-            JOB_FUN_VIDEO, run_pipeline, photo_path, settings, label=label,
+        job = job_manager.submit_with_prep(
+            JOB_FUN_VIDEO, run_prep, run_pipeline, photo_path, settings, label=label,
         )
     except RuntimeError as e:
         raise HTTPException(429, str(e))

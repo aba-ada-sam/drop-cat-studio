@@ -116,7 +116,7 @@ class LLMClient:
             import ollama
             self._client = ollama.Client(
                 host=self._host,
-                timeout=httpx.Timeout(connect=10, read=180, write=30, pool=10),
+                timeout=httpx.Timeout(connect=10, read=45, write=30, pool=10),
             )
         return self._client
 

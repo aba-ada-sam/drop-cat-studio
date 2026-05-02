@@ -203,6 +203,74 @@ class JobManager:
             self._gpu_queue.clear()
             return count
 
+    def submit_with_prep(
+        self,
+        job_type: str,
+        prep_fn: Callable,
+        gpu_fn: Callable,
+        *args,
+        label: str = "",
+        **kwargs,
+    ) -> Job:
+        """Submit a GPU job with a non-blocking prep phase.
+
+        prep_fn(job, *args, **kwargs) runs immediately in a background thread
+        with no GPU lock — it can run concurrently with other GPU jobs in the
+        queue. When prep finishes the job automatically enters the GPU queue
+        and gpu_fn runs under the normal GPU lock.
+
+        Both functions receive the same Job object and *args/**kwargs, so
+        prep_fn can write results into a mutable args dict for gpu_fn to read.
+        """
+        job = Job(job_type, label=label)
+        job._worker_fn = gpu_fn
+        job._worker_args = args
+        job._worker_kwargs = kwargs
+
+        with self._lock:
+            if job_type in GPU_JOB_TYPES:
+                max_depth = int(cfg.get("gpu_queue_max_depth") or 3)
+                active_gpu = sum(
+                    1 for j in self._jobs.values()
+                    if j.type in GPU_JOB_TYPES and j.status in ("running", "queued")
+                )
+                if active_gpu >= max_depth:
+                    raise RuntimeError(
+                        f"Queue is full ({active_gpu}/{max_depth} video jobs) — "
+                        f"wait for a video to finish before adding more"
+                    )
+            self._jobs[job.id] = job
+
+        def _run_prep():
+            job.status = "running"
+            try:
+                prep_fn(job, *args, **kwargs)
+            except Exception as e:
+                log.exception("Prep phase failed for job %s: %s", job.id, e)
+                job.status = "error"
+                job.error = str(e)
+                job.message = f"Prep failed: {e}"
+                return
+
+            if job.stop_event.is_set():
+                job.status = "stopped"
+                job.message = "Stopped"
+                return
+
+            # Prep done — hand off to GPU queue
+            job.status = "queued"
+            job.message = "Waiting for GPU…"
+            with self._lock:
+                self._gpu_queue.append(job.id)
+            self._gpu_event.set()
+            log.info("Job %s (%s) prep done, queued for GPU — position %d",
+                     job.id, job_type, len(self._gpu_queue))
+
+        t = threading.Thread(target=_run_prep, daemon=True)
+        t.start()
+        log.info("Job %s (%s) prep phase starting", job.id, job_type)
+        return job
+
     def retry(self, job_id: str):
         """Re-submit a failed/stopped job with the same worker and arguments."""
         with self._lock:
