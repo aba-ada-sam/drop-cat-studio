@@ -77,14 +77,13 @@ let _activeJobId    = null;
 let _activePoller   = null;
 let _models         = {};
 let _applyStart     = null;
+let _applyVideoFn   = null;
 
 export function receiveHandoff(data) {
   if (!data.path) return;
   if (data.type === 'video') {
-    if (_applyStart) {
-      // _applyVideo isn't module-level; trigger via a custom event the tab listens for
-      document.dispatchEvent(new CustomEvent('fv-handoff-video', { detail: data }));
-    }
+    if (_applyVideoFn) _applyVideoFn(data.path, data.url || '');
+    else if (_applyStart) toast('Open Create Videos tab first', 'info');
   } else if (data.type === 'image') {
     if (_applyStart) _applyStart(data.path, data.url || '');
     else toast('Open Create Videos tab first', 'info');
@@ -221,8 +220,8 @@ export function init(panel) {
   const previewCard = el('div', { class: 'drop-zone', style: 'display:none; position:relative; overflow:hidden; padding:0;' });
   root.appendChild(previewCard);
 
-  const previewImg   = el('img',   { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised); display:block;' });
-  const previewVid   = el('video', { controls: '', style: 'display:none; width:100%; max-height:260px; border-radius:8px; background:#000; display:block;' });
+  const previewImg   = el('img',   { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
+  const previewVid   = el('video', { controls: '', style: 'display:none; width:100%; max-height:260px; border-radius:8px; background:#000;' });
   const previewClear = el('button', {
     style: 'position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
     title: 'Clear', text: '×',
@@ -230,9 +229,6 @@ export function init(panel) {
   previewCard.appendChild(previewImg);
   previewCard.appendChild(previewVid);
   previewCard.appendChild(previewClear);
-
-  previewImg.style.display = 'none';
-  previewVid.style.display = 'none';
 
   previewClear.addEventListener('click', () => {
     _startImagePath = null;
@@ -271,8 +267,7 @@ export function init(panel) {
     videoName.textContent = path.split(/[\\/]/).pop();
     videoClearBtn.style.display = '';
   }
-
-  document.addEventListener('fv-handoff-video', e => _applyVideo(e.detail.path, e.detail.url || ''), { once: false });
+  _applyVideoFn = _applyVideo;
 
   // ── Start video (video-to-video) ──────────────────────────────────────────
   let _startVideoPath = null;
