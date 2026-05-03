@@ -176,6 +176,7 @@ _acestep_proc: subprocess.Popen | None = None
 # BUG-11: guard against two concurrent calls both passing the alive-check and
 # starting duplicate worker processes.
 _wangp_start_lock = threading.Lock()
+_acestep_start_lock = threading.Lock()
 
 
 def get_status() -> dict:
@@ -224,116 +225,117 @@ def start_acestep() -> tuple[bool, str | None]:
     import shutil
     global _acestep_proc
 
-    if acestep_alive():
-        _set_status("acestep", state="running",
-                    message="ACE-Step server already running", port=ACESTEP_PORT)
-        log.info("ACE-Step already running on port %d", ACESTEP_PORT)
-        return True, None
+    with _acestep_start_lock:
+        if acestep_alive():
+            _set_status("acestep", state="running",
+                        message="ACE-Step server already running", port=ACESTEP_PORT)
+            log.info("ACE-Step already running on port %d", ACESTEP_PORT)
+            return True, None
 
-    acestep_root = cfg.get_acestep_root()
-    if acestep_root is None:
-        msg = "ACE-Step path not configured — set it in Settings"
-        _set_status("acestep", state="not_configured", message=msg)
-        return False, msg
+        acestep_root = cfg.get_acestep_root()
+        if acestep_root is None:
+            msg = "ACE-Step path not configured — set it in Settings"
+            _set_status("acestep", state="not_configured", message=msg)
+            return False, msg
 
-    api_script = acestep_root / "acestep" / "api_server.py"
-    if not api_script.exists():
-        msg = f"ACE-Step api_server.py not found: {api_script}"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
-
-    # Prefer venv python; fall back to uv run
-    python = acestep_root / ".venv" / "Scripts" / "python.exe"
-    uv_exe = shutil.which("uv")
-
-    if python.exists():
-        cmd = [str(python), str(api_script), "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
-    elif uv_exe:
-        cmd = [uv_exe, "run", "--no-sync", "acestep-api",
-               "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
-    else:
-        msg = "Cannot start ACE-Step: no .venv Python and 'uv' not found in PATH"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
-
-    _set_status("acestep", state="starting", message="Starting ACE-Step server...")
-    log.info("Starting ACE-Step server headlessly (port %d)...", ACESTEP_PORT)
-
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env["ACESTEP_NO_INIT"] = "false"
-    env["ACESTEP_INIT_LLM"] = "auto"
-    existing_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(acestep_root) + (os.pathsep + existing_pp if existing_pp else "")
-
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(acestep_root), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            **_popen_flags(),
-        )
-        _assign_to_job(proc)
-        _acestep_proc = proc
-
-        def _drain(p):
-            try:
-                for line in p.stdout:
-                    stripped = line.rstrip()
-                    if stripped:
-                        log.info("[ace-step] %s", stripped)
-            except Exception:
-                pass
-
-        threading.Thread(target=_drain, args=(proc,), daemon=True).start()
-
-        deadline = time.time() + 300  # 5 min — LM model loading takes ~90s
-
-        # Phase 1: wait for uvicorn to bind the port (~5s)
-        while time.time() < deadline:
-            if check_port(ACESTEP_HOST, ACESTEP_PORT, timeout=2):
-                break
-            if proc.poll() is not None:
-                msg = "ACE-Step process exited before port opened"
-                _set_status("acestep", state="error", message=msg)
-                return False, msg
-            time.sleep(2)
-        else:
-            msg = "ACE-Step did not open port within 300s"
+        api_script = acestep_root / "acestep" / "api_server.py"
+        if not api_script.exists():
+            msg = f"ACE-Step api_server.py not found: {api_script}"
             _set_status("acestep", state="error", message=msg)
             return False, msg
 
-        # Phase 2: port open; wait for model loading (~90s).
-        # uvicorn queues HTTP requests during startup — issue one long-timeout
-        # request so we get the response as soon as initialization finishes.
-        log.info("ACE-Step port %d open — waiting for model to load...", ACESTEP_PORT)
-        _set_status("acestep", state="starting",
-                    message="ACE-Step loading model into VRAM (~90s)...")
-        while time.time() < deadline:
-            remaining = max(10, int(deadline - time.time()))
-            result = http_get(
-                f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health",
-                timeout=remaining,
+        # Prefer venv python; fall back to uv run
+        python = acestep_root / ".venv" / "Scripts" / "python.exe"
+        uv_exe = shutil.which("uv")
+
+        if python.exists():
+            cmd = [str(python), str(api_script), "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+        elif uv_exe:
+            cmd = [uv_exe, "run", "--no-sync", "acestep-api",
+                   "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+        else:
+            msg = "Cannot start ACE-Step: no .venv Python and 'uv' not found in PATH"
+            _set_status("acestep", state="error", message=msg)
+            return False, msg
+
+        _set_status("acestep", state="starting", message="Starting ACE-Step server...")
+        log.info("Starting ACE-Step server headlessly (port %d)...", ACESTEP_PORT)
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["ACESTEP_NO_INIT"] = "false"
+        env["ACESTEP_INIT_LLM"] = "auto"
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(acestep_root) + (os.pathsep + existing_pp if existing_pp else "")
+
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(acestep_root), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                **_popen_flags(),
             )
-            if result is not None:
-                _set_status("acestep", state="running",
-                            message="ACE-Step ready — music generation available",
-                            port=ACESTEP_PORT, pid=proc.pid)
-                log.info("ACE-Step started and ready on port %d", ACESTEP_PORT)
-                return True, None
-            if proc.poll() is not None:
-                msg = "ACE-Step exited during model loading"
+            _assign_to_job(proc)
+            _acestep_proc = proc
+
+            def _drain(p):
+                try:
+                    for line in p.stdout:
+                        stripped = line.rstrip()
+                        if stripped:
+                            log.info("[ace-step] %s", stripped)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+
+            deadline = time.time() + 300  # 5 min — LM model loading takes ~90s
+
+            # Phase 1: wait for uvicorn to bind the port (~5s)
+            while time.time() < deadline:
+                if check_port(ACESTEP_HOST, ACESTEP_PORT, timeout=2):
+                    break
+                if proc.poll() is not None:
+                    msg = "ACE-Step process exited before port opened"
+                    _set_status("acestep", state="error", message=msg)
+                    return False, msg
+                time.sleep(2)
+            else:
+                msg = "ACE-Step did not open port within 300s"
                 _set_status("acestep", state="error", message=msg)
                 return False, msg
-            time.sleep(5)
 
-        msg = "ACE-Step model did not finish loading within 300s"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
+            # Phase 2: port open; wait for model loading (~90s).
+            # uvicorn queues HTTP requests during startup — issue one long-timeout
+            # request so we get the response as soon as initialization finishes.
+            log.info("ACE-Step port %d open — waiting for model to load...", ACESTEP_PORT)
+            _set_status("acestep", state="starting",
+                        message="ACE-Step loading model into VRAM (~90s)...")
+            while time.time() < deadline:
+                remaining = max(10, int(deadline - time.time()))
+                result = http_get(
+                    f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health",
+                    timeout=remaining,
+                )
+                if result is not None:
+                    _set_status("acestep", state="running",
+                                message="ACE-Step ready — music generation available",
+                                port=ACESTEP_PORT, pid=proc.pid)
+                    log.info("ACE-Step started and ready on port %d", ACESTEP_PORT)
+                    return True, None
+                if proc.poll() is not None:
+                    msg = "ACE-Step exited during model loading"
+                    _set_status("acestep", state="error", message=msg)
+                    return False, msg
+                time.sleep(5)
 
-    except Exception as e:
-        msg = f"Failed to start ACE-Step: {e}"
-        _set_status("acestep", state="error", message=msg)
+            msg = "ACE-Step model did not finish loading within 300s"
+            _set_status("acestep", state="error", message=msg)
+            return False, msg
+
+        except Exception as e:
+            msg = f"Failed to start ACE-Step: {e}"
+            _set_status("acestep", state="error", message=msg)
         return False, msg
 
 
