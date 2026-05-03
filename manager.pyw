@@ -182,31 +182,30 @@ def _do_git_pull(on_status=None) -> None:
 # ── Desktop shortcut self-update ──────────────────────────────────────────────
 
 def _ensure_shortcut() -> None:
-    """Point the desktop shortcut at manager.pyw (pythonw.exe) instead of launch.bat."""
+    """Keep the desktop shortcut pointing at launch-silent.vbs via wscript.exe."""
     try:
         desktop_lnk = Path(os.environ["USERPROFILE"]) / "Desktop" / "Drop Cat Go Studio.lnk"
-        pythonw = Path(sys.executable)
-        if pythonw.stem.lower() != "pythonw":
-            candidate = pythonw.with_name("pythonw.exe")
-            pythonw = candidate if candidate.is_file() else pythonw
-        mgr = ROOT / "manager.pyw"
+        vbs = ROOT / "launch-silent.vbs"
         ico = ROOT / "dropcat.ico"
+        if not vbs.exists():
+            return
         ico_str = f"{ico},0" if ico.exists() else ""
+        wscript = r"C:\Windows\System32\wscript.exe"
         ps = (
-            f"$ws=New-Object -ComObject WScript.Shell;"
-            f"$sc=$ws.CreateShortcut('{desktop_lnk}');"
-            f"$sc.TargetPath='{pythonw}';"
-            f"$sc.Arguments='\"{mgr}\"';"
-            f"$sc.WorkingDirectory='{ROOT}';"
-            f"$sc.IconLocation='{ico_str}';"
-            f"$sc.Description='Drop Cat Go Studio';"
-            f"$sc.Save()"
+            f'$ws=New-Object -ComObject WScript.Shell;'
+            f'$sc=$ws.CreateShortcut("{desktop_lnk}");'
+            f'$sc.TargetPath="{wscript}";'
+            f'$sc.Arguments=\'"{vbs}"\';'
+            f'$sc.WorkingDirectory="{ROOT}";'
+            f'$sc.IconLocation="{ico_str}";'
+            f'$sc.Description="Drop Cat Go Studio";'
+            f'$sc.Save()'
         )
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True, timeout=15,
         )
-        log.info("Desktop shortcut updated → manager.pyw")
+        log.info("Desktop shortcut updated → launch-silent.vbs")
     except Exception as exc:
         log.warning("_ensure_shortcut failed (non-fatal): %s", exc)
 
