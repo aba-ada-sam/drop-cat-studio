@@ -145,8 +145,8 @@ function _logError(msg, context, details) {
 function _prependErrorEntry(container, entry) {
   const div = document.createElement('div');
   div.className = 'error-log-entry';
-  div.innerHTML = `<span class="elog-time">${entry.time}</span>` +
-    (entry.context ? `<span class="elog-ctx">[${entry.context}]</span>` : '') +
+  div.innerHTML = `<span class="elog-time">${_escHtml(entry.time)}</span>` +
+    (entry.context ? `<span class="elog-ctx">[${_escHtml(entry.context)}]</span>` : '') +
     `<span class="elog-msg">${_escHtml(entry.msg)}</span>` +
     (entry.details ? `<div style="margin-top:2px;color:var(--text-3);word-break:break-all">${_escHtml(entry.details)}</div>` : '');
   container.prepend(div);
