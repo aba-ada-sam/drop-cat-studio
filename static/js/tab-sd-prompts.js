@@ -526,8 +526,11 @@ export function init(panel) {
         body: JSON.stringify({ concept, name: nameInput.value.trim() || undefined, count: Number(countSlider.value) }),
       });
       growResult.style.display = '';
-      growResult.innerHTML = `<span style="color:var(--green)">Created <strong>${data.token}</strong> with ${data.count} entries (+${data.added} new).</span>
-        <div style="margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap">${(data.entries || []).slice(0,10).join('\n')}${data.count > 10 ? `\n… and ${data.count - 10} more` : ''}</div>`;
+      growResult.innerHTML = `<span style="color:var(--green)">Created <strong>${data.token}</strong> with ${data.count} entries (+${data.added} new).</span>`;
+      const growEntriesDiv = el('div', { style: 'margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap' });
+      const previewEntries = (data.entries || []).slice(0, 10);
+      growEntriesDiv.textContent = previewEntries.join('\n') + (data.count > 10 ? `\n… and ${data.count - 10} more` : '');
+      growResult.appendChild(growEntriesDiv);
       nameInput.value = '';
       conceptInput.value = '';
       await loadWildcardFiles();
@@ -555,8 +558,10 @@ export function init(panel) {
         body: JSON.stringify({ path: selectedWcFile.path, count: Number(expandCount.value), apply: true }),
       });
       expandResult.style.display = '';
-      expandResult.innerHTML = `<span style="color:var(--green)">${data.count} new entries added.</span>
-        <div style="margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap">${(data.new_entries || []).join('\n')}</div>`;
+      expandResult.innerHTML = `<span style="color:var(--green)">${data.count} new entries added.</span>`;
+      const expandEntriesDiv = el('div', { style: 'margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap' });
+      expandEntriesDiv.textContent = (data.new_entries || []).join('\n');
+      expandResult.appendChild(expandEntriesDiv);
       await loadWildcardFiles();
     } catch (e) { toast(e.message, 'error'); }
     expandBtn.disabled = false;
@@ -585,8 +590,10 @@ export function init(panel) {
         body: JSON.stringify({ path: selectedWcFile.path, level: Number(pruneLevel.value), apply: false }),
       });
       pruneResult.style.display = '';
-      pruneResult.innerHTML = `<span style="color:var(--green)">Keep: ${_lastPruneData.kept?.length || 0}</span> &nbsp; <span style="color:var(--red)">Remove: ${_lastPruneData.removed?.length || 0}</span>
-        <pre style="font-size:.75rem; color:var(--text-3); max-height:100px; overflow:auto; white-space:pre-wrap; margin-top:4px">${_lastPruneData.notes || ''}</pre>`;
+      pruneResult.innerHTML = `<span style="color:var(--green)">Keep: ${_lastPruneData.kept?.length || 0}</span> &nbsp; <span style="color:var(--red)">Remove: ${_lastPruneData.removed?.length || 0}</span>`;
+      const pruneNotePre = el('pre', { style: 'font-size:.75rem; color:var(--text-3); max-height:100px; overflow:auto; white-space:pre-wrap; margin-top:4px' });
+      pruneNotePre.textContent = _lastPruneData.notes || '';
+      pruneResult.appendChild(pruneNotePre);
       pruneApplyBtn.style.display = '';
     } catch (e) { toast(e.message, 'error'); }
     pruneBtn.disabled = false;
@@ -620,7 +627,10 @@ export function init(panel) {
     try {
       const data = await api('/api/prompts/audit', { method: 'POST', body: '{}' });
       auditResult.style.display = '';
-      auditResult.innerHTML = `<pre style="font-size:.78rem; color:var(--text-2); white-space:pre-wrap; max-height:300px; overflow:auto">${data.report || '(no report)'}</pre>`;
+      auditResult.innerHTML = '';
+      const auditPre = el('pre', { style: 'font-size:.78rem; color:var(--text-2); white-space:pre-wrap; max-height:300px; overflow:auto' });
+      auditPre.textContent = data.report || '(no report)';
+      auditResult.appendChild(auditPre);
     } catch (e) { toast(e.message, 'error'); }
     auditBtn.disabled = false;
     auditBtn.textContent = 'Audit Library';
