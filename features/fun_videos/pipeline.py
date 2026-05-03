@@ -285,10 +285,20 @@ def run_pipeline(job, photo_path, settings):
         return
 
     # ── Phase 1: Video Generation ────────────────────────────────────────
-    # Unload Forge SD model from VRAM before WanGP starts so they don't compete
-    # for GPU memory during inference.
+    # Free all VRAM before WanGP starts: unload Forge SD AND kill ACE-Step.
+    # ACE-Step holds ~12 GB VRAM when idle; WanGP needs the full 16 GB.
+    # ACE-Step is restarted after Phase 1 and loads during Phase 2.
     from services.forge_client import unload_checkpoint, reload_checkpoint
     forge_unloaded_for_video = unload_checkpoint()
+
+    if not skip_audio and not use_mmaudio:
+        try:
+            from services.manager import stop_service, acestep_alive
+            if acestep_alive():
+                log.info("[info] Stopping ACE-Step to free VRAM for WanGP")
+                stop_service("acestep")
+        except Exception as _e:
+            log.debug("ACE-Step pre-stop skipped: %s", _e)
 
     job.update(progress=10, message="Generating video...")
 

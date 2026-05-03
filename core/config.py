@@ -48,7 +48,7 @@ DEFAULTS: dict = {
     "i2v_fps": 30,
 
     # ── Fun Videos (fun_) ────────────────────────────────────────────────
-    "fun_video_duration": 14.0,
+    "fun_video_duration": 6.0,
     "fun_video_steps": 30,
     "fun_video_guidance": 7.5,
     "fun_video_seed": -1,
