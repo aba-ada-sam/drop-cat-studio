@@ -168,7 +168,10 @@ export function init(panel) {
     clearImgBtn.style.display = 'none';
   });
 
-  dropZone.addEventListener('click', () => imgInput.click());
+  dropZone.addEventListener('click', e => {
+    if (preview.contains(e.target) || e.target === preview) return;
+    imgInput.click();
+  });
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', () => dropZone.classList.remove('drag-over'));
