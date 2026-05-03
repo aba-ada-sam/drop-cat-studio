@@ -1,0 +1,166 @@
+"""Audio analysis for the Song Video feature.
+
+Uses librosa for rich analysis (BPM, key, per-clip energy profile) when
+available, falls back to ffprobe-only (duration + basic metadata) if not.
+Install librosa with: pip install librosa
+"""
+import logging
+import math
+import os
+from pathlib import Path
+
+from core.ffmpeg_utils import probe_duration
+
+log = logging.getLogger(__name__)
+
+NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+# Bars per clip options, in preference order.
+# We pick the first option that lands within WanGP's 8–20s range.
+_BARS_PER_CLIP_OPTIONS = [8, 4, 16]
+
+
+def _bars_to_seconds(bpm: float, bars: int) -> float:
+    """Convert bars to seconds at the given BPM (4/4 time assumed)."""
+    beats_per_second = bpm / 60.0
+    return (bars * 4) / beats_per_second
+
+
+def _suggest_clip_dur(bpm: float | None) -> int:
+    """Pick a musically-aligned clip duration in seconds (8–20s range)."""
+    if bpm and bpm > 0:
+        for bars in _BARS_PER_CLIP_OPTIONS:
+            secs = _bars_to_seconds(bpm, bars)
+            if 8 <= secs <= 20:
+                return max(8, min(20, round(secs)))
+    return 8  # fallback
+
+
+def _energy_label(e: float) -> str:
+    if e > 0.70:
+        return "HIGH"
+    if e > 0.35:
+        return "MED"
+    return "LOW"
+
+
+def _mood_from_analysis(mode: str | None, energy: str) -> str:
+    if mode == "minor":
+        return "intense" if energy == "high" else ("melancholic" if energy == "low" else "dramatic")
+    return "euphoric" if energy == "high" else ("peaceful" if energy == "low" else "uplifting")
+
+
+def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
+    """Analyze an audio file and return a structured analysis dict.
+
+    Returns:
+        duration          float   total seconds
+        duration_display  str     "M:SS"
+        bpm               int|None  beats per minute (None if librosa unavailable)
+        key               str|None  e.g. "A"
+        mode              str|None  "major" | "minor"
+        mood              str     derived from mode + energy
+        energy            str     "low" | "moderate" | "high"
+        energy_profile    list    per-clip energy 0.0–1.0 (empty if no librosa)
+        clip_energy_labels list   ["HIGH", "MED", "LOW", ...]
+        suggested_clip_dur int    BPM-aligned clip length in seconds
+        suggested_num_clips int   ceil(duration / suggested_clip_dur)
+        has_rich_analysis bool    True if librosa ran successfully
+    """
+    result: dict = {
+        "duration": 0.0,
+        "duration_display": "0:00",
+        "bpm": None,
+        "key": None,
+        "mode": None,
+        "mood": "cinematic",
+        "energy": "moderate",
+        "energy_profile": [],
+        "clip_energy_labels": [],
+        "suggested_clip_dur": suggested_clip_dur or 8,
+        "suggested_num_clips": 0,
+        "has_rich_analysis": False,
+    }
+
+    # ── Basic duration via ffprobe ────────────────────────────────────────
+    dur = probe_duration(audio_path)
+    if dur <= 0:
+        log.warning("[song-video] Could not probe duration for %s", audio_path)
+        return result
+
+    result["duration"] = dur
+    mins, secs = divmod(int(dur), 60)
+    result["duration_display"] = f"{mins}:{secs:02d}"
+
+    # ── Rich analysis via librosa ─────────────────────────────────────────
+    try:
+        import librosa
+        import numpy as np
+
+        log.info("[song-video] Running librosa analysis on %s", Path(audio_path).name)
+        # Load mono, 22050 Hz — good enough for beat/key analysis, fast to load
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 300))
+
+        # BPM
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0])
+        result["bpm"] = max(40, min(240, round(bpm)))
+
+        # Key via chroma
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        chroma_mean = np.mean(chroma, axis=1)
+        key_idx = int(np.argmax(chroma_mean))
+        result["key"] = NOTES[key_idx]
+
+        # Major vs minor: compare prominence of minor-third vs major-third above tonic
+        minor_third = (key_idx + 3) % 12
+        major_third = (key_idx + 4) % 12
+        result["mode"] = "minor" if chroma_mean[minor_third] > chroma_mean[major_third] else "major"
+
+        # Per-clip energy profile (RMS)
+        clip_dur_secs = suggested_clip_dur or _suggest_clip_dur(bpm)
+        result["suggested_clip_dur"] = clip_dur_secs
+        n_clips = max(1, math.ceil(dur / clip_dur_secs))
+
+        rms = librosa.feature.rms(y=y)[0]
+        samples_per_clip = max(1, len(rms) // n_clips)
+        energy_raw = []
+        for i in range(n_clips):
+            start = i * samples_per_clip
+            end = min(start + samples_per_clip, len(rms))
+            energy_raw.append(float(np.mean(rms[start:end])) if end > start else 0.0)
+
+        max_e = max(energy_raw) if max(energy_raw) > 0 else 1.0
+        energy_profile = [round(e / max_e, 3) for e in energy_raw]
+        result["energy_profile"] = energy_profile
+        result["clip_energy_labels"] = [_energy_label(e) for e in energy_profile]
+
+        # Overall energy level (label)
+        overall_rms = float(np.mean(rms))
+        peak_rms    = float(np.max(rms)) if np.max(rms) > 0 else 1.0
+        ratio = overall_rms / peak_rms
+        result["energy"] = "high" if ratio > 0.45 else ("low" if ratio < 0.20 else "moderate")
+
+        result["mood"] = _mood_from_analysis(result["mode"], result["energy"])
+        result["has_rich_analysis"] = True
+        log.info(
+            "[song-video] Analysis done: %d BPM, %s %s, %s energy, %d clips × %ds",
+            result["bpm"], result["key"], result["mode"],
+            result["energy"], n_clips, clip_dur_secs,
+        )
+
+    except ImportError:
+        log.info("[song-video] librosa not installed — using ffprobe-only analysis. "
+                 "Run: pip install librosa  for BPM/key/energy features.")
+        result["suggested_clip_dur"] = suggested_clip_dur or 8
+
+    except Exception as e:
+        log.warning("[song-video] librosa analysis failed: %s", e)
+        result["suggested_clip_dur"] = suggested_clip_dur or 8
+
+    # ── Always recalculate clip count from final clip dur ─────────────────
+    result["suggested_num_clips"] = max(1, math.ceil(dur / result["suggested_clip_dur"]))
+    if not result["mood"] or result["mood"] == "cinematic":
+        result["mood"] = _mood_from_analysis(result.get("mode"), result["energy"])
+
+    return result

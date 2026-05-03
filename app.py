@@ -919,12 +919,14 @@ from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
 from features.sd_prompts.routes import router as prompts_router
 from features.video_tools.routes import router as tools_router
+from features.song_video.routes import router as song_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
+app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
 
 
 # ── Presets (WS8) ────────────────────────────────────────────────────────────

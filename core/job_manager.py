@@ -30,7 +30,7 @@ GPU_JOB_TYPES = {JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE}
 class Job:
     """Represents a single processing job."""
 
-    def __init__(self, job_type: str, label: str = ""):
+    def __init__(self, job_type: str, label: str = "", timeout_seconds: int | None = None):
         self.id = uuid.uuid4().hex[:12]
         self.type = job_type
         self.label = label
@@ -42,6 +42,7 @@ class Job:
         self.error: str | None = None
         self.created_at = time.time()
         self.stop_event = threading.Event()
+        self.timeout_seconds: int | None = timeout_seconds  # overrides gpu_job_timeout_seconds
         self._worker_fn: Callable | None = None
         self._worker_args: tuple = ()
         self._worker_kwargs: dict = {}
@@ -93,6 +94,7 @@ class JobManager:
         worker_fn: Callable,
         *args,
         label: str = "",
+        timeout_seconds: int | None = None,
         **kwargs,
     ) -> Job:
         """Submit a new job. Returns the Job immediately.
@@ -103,7 +105,7 @@ class JobManager:
         The function should update job.progress, job.message, etc.
         It should check job.stop_event.is_set() periodically.
         """
-        job = Job(job_type, label=label)
+        job = Job(job_type, label=label, timeout_seconds=timeout_seconds)
         job._worker_fn = worker_fn
         job._worker_args = args
         job._worker_kwargs = kwargs
@@ -211,6 +213,7 @@ class JobManager:
         gpu_fn: Callable,
         *args,
         label: str = "",
+        timeout_seconds: int | None = None,
         **kwargs,
     ) -> Job:
         """Submit a GPU job with a non-blocking prep phase.
@@ -223,7 +226,7 @@ class JobManager:
         Both functions receive the same Job object and *args/**kwargs, so
         prep_fn can write results into a mutable args dict for gpu_fn to read.
         """
-        job = Job(job_type, label=label)
+        job = Job(job_type, label=label, timeout_seconds=timeout_seconds)
         job._worker_fn = gpu_fn
         job._worker_args = args
         job._worker_kwargs = kwargs
@@ -402,7 +405,7 @@ class JobManager:
                     job.message = "Starting..."
                     log.info("GPU job %s (%s) starting", job.id, job.type)
 
-                    timeout = cfg.get("gpu_job_timeout_seconds") or 600
+                    timeout = job.timeout_seconds or cfg.get("gpu_job_timeout_seconds") or 1800
                     worker = threading.Thread(
                         target=self._run_job, args=(job,), daemon=True,
                     )
