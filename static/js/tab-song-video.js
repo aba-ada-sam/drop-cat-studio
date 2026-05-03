@@ -166,7 +166,11 @@ export function init(panel) {
     _refreshClipCount();
   });
 
-  audioDropZone.addEventListener('click', () => audioInput.click());
+  audioDropZone.addEventListener('click', e => {
+    // Don't open file picker when clicking the audio player controls
+    if (audioPreview.contains(e.target) || e.target === audioPreview) return;
+    audioInput.click();
+  });
   audioDropZone.addEventListener('dragover', e => { e.preventDefault(); audioDropZone.classList.add('drag-over'); });
   audioDropZone.addEventListener('dragleave', () => audioDropZone.classList.remove('drag-over'));
   audioDropZone.addEventListener('drop', async e => {

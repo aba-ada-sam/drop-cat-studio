@@ -101,9 +101,10 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         # Load mono, 22050 Hz — good enough for beat/key analysis, fast to load
         y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 300))
 
-        # BPM
+        # BPM — beat_track returns a scalar in librosa 0.10+ and a 1-element
+        # ndarray in 0.9.x; np.atleast_1d handles both safely.
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-        bpm = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0])
+        bpm = float(np.atleast_1d(tempo)[0])
         result["bpm"] = max(40, min(240, round(bpm)))
 
         # Key via chroma
