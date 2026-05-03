@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Drop Cat Go Studio — Audio & Batch Processing
  * Section 1: Add ACE-Step AI music to session videos
  * Section 2: Batch video transforms (reverse, flip, speed, upscale…)
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260429b';
-import { toast } from './shell/toast.js?v=20260429d';
+import { toast } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 
 export function init(panel) {
@@ -70,6 +70,7 @@ function _buildAudioSection(root) {
     if (!fileInput.files?.length) return;
     try {
       const data = await apiUpload('/api/tools/upload', Array.from(fileInput.files));
+      if (data.rejected?.length) toast(`Skipped non-video file${data.rejected.length > 1 ? 's' : ''}: ${data.rejected.join(', ')}`, 'error');
       const f = data.files?.[0];
       if (f) _applyVideo(f.path);
     } catch (e) { toast(e.message, 'error'); }
@@ -237,6 +238,7 @@ function _buildBatchSection(root) {
     if (!batchFileInput.files?.length) return;
     try {
       const data = await apiUpload('/api/tools/upload', Array.from(batchFileInput.files));
+      if (data.rejected?.length) toast(`Skipped non-video file${data.rejected.length > 1 ? 's' : ''}: ${data.rejected.join(', ')}`, 'error');
       for (const f of data.files || []) _files.push(f);
       _renderFiles();
     } catch (e) { toast(e.message, 'error'); }

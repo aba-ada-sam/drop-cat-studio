@@ -1,10 +1,10 @@
-/**
+﻿/**
  * Drop Cat Go Studio — Create Videos
  * Pick a generated image, write a motion prompt, get a video.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260429b';
-import { toast, apiFetch } from './shell/toast.js?v=20260429d';
+import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 

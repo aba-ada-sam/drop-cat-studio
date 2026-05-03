@@ -1,10 +1,10 @@
-/**
+﻿/**
  * Drop Cat Go Studio -- palette-driven AI intent.
  * Each tab registers {getContext, applySettings} on init. When the user types
  * free text in the command palette and picks "Ask AI", we dispatch to the
  * currently active tab's applier.
  */
-import { apiFetch, toast } from './toast.js?v=20260429d';
+import { apiFetch, toast } from './toast.js?v=20260503a';
 
 const _appliers = {};
 const _HISTORY_KEY = 'dropcat_ai_intent_history';

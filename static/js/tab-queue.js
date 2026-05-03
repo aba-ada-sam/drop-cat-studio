@@ -1,9 +1,9 @@
-/**
+﻿/**
  * Queue tab — GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
-import { api } from './api.js?v=20260414';
-import { toast } from './shell/toast.js?v=20260429d';
+import { api } from './api.js?v=20260503b';
+import { toast } from './shell/toast.js?v=20260503a';
 import { el, pathToUrl } from './components.js?v=20260429b';
 
 let _root        = null;
@@ -43,10 +43,12 @@ function _buildShell() {
   });
   pauseBtn.addEventListener('click', async () => {
     if (_paused) {
-      await api('/api/jobs/resume', { method: 'POST' }).catch(() => {});
+      const r = await api('/api/jobs/resume', { method: 'POST' }).catch(() => null);
+      if (r === null) { toast('Failed to resume queue', 'error'); return; }
       _paused = false;
     } else {
-      await api('/api/jobs/pause', { method: 'POST' }).catch(() => {});
+      const r = await api('/api/jobs/pause', { method: 'POST' }).catch(() => null);
+      if (r === null) { toast('Failed to pause queue', 'error'); return; }
       _paused = true;
     }
     _syncPauseBtn();
@@ -63,7 +65,8 @@ function _buildShell() {
   cancelAllBtn.addEventListener('click', async () => {
     cancelAllBtn.disabled = true;
     const r = await api('/api/jobs/cancel-queued', { method: 'POST' }).catch(() => null);
-    if (r?.cancelled) toast(`Cancelled ${r.cancelled} queued job${r.cancelled > 1 ? 's' : ''}`, 'info');
+    if (r === null) toast('Failed to cancel queued jobs', 'error');
+    else if (r?.cancelled) toast(`Cancelled ${r.cancelled} queued job${r.cancelled > 1 ? 's' : ''}`, 'info');
     cancelAllBtn.disabled = false;
     _poll();
   });
@@ -76,7 +79,9 @@ function _buildShell() {
     style: 'display:none;',
   });
   clearBtn.addEventListener('click', async () => {
-    await api('/api/jobs', { method: 'DELETE' }).catch(() => {});
+    clearBtn.disabled = true;
+    await api('/api/jobs', { method: 'DELETE' }).catch(() => toast('Failed to clear finished jobs', 'error'));
+    clearBtn.disabled = false;
     _poll();
   });
 

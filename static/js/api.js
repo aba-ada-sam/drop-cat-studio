@@ -13,7 +13,7 @@ export async function api(path, opts = {}) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || err.detail || `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => { throw new Error(`Non-JSON response from server (${res.status})`); });
 }
 
 /** Upload files via FormData. Returns parsed JSON response. */
@@ -27,7 +27,7 @@ export async function apiUpload(path, files) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || err.detail || `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => { throw new Error(`Non-JSON response from server (${res.status})`); });
 }
 
 /**

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Drop Cat Go Studio — Shared UI components.
  * Reusable DOM builders for all feature tabs.
  */
@@ -48,7 +48,7 @@ export function formatDuration(sec) {
 }
 
 // ── Toast re-export (convenience for panels that only import components.js) ──
-export { toast } from './shell/toast.js?v=20260429d';
+export { toast } from './shell/toast.js?v=20260503a';
 
 // ── DropZone ─────────────────────────────────────────────────────────────────
 

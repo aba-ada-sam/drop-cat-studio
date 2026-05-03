@@ -137,7 +137,7 @@ async def refine(request: Request):
     with _conv_lock:
         conv_state = _conv_states.get(session_id)
     if not conv_state:
-        raise HTTPException(400, "No active session — generate prompts first")
+        raise HTTPException(400, "Session not found — please generate prompts first (session may have expired)")
     if not feedback:
         raise HTTPException(400, "Feedback required")
 

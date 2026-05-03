@@ -55,9 +55,11 @@ async def add_paths(request: Request):
 @router.post("/upload")
 async def upload_videos(files: list[UploadFile] = File(...)):
     saved = []
+    rejected = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
         if ext not in VIDEO_EXTS:
+            rejected.append(f.filename or "unnamed")
             continue
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
@@ -70,7 +72,7 @@ async def upload_videos(files: list[UploadFile] = File(...)):
             "size": len(data),
             **info,
         })
-    return {"files": saved}
+    return {"files": saved, "rejected": rejected}
 
 
 @router.post("/process")

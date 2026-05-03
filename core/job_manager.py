@@ -446,6 +446,10 @@ class JobManager:
                                     "proceeding anyway; VRAM contention possible",
                                     job.id,
                                 )
+                                job.message = (
+                                    f"Timed out after {timeout}s — WanGP restart failed; "
+                                    "restart the app if the next job hangs"
+                                )
 
                     self._gpu_queue.popleft()
 
@@ -482,6 +486,7 @@ class JobManager:
                     job.message = "Complete"
         except Exception as e:
             log.exception("Job %s failed: %s", job.id, e)
-            job.status = "error"
-            job.error = str(e)
-            job.message = f"Error: {e}"
+            if job.status not in ("done", "stopped", "cancelled"):
+                job.status = "error"
+                job.error = str(e)
+                job.message = f"Error: {e}"

@@ -197,10 +197,18 @@ export async function apiFetch(path, opts = {}) {
       });
       throw new Error(errMsg);
     }
-    return res.json();
+    try {
+      return await res.json();
+    } catch (_parseErr) {
+      const errMsg = `Server returned non-JSON response (${res.status})`;
+      _logError(errMsg, context, '');
+      toast(errMsg, 'error', { context });
+      throw new Error(errMsg);
+    }
   } catch (e) {
+    if (e.name === 'AbortError') throw e;  // intentional cancellation — no toast
     if (e.name === 'TypeError') {
-      // Network error (offline, refused)
+      // Network error (offline, refused, CORS)
       const errMsg = `Network error: ${context}`;
       _logError(errMsg, context, e.message);
       toast(errMsg, 'error', {

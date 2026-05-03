@@ -1,12 +1,12 @@
-/**
+﻿/**
  * Drop Cat Go Studio — Generate Images
  *
  * Unified tab: direct Forge interface + AI prompt composition + wildcard workshop.
  * Wildcard tokens (__token__) are expanded server-side before sending to Forge.
  */
-import { api } from './api.js?v=20260414';
+import { api } from './api.js?v=20260503b';
 import { createSlider, el } from './components.js?v=20260429b';
-import { toast, apiFetch } from './shell/toast.js?v=20260429d';
+import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
 import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';

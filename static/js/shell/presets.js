@@ -1,10 +1,10 @@
-/**
+﻿/**
  * Drop Cat Go Studio -- Preset / recipe system (WS8).
  * Save/restore full tab configurations. Per-tab getSettings()/applySettings().
  * Presets persisted to /api/presets (disk-backed SQLite on server).
  */
 
-import { apiFetch, toast } from './toast.js?v=20260429d';
+import { apiFetch, toast } from './toast.js?v=20260503a';
 import { registerItems } from './command-palette.js?v=20260421c';
 
 // Tab settings providers: { getSettings(), applySettings(s) }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Drop Cat Go Studio -- Import Assets / Project Entry Point
  *
  * Allows users to:
@@ -6,9 +6,9 @@
  * - Start a new project
  * - Browse and restore previous work
  */
-import { api } from './api.js?v=20260414';
+import { api } from './api.js?v=20260503b';
 import { createDropZone, el } from './components.js?v=20260429b';
-import { toast } from './shell/toast.js?v=20260429d';
+import { toast } from './shell/toast.js?v=20260503a';
 
 export function init(panel) {
   panel.innerHTML = '';

@@ -1,20 +1,20 @@
-/**
+﻿/**
  * Drop Cat Go Studio -- Main shell controller.
  * Owns: tab routing, service polling, split pane, gallery,
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260503d';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260430a';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260503e';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260503c';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260502a';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260503a';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260429a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260429e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
-import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260426o';
+import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
 import { consumeHandoff } from './handoff.js?v=20260422a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260429d';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260503a';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260429a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260421c';
