@@ -13,7 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from PIL import Image
 
 from core import config as cfg
-from core.job_manager import JOB_FUN_VIDEO
+from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO
 from core.llm_client import encode_image_b64
 from core.wangp_models import resolve_model_name
 from features.fun_videos.video_generator import MODELS
@@ -310,6 +310,72 @@ async def make_it(request: Request):
         "source_image": photo_path or "",
         "prompt": settings.get("video_prompt", "")[:120],
         "model": settings.get("model_name", ""),
+    })
+    return {"job_id": job.id}
+
+
+@router.post("/make-it-multi")
+async def make_it_multi(request: Request):
+    """Submit a multi-clip story job.
+
+    Generates N sequentially chained video clips (last frame of clip N becomes
+    start image of clip N+1), then a single audio pass over the concatenated video.
+    """
+    from app import get_job_manager; job_manager = get_job_manager()
+    from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
+
+    body = await request.json()
+    photo_path = _resolve_path(body.get("photo_path") or "")
+    if photo_path and not os.path.isfile(photo_path):
+        raise HTTPException(400, f"Photo not found: {photo_path}")
+    if not photo_path and not body.get("video_prompt", "").strip():
+        raise HTTPException(400, "Provide either a photo or a video prompt")
+
+    config = cfg.load()
+    n_clips  = max(2, min(10, int(body.get("num_clips",   config.get("fun_multi_num_clips",   4)))))
+    clip_dur = max(4.0, min(20.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 8.0)))))
+
+    settings = {
+        "video_prompt":    body.get("video_prompt", ""),
+        "music_prompt":    body.get("music_prompt", ""),
+        "lyric_direction": body.get("lyric_direction", ""),
+        "user_direction":  body.get("user_direction", ""),
+        "num_clips":       n_clips,
+        "clip_duration":   clip_dur,
+        "model_name":      body.get("model",      config.get("wan_model",        "LTX-2 Dev19B Distilled")),
+        "resolution":      body.get("resolution", config.get("resolution",       "580p")),
+        "override_width":  body.get("output_width"),
+        "override_height": body.get("output_height"),
+        "video_steps":     body.get("steps",         config.get("fun_video_steps",    30)),
+        "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
+        "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
+        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    8)),
+        "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
+        "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
+        "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
+        "skip_audio":      body.get("skip_audio", False),
+        "bpm":             body.get("bpm"),
+    }
+
+    if photo_path:
+        label = f"Story ({n_clips} clips): {Path(photo_path).stem[:16]}"
+    else:
+        label = f"Story ({n_clips} clips): {settings.get('video_prompt', '')[:20]}"
+
+    try:
+        job = job_manager.submit_with_prep(
+            JOB_FUN_MULTI_VIDEO, run_multi_prep, run_multi_pipeline,
+            photo_path, settings, label=label,
+        )
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
+
+    job.meta.update({
+        "source_image":  photo_path or "",
+        "prompt":        settings.get("video_prompt", "")[:120],
+        "model":         settings.get("model_name", ""),
+        "num_clips":     n_clips,
+        "clip_duration": clip_dur,
     })
     return {"job_id": job.id}
 

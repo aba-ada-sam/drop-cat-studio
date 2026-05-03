@@ -488,6 +488,67 @@ export function init(panel) {
     warnEl,
   ]));
 
+  // ── Multi-video story ─────────────────────────────────────────────────────
+  let _multiVideo = false;
+  let _numClips   = 4;
+
+  const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
+
+  const clipsSlider = el('input', { type: 'range', min: '2', max: '8', value: '4', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const clipsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:20px; text-align:right;', text: '4' });
+  const totalLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '~32s' });
+
+  function _refreshMultiTotal() {
+    totalLabel.textContent = `~${_numClips * _duration}s`;
+  }
+  clipsSlider.addEventListener('input', () => {
+    _numClips = parseInt(clipsSlider.value);
+    clipsLabel.textContent = String(_numClips);
+    _refreshMultiTotal();
+  });
+  // Keep total in sync when clip-length slider changes
+  durSlider.addEventListener('input', _refreshMultiTotal);
+
+  const multiSettings = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Clips' }),
+    clipsSlider,
+    clipsLabel,
+  ]));
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Total story length:' }),
+    totalLabel,
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: '(clip length × clips)' }),
+  ]));
+  multiSettings.appendChild(el('div', {
+    style: 'font-size:.73rem; color:var(--text-3); line-height:1.5; padding:4px 0;',
+    text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Audio is generated once over the whole piece.',
+  }));
+
+  const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+      multiChk,
+      el('label', {
+        for: 'express-multi-video',
+        style: 'font-size:.88rem; font-weight:600; cursor:pointer; user-select:none; color:var(--text);',
+        text: 'Multi-video story',
+      }),
+      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '— chain clips into a narrative' }),
+    ]),
+    multiSettings,
+  ]);
+  root.appendChild(multiCard);
+
+  multiChk.addEventListener('change', () => {
+    _multiVideo = multiChk.checked;
+    multiSettings.style.display = _multiVideo ? 'flex' : 'none';
+    loopBtn.style.display = _multiVideo ? 'none' : '';
+    if (!_looping) {
+      createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '＋ Add to Queue' : 'Create');
+    }
+    _refreshMultiTotal();
+  });
+
   // ── Loop state ────────────────────────────────────────────────────────────
   let _looping    = false;
   let _varyPrompt = false;
@@ -497,7 +558,11 @@ export function init(panel) {
   let _pendingCount = 0;
   function _refreshCreateBtn() {
     createBtn.disabled = false;
-    createBtn.textContent = _pendingCount > 0 ? '＋ Add to Queue' : 'Create';
+    if (_multiVideo) {
+      createBtn.textContent = 'Create Story';
+    } else {
+      createBtn.textContent = _pendingCount > 0 ? '＋ Add to Queue' : 'Create';
+    }
   }
   function _trackDone(job_id) {
     const done = () => { _pendingCount = Math.max(0, _pendingCount - 1); _refreshCreateBtn(); };
@@ -785,7 +850,71 @@ export function init(panel) {
     }
   });
 
-  // ── Create (single run) ───────────────────────────────────────────────────
+  // ── Multi-video generation ────────────────────────────────────────────────
+  async function _generateMulti() {
+    let motionPrompt = ideaInput.value.trim();
+
+    // Auto-generate a story concept if the idea field is blank
+    if (!motionPrompt && _imagePath) {
+      try {
+        await _brainstorm(
+          'Create a cinematic story concept for a multi-clip video: ' +
+          'describe the overall narrative arc and what action happens across several scenes. Keep it dramatic and visual.'
+        );
+        motionPrompt = ideaInput.value.trim();
+      } catch (_) {}
+    }
+    if (!motionPrompt) {
+      toast('Type a story idea or drop an image first', 'error');
+      return false;
+    }
+
+    // Auto-generate lyric direction if blank
+    if (!lyricInput.value.trim()) {
+      try {
+        await _brainstorm(
+          'Write a lyric direction for a song that spans a multi-clip cinematic story: ' + motionPrompt,
+          { lyricOnly: true }
+        );
+      } catch (_) {}
+    }
+
+    try {
+      const { job_id } = await api('/api/fun/make-it-multi', {
+        method: 'POST',
+        body: JSON.stringify({
+          photo_path:      _imagePath,
+          video_prompt:    motionPrompt,
+          music_prompt:    '',
+          lyric_direction: lyricInput.value.trim(),
+          user_direction:  'cinematic narrative, story continuity, dramatic',
+          model:           _model,
+          clip_duration:   _duration,
+          num_clips:       _numClips,
+          steps:           _steps,
+          guidance:        _guidance,
+          seed:            -1,
+          skip_audio:      false,
+          instrumental:    false,
+          output_width:    _outW,
+          output_height:   _outH,
+        }),
+      });
+      _jobId = job_id;
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
+      _watchJob(job_id);
+      return true;
+    } catch (e) {
+      if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
+        toast('Queue is full — wait for the current video to finish', 'error');
+      } else {
+        toast(e.message, 'error');
+      }
+      return false;
+    }
+  }
+
+  // ── Create (single run or multi-video) ───────────────────────────────────
   createBtn.addEventListener('click', async () => {
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
@@ -794,7 +923,7 @@ export function init(panel) {
       return;
     }
     _loopCount = 0;
-    const submitted = await _generateOne(false);
+    const submitted = _multiVideo ? await _generateMulti() : await _generateOne(false);
     if (submitted && _jobId) {
       _pendingCount++;
       _refreshCreateBtn();

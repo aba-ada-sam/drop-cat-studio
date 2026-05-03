@@ -18,12 +18,13 @@ log = logging.getLogger(__name__)
 # Job types
 JOB_I2V = "i2v"
 JOB_FUN_VIDEO = "fun_video"
+JOB_FUN_MULTI_VIDEO = "fun_multi_video"
 JOB_BRIDGE = "bridge"
 JOB_VIDEO_TOOL = "video_tool"
 JOB_SD_PROMPT = "sd_prompt"
 
 # Types that require exclusive GPU access
-GPU_JOB_TYPES = {JOB_FUN_VIDEO, JOB_BRIDGE}
+GPU_JOB_TYPES = {JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE}
 
 
 class Job:
