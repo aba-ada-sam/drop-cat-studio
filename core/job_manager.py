@@ -468,7 +468,7 @@ class JobManager:
                 log.exception(
                     "GPU queue worker caught unexpected exception — "
                     "continuing after 2s (job %s may need retry): %s",
-                    job_id if "job_id" in dir() else "?", _worker_exc,
+                    locals().get('job_id', '?'), _worker_exc,
                 )
                 time.sleep(2)
 

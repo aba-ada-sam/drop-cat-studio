@@ -4,7 +4,7 @@
  */
 
 import { apiFetch, toast } from './toast.js?v=20260503a';
-import { applySettingsToTab } from './ai-intent.js?v=20260421c';
+import { applySettingsToTab } from './ai-intent.js?v=20260503h';
 import { handoff } from '../handoff.js?v=20260422a';
 import { pathToUrl } from '../components.js?v=20260429b';
 

@@ -1170,7 +1170,7 @@ export function init(panel) {
   });
 
   // ── Palette AI intent ─────────────────────────────────────────────────────
-  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+  import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
     registerTabAI('fun-videos', {
       getContext: () => ({
         prompt:       promptTA.value,

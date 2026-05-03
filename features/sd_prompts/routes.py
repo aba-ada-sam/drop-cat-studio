@@ -190,8 +190,8 @@ async def list_wildcard_files():
                     ]
                     files.append({"token": token, "count": len(lines), "samples": lines[:5],
                                   "path": str(txt_file), "source": "filesystem"})
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Could not read wildcard file %s: %s", txt_file, e)
 
     return {"files": files, "directory": wc_dir or ""}
 

@@ -17,7 +17,7 @@ import { consumeHandoff } from './handoff.js?v=20260422a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260503a';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260503g';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
-import './shell/ai-intent.js?v=20260421c';
+import './shell/ai-intent.js?v=20260503h';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260421c';
 

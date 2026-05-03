@@ -353,7 +353,7 @@ export function init(panel) {
   player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; _lastOutput = null; });
 
   // ── Palette AI intent ─────────────────────────────────────────────────────
-  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+  import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
     registerTabAI('bridges', {
       getContext: () => ({
         transition_mode: _activeMode,
