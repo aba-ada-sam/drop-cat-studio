@@ -454,13 +454,13 @@ function renderServicePanel() {
       <div class="svc-detail-header">
         <span class="dot ${state}" style="width:10px;height:10px" aria-hidden="true"></span>
         <h3>${label}</h3>
-        <span style="font-size:.72rem;color:var(--text-3)">${state}</span>
+        <span style="font-size:.72rem;color:var(--text-3)">${escHtml(state)}</span>
       </div>
       <div class="svc-detail-body">
         <div class="svc-meta-row"><span>Hint</span><span>${SVC_HINTS[name]}</span></div>
         <div class="svc-meta-row"><span>Latency</span><span>${latency}</span></div>
         <div class="svc-meta-row"><span>Last check</span><span>${lastCheck}</span></div>
-        ${model !== '--' ? `<div class="svc-meta-row"><span>Model</span><span>${model}</span></div>` : ''}
+        ${model !== '--' ? `<div class="svc-meta-row"><span>Model</span><span>${escHtml(model)}</span></div>` : ''}
         ${vram  !== '--' ? `<div class="svc-meta-row"><span>GPU VRAM</span><span>${vram}</span></div>`  : ''}
         <div class="svc-log-lines">${escHtml(logLines)}</div>
       </div>
@@ -468,7 +468,7 @@ function renderServicePanel() {
         <button class="btn btn-sm svc-start" data-svc="${name}">Start</button>
         <button class="btn btn-sm svc-stop"  data-svc="${name}">Stop</button>
         <button class="btn btn-sm svc-restart" data-svc="${name}">Restart</button>
-        ${info.url ? `<a href="${info.url}" target="_blank" class="btn btn-sm">Open UI</a>` : ''}
+        ${info.url ? `<a href="${escHtml(info.url)}" target="_blank" class="btn btn-sm">Open UI</a>` : ''}
       </div>`;
 
     card.querySelectorAll('.svc-start').forEach(b => b.addEventListener('click', () => svcAction('start', b.dataset.svc)));
@@ -488,7 +488,7 @@ async function pollLogs() {
     for (const entry of (data.logs || [])) {
       const div = document.createElement('div');
       div.className = `log-entry ${entry.level}`;
-      div.innerHTML = `<span class="time">${entry.time}</span>${escHtml(entry.msg)}`;
+      div.innerHTML = `<span class="time">${escHtml(entry.time)}</span>${escHtml(entry.msg)}`;
       container.prepend(div);
       state.logSeq = Math.max(state.logSeq, entry.seq || 0);
     }
@@ -597,7 +597,7 @@ async function loadOllamaModels() {
       const sel = document.getElementById(selId);
       if (!sel) continue;
       const current = sel.value || state.config?.[selId.replace('cfg-', '')] || '';
-      sel.innerHTML = models.map(m => `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`).join('') || '<option value="">No models found</option>';
+      sel.innerHTML = models.map(m => `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`).join('') || '<option value="">No models found</option>';
     }
   } catch (_) {}
 }
@@ -728,7 +728,7 @@ function initAIPills() {
     menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
     if (current === 'forge') {
       const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '—';
-      menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${msg}</div>`);
+      menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>`);
       const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
       acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="forge" data-act="start">Start</button>
         <button class="btn btn-sm ap-ss" data-svc="forge" data-act="stop">Stop</button>
@@ -753,7 +753,7 @@ function initAIPills() {
     const currentModel = configData.wan_model || 'LTX-2 Dev19B Distilled';
     const svc = _svcState.wangp || {};
 
-    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${svc.state||'—'}</span></div>
+    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(svc.state||'—')}</span></div>
       <div class="ap-menu-subtitle">Select model</div>`;
     for (const [name, info] of Object.entries(models)) {
       const res = info.res ? `${info.res[0]}×${info.res[1]}` : '';
@@ -809,8 +809,8 @@ function initAIPills() {
       menu.appendChild(row);
     }
     menu.insertAdjacentHTML('beforeend', `<div class="ap-menu-sep"></div>
-      <div class="ap-menu-title" style="font-size:.7rem;">ACE-Step <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${st}</span></div>
-      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${msg}</div>
+      <div class="ap-menu-title" style="font-size:.7rem;">ACE-Step <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(st)}</span></div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>
       <div class="ap-menu-sep"></div>`);
     const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="acestep" data-act="start">Start</button>
@@ -826,9 +826,9 @@ function initAIPills() {
     const svc = _svcState[svcName] || {};
     const st = svc.state || 'unknown';
     const msg = SERVICE_MESSAGES[svcName]?.[svc.state] || svc.message || svc.state || '—';
-    menu.innerHTML = `<div class="ap-menu-title">${label} <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${st}</span></div>
+    menu.innerHTML = `<div class="ap-menu-title">${label} <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(st)}</span></div>
       <div class="ap-menu-subtitle">${hint}</div>
-      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 10px;line-height:1.5;">${msg}</div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 10px;line-height:1.5;">${escHtml(msg)}</div>
       <div class="ap-menu-sep"></div>`;
     const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="start">Start</button>
