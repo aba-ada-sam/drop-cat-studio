@@ -400,7 +400,7 @@ async def brainstorm(request: Request):
     """
     import json as _json, re as _re
     from app import get_llm_router
-    _TIER = "fast"   # TIER_FAST value — hardcoded to avoid late-import confusion
+    from core.llm_client import TIER_FAST as _TIER
     llm_router = get_llm_router()
 
     body = await request.json()
