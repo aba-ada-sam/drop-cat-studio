@@ -143,6 +143,7 @@ class LLMRouter:
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
         client = OpenAI(api_key=get_key("openai"))
+        model = cfg.get(f"ai_model_{tier}") or _OPENAI_MODELS.get(tier, _OPENAI_MODELS[TIER_BALANCED])
         safe_msgs = [
             {**m, "content": sanitize(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
             for m in messages
@@ -152,7 +153,7 @@ class LLMRouter:
             all_messages.append({"role": "system", "content": sanitize(system)})
         all_messages.extend(safe_msgs)
         resp = client.chat.completions.create(
-            model=_OPENAI_MODELS[tier],
+            model=model,
             messages=all_messages,
             max_tokens=max_tokens,
         )
@@ -163,6 +164,7 @@ class LLMRouter:
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
         client = OpenAI(api_key=get_key("openai"))
+        model = cfg.get(f"ai_model_{tier}") or _OPENAI_MODELS.get(tier, _OPENAI_MODELS[TIER_BALANCED])
         content = [{"type": "text", "text": sanitize(prompt)}]
         for img in images_b64[:4]:
             content.append({
@@ -174,7 +176,7 @@ class LLMRouter:
             all_messages.append({"role": "system", "content": sanitize(system)})
         all_messages.append({"role": "user", "content": content})
         resp = client.chat.completions.create(
-            model=_OPENAI_MODELS[tier],
+            model=model,
             messages=all_messages,
             max_tokens=max_tokens,
         )

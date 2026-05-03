@@ -86,11 +86,12 @@ export function init(panel) {
         body: JSON.stringify({ path: f?.path || selectedFile, level: pruneLevel.value }),
       });
       pruneResult.style.display = '';
-      pruneResult.innerHTML = `
-        <p style="color:var(--green)">Kept: ${data.kept?.length || 0} entries</p>
-        <p style="color:var(--red)">Removed: ${data.removed?.length || 0} entries</p>
-        <pre style="font-size:.75rem; color:var(--text-3); max-height:200px; overflow:auto">${data.notes || ''}</pre>
-      `;
+      pruneResult.innerHTML = '';
+      pruneResult.appendChild(el('p', { style: 'color:var(--green)', text: `Kept: ${data.kept?.length || 0} entries` }));
+      pruneResult.appendChild(el('p', { style: 'color:var(--red)', text: `Removed: ${data.removed?.length || 0} entries` }));
+      const pruneNotes = el('pre', { style: 'font-size:.75rem; color:var(--text-3); max-height:200px; overflow:auto' });
+      pruneNotes.textContent = data.notes || '';
+      pruneResult.appendChild(pruneNotes);
     } catch (e) { toast(e.message, 'error'); }
     pruneBtn.disabled = false;
   });
@@ -113,10 +114,11 @@ export function init(panel) {
         body: JSON.stringify({ path: f?.path || selectedFile, count: expandCount.value }),
       });
       expandResult.style.display = '';
-      expandResult.innerHTML = `
-        <p style="color:var(--green)">${data.count} new entries generated:</p>
-        <pre style="font-size:.75rem; color:var(--text-2); max-height:200px; overflow:auto">${(data.new_entries || []).join('\n')}</pre>
-      `;
+      expandResult.innerHTML = '';
+      expandResult.appendChild(el('p', { style: 'color:var(--green)', text: `${data.count} new entries generated:` }));
+      const expandPre = el('pre', { style: 'font-size:.75rem; color:var(--text-2); max-height:200px; overflow:auto' });
+      expandPre.textContent = (data.new_entries || []).join('\n');
+      expandResult.appendChild(expandPre);
     } catch (e) { toast(e.message, 'error'); }
     expandBtn.disabled = false;
   });
@@ -134,7 +136,10 @@ export function init(panel) {
     try {
       const data = await api('/api/prompts/audit', { method: 'POST', body: '{}' });
       auditResult.style.display = '';
-      auditResult.innerHTML = `<pre style="font-size:.8rem; color:var(--text-2); white-space:pre-wrap; max-height:400px; overflow:auto">${data.report || 'No report generated'}</pre>`;
+      auditResult.innerHTML = '';
+      const auditPre = el('pre', { style: 'font-size:.8rem; color:var(--text-2); white-space:pre-wrap; max-height:400px; overflow:auto' });
+      auditPre.textContent = data.report || 'No report generated';
+      auditResult.appendChild(auditPre);
     } catch (e) { toast(e.message, 'error'); }
     auditBtn.disabled = false;
     auditBtn.textContent = 'Audit Entire Library';
