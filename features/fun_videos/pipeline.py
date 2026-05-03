@@ -493,6 +493,13 @@ def run_pipeline(job, photo_path, settings):
             get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
         except Exception as e:
             log.warning("session.add_file failed: %s", e)
+        # Delete the raw WanGP intermediate — only the merged file is needed
+        if video_path and video_path != merged:
+            try:
+                os.remove(video_path)
+                log.debug("Deleted raw intermediate: %s", video_path)
+            except Exception as e:
+                log.debug("Could not delete raw intermediate: %s", e)
     else:
         job.output = video_path
         job.message = "Video generated (audio merge failed)"
