@@ -291,7 +291,7 @@ def run_pipeline(job, photo_path, settings):
     from services.forge_client import unload_checkpoint, reload_checkpoint
     forge_unloaded_for_video = unload_checkpoint()
 
-    if not skip_audio and not use_mmaudio:
+    if not skip_audio and not use_mmaudio_early:
         try:
             from services.manager import stop_service, acestep_alive
             if acestep_alive():
