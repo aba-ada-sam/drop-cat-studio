@@ -7,11 +7,9 @@ on loud sections, graceful motion on quiet ones.
 No ACE-Step involved. The user's uploaded song is the audio track.
 """
 import logging
-import math
 import os
 import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 

@@ -273,6 +273,14 @@ export function init(panel) {
       _qualityPx = q.px;
       [_outW, _outH] = _computeDims(_qualityPx);
       dimsLabel.textContent = `${_outW} × ${_outH}`;
+      // Enforce per-quality clip duration ceiling
+      clipSlider.max = String(q.maxSec);
+      if (_clipDur > q.maxSec) {
+        _clipDur = q.maxSec;
+        clipSlider.value = String(_clipDur);
+        clipLabel.textContent = `${_clipDur}s`;
+        _refreshClipCount();
+      }
       Object.entries(qualChips).forEach(([px, b]) =>
         b.setAttribute('style', CHIP_BASE + (Number(px) === _qualityPx ? CHIP_ON : '')));
     });
@@ -334,7 +342,6 @@ export function init(panel) {
       }
       // Update energy labels if analysis has profile
       if (_audioAnalysis.energy_profile?.length) {
-        const n = _audioAnalysis.energy_profile.length;
         const newProfile = _resampleProfile(_audioAnalysis.energy_profile, Math.max(1, Math.ceil((_audioAnalysis.duration || 0) / _clipDur)));
         _audioAnalysis = { ..._audioAnalysis, energy_profile: newProfile, suggested_clip_dur: _clipDur, suggested_num_clips: _numClips };
       }
@@ -475,6 +482,7 @@ export function init(panel) {
             pushToGallery('song-video', out, ideaInput.value.trim() || 'Music video', -1, {});
           } else {
             _hideProgress();
+            toast('Job finished but produced no output — check the Queue tab for details', 'error');
           }
           resolve(true);
         },
