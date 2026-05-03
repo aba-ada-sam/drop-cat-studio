@@ -5,7 +5,7 @@
  * Wildcard tokens (__token__) are expanded server-side before sending to Forge.
  */
 import { api } from './api.js?v=20260503b';
-import { createSlider, el } from './components.js?v=20260429b';
+import { createSlider, el, escHtml } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 import { handoff } from './handoff.js?v=20260422a';
@@ -526,7 +526,7 @@ export function init(panel) {
         body: JSON.stringify({ concept, name: nameInput.value.trim() || undefined, count: Number(countSlider.value) }),
       });
       growResult.style.display = '';
-      growResult.innerHTML = `<span style="color:var(--green)">Created <strong>${data.token}</strong> with ${data.count} entries (+${data.added} new).</span>`;
+      growResult.innerHTML = `<span style="color:var(--green)">Created <strong>${escHtml(data.token)}</strong> with ${data.count} entries (+${data.added} new).</span>`;
       const growEntriesDiv = el('div', { style: 'margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap' });
       const previewEntries = (data.entries || []).slice(0, 10);
       growEntriesDiv.textContent = previewEntries.join('\n') + (data.count > 10 ? `\n… and ${data.count - 10} more` : '');
