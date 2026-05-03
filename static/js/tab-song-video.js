@@ -20,7 +20,6 @@ export function init(panel) {
 
   // ── State ─────────────────────────────────────────────────────────────────
   let _audioPath     = null;
-  let _audioUrl      = null;
   let _audioDuration = 0;
   let _audioAnalysis = null;
   let _imagePath     = null;
@@ -106,9 +105,9 @@ export function init(panel) {
     analysisCard.appendChild(clipsNote);
     analysisCard.style.display = 'flex';
 
-    // Apply suggestions to settings
+    // Apply suggestions to settings; clamp to current quality ceiling
     if (a.suggested_clip_dur) {
-      _clipDur = a.suggested_clip_dur;
+      _clipDur = Math.min(a.suggested_clip_dur, parseInt(clipSlider.max) || 20);
       clipSlider.value = String(_clipDur);
       clipLabel.textContent = `${_clipDur}s`;
     }
@@ -141,7 +140,6 @@ export function init(panel) {
 
   function _applyAudio(path, url, duration) {
     _audioPath     = path;
-    _audioUrl      = url;
     _audioDuration = duration || 0;
     _audioAnalysis = null;
     audioPreview.src = url;
@@ -156,7 +154,7 @@ export function init(panel) {
   audioClearBtn.addEventListener('click', e => {
     e.stopPropagation();
     _analyzeSeq++;   // invalidate any in-flight analysis
-    _audioPath = null; _audioUrl = null; _audioDuration = 0; _audioAnalysis = null;
+    _audioPath = null; _audioDuration = 0; _audioAnalysis = null;
     audioPreview.src = ''; audioPreview.style.display = 'none';
     audioHint.style.display = '';
     audioClearBtn.style.display = 'none';
