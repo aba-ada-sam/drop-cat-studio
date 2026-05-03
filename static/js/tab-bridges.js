@@ -6,7 +6,7 @@ import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260429b';
 import { toast } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 let _items      = [];   // { path, name, kind, duration, analysis, prompt }
 let _activeMode = 'cinematic';
@@ -104,18 +104,26 @@ export function init(panel) {
     const toAnalyze = _items.filter(it => !it.analysis && it.kind !== 'text');
     if (!toAnalyze.length) { toast('Nothing to analyze', 'info'); return; }
     analyzeBtn.disabled = true;
+    const origText = analyzeBtn.textContent;
+    let done = 0, failed = 0;
     for (let i = 0; i < _items.length; i++) {
       if (_items[i].analysis || _items[i].kind === 'text') continue;
+      analyzeBtn.textContent = `Analyzing ${done + failed + 1}/${toAnalyze.length}…`;
       try {
-        toast(`Analyzing clip ${i + 1}/${_items.length}…`, 'info');
         _items[i].analysis = await api('/api/bridges/analyze', {
           method: 'POST', body: JSON.stringify({ path: _items[i].path }),
         });
         _renderItems();
-      } catch (e) { toast(`Analysis failed: ${e.message}`, 'error'); }
+        done++;
+      } catch (e) {
+        failed++;
+        toast(`"${_items[i].name}" analysis failed: ${e.message}`, 'error');
+      }
     }
     analyzeBtn.disabled = false;
-    toast('Analysis done', 'success');
+    analyzeBtn.textContent = origText;
+    if (failed === 0) toast('Analysis done', 'success');
+    else if (done > 0) toast(`Analysis done — ${failed} clip${failed > 1 ? 's' : ''} failed`, 'info');
   });
 
   const itemList = el('div', { style: 'display:flex; flex-direction:column; gap:0;' });
@@ -126,7 +134,7 @@ export function init(panel) {
   seqCard.appendChild(textToggleRow);
   const textToggle = el('button', { class: 'btn btn-sm', text: '+ Add text scene (text → video clip)' });
   textToggleRow.appendChild(textToggle);
-  const textInput = el('div', { style: 'display:none; margin-top:8px; display:none;' });
+  const textInput = el('div', { style: 'display:none; margin-top:8px;' });
   textToggleRow.appendChild(textInput);
   const textTA = el('input', { type: 'text', placeholder: 'Describe a scene…', style: 'flex:1;' });
   const textAddBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Add' });

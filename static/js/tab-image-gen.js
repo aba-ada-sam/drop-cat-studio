@@ -5,7 +5,7 @@
 import { api } from './api.js?v=20260503b';
 import { createSlider, createDropZone, el } from './components.js?v=20260429b';
 import { toast } from './shell/toast.js?v=20260503a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 let forgeStatus = null;
 let _forgeRetryTimer = null;

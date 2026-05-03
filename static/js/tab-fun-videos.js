@@ -6,7 +6,7 @@ import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 // Concurrency limiter for thumbnail extraction — caps parallel <video> preloads.
 const _thumbQueue = { running: 0, max: 4, pending: [] };
@@ -562,7 +562,7 @@ export function init(panel) {
     const ltx = Object.keys(_models).find(k => k.includes('LTX'));
     if (ltx) modelSel.value = ltx;
     modelSel.dispatchEvent(new Event('change'));
-  }).catch(() => {});
+  }).catch(() => toast('Could not load video models — using defaults', 'error'));
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   const audioCard = el('div', { class: 'card', style: 'padding:14px;' });

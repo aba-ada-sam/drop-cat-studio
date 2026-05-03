@@ -232,21 +232,33 @@ function _makeCard(item) {
 
   actions.querySelector('.gallery-fav').addEventListener('click', async e => {
     e.stopPropagation();
-    item.favorite = !item.favorite;
-    e.currentTarget.classList.toggle('on', item.favorite);
-    await apiFetch(`/api/gallery/${item.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ favorite: item.favorite }),
-      context: 'gallery.favorite',
-    }).catch(() => {});
+    const btn = e.currentTarget;
+    const newVal = !item.favorite;
+    item.favorite = newVal;
+    btn.classList.toggle('on', newVal);
+    try {
+      await apiFetch(`/api/gallery/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ favorite: newVal }),
+        context: 'gallery.favorite',
+      });
+    } catch (_) {
+      // revert local state so the star reflects actual server state
+      item.favorite = !newVal;
+      btn.classList.toggle('on', item.favorite);
+    }
   });
 
   actions.querySelector('.remove').addEventListener('click', async e => {
     e.stopPropagation();
     if (!confirm('Delete this generation?')) return;
-    await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {});
-    _items = _items.filter(i => i.id !== item.id);
-    _renderGrid();
+    try {
+      await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' });
+      _items = _items.filter(i => i.id !== item.id);
+      _renderGrid();
+    } catch (_) {
+      // error already toasted by apiFetch; leave item in grid
+    }
   });
 
   card.appendChild(actions);

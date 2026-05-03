@@ -7,7 +7,7 @@
 import { api } from './api.js?v=20260503b';
 import { createSlider, el } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';
 

@@ -6,7 +6,7 @@
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260429b';
 import { toast } from './shell/toast.js?v=20260503a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260428a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 export function init(panel) {
   panel.innerHTML = '';
