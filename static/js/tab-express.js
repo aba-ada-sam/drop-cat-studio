@@ -493,6 +493,17 @@ export function init(panel) {
   let _varyPrompt = false;
   let _loopCount  = 0;
 
+  // ── Queue-depth tracking for Create button ────────────────────────────────
+  let _pendingCount = 0;
+  function _refreshCreateBtn() {
+    createBtn.disabled = false;
+    createBtn.textContent = _pendingCount > 0 ? '＋ Add to Queue' : 'Create';
+  }
+  function _trackDone(job_id) {
+    const done = () => { _pendingCount = Math.max(0, _pendingCount - 1); _refreshCreateBtn(); };
+    pollJob(job_id, null, done, done);
+  }
+
   // ── Create + Loop button row ──────────────────────────────────────────────
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
@@ -766,15 +777,12 @@ export function init(panel) {
       toast('Drop an image or type a video idea first', 'error');
       return;
     }
-    createBtn.disabled = true;
-    createBtn.textContent = 'Working…';
     _loopCount = 0;
-    try {
-      const submitted = await _generateOne(false);
-      if (submitted && _jobId) await _watchJob(_jobId);
-    } finally {
-      createBtn.disabled = false;
-      createBtn.textContent = 'Create';
+    const submitted = await _generateOne(false);
+    if (submitted && _jobId) {
+      _pendingCount++;
+      _refreshCreateBtn();
+      _trackDone(_jobId);
     }
   });
 }
