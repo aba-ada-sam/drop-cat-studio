@@ -161,18 +161,6 @@ def run_prep(job, photo_path, settings):
     except Exception as e:
         log.warning("[warning] Pre-analysis failed: %s — will retry during GPU phase", e)
 
-    # Kick off ACE-Step startup now (non-blocking) so it's warm by the time
-    # WanGP finishes and the audio phase begins. Saves ~77s cold-start wait.
-    if needs_audio:
-        try:
-            from services.manager import start_acestep, acestep_alive
-            if not acestep_alive():
-                import threading
-                threading.Thread(target=start_acestep, daemon=True).start()
-                log.info("[info] ACE-Step warm-up started in background")
-        except Exception as _e:
-            log.debug("ACE-Step pre-warm skipped: %s", _e)
-
     job.update(progress=9, message="Analysis complete, waiting for GPU…")
 
 
@@ -372,6 +360,17 @@ def run_pipeline(job, photo_path, settings):
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path
     job.meta["video_prompt"] = video_prompt
+
+    # Start ACE-Step NOW — WanGP has released the GPU, so ACE-Step gets full VRAM.
+    # Phase 2 (music prompt via Ollama, ~30s) runs while ACE-Step loads.
+    if not skip_audio and not use_mmaudio:
+        try:
+            from services.manager import start_acestep, acestep_alive
+            if not acestep_alive():
+                threading.Thread(target=start_acestep, daemon=True).start()
+                log.info("[info] ACE-Step warm-up started after video generation")
+        except Exception as _e:
+            log.debug("ACE-Step post-video warm skipped: %s", _e)
 
     # ── Early exit for video-only ────────────────────────────────────────
     if skip_audio:

@@ -557,7 +557,6 @@ export function init(panel) {
     resultWrap.style.display   = 'flex';
     resultVideo.src = pathToUrl(videoPath);
     resultVideo.load();
-    pushToGallery('express', videoPath, ideaInput.value.trim(), null, {});
   }
 
   function _showError(msg) {

@@ -845,12 +845,6 @@ export function init(panel) {
             resultTabBar.style.display = 'none';
             player.show(pathToUrl(bestPath), bestPath);
 
-            pushToGallery('fun-videos', bestPath, prompt, null, {
-              steps: Number(stepsSlider.value),
-              guidance: Number(guidanceSlider.value),
-              duration_sec: Number(durSlider.value),
-            });
-
             // Redo Audio + Sync — build once, update paths on each generation
             let redoCard = vidWrap.querySelector('.redo-audio-card');
             // Load sync preview whenever we have a new mix (even on repeat generations)
@@ -1167,7 +1161,6 @@ export function init(panel) {
             extPlayer.show(pathToUrl(j.output), j.output);
             extSyncTool.style.display = '';
             extSyncTool.load(j.output);
-            pushToGallery('fun-videos', j.output, extMusicIn.value.trim() || 'AI music', null, {});
             toast('Audio added!', 'success');
           }
         },
