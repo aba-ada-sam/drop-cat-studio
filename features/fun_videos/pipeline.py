@@ -232,7 +232,8 @@ def run_pipeline(job, photo_path, settings):
         log.info(msg)
         if "[error]" in msg:
             _last_error[0] = msg.replace("[error] ", "")
-        job.update(message=msg.lstrip("[info] ").lstrip("[error] ").lstrip("[success] "))
+        display = msg.removeprefix("[info] ").removeprefix("[error] ").removeprefix("[success] ").removeprefix("[warning] ")
+        job.update(message=display)
 
     def _stopped():
         return job.stop_event.is_set()

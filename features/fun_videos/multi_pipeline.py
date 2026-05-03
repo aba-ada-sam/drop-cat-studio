@@ -13,8 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from core import config as cfg
-from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file, sample_frames_temporal
+from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt, _sample_music_frames
 
@@ -91,9 +90,9 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     ) as f:
         for p in clip_paths:
-            # Escape single quotes in paths (concat list uses single-quote delimiters)
-            safe = p.replace("'", r"\'")
-            f.write(f"file '{safe}'\n")
+            # ffmpeg concat demuxer expects forward slashes; escape any embedded single quotes
+            fwd = p.replace("\\", "/").replace("'", r"\'")
+            f.write(f"file '{fwd}'\n")
         list_path = f.name
     try:
         r = subprocess.run(
@@ -204,7 +203,8 @@ def run_multi_pipeline(job, photo_path, settings):
 
     def _log(msg):
         log.info(msg)
-        job.update(message=msg.lstrip("[info] ").lstrip("[error] ").lstrip("[warning] "))
+        display = msg.removeprefix("[info] ").removeprefix("[error] ").removeprefix("[warning] ").removeprefix("[success] ")
+        job.update(message=display)
 
     def _stopped():
         return job.stop_event.is_set()
