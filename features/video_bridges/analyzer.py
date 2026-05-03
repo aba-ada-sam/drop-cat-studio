@@ -75,6 +75,7 @@ def analyze_media(router, media_path: str, frames_b64: list[str] | None = None) 
             frames_b64,
             tier=TIER_BALANCED,
             system=ANALYSIS_SYSTEM,
+            force_provider="ollama",  # video frames may be NSFW
         )
     result = parse_json_response(text)
     if not result:
@@ -141,6 +142,7 @@ from Clip A to Clip B. Focus on MOTION and CHANGE only. No static descriptions."
                     context, images,
                     tier=TIER_POWER,
                     system=BRIDGE_PROMPT_SYSTEM,
+                    force_provider="ollama",  # video frames may be NSFW
                 )
             else:
                 text = router.route(

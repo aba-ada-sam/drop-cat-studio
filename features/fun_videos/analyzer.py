@@ -87,6 +87,7 @@ def analyze_photo(router, image_b64: str) -> dict:
         [image_b64],
         tier=TIER_BALANCED,
         system=ANALYSIS_SYSTEM,
+        force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
     )
     result = parse_json_response(text)
     if not result:
@@ -143,7 +144,7 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
             tier=tier,
             max_tokens=max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
-            force_provider=force_provider,
+            force_provider=force_provider or "ollama",  # user images may be NSFW
         )
         result = parse_json_response(last_text)
         if result and isinstance(result, dict) and result.get("prompts"):
@@ -237,6 +238,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
             video_frames_b64,  # caller controls count via _sample_music_frames
             tier=TIER_BALANCED,
             system=MUSIC_PROMPT_SYSTEM,
+            force_provider="ollama",  # frames may be NSFW; cloud APIs refuse them
         )
         result = parse_json_response(text)
         return result or {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80}

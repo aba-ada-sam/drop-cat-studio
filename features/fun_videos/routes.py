@@ -247,7 +247,7 @@ async def refine_prompt(request: Request):
             from core.llm_client import encode_image_b64
             b64 = encode_image_b64(image_path)
             if b64:
-                return llm_router.route_vision(user_msg, [b64], tier=TIER_FAST, system=system, max_tokens=200)
+                return llm_router.route_vision(user_msg, [b64], tier=TIER_FAST, system=system, max_tokens=200, force_provider="ollama")
         return llm_router.route([{"role": "user", "content": user_msg}], tier=TIER_FAST, system=system, max_tokens=200)
 
     try:
