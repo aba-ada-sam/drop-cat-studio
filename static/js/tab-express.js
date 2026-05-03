@@ -644,27 +644,42 @@ export function init(panel) {
     const needLyric  = !lyricInput.value.trim();
 
     if (needIdea && needLyric && _imagePath) {
-      // Both blank + image present — brainstorm fills both fields at once
+      // Both blank + image — one brainstorm call fills both with energy
       try {
-        await _brainstorm('Generate a video motion prompt and a brief lyric direction based on this image');
+        await _brainstorm(
+          'Create a fun, high-energy video: describe dramatic physical movement or a wild transformation happening to the subject. ' +
+          'Also write a lyric direction for a catchy, upbeat song with real sung lyrics (never instrumental).'
+        );
         motionPrompt = ideaInput.value.trim();
       } catch (_) {}
-    } else if (needIdea) {
-      try {
-        const data = await api('/api/fun/generate-prompts', {
-          method: 'POST',
-          body: JSON.stringify({
-            image_path: _imagePath, num_prompts: 1, creativity: 9, max_tokens: 400,
-            user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
-          }),
-        });
-        const p = data.prompts?.[0];
-        motionPrompt = (typeof p === 'string' ? p : p?.prompt) || '';
-      } catch (_) {}
-      if (!motionPrompt) motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
-      ideaInput.value = motionPrompt;
     } else {
-      motionPrompt = ideaInput.value.trim();
+      if (needIdea) {
+        try {
+          const data = await api('/api/fun/generate-prompts', {
+            method: 'POST',
+            body: JSON.stringify({
+              image_path: _imagePath, num_prompts: 1, creativity: 9, max_tokens: 400,
+              user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
+            }),
+          });
+          const p = data.prompts?.[0];
+          motionPrompt = (typeof p === 'string' ? p : p?.prompt) || '';
+        } catch (_) {}
+        if (!motionPrompt) motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
+        ideaInput.value = motionPrompt;
+      } else {
+        motionPrompt = ideaInput.value.trim();
+      }
+      // Always generate a lyric direction when missing — bare ideas produce flat music
+      if (needLyric) {
+        try {
+          await _brainstorm(
+            'Write a lyric direction for a catchy, energetic song with real sung lyrics (not instrumental) ' +
+            'that matches this video idea: ' + motionPrompt,
+            { lyricOnly: true }
+          );
+        } catch (_) {}
+      }
     }
 
     try {
@@ -672,7 +687,8 @@ export function init(panel) {
         method: 'POST',
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
-          lyric_direction: lyricInput.value.trim(), model: _model, duration: _duration,
+          lyric_direction: lyricInput.value.trim(), user_direction: 'fun, energetic, entertaining',
+          model: _model, duration: _duration,
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
         }),

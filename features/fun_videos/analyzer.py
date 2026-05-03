@@ -68,11 +68,12 @@ For landscapes: wind, weather, water, fire all moving together.
 
 Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
 
-MUSIC_PROMPT_SYSTEM = """You are a music director analyzing a generated video to suggest matching audio.
-Given frames from the video and context, return ONLY valid JSON:
+MUSIC_PROMPT_SYSTEM = """You are a music director suggesting background music for a short AI-generated video.
+Prefer energetic, characterful music — avoid vague ambient pads. Pick a real genre (pop, hip-hop, folk, funk, punk, etc.) with distinctive instrumentation and a strong hook feel.
+Return ONLY valid JSON:
 {
-  "music_prompt": "genre, mood, instrumentation description for AI music generation",
-  "bpm": 80,
+  "music_prompt": "specific genre, energy level, key instruments — e.g. 'driving indie rock, punchy drums, distorted guitar, anthemic'",
+  "bpm": 120,
   "key_suggestion": "optional key/scale",
   "reasoning": "brief explanation of why this music fits"
 }"""
