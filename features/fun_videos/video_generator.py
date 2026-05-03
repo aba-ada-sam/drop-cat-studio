@@ -83,7 +83,22 @@ def generate_video(
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
-    # Try persistent worker first
+    # Wait for the persistent worker (it may still be loading after a cold start).
+    # Never fall back to subprocess while the worker process is alive — that would
+    # spawn a second WanGP instance that competes for VRAM and causes the "two
+    # videos" appearance.
+    from services.manager import wangp_worker_alive as _proc_alive
+    wait_deadline = time.time() + 180
+    while not _worker_alive():
+        if stop_check and stop_check():
+            return None
+        if time.time() > wait_deadline:
+            break
+        # Log a waiting message periodically
+        if log_fn and int(time.time()) % 10 == 0:
+            log_fn("[info] Waiting for WanGP worker to load...")
+        time.sleep(2)
+
     if _worker_alive():
         return _generate_via_worker(
             image_path, prompt, out_path, num_frames, res_w, res_h,
@@ -92,7 +107,12 @@ def generate_video(
             mmaudio=mmaudio,
         )
 
-    # Fallback to subprocess
+    # Only fall back to subprocess if the worker process is not running at all
+    # (i.e. WanGP is not configured or the worker died before startup completed).
+    if _proc_alive():
+        if log_fn:
+            log_fn("[error] WanGP worker timed out during model load")
+        return None
     return _generate_via_subprocess(
         image_path, prompt, out_path, num_frames, res_w, res_h,
         steps, guidance, seed, model_name, end_image_path,
