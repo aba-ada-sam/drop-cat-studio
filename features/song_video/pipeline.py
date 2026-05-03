@@ -170,10 +170,9 @@ def run_song_prep(job, photo_path, settings):
 
 def run_song_pipeline(job, photo_path, settings):
     """Song-video GPU pipeline: N chained clips → concat → merge with user's audio."""
-    from app import get_llm_router, gallery_push
+    from app import gallery_push
     from features.fun_videos import video_generator
     from services.forge_client import unload_checkpoint, reload_checkpoint
-    llm_router = get_llm_router()  # noqa: F841 — kept for future use
 
     def _log(msg):
         log.info(msg)

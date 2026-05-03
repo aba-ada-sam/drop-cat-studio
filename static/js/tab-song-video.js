@@ -33,7 +33,7 @@ export function init(panel) {
   let _steps         = 20;
   let _guidance      = 7.5;
   let _jobId         = null;
-  let _analyzing     = false;
+  let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
 
   const QUALITIES = [
     { label: '480P', px: 480, maxSec: 20 },
@@ -116,8 +116,7 @@ export function init(panel) {
   }
 
   async function _analyzeAudio(path) {
-    if (_analyzing) return;
-    _analyzing = true;
+    const seq = ++_analyzeSeq;
     analysisCard.style.display = 'none';
     analysisCard.innerHTML = '';
     analysisCard.appendChild(el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Analyzing song…' }));
@@ -127,17 +126,16 @@ export function init(panel) {
       const result = await apiFetch('/api/song-video/analyze', {
         method: 'POST',
         body: JSON.stringify({ audio_path: path, clip_duration: _clipDur }),
-        context: 'song-video.analyze',
       });
+      if (seq !== _analyzeSeq) return;   // superseded by clear or a newer upload
       _audioAnalysis = result;
       _audioDuration = result.duration || _audioDuration;
       _renderAnalysis(result);
     } catch (e) {
+      if (seq !== _analyzeSeq) return;
       analysisCard.innerHTML = '';
       analysisCard.appendChild(el('div', { style: 'font-size:.8rem; color:var(--text-3); font-style:italic;', text: `Analysis unavailable: ${e.message}` }));
       _refreshClipCount();
-    } finally {
-      _analyzing = false;
     }
   }
 
@@ -157,6 +155,7 @@ export function init(panel) {
 
   audioClearBtn.addEventListener('click', e => {
     e.stopPropagation();
+    _analyzeSeq++;   // invalidate any in-flight analysis
     _audioPath = null; _audioUrl = null; _audioDuration = 0; _audioAnalysis = null;
     audioPreview.src = ''; audioPreview.style.display = 'none';
     audioHint.style.display = '';
