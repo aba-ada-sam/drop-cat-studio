@@ -225,7 +225,7 @@ def run_pipeline(job, photo_path, settings):
     # By finishing all AI analysis on the SOURCE IMAGE before WanGP starts we
     # give WanGP a completely clear GPU for the entire video generation phase.
     needs_audio = not skip_audio and not use_mmaudio_early
-    if needs_audio and (not music_prompt or not instrumental):
+    if needs_audio and (not music_prompt or (not instrumental and not lyrics)):
         job.update(progress=5, message="Analyzing image for music direction...")
         try:
             src_b64 = encode_image_b64(photo_path) if photo_path and os.path.isfile(photo_path) else None
