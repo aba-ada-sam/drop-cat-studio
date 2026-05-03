@@ -191,7 +191,7 @@ export function init(panel) {
   resultCard.appendChild(emptyMsg);
 
   // Action buttons below image
-  const actionRow = el('div', { style: 'display:none; margin-top:10px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap' });
+  const actionRow = el('div', { style: 'display:none; margin-top:10px; gap:6px; justify-content:center; flex-wrap:wrap' });
   resultCard.appendChild(actionRow);
 
   const btnReuse = el('button', { class: 'btn btn-sm', text: 'Reuse seed', onclick() {
@@ -229,7 +229,7 @@ export function init(panel) {
   galleryCard.appendChild(galleryEmpty);
 
   // Nav row
-  const navRow = el('div', { style: 'display:none; margin-top:8px; display:flex; justify-content:center; align-items:center; gap:12px' });
+  const navRow = el('div', { style: 'display:none; margin-top:8px; justify-content:center; align-items:center; gap:12px' });
   const prevBtn = el('button', { class: 'btn btn-sm', text: '< Prev', onclick() { showImage(currentIdx - 1); } });
   const navLabel = el('span', { style: 'font-size:.82rem; color:var(--text-2)' });
   const nextBtn = el('button', { class: 'btn btn-sm', text: 'Next >', onclick() { showImage(currentIdx + 1); } });
