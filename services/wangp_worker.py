@@ -161,14 +161,22 @@ def _do_generate(params: dict) -> dict:
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
-    # Force off all post-processing passes saved in WanGP's settings file.
-    # setdefault above won't override already-present keys — explicit assignment required.
-    defaults["spatial_upsampling"]  = ""   # no Lanczos/VAE upscaling pass
-    defaults["temporal_upsampling"] = ""   # no RIFE frame interpolation pass
-    defaults["self_refiner_setting"] = 0   # no second denoising pass
+    # Force off ALL post-processing passes that WanGP saves to its settings file.
+    # setdefault cannot override already-present keys, so explicit assignment is required.
+    # This block is the single authoritative list — add any new WanGP pass here if it
+    # reappears, rather than discovering it one generation at a time.
+    defaults["spatial_upsampling"]   = ""   # no Lanczos/VAE upscaling pass
+    defaults["temporal_upsampling"]  = ""   # no RIFE frame interpolation pass
+    defaults["self_refiner_setting"] = 0    # no second denoising pass
+    defaults["self_refiner_plan"]    = []
+    defaults["film_grain_intensity"] = 0    # no film grain
+    defaults["prompt_enhancer"]      = ""   # no LLM prompt rewriting inside WanGP
+    defaults["skip_steps_cache_type"] = ""  # no tea/mag cache unless DCS enables it
     # MMAudio: enable LTX-2 native audio when requested
     if params.get("mmaudio"):
         defaults["MMAudio_setting"] = 1
+    else:
+        defaults["MMAudio_setting"] = 0     # never inherit a saved MMAudio=1
     # LoRA settings override defaults when provided
     if activated_loras:
         defaults["activated_loras"] = activated_loras
