@@ -622,10 +622,12 @@ export function init(panel) {
   root.appendChild(resultWrap);
 
   function _showProgress(pct, msg) {
-    progressWrap.style.display = 'flex';
-    resultWrap.style.display   = 'none';
-    progressFill.style.width   = `${pct}%`;
-    progressMsg.textContent    = msg || '';
+    progressWrap.style.display    = 'flex';
+    resultWrap.style.display      = 'none';
+    progressFill.style.width      = `${pct}%`;
+    progressFill.style.background = 'var(--accent)';
+    progressMsg.style.color       = 'var(--text-3)';
+    progressMsg.textContent       = msg || '';
   }
 
   function _showResult(videoPath) {
