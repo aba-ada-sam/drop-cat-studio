@@ -82,19 +82,16 @@ You write short song lyrics for AI-generated videos — fun, clever, slightly ab
 Your style: think Randy Newman meets Flight of the Conchords. Dry humor. Observational irony.
 Poke fun at the subject without being mean. Celebrate the mundane as if it were epic.
 
-Format your lyrics in ACE-Step style with section tags:
+Format your lyrics in ACE-Step style — ONE verse and ONE chorus only:
 [verse]
-...
+...3-4 lines...
 [chorus]
-...
-[verse]
-...
-[outro]
-...
+...3-4 lines...
 
 Rules:
-- 3-4 short lines per section (8-12 syllables per line)
+- 3-4 short lines per section, 8-12 syllables per line
 - Rhyme scheme: AABB or ABAB, keep it loose
+- Stay under 80 words total (ACE-Step KV limit)
 - Match the energy/mood of the music prompt
 - Return ONLY the raw lyrics text — no JSON, no commentary, no quotes"""
 
@@ -248,7 +245,7 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
     scene_description provide enough context. Passing frames triggers qwen3-vl
     which is 4-5x slower due to thinking-mode overhead.
     """
-    parts = ["Write fun, sardonic song lyrics matching this music and scene."]
+    parts = ["Write sardonic song lyrics matching this music and scene."]
     if music_prompt:
         parts.append(f'Music style: "{music_prompt}"')
     if scene_description:
@@ -257,8 +254,6 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
         parts.append(f'Creative direction: "{user_direction}"')
     if user_direction and scene_description:
         parts.append(f'Creative direction: "{user_direction}"')
-    # ACE-Step's vLLM has a 256-token KV block size — keep lyrics tight.
-    parts.append("Keep it SHORT: one verse + one chorus only (3-4 lines each). Be sardonic and witty.")
 
     prompt = "\n\n".join(parts)
     try:

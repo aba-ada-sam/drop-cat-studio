@@ -101,13 +101,12 @@ def run_prep(job, photo_path, settings):
     use_mmaudio     = settings.get("audio_provider", "acestep") == "ltx_native"
 
     needs_audio = not skip_audio and not use_mmaudio
-    if not needs_audio or (music_prompt and instrumental):
-        return
 
     video_prompt = settings.get("video_prompt", "")
 
-    # Auto-generate a kinetic video prompt when the user hasn't written one.
-    # This prevents frozen/static videos from blank-prompt submissions.
+    # Always auto-generate a kinetic video prompt when the user hasn't written one —
+    # applies to all modes (audio, video-only, MMAudio). Without this, blank prompts
+    # produce frozen/static clips regardless of audio settings.
     if not video_prompt:
         job.update(progress=3, message="Writing motion prompt…")
         try:
@@ -118,9 +117,13 @@ def run_prep(job, photo_path, settings):
             )
             if auto_prompt:
                 settings["_prepped_video_prompt"] = auto_prompt
+                video_prompt = auto_prompt  # use as context for music direction below
                 log.info("[info] Auto video prompt: %s", auto_prompt[:80])
         except Exception as e:
             log.warning("[warning] Auto prompt failed: %s", e)
+
+    if not needs_audio or (music_prompt and instrumental):
+        return  # no audio prep needed — video prompt is already set above
 
     job.update(progress=5, message="Getting music direction…")
     try:

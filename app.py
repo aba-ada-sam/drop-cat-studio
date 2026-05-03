@@ -11,12 +11,14 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
-# Single-instance guard — Windows named mutex prevents a second copy from starting.
-import ctypes as _ctypes
-_mutex = _ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\DropCatGoStudio_SingleInstance")
-if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-    print("Drop Cat Go Studio is already running.", file=_sys.stderr)
-    _sys.exit(0)
+# Single-instance guard — only when run as the server entry point, not when
+# imported by tests or other modules. Mutex prevents a second server from starting.
+if _sys.modules.get("__main__") is _sys.modules.get("app"):
+    import ctypes as _ctypes
+    _mutex = _ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\DropCatGoStudio_SingleInstance")
+    if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        print("Drop Cat Go Studio is already running.", file=_sys.stderr)
+        _sys.exit(0)
 
 import asyncio
 import json as _json_std
