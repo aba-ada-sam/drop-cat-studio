@@ -210,7 +210,8 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
         parts.append(f'Creative direction: "{user_direction}"')
     if user_direction and scene_description:
         parts.append(f'Creative direction: "{user_direction}"')
-    parts.append("Make the lyrics specific to the mood and energy of the music. Be sardonic, witty, and a little absurdist.")
+    # ACE-Step's vLLM has a 256-token KV block size — keep lyrics tight.
+    parts.append("Keep it SHORT: one verse + one chorus only (3-4 lines each). Be sardonic and witty.")
 
     prompt = "\n\n".join(parts)
     try:
@@ -218,7 +219,7 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
             [{"role": "user", "content": prompt}],
             tier=TIER_FAST,
             system=LYRICS_SYSTEM,
-            max_tokens=500,
+            max_tokens=200,  # ~150 tokens output keeps ACE-Step under its KV block limit
         )
         return text.strip() if text else ""
     except Exception as e:
@@ -226,22 +227,48 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
         return ""
 
 
-def generate_music_prompt(router, video_frames_b64: list[str], user_direction: str = "") -> dict:
-    """Analyze video frames and suggest matching music."""
-    prompt = "Analyze these frames from a generated video and suggest matching background music."
-    if user_direction:
-        prompt += f'\nCreative direction: "{user_direction}"'
+def generate_music_prompt(router, video_frames_b64: list[str], user_direction: str = "",
+                          video_prompt: str = "") -> dict:
+    """Suggest music direction for a video.
 
+    When frames are provided and Ollama is the active provider, sends them for
+    visual analysis.  When no frames are given (or a cloud provider is active),
+    falls back to text-only generation from user_direction + video_prompt — cloud
+    APIs refuse NSFW images so we never send frames to them.
+    """
+    use_vision = bool(video_frames_b64) and router._provider() == "ollama"
+
+    if use_vision:
+        prompt = "Analyze these frames from a generated video and suggest matching background music."
+        if user_direction:
+            prompt += f'\nCreative direction: "{user_direction}"'
+        try:
+            text = router.route_vision(
+                prompt, video_frames_b64,
+                tier=TIER_BALANCED, system=MUSIC_PROMPT_SYSTEM,
+                force_provider="ollama",
+            )
+            result = parse_json_response(text)
+            return result or {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80}
+        except Exception as e:
+            log.warning("Music prompt vision call failed, falling back to text: %s", e)
+
+    # Text-only path — fast on cloud APIs, also used as fallback when vision fails
+    parts = ["Suggest background music for a short AI-generated video."]
+    if video_prompt:
+        parts.append(f'Video description: "{video_prompt}"')
+    if user_direction:
+        parts.append(f'Creative direction: "{user_direction}"')
+    if not video_prompt and not user_direction:
+        parts.append("The video is a creative short clip.")
+    parts.append("Return JSON with music_prompt, bpm, key_suggestion, and reasoning fields.")
     try:
-        text = router.route_vision(
-            prompt,
-            video_frames_b64,  # caller controls count via _sample_music_frames
-            tier=TIER_BALANCED,
-            system=MUSIC_PROMPT_SYSTEM,
-            force_provider="ollama",  # frames may be NSFW; cloud APIs refuse them
+        text = router.route(
+            [{"role": "user", "content": "\n".join(parts)}],
+            tier=TIER_FAST, system=MUSIC_PROMPT_SYSTEM, max_tokens=300,
         )
         result = parse_json_response(text)
         return result or {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80}
     except Exception as e:
-        log.warning("Music prompt generation failed: %s", e)
+        log.warning("Music prompt text generation failed: %s", e)
         return {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80, "error": str(e)}

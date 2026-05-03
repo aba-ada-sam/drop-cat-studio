@@ -836,17 +836,14 @@ export function init(panel) {
           _activeJobId = null;
           if (j.output) {
             const outputs = Array.isArray(j.output) ? j.output : [j.output];
-            _rawPath  = outputs[0];
+            // outputs[0] is always the final video (merged with audio, or raw if no audio).
+            // meta.video_path holds the silent raw WanGP video for downstream tools.
+            _rawPath  = (j.meta && j.meta.video_path) || outputs[0];
             _mixPath  = outputs.length > 1 ? outputs[1] : null;
-            const bestPath = _mixPath || _rawPath;
+            const bestPath = _mixPath || outputs[0];
 
-            if (_mixPath) {
-              resultTabBar.style.display = 'flex';
-              _showResultTab('mix');
-            } else {
-              resultTabBar.style.display = 'none';
-              player.show(pathToUrl(_rawPath), _rawPath);
-            }
+            resultTabBar.style.display = 'none';
+            player.show(pathToUrl(bestPath), bestPath);
 
             pushToGallery('fun-videos', bestPath, prompt, null, {
               steps: Number(stepsSlider.value),

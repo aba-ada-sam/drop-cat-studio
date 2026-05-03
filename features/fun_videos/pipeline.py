@@ -104,28 +104,38 @@ def run_prep(job, photo_path, settings):
     if not needs_audio or (music_prompt and instrumental):
         return
 
-    job.update(progress=5, message="Analyzing image for music direction…")
+    video_prompt = settings.get("video_prompt", "")
+    job.update(progress=5, message="Getting music direction…")
     try:
-        src_b64 = encode_image_b64(photo_path) if photo_path and os.path.isfile(photo_path) else None
-        if src_b64:
+        # Cloud providers (Anthropic/OpenAI) must not receive NSFW images.
+        # Pass frames only when Ollama is active; cloud gets text context instead.
+        provider = llm_router._provider()
+        if not music_prompt:
+            if provider == "ollama" and photo_path and os.path.isfile(photo_path):
+                src_b64 = encode_image_b64(photo_path)
+                frames = [src_b64] if src_b64 else []
+            else:
+                frames = []  # cloud path: text-only, no image sent
+            music_result = analyzer.generate_music_prompt(
+                llm_router, frames, user_direction, video_prompt=video_prompt
+            )
+            music_prompt = music_result.get("music_prompt", "")
+            scene_desc   = music_result.get("reasoning", "")
+            if not settings.get("bpm") and music_result.get("bpm"):
+                settings["bpm"] = music_result["bpm"]
+            log.info("[info] Music direction: %s", music_prompt[:80])
+        else:
             scene_desc = ""
-            if not music_prompt:
-                music_result = analyzer.generate_music_prompt(llm_router, [src_b64], user_direction)
-                music_prompt = music_result.get("music_prompt", "")
-                scene_desc   = music_result.get("reasoning", "")
-                if not settings.get("bpm") and music_result.get("bpm"):
-                    settings["bpm"] = music_result["bpm"]
-                log.info("[info] Music direction: %s", music_prompt[:80])
-            if not instrumental:
-                job.update(progress=8, message="Writing lyrics…")
-                lyrics = analyzer.generate_lyrics(
-                    llm_router, [],
-                    music_prompt, lyric_direction or user_direction,
-                    scene_description=scene_desc,
-                )
-                if lyrics:
-                    log.info("[info] Lyrics generated")
-                    settings["_prepped_lyrics"] = lyrics
+        if not instrumental:
+            job.update(progress=8, message="Writing lyrics…")
+            lyrics = analyzer.generate_lyrics(
+                llm_router, [],
+                music_prompt, lyric_direction or user_direction,
+                scene_description=scene_desc,
+            )
+            if lyrics:
+                log.info("[info] Lyrics generated")
+                settings["_prepped_lyrics"] = lyrics
         if music_prompt:
             settings["_prepped_music_prompt"] = music_prompt
     except Exception as e:
@@ -458,8 +468,7 @@ def run_pipeline(job, photo_path, settings):
 
     from core.session import get_current as get_session
     if merged:
-        # Return both: raw video first, ACE-Step mixed second
-        job.output = [video_path, merged]
+        job.output = merged
         job.meta["final_path"] = merged
         job.message = "Complete!"
         _gallery(merged, {"music_prompt": music_prompt})
