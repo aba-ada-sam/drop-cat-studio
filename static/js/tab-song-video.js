@@ -220,7 +220,10 @@ export function init(panel) {
     imgClearBtn.style.display = 'none';
     imgDropZone.classList.remove('drop-zone-loaded');
   });
-  imgDropZone.addEventListener('click', () => imgInput.click());
+  imgDropZone.addEventListener('click', e => {
+    if (imgPreview.contains(e.target) || e.target === imgPreview) return;
+    imgInput.click();
+  });
   imgDropZone.addEventListener('dragover', e => { e.preventDefault(); imgDropZone.classList.add('drag-over'); });
   imgDropZone.addEventListener('dragleave', () => imgDropZone.classList.remove('drag-over'));
   imgDropZone.addEventListener('drop', async e => {
