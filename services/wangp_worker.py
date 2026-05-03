@@ -161,12 +161,11 @@ def _do_generate(params: dict) -> dict:
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
-    # WanGP compares self_refiner_setting > 0 — must be int, never str
-    defaults["self_refiner_setting"] = int(defaults.get("self_refiner_setting") or 0)
-    # Disable post-processing passes saved in WanGP's settings file.
-    # setdefault above won't override them; force to off so DCS controls output quality.
+    # Force off all post-processing passes saved in WanGP's settings file.
+    # setdefault above won't override already-present keys — explicit assignment required.
     defaults["spatial_upsampling"]  = ""   # no Lanczos/VAE upscaling pass
     defaults["temporal_upsampling"] = ""   # no RIFE frame interpolation pass
+    defaults["self_refiner_setting"] = 0   # no second denoising pass
     # MMAudio: enable LTX-2 native audio when requested
     if params.get("mmaudio"):
         defaults["MMAudio_setting"] = 1

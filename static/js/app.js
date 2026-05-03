@@ -1207,6 +1207,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const el = _feedCards.get(old);
           if (el) { el.remove(); _feedCards.delete(old); }
         }
+        // Remove the active card for this job before adding the done card
+        // (prevents the same job appearing twice during the active→done transition)
+        const existing = _feedCards.get(job.id);
+        if (existing) existing.remove();
         const card = _makeCard(job);
         _updateCard(card, job);
         _feedEl.prepend(card);
