@@ -8,6 +8,8 @@ import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, cr
 import { toast } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
+let _sessionListener = null;
+
 export function init(panel) {
   panel.innerHTML = '';
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:28px; padding:16px; max-width:900px; margin:0 auto;' });
@@ -112,7 +114,9 @@ function _buildAudioSection(root) {
 
   refreshBtn.addEventListener('click', _refreshList);
   _refreshList();
-  window.addEventListener('session-updated', _refreshList);
+  if (_sessionListener) window.removeEventListener('session-updated', _sessionListener);
+  _sessionListener = _refreshList;
+  window.addEventListener('session-updated', _sessionListener);
 
   // ── Music options ────────────────────────────────────────────────────────
   const optionsCard = el('div', { class: 'card', style: 'padding:14px;' });

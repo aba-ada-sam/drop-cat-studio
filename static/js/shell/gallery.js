@@ -122,8 +122,8 @@ function _renderPreview() {
   area.innerHTML = `
     <div style="display:flex;flex-direction:column;background:var(--surface-2);border-bottom:1px solid var(--border)">
       ${isVideo
-        ? `<video src="${mediaSrc}" controls style="width:100%;max-height:55vh;object-fit:contain;background:#000;display:block"></video>`
-        : `<img src="${mediaSrc}" alt="" style="width:100%;max-height:55vh;object-fit:contain;background:var(--bg);display:block">`}
+        ? `<video src="${_esc(mediaSrc)}" controls style="width:100%;max-height:55vh;object-fit:contain;background:#000;display:block"></video>`
+        : `<img src="${_esc(mediaSrc)}" alt="" style="width:100%;max-height:55vh;object-fit:contain;background:var(--bg);display:block">`}
       <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
         ${btnHtml}
         ${prompt ? `<p style="font-size:.75rem;color:var(--text-3);margin:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${_esc(prompt)}</p>` : ''}
@@ -301,8 +301,8 @@ function _openDetail(item) {
     <div class="gallery-detail">
       <div class="gallery-detail-media">
         ${isVideo
-          ? `<video src="${item.url}" controls style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
-          : `<img src="${item.url}" alt="${_esc(item.prompt || '')}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
+          ? `<video src="${_esc(item.url)}" controls style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
+          : `<img src="${_esc(item.url)}" alt="${_esc(item.prompt || '')}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
       </div>
       <div class="gallery-detail-sidebar">
         <button class="btn-icon modal-close" style="align-self:flex-end" aria-label="Close">&times;</button>
@@ -315,7 +315,7 @@ function _openDetail(item) {
         ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
           ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">→ Make Video</button>` : ''}
-          <a href="${item.url}" download class="btn btn-sm">Download</a>
+          <a href="${_esc(item.url)}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
           <button class="btn btn-sm btn-danger" id="gd-delete">Delete File</button>

@@ -14,6 +14,7 @@ let currentIdx = -1;
 
 export function init(panel) {
   panel.innerHTML = '';
+  if (_forgeRetryTimer) { clearInterval(_forgeRetryTimer); _forgeRetryTimer = null; }
   const layout = el('div', { class: 'wide-layout' });
   panel.appendChild(layout);
 
