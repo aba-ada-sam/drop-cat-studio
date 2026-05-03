@@ -540,7 +540,8 @@ async def get_thumbnail(path: str, size: int = 120):
             img.convert("RGB").save(buf, format="JPEG", quality=75)
         return _Resp(content=buf.getvalue(), media_type="image/jpeg")
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        log.warning("Thumbnail generation failed for %s: %s", path, e)
+        return JSONResponse({"error": "Could not generate thumbnail"}, status_code=500)
 
 
 @app.get("/output/{path:path}")

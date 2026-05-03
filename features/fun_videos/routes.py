@@ -457,7 +457,12 @@ async def brainstorm(request: Request):
                 llm_router.route, messages=msgs, system=system, tier=_TIER,
             )
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        msg = str(exc)
+        if "rate limit" in msg.lower() or "429" in msg:
+            raise HTTPException(429, "AI rate limit reached — try again in a moment")
+        if "connection" in msg.lower() or "refused" in msg.lower():
+            raise HTTPException(503, "AI service unavailable — check that Ollama or your API key is configured")
+        raise HTTPException(502, f"AI error — {msg[:120]}")
 
     try:
         # Strip markdown code fences if present, then grab outermost JSON object

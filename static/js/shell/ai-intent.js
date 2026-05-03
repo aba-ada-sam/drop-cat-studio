@@ -90,7 +90,7 @@ export async function askAI(query) {
   const tabId = _activeTabId();
   const entry = _appliers[tabId];
   if (!entry) {
-    toast(`AI assist not wired for ${tabId || 'this tab'}`, 'info');
+    toast('AI assist is not available on this tab', 'info');
     return;
   }
   let context = {};

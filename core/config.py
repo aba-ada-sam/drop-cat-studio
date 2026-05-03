@@ -170,8 +170,8 @@ def load() -> dict:
                 _cache = merged
                 _cache_mtime = mtime
                 return dict(merged)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("config.json is malformed, using defaults: %s", e)
         result = dict(DEFAULTS)
         _cache = result
         _cache_mtime = mtime
