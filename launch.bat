@@ -42,7 +42,7 @@ if not defined _PYTHONW (
 :have_pythonw2
 if defined _PYTHONW (
     powershell -NoProfile -Command ^
-        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='%_PYTHONW%'; $sc.Arguments='\"\"\"^%~dp0manager.pyw\"\"\"'; $sc.WorkingDirectory='%~dp0'; $sc.IconLocation='%~dp0static\favicon.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='C:\Windows\System32\wscript.exe'; $sc.Arguments='\"\"\"C:\DropCat-Studio\launch-silent.vbs\"\"\"'; $sc.WorkingDirectory='C:\DropCat-Studio'; $sc.IconLocation='C:\DropCat-Studio\dropcat.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
 )
 
 :: -- Auto-update from GitHub --------------------------------------------
