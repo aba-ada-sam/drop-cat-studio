@@ -105,6 +105,23 @@ def run_prep(job, photo_path, settings):
         return
 
     video_prompt = settings.get("video_prompt", "")
+
+    # Auto-generate a kinetic video prompt when the user hasn't written one.
+    # This prevents frozen/static videos from blank-prompt submissions.
+    if not video_prompt:
+        job.update(progress=3, message="Writing motion prompt…")
+        try:
+            auto_prompt = analyzer.generate_video_prompt_auto(
+                llm_router,
+                user_direction=user_direction,
+                subject_hint="",
+            )
+            if auto_prompt:
+                settings["_prepped_video_prompt"] = auto_prompt
+                log.info("[info] Auto video prompt: %s", auto_prompt[:80])
+        except Exception as e:
+            log.warning("[warning] Auto prompt failed: %s", e)
+
     job.update(progress=5, message="Getting music direction…")
     try:
         # Cloud providers (Anthropic/OpenAI) must not receive NSFW images.
@@ -208,7 +225,7 @@ def run_pipeline(job, photo_path, settings):
     job_dir = OUTPUT_DIR / ts / f"{slug}_{job.id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    video_prompt = settings.get("video_prompt", "")
+    video_prompt = settings.get("video_prompt", "") or settings.pop("_prepped_video_prompt", "")
     music_prompt = settings.get("music_prompt", "") or settings.pop("_prepped_music_prompt", "")
     lyric_direction = settings.get("lyric_direction", "")
     use_wildcards = settings.get("use_wildcards", False)

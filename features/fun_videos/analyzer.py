@@ -25,12 +25,14 @@ Given the image, return ONLY valid JSON with this structure:
 VIDEO_PROMPT_SYSTEM = """You are a kinetic action director writing prompts for an image-to-video AI (Wan2GP / LTX-2).
 The model already sees the image. Your job: describe explosive PHYSICAL ACTION, not camera moves.
 
-BANNED — these produce boring pan/zoom slideshows. Never write:
+BANNED — these produce boring frozen or pan/zoom slideshows. Never write:
   "camera slowly pushes in", "gentle pan", "slow zoom", "camera pulls back",
-  "soft dolly", "subtle movement", "gentle motion", "warm light plays across"
+  "soft dolly", "subtle movement", "gentle motion", "warm light plays across",
+  "sits", "stands", "poses", "remains", "stays still", "holds position"
 
 REQUIRED: Lead with what the SUBJECT IS DOING. Examples by subject type:
   Person/face  → "throws head back laughing, hair whipping sideways, hands clap wildly"
+  Sexy/nude    → "arches back dramatically, hair cascades and swirls, hands trace slow deliberate paths across skin"
   Animal       → "launches into a full sprint, paws churning, ears flat, tongue flying"
   Food/object  → "steam erupts violently, liquid splashes and arcs, surface bubbles and churns"
   Landscape    → "storm front slams in, trees thrash violently, rain sheets sideways, lightning splits the sky"
@@ -44,10 +46,27 @@ RULES:
 - Start with the subject acting — explosive action verbs: erupts, whips, crashes, surges, slams, tears, launches
 - 35-65 words, every word earns its place
 - NO negative language (video models ignore negation)
-- NO re-describing the image's appearance
+- NO re-describing the image's appearance — describe MOTION only
 - Single tight paragraph
 
 Return ONLY valid JSON."""
+
+VIDEO_PROMPT_AUTO_SYSTEM = """You are a kinetic action director writing motion prompts for an image-to-video AI.
+You have NOT seen the image. Write an explosive motion prompt based only on the context given.
+
+Rules — the prompt MUST:
+- Open with a violent, kinetic action verb (erupts, whips, slams, surges, arches, tears, launches, thrashes)
+- Describe continuous physical movement: body, hair, fabric, environment all in motion simultaneously
+- Be 35-55 words, one tight paragraph
+- Contain zero static language: no "sits", "stands", "poses", "holds", "remains"
+- Contain zero camera instructions unless they're a reaction to action
+
+For people/portraits: describe face, eyes, hair, hands, and body all moving at once.
+For sensual/adult content: flowing fabric, arching bodies, cascading hair, deliberate hand movements.
+For animals: explosive sprinting, fur rippling, muscles firing.
+For landscapes: wind, weather, water, fire all moving together.
+
+Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
 
 MUSIC_PROMPT_SYSTEM = """You are a music director analyzing a generated video to suggest matching audio.
 Given frames from the video and context, return ONLY valid JSON:
@@ -78,6 +97,34 @@ Rules:
 - Rhyme scheme: AABB or ABAB, keep it loose
 - Match the energy/mood of the music prompt
 - Return ONLY the raw lyrics text — no JSON, no commentary, no quotes"""
+
+
+def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: str = "") -> str:
+    """Generate a kinetic motion prompt with no image — fast cloud text call.
+
+    Used when the user hasn't written a video prompt and a cloud API is active
+    (we can't send potentially NSFW images to cloud vision models).
+    Returns a raw prompt string, empty on failure.
+    """
+    parts = ["Write an explosive motion prompt for a short AI-generated video clip."]
+    if subject_hint:
+        parts.append(f"Subject/scene: {subject_hint}")
+    if user_direction:
+        parts.append(f"Creative direction: {user_direction}")
+    if not subject_hint and not user_direction:
+        parts.append("Subject: a person in a dramatic, dynamic scene.")
+    parts.append("Make it kinetic — every element should be in violent, expressive motion.")
+    try:
+        text = router.route(
+            [{"role": "user", "content": "\n".join(parts)}],
+            tier=TIER_FAST,
+            system=VIDEO_PROMPT_AUTO_SYSTEM,
+            max_tokens=120,
+        )
+        return (text or "").strip()
+    except Exception as e:
+        log.warning("Auto video prompt generation failed: %s", e)
+        return ""
 
 
 def analyze_photo(router, image_b64: str) -> dict:
