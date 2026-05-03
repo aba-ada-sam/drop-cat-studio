@@ -566,18 +566,6 @@ def startup_all():
             log.error("[Startup] %s failed to start: %s", name, e)
             _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
 
-    def _check_forge():
-        from services.forge_client import forge_alive, FORGE_PORT
-        if forge_alive():
-            _set_status("forge", state="running",
-                        message="Forge WebUI running (SD image generation ready)",
-                        port=FORGE_PORT)
-            log.info("Forge WebUI detected on port %d", FORGE_PORT)
-            return
-        # Auto-start Forge on app launch
-        log.info("Forge not detected — starting automatically...")
-        start_forge()
-
     def _ensure_ollama():
         ok, err = start_ollama()
         if ok:
@@ -587,7 +575,7 @@ def startup_all():
             _set_status("ollama", state="not_running",
                         message=err or "Ollama not available")
 
-    for label, fn in [("WanGP", _start_wan), ("Forge", _check_forge), ("Ollama", _ensure_ollama)]:
+    for label, fn in [("WanGP", _start_wan), ("Ollama", _ensure_ollama)]:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
     # ACE-Step: deferred -- only started when music generation is needed.
@@ -773,8 +761,8 @@ def start_forge() -> tuple[bool, str | None]:
                 ["powershell", "-WindowStyle", "Hidden", "-NonInteractive",
                  "-Command", ps_args],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                close_fds=True,
             )
+            log.info("Forge launch command sent — polling for API...")
         _forge_proc = None  # detached — no handle to track
 
         # Poll until Forge API responds (up to 5 minutes for large models)
@@ -876,25 +864,19 @@ def _watchdog_loop():
                 _set_status("acestep", state="error", message="Server crashed -- restarting...")
                 start_acestep()
 
-            # Check Forge -- restart if we launched it and it died
-            if _forge_proc and _forge_proc.poll() is not None:
-                log.warning("[watchdog] Forge died -- restarting")
-                _set_status("forge", state="error", message="Forge crashed -- restarting...")
-                start_forge()
-
-            # Re-check externally-managed Forge every cycle so it goes green
-            # when the user launches it separately (e.g. via desktop shortcut)
+            # Forge is user-managed (image gen is separate from video gen).
+            # Just passively detect its state — never auto-restart it.
             from services.forge_client import forge_alive as _forge_alive
             forge_state = status.get("forge", {}).get("state", "unknown")
-            if forge_state in ("not_running", "unknown", "error") and not _forge_proc:
+            if forge_state in ("not_running", "unknown", "error", "ready"):
                 if _forge_alive():
                     _set_status("forge", state="running",
                                 message="Forge WebUI running (SD image generation ready)",
                                 port=7861)
-            elif forge_state == "running" and not _forge_proc:
+            elif forge_state == "running":
                 if not _forge_alive():
                     _set_status("forge", state="not_running",
-                                message="Forge stopped — use Services tab to restart")
+                                message="Forge not running — use Services tab to start")
 
             # Ensure Ollama stays up (lightweight check)
             if not ollama_alive():

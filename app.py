@@ -12,13 +12,13 @@ import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
 # Single-instance guard — only when run as the server entry point, not when
-# imported by tests or other modules. Mutex prevents a second server from starting.
+# imported by tests or other modules. Uses os._exit so atexit/lifespan don't run.
 if _sys.modules.get("__main__") is _sys.modules.get("app"):
-    import ctypes as _ctypes
+    import ctypes as _ctypes, os as _os
     _mutex = _ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\DropCatGoStudio_SingleInstance")
     if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        print("Drop Cat Go Studio is already running.", file=_sys.stderr)
-        _sys.exit(0)
+        _sys.stderr.write("Drop Cat Go Studio is already running.\n")
+        _os._exit(0)
 
 import asyncio
 import json as _json_std
