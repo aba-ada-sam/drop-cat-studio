@@ -451,7 +451,7 @@ export function init(panel) {
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Steps' }),
       stepsSlider, stepsLabel,
-      el('span', { style: 'font-size:.7rem; color:var(--text-3);', text: '(4 = fast/distilled, 30 = quality)' }),
+      el('span', { style: 'font-size:.7rem; color:var(--text-3); font-style:italic;', text: '(ignored by LTX-2 Distilled — model uses a fixed 8+3 schedule)' }),
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Guidance' }),

@@ -171,7 +171,10 @@ def _do_generate(params: dict) -> dict:
     defaults["self_refiner_plan"]    = []
     defaults["film_grain_intensity"] = 0    # no film grain
     defaults["prompt_enhancer"]      = ""   # no LLM prompt rewriting inside WanGP
-    defaults["skip_steps_cache_type"] = ""  # no tea/mag cache unless DCS enables it
+    # TeaCache: skips redundant denoising computations between similar timesteps.
+    # "tea" gives ~25-35% speedup with negligible quality loss at 480p and below.
+    # Pass cache_type="" in params to disable for a specific job if needed.
+    defaults["skip_steps_cache_type"] = params.get("cache_type", "tea")
     # MMAudio: enable LTX-2 native audio when requested
     if params.get("mmaudio"):
         defaults["MMAudio_setting"] = 1
