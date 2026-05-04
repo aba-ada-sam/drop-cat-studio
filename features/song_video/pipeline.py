@@ -124,10 +124,20 @@ subsequent clip prompt. The AI renderer locks visual style from these tokens —
 inconsistent style tags are the #1 cause of jarring aesthetic shifts between
 clips.
 
-The energy level tells you HOW the subject moves in each clip:
-  HIGH energy → explosive verbs: erupts, slams, whips, surges, tears, launches
-  MED energy  → dynamic verbs: flows, pulses, swings, arcs, spirals, unfolds
-  LOW energy  → graceful verbs: drifts, glides, sways, breathes, melts, settles
+FACE RULE — CRITICAL: Never write close-up face shots. Never describe things
+happening TO a character's body (impacts, wounds, eruptions on skin). Describe
+ENVIRONMENT motion and SCENE energy instead — light, colour, atmosphere,
+landscapes, abstract forces, silhouettes in wide shot. If characters appear,
+show them at distance or from behind. The renderer distorts faces badly under
+high-energy prompts; keep faces out of frame entirely.
+
+The energy level tells you HOW the scene moves in each clip:
+  HIGH energy → explosive environment: light erupts, landscape surges, colours
+                explode, wind tears through, energy rips across the horizon
+  MED energy  → dynamic scene: light flows, shapes pulse, atmosphere swings,
+                colour arcs across the sky, forms spiral and unfold
+  LOW energy  → graceful atmosphere: mist drifts, light glides, colours sway,
+                air breathes, shadows melt, stillness settles
 
 Rules:
 - 30-50 words per prompt, one tight paragraph, no camera moves as the primary event
@@ -194,7 +204,7 @@ def _generate_song_arc(
                 frames = [b64]
         # max_tokens must cover n_clips × ~50 words each plus JSON overhead.
         # 1500 was too small for >20 clips; 4096 handles up to ~60 clips safely.
-        max_tok = max(2048, n_clips * 80)
+        max_tok = max(3000, n_clips * 100)
         if frames:
             text = llm_router.route_vision(
                 user_msg, frames,
@@ -218,7 +228,7 @@ def _generate_song_arc(
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
 
-    base = user_idea or "Subject erupts into motion, energy bursts through the frame"
+    base = user_idea or "Sweeping landscape at golden hour, light surges across the horizon, colours bloom and shift with the energy of the music, wide cinematic shot"
     return [base] * n_clips
 
 
