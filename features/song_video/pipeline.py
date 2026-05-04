@@ -228,23 +228,38 @@ def _merge_video_audio_trim(
     out_path: str,
     audio_duration: float,
 ) -> str | None:
-    """Merge video + audio, trimming both to exactly audio_duration seconds."""
+    """Merge video + audio, looping the video if needed to fill the full song duration."""
+    video_dur = probe_duration(video_path) or 0.0
+    need_loop = video_dur > 0 and video_dur < audio_duration * 0.98
+
+    if need_loop:
+        # Loop the video to fill the song. Re-encode to keep timestamps clean.
+        cmd = [
+            "ffmpeg", "-y",
+            "-stream_loop", "-1", "-i", video_path,
+            "-i", audio_path,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{audio_duration:.3f}",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{audio_duration:.3f}",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+
     try:
-        r = subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-map", "0:v",
-                "-map", "1:a",
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "192k",
-                "-t", f"{audio_duration:.3f}",   # hard trim to song length
-                "-movflags", "+faststart",
-                out_path,
-            ],
-            capture_output=True, timeout=300,
-        )
+        r = subprocess.run(cmd, capture_output=True, timeout=600)
         if r.returncode == 0 and Path(out_path).exists():
             return out_path
         log.error("[song-video] merge failed:\n%s", r.stderr.decode(errors="replace")[-2000:])
@@ -433,8 +448,8 @@ def run_song_pipeline(job, photo_path, settings):
         log.warning("[song-video] Concat failed — using first clip")
         concat_path = clip_paths[0]
 
-    # ── Phase 3: Merge with user's audio ─────────────────────────────────
-    job.update(progress=88, message="Merging with your song…")
+    # ── Phase 3: Merge with user's audio (loop clips to fill song if needed) ─
+    job.update(progress=88, message="Looping clips to fill song duration…")
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")

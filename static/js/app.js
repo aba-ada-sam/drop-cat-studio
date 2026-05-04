@@ -8,7 +8,7 @@
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260503e';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260503c';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260503h';
-import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260504g';
+import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260504h';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260503i';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260429e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';

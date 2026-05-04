@@ -34,7 +34,6 @@ export function init(panel) {
   let _jobId         = null;
   let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
   let _lyricsTextarea = null;  // editable lyrics field — ref set by _renderAnalysis
-  let _fullLength    = false;  // when false, cap at MAX_CLIPS for quick previews
   let _loopMode      = false;
   let _aiVariety     = true;  // on by default — every run gets a fresh visual theme
   let _loopCount     = 0;
@@ -392,38 +391,22 @@ export function init(panel) {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
 
-  const MAX_CLIPS = 6;  // default preview cap — full song opt-in via Advanced settings
+  const MAX_CLIPS = 6;  // generates 6 clips then loops to fill the full song
 
   function _refreshClipCount() {
     if (!_audioDuration) {
       _numClips = 0;
-      clipSummary.textContent = 'Drop a song to calculate clip count.';
+      clipSummary.textContent = 'Drop a song to get started.';
       timeWarn.style.display = 'none';
       return;
     }
-    const totalPossible = Math.max(1, Math.ceil(_audioDuration / _clipDur));
-    _numClips = _fullLength ? totalPossible : Math.min(MAX_CLIPS, totalPossible);
+    _numClips = Math.min(MAX_CLIPS, Math.max(1, Math.ceil(_audioDuration / _clipDur)));
 
-    const videoDur = _numClips * _clipDur;
     const songMins = Math.floor(_audioDuration / 60), songSecs = Math.round(_audioDuration % 60);
     const songDisplay = `${songMins}:${String(songSecs).padStart(2, '0')}`;
+    clipSummary.textContent = `${_numClips} clips generated, looped to fill ${songDisplay} — est. ${_numClips * 2}–${_numClips * 3} min`;
 
-    if (!_fullLength && totalPossible > MAX_CLIPS) {
-      clipSummary.textContent = `${_numClips} clips × ${_clipDur}s = ${videoDur}s preview  (song: ${songDisplay} — enable Full length in Advanced for the whole thing)`;
-    } else {
-      clipSummary.textContent = `${_numClips} clips × ${_clipDur}s = ~${videoDur}s  (song: ${songDisplay})`;
-    }
-
-    // ~1.5 min per clip at 4 steps on LTX Distilled
-    const estMin = Math.round(_numClips * 1.5);
-    if (estMin >= 15) {
-      const hrs = Math.floor(estMin / 60), mins2 = estMin % 60;
-      const timeStr = hrs > 0 ? `${hrs}h ${mins2}m` : `${estMin}m`;
-      timeWarn.textContent = `⏱ Est. ~${timeStr} GPU time for ${_numClips} clips. WanGP must stay running. You can close this tab — the Queue tab shows progress.`;
-      timeWarn.style.display = '';
-    } else {
-      timeWarn.style.display = 'none';
-    }
+    timeWarn.style.display = 'none';
   }
 
   clipSlider.addEventListener('input', () => {
@@ -434,7 +417,7 @@ export function init(panel) {
     if (_audioPath && _audioAnalysis) {
       // Recalculate clip count from existing analysis using new duration
       if (_audioAnalysis.duration) {
-        _numClips = Math.max(1, Math.ceil(_audioAnalysis.duration / _clipDur));
+        _numClips = Math.min(MAX_CLIPS, Math.max(1, Math.ceil(_audioAnalysis.duration / _clipDur)));
       }
       // Update energy labels if analysis has profile
       if (_audioAnalysis.energy_profile?.length) {
@@ -455,20 +438,8 @@ export function init(panel) {
     return result;
   }
 
-  // Full length toggle
-  const fullLenChk = el('input', { type: 'checkbox', id: 'sv-fulllen', style: 'cursor:pointer;' });
-  fullLenChk.checked = _fullLength;
-  fullLenChk.addEventListener('change', () => {
-    _fullLength = fullLenChk.checked;
-    _refreshClipCount();
-  });
-
   // Advanced settings — collapsed by default so the clean path is just drop + generate
   const _advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
-    el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
-      fullLenChk,
-      el('label', { for: 'sv-fulllen', style: 'font-size:.78rem; color:var(--text-2); cursor:pointer;', text: 'Full length video (generates clips for entire song — much slower)' }),
-    ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Per-clip length' }),
       clipSlider, clipLabel,
