@@ -33,6 +33,26 @@ export function init(panel) {
   let _guidance      = 7.5;
   let _jobId         = null;
   let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
+  let _loopMode      = false;
+  let _aiVariety     = false;
+  let _loopCount     = 0;
+  let _stopAfter     = false;
+  let _varietyIdx    = 0;
+
+  const _VARIETY_THEMES = [
+    'Abstract geometric forms and flowing light, motion-blurred energy trails',
+    'Sweeping epic landscape — mountains, forests, dramatic skies at golden hour',
+    'Urban night — neon-lit rain-slick streets, city pulse and electric glow',
+    'Underwater world — bioluminescent drift, slow ethereal motion, deep blues',
+    'Cosmic journey — nebula clouds, star fields, galactic scale, time-lapse universe',
+    'Fire and molten metal — ember cascades, plasma arcs, blazing intensity',
+    'Dancers and performers — fabric billowing, choreographic peaks and lulls',
+    'Desert and canyon — heat shimmer, red rock, ancient silent power',
+    'Arctic and aurora — frozen geometry, northern lights, crystalline stillness',
+    'Macro nature — water droplets, insect wings, pollen in shafts of light',
+    'Surreal dreamscape — floating objects, impossible architecture, fluid reality',
+    'Storm and lightning — dark clouds, electric chaos, rain-drenched intensity',
+  ];
 
   const QUALITIES = [
     { label: '480P', px: 480, maxSec: 20 },
@@ -393,6 +413,34 @@ export function init(panel) {
   });
   root.appendChild(createBtn);
 
+  // ── Loop + variety toggles ─────────────────────────────────────────────────
+  const _CHIP = 'border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:.8rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s,border-color .15s;';
+  const _CHIP_ON = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+
+  const loopBtn    = el('button', { style: _CHIP, title: 'Keep generating new music videos automatically — all saved to gallery', text: '∞  Loop' });
+  const varietyBtn = el('button', { style: _CHIP, title: 'AI picks a different visual theme each loop so every video looks unique', text: '✦  AI variety' });
+
+  const stopAfterBtn  = el('button', { class: 'btn btn-sm', style: 'display:none;', text: 'Stop after this' });
+  const loopCountEl   = el('span',   { style: 'font-size:.78rem; color:var(--text-3);', text: '' });
+  const loopStatusRow = el('div', {
+    style: 'display:none; align-items:center; gap:10px; padding:4px 2px;',
+  }, [loopCountEl, stopAfterBtn]);
+
+  root.appendChild(el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; align-items:center;' }, [loopBtn, varietyBtn]));
+  root.appendChild(loopStatusRow);
+
+  function _updateLoopUI() {
+    loopBtn.setAttribute('style',    _CHIP + (_loopMode  ? _CHIP_ON : ''));
+    varietyBtn.setAttribute('style', _CHIP + (_aiVariety ? _CHIP_ON : ''));
+  }
+  loopBtn.addEventListener('click', () => { _loopMode  = !_loopMode;  _updateLoopUI(); });
+  varietyBtn.addEventListener('click', () => { _aiVariety = !_aiVariety; _updateLoopUI(); });
+  stopAfterBtn.addEventListener('click', () => {
+    _stopAfter = true;
+    stopAfterBtn.style.display = 'none';
+    loopCountEl.textContent += ' — stopping after this one…';
+  });
+
   // ── Progress + result ─────────────────────────────────────────────────────
   const progressWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   const progressBar  = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
@@ -446,13 +494,18 @@ export function init(panel) {
   newBtn.addEventListener('click', () => {
     resultWrap.style.display = 'none';
     resultVideo.src = '';
-    createBtn.disabled = false;
+    if (!_loopMode) createBtn.disabled = false;
   });
 
   stopBtn.addEventListener('click', () => {
+    _stopAfter = true;
+    _loopMode  = false;
+    _updateLoopUI();
+    loopStatusRow.style.display = 'none';
+    _loopCount = 0;
     if (_jobId) {
       stopJob(_jobId).catch(() => {});
-      toast('Stop requested — current clip will finish then generation halts', 'info');
+      toast('Stopping — current clip will finish then generation halts', 'info');
     }
   });
 
@@ -478,7 +531,6 @@ export function init(panel) {
         j => {
           _activePoller = null;
           stopBtn.style.display = 'none';
-          createBtn.disabled = false;
           const out = Array.isArray(j.output) ? j.output[0] : j.output;
           if (out) {
             _showResult(out);
@@ -487,12 +539,22 @@ export function init(panel) {
             _hideProgress();
             toast('Job finished but produced no output — check the Queue tab for details', 'error');
           }
+          if (_loopMode && !_stopAfter) {
+            // Kick off the next generation automatically
+            setTimeout(_submitJob, 1500);
+          } else {
+            createBtn.disabled = false;
+            loopStatusRow.style.display = 'none';
+            _loopCount = 0;
+          }
           resolve(true);
         },
         err => {
           _activePoller = null;
           stopBtn.style.display = 'none';
           createBtn.disabled = false;
+          loopStatusRow.style.display = 'none';
+          _loopCount = 0;
           _showError(err);
           resolve(false);
         },
@@ -502,17 +564,28 @@ export function init(panel) {
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
-  createBtn.addEventListener('click', async () => {
-    if (!_audioPath) {
-      toast('Drop a song file first', 'error');
-      return;
-    }
-    if (_numClips <= 0) {
-      toast('Song duration could not be determined — try re-uploading the file', 'error');
-      return;
+  async function _submitJob() {
+    if (!_audioPath) { toast('Drop a song file first', 'error'); return; }
+    if (_numClips <= 0) { toast('Song duration could not be determined — try re-uploading the file', 'error'); return; }
+
+    _loopCount++;
+    _stopAfter = false;
+    createBtn.disabled = true;
+
+    // Build video prompt — mix in a variety theme if AI variety is on
+    let prompt = ideaInput.value.trim();
+    if (_aiVariety) {
+      const theme = _VARIETY_THEMES[_varietyIdx % _VARIETY_THEMES.length];
+      _varietyIdx++;
+      prompt = prompt ? `${prompt} — ${theme}` : theme;
     }
 
-    createBtn.disabled = true;
+    // Update loop status bar
+    if (_loopMode) {
+      loopStatusRow.style.display = 'flex';
+      stopAfterBtn.style.display  = '';
+      loopCountEl.textContent     = `Video ${_loopCount} generating…`;
+    }
 
     try {
       const resp = await api('/api/song-video/generate', {
@@ -520,7 +593,7 @@ export function init(panel) {
         body: JSON.stringify({
           audio_path:     _audioPath,
           photo_path:     _imagePath || '',
-          video_prompt:   ideaInput.value.trim(),
+          video_prompt:   prompt,
           user_direction: 'cinematic music video, visual energy matches song dynamics',
           audio_analysis: _audioAnalysis || undefined,
           model:          _model,
@@ -537,11 +610,15 @@ export function init(panel) {
       _watchJob(_jobId);
     } catch (e) {
       createBtn.disabled = false;
+      loopStatusRow.style.display = 'none';
+      _loopCount = 0;
       if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
         toast('Queue is full — wait for the current job to finish', 'error');
       } else {
         toast(e.message || 'Submission failed', 'error');
       }
     }
-  });
+  }
+
+  createBtn.addEventListener('click', _submitJob);
 }
