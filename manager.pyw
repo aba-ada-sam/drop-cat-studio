@@ -1,14 +1,12 @@
 """
-manager.pyw — Drop Cat Go Studio tray + window manager
+manager.pyw — Drop Cat Go Studio window manager
 Run with:  pythonw.exe manager.pyw
 
 - Shows tkinter loading splash instantly while server starts
 - Opens app in Chrome --app mode (plain window, no URL bar or tabs)
 - Single-instance mutex: double-click while running re-opens the window
-- Tray: Open / Restart Server / Exit
+- Closing the Chrome window shuts down the server and exits
 - Keeps app.py alive, restarts on crash (max 5 in 60s)
-
-Dependencies: pystray, Pillow  (pip install pystray Pillow)
 """
 from __future__ import annotations
 
@@ -212,28 +210,38 @@ def _ensure_shortcut() -> None:
 
 # ── Open app window ───────────────────────────────────────────────────────────
 
-def open_app_window(port: int) -> None:
-    """Open the app in Chrome --app mode: plain window, no URL bar or tabs."""
+def open_app_window(port: int) -> "subprocess.Popen | None":
+    """Open the app in Chrome --app mode using a dedicated profile.
+
+    Using --user-data-dir ensures Chrome runs as its own process (not delegated
+    to an existing Chrome instance), so we can wait() on the returned Popen and
+    detect when the window is closed.
+
+    Returns the Popen object, or None if Chrome was not found (default browser).
+    """
     url = f"http://127.0.0.1:{port}"
     chrome_paths = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
     ]
+    profile_dir = str(ROOT / ".chrome_profile")
     for path in chrome_paths:
         if os.path.isfile(path):
-            subprocess.Popen([
+            proc = subprocess.Popen([
                 path,
                 f"--app={url}",
+                f"--user-data-dir={profile_dir}",
                 "--window-size=1400,900",
                 "--window-position=100,50",
             ])
-            log.info("Opened Chrome --app on port %d", port)
-            return
-    # Chrome not found — fall back to default browser
+            log.info("Opened Chrome --app on port %d (profile: %s)", port, profile_dir)
+            return proc
+    # Chrome not found — fall back to default browser (can't track close)
     import webbrowser
     webbrowser.open(url)
     log.warning("Chrome not found, opened default browser")
+    return None
 
 
 # ── Server process manager ────────────────────────────────────────────────────
@@ -492,78 +500,21 @@ def show_splash(srv: ServerManager) -> None:
     root.mainloop()
 
 
-# ── Tray icon ─────────────────────────────────────────────────────────────────
-
-def _build_icon_image():
-    from PIL import Image, ImageDraw, ImageFont
-    if ICO_PATH.is_file():
-        try:
-            img = Image.open(ICO_PATH).convert("RGBA")
-            if img.size != (32, 32):
-                img = img.resize((32, 32), Image.LANCZOS)
-            return img
-        except Exception:
-            pass
-    size = 32
-    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([0, 0, size - 1, size - 1], fill=(196, 30, 58, 255))
-    font = None
-    for name in ("arialbd.ttf", "arial.ttf", "calibrib.ttf"):
-        try:
-            font = ImageFont.truetype(name, 12); break
-        except Exception:
-            continue
-    if font is None:
-        font = ImageFont.load_default()
-    draw.text((size // 2, size // 2), "DCG", fill=(212, 160, 23, 255), font=font, anchor="mm")
-    return img
-
-
-def run_tray(srv: ServerManager) -> None:
-    import pystray
-
-    def _open(icon=None, item=None):
-        if srv.port:
-            open_app_window(srv.port)
-
-    def _do_restart():
-        srv.restart()
-        srv.wait_ready(120)
-        if srv.port:
-            open_app_window(srv.port)
-
-    def _restart(icon=None, item=None):
-        threading.Thread(target=_do_restart, daemon=True).start()
-
-    def _exit(icon, item=None):
-        log.info("Exit from tray")
-        # Kill GPU subprocesses before the server stops so they don't linger.
-        try:
-            from services import manager as svc
-            for svc_name in ("wangp", "acestep"):
-                try:
-                    svc.stop_service(svc_name)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        srv.stop()
-        clear_port_file()
-        try:
-            icon.stop()
-        except Exception:
-            pass
-        threading.Timer(0.5, lambda: os._exit(0)).start()
-
-    menu = pystray.Menu(
-        pystray.MenuItem("Open Drop Cat Go Studio", _open, default=True),
-        pystray.MenuItem("Restart Server", _restart),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Exit", _exit),
-    )
-    icon = pystray.Icon("DropCatGoStudio", _build_icon_image(), "Drop Cat Go Studio", menu)
-    icon.run()   # blocks until Exit is clicked
+def _shutdown(srv: "ServerManager") -> None:
+    """Stop the server and GPU subprocesses, then exit the process."""
+    log.info("Shutting down")
+    try:
+        from services import manager as svc
+        for svc_name in ("wangp", "acestep"):
+            try:
+                svc.stop_service(svc_name)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    srv.stop()
+    clear_port_file()
+    os._exit(0)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -626,24 +577,7 @@ def main() -> None:
             _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
             # Fall through to normal startup
 
-    _diag("pystray/PIL import check")
-    try:
-        import pystray
-        from PIL import Image
-    except ImportError as exc:
-        log.error("Missing: %s — run: pip install pystray Pillow", exc)
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"Cannot start:\n\n{exc}\n\nRun: pip install -r requirements.txt",
-                "Drop Cat Go Studio", 0x10,
-            )
-        except Exception:
-            pass
-        sys.exit(1)
-
-    _diag("pystray/PIL OK — calling _ensure_shortcut")
+    _diag("calling _ensure_shortcut")
     # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)
     _ensure_shortcut()
 
@@ -653,12 +587,13 @@ def main() -> None:
     # Fast check: is a server already recorded in .dcs-port and alive?
     existing_port = find_running_server()
 
+    chrome_proc = None
     if existing_port:
         _diag(f"server already on port {existing_port} — opening window")
         log.info("Server already on port %d", existing_port)
         srv._port = existing_port
         srv._ready_event.set()
-        open_app_window(existing_port)
+        chrome_proc = open_app_window(existing_port)
     else:
         # show_splash drives the full startup: git pull → srv.start() → wait ready
         _diag("no server found — calling show_splash")
@@ -666,12 +601,20 @@ def main() -> None:
         show_splash(srv)
         _diag(f"show_splash returned — srv.port={srv.port}")
         if srv.port:
-            open_app_window(srv.port)
+            chrome_proc = open_app_window(srv.port)
         else:
             log.error("Server never became ready")
 
-    _diag("calling run_tray")
-    run_tray(srv)
+    # Block until the Chrome window closes, then shut everything down.
+    # If Chrome wasn't found (default browser), keep alive until the server dies.
+    _diag("waiting for window close")
+    if chrome_proc is not None:
+        chrome_proc.wait()
+        log.info("App window closed — shutting down")
+        _shutdown(srv)
+    else:
+        # No trackable window — keep manager alive as a watchdog indefinitely
+        srv._stop_event.wait()
 
 
 if __name__ == "__main__":
