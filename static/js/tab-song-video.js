@@ -26,15 +26,15 @@ export function init(panel) {
   let _model         = 'LTX-2 Dev19B Distilled';
   let _clipDur       = 8;
   let _numClips      = 0;     // auto-calculated
-  let _qualityPx     = 580;
-  let _outW          = 1032;
-  let _outH          = 580;
-  let _steps         = 20;
+  let _qualityPx     = 720;   // best quality by default
+  let _outW          = 1280;
+  let _outH          = 720;
+  let _steps         = 30;    // 30 steps produces noticeably sharper output
   let _guidance      = 7.5;
   let _jobId         = null;
   let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
   let _loopMode      = false;
-  let _aiVariety     = false;
+  let _aiVariety     = true;  // on by default — every run gets a fresh visual theme
   let _loopCount     = 0;
   let _stopAfter     = false;
   let _varietyIdx    = 0;
@@ -362,8 +362,8 @@ export function init(panel) {
   }
 
   // Steps + Guidance
-  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '20', step: '1', style: 'flex:1; accent-color:var(--accent);' });
-  const stepsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:28px; text-align:right;', text: '20' });
+  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '30', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const stepsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:28px; text-align:right;', text: '30' });
   stepsSlider.addEventListener('input', () => { _steps = parseInt(stepsSlider.value); stepsLabel.textContent = String(_steps); });
 
   const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: '7.5', step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
@@ -432,7 +432,8 @@ export function init(panel) {
     return result;
   }
 
-  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
+  // Advanced settings — collapsed by default so the clean path is just drop + generate
+  const _advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Per-clip length' }),
       clipSlider, clipLabel,
@@ -449,12 +450,23 @@ export function init(panel) {
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Guidance' }),
       guidSlider, guidLabel,
     ]),
-    el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:2px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:6px;' }, [
       el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
       dimsLabel,
     ]),
-    clipSummary,
-    timeWarn,
+  ]);
+  const _advToggle = el('button', {
+    style: 'background:none; border:none; cursor:pointer; font-size:.75rem; color:var(--text-3); padding:0; align-self:flex-start; opacity:.7;',
+    text: '⚙ Advanced settings ▼',
+  });
+  _advToggle.addEventListener('click', () => {
+    const open = _advBody.style.display !== 'none';
+    _advBody.style.display = open ? 'none' : 'flex';
+    _advToggle.textContent = open ? '⚙ Advanced settings ▼' : '⚙ Advanced settings ▲';
+  });
+
+  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:6px;' }, [
+    clipSummary, timeWarn, _advToggle, _advBody,
   ]));
 
   // ── Create button ─────────────────────────────────────────────────────────
@@ -487,6 +499,7 @@ export function init(panel) {
   }
   loopBtn.addEventListener('click', () => { _loopMode  = !_loopMode;  _updateLoopUI(); });
   varietyBtn.addEventListener('click', () => { _aiVariety = !_aiVariety; _updateLoopUI(); });
+  _updateLoopUI(); // render initial state (variety on by default)
   stopAfterBtn.addEventListener('click', () => {
     _stopAfter = true;
     stopAfterBtn.style.display = 'none';
