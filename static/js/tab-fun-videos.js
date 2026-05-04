@@ -732,7 +732,14 @@ export function init(panel) {
     text: 'Generate Video',
     style: 'width:100%; font-size:1.1rem; padding:14px; font-weight:700;',
   });
+  const fvQueueBtn = el('button', {
+    class: 'btn',
+    text: '＋ Add to Queue',
+    style: 'display:none; width:100%; margin-top:6px; font-size:.9rem;',
+    title: 'Queue another generation with current settings — runs after the active job',
+  });
   root.appendChild(genBtn);
+  root.appendChild(fvQueueBtn);
 
   const progWrap = el('div');
   root.appendChild(progWrap);
@@ -773,6 +780,40 @@ export function init(panel) {
     _rawPath = null; _mixPath = null;
   });
 
+  function _buildFvPayload() {
+    const m        = _models[modelSel.value] || {};
+    const duration = Math.min(parseFloat(durSlider.value) || 14, m.max_sec || 20);
+    return {
+      photo_path:       _startImagePath,
+      video_prompt:     promptTA.value.trim() || PROMPT_DEFAULT,
+      music_prompt:     musicIn.value.trim(),
+      model:            modelSel.value,
+      duration,
+      steps:            parseInt(stepsSlider.value)     || 40,
+      guidance:         parseFloat(guidanceSlider.value) || 8.5,
+      seed:             parseInt(seedIn.value)           || -1,
+      skip_audio:       !audioChk.checked,
+      instrumental:     instrChk.checked,
+      lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
+      end_photo_path:   _endImagePath || null,
+      start_video_path: _startVideoPath || null,
+    };
+  }
+
+  fvQueueBtn.addEventListener('click', async () => {
+    if (!_startImagePath && !_startVideoPath) { toast('Select an image first', 'error'); return; }
+    try {
+      const resp = await api('/api/fun/make-it', {
+        method: 'POST',
+        body: JSON.stringify(_buildFvPayload()),
+      });
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: resp.job_id } }));
+      toast('Added to queue!', 'success');
+    } catch (e) {
+      toast(e.message || 'Failed to queue job', 'error');
+    }
+  });
+
   genBtn.addEventListener('click', async () => {
     if (_autoPromptAbort) { _autoPromptAbort.abort(); _autoPromptAbort = null; }
     promptStatus.style.display = 'none';
@@ -787,10 +828,8 @@ export function init(panel) {
       return;
     }
 
-    const m        = _models[modelSel.value] || {};
-    const duration = Math.min(parseFloat(durSlider.value) || 14, m.max_sec || 20);
-
     genBtn.disabled = true;
+    fvQueueBtn.style.display = '';
     prog.show();
     prog.update(0, 'Submitting...');
     player.hide();
@@ -799,21 +838,7 @@ export function init(panel) {
     try {
       const { job_id } = await api('/api/fun/make-it', {
         method: 'POST',
-        body: JSON.stringify({
-          photo_path:       _startImagePath,
-          video_prompt:     prompt,
-          music_prompt:     musicIn.value.trim(),
-          model:            modelSel.value,
-          duration,
-          steps:            parseInt(stepsSlider.value)     || 40,
-          guidance:         parseFloat(guidanceSlider.value) || 8.5,
-          seed:             parseInt(seedIn.value)           || -1,
-          skip_audio:       !audioChk.checked,
-          instrumental:     instrChk.checked,
-          lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
-          end_photo_path:   _endImagePath || null,
-          start_video_path: _startVideoPath || null,
-        }),
+        body: JSON.stringify(_buildFvPayload()),
       });
       if (_activePoller) { _activePoller.stop(); _activePoller = null; }
       _activeJobId = job_id;
@@ -828,6 +853,7 @@ export function init(panel) {
           _activePoller = null;
           prog.hide();
           genBtn.disabled = false;
+          fvQueueBtn.style.display = 'none';
           _activeJobId = null;
           if (j.output) {
             const outputs = Array.isArray(j.output) ? j.output : [j.output];
@@ -964,6 +990,7 @@ export function init(panel) {
           _activePoller = null;
           prog.hide();
           genBtn.disabled = false;
+          fvQueueBtn.style.display = 'none';
           _activeJobId = null;
           toast(typeof err === 'string' ? err : (err?.message || 'Generation failed'), 'error');
         },
@@ -971,6 +998,7 @@ export function init(panel) {
     } catch (e) {
       prog.hide();
       genBtn.disabled = false;
+      fvQueueBtn.style.display = 'none';
       toast(e.message, 'error');
     }
   });

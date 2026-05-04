@@ -478,13 +478,20 @@ export function init(panel) {
     clipSummary, timeWarn, _advToggle, _advBody,
   ]));
 
-  // ── Create button ─────────────────────────────────────────────────────────
+  // ── Create / Queue buttons ────────────────────────────────────────────────
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Generate Music Video',
     style: 'font-size:1.1rem; padding:16px; font-weight:700; letter-spacing:.04em; width:100%;',
   });
+  const queueBtn = el('button', {
+    class: 'btn',
+    text: '＋ Add to Queue',
+    style: 'display:none; width:100%; margin-top:6px; font-size:.9rem;',
+    title: 'Queue another generation with current settings — it will start after the active job finishes',
+  });
   root.appendChild(createBtn);
+  root.appendChild(queueBtn);
 
   // ── Loop + variety toggles ─────────────────────────────────────────────────
   const _CHIP = 'border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:.8rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s,border-color .15s;';
@@ -623,6 +630,7 @@ export function init(panel) {
             setTimeout(_submitJob, 1500);
           } else {
             createBtn.disabled = false;
+            queueBtn.style.display = 'none';
             loopStatusRow.style.display = 'none';
             _loopCount = 0;
           }
@@ -632,6 +640,7 @@ export function init(panel) {
           _activePoller = null;
           stopBtn.style.display = 'none';
           createBtn.disabled = false;
+          queueBtn.style.display = 'none';
           loopStatusRow.style.display = 'none';
           _loopCount = 0;
           _showError(err);
@@ -644,6 +653,28 @@ export function init(panel) {
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
+  function _buildPayload() {
+    const varietyTheme = _aiVariety
+      ? _VARIETY_THEMES[(_varietyIdx++) % _VARIETY_THEMES.length]
+      : '';
+    return {
+      audio_path:     _audioPath,
+      photo_path:     _imagePath || '',
+      video_prompt:   ideaInput.value.trim(),
+      variety_theme:  varietyTheme,
+      lyrics_text:    _lyricsTextarea ? _lyricsTextarea.value.trim() : '',
+      user_direction: 'cinematic music video, visual energy matches song dynamics',
+      audio_analysis: _audioAnalysis || undefined,
+      model:          _model,
+      clip_duration:  _clipDur,
+      num_clips:      _numClips,
+      steps:          _steps,
+      guidance:       _guidance,
+      output_width:   _outW,
+      output_height:  _outH,
+    };
+  }
+
   async function _submitJob() {
     if (!_audioPath) { toast('Drop a song file first', 'error'); return; }
     if (_numClips <= 0) { toast('Song duration could not be determined — try re-uploading the file', 'error'); return; }
@@ -651,15 +682,8 @@ export function init(panel) {
     _loopCount++;
     _stopAfter = false;
     createBtn.disabled = true;
+    queueBtn.style.display = '';
 
-    // Variety is a visual-style modifier, never the story itself.
-    // Pass it as a separate field so the arc LLM keeps the narrative thread.
-    const prompt = ideaInput.value.trim();
-    const varietyTheme = _aiVariety
-      ? _VARIETY_THEMES[(_varietyIdx++) % _VARIETY_THEMES.length]
-      : '';
-
-    // Update loop status bar
     if (_loopMode) {
       loopStatusRow.style.display = 'flex';
       stopAfterBtn.style.display  = '';
@@ -669,28 +693,14 @@ export function init(panel) {
     try {
       const resp = await api('/api/song-video/generate', {
         method: 'POST',
-        body: JSON.stringify({
-          audio_path:     _audioPath,
-          photo_path:     _imagePath || '',
-          video_prompt:   prompt,
-          variety_theme:  varietyTheme,
-          lyrics_text:    _lyricsTextarea ? _lyricsTextarea.value.trim() : '',
-          user_direction: 'cinematic music video, visual energy matches song dynamics',
-          audio_analysis: _audioAnalysis || undefined,
-          model:          _model,
-          clip_duration:  _clipDur,
-          num_clips:      _numClips,
-          steps:          _steps,
-          guidance:       _guidance,
-          output_width:   _outW,
-          output_height:  _outH,
-        }),
+        body: JSON.stringify(_buildPayload()),
       });
       _jobId = resp.job_id;
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: _jobId } }));
       _watchJob(_jobId, resp.timeout_sec || 0);
     } catch (e) {
       createBtn.disabled = false;
+      queueBtn.style.display = 'none';
       loopStatusRow.style.display = 'none';
       _loopCount = 0;
       if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
@@ -700,6 +710,20 @@ export function init(panel) {
       }
     }
   }
+
+  queueBtn.addEventListener('click', async () => {
+    if (!_audioPath) { toast('Drop a song file first', 'error'); return; }
+    try {
+      const resp = await api('/api/song-video/generate', {
+        method: 'POST',
+        body: JSON.stringify(_buildPayload()),
+      });
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: resp.job_id } }));
+      toast('Added to queue!', 'success');
+    } catch (e) {
+      toast(e.message || 'Failed to queue job', 'error');
+    }
+  });
 
   createBtn.addEventListener('click', _submitJob);
 }
