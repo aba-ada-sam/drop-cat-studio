@@ -264,8 +264,16 @@ def run_song_prep(job, photo_path, settings):
     user_idea     = settings.get("video_prompt", "") or settings.get("user_direction", "")
     variety_theme = settings.get("variety_theme", "")
     analysis      = settings.get("audio_analysis", {})
-    # lyrics_text: explicit user override takes priority, then whatever the analyzer detected
-    lyrics_text   = (settings.get("lyrics_text") or analysis.get("lyrics_text", "")).strip()
+    audio_path    = settings.get("audio_path", "")
+    # lyrics_text: user-typed override takes priority; otherwise auto-detect now
+    lyrics_text   = (settings.get("lyrics_text") or "").strip()
+
+    if not lyrics_text and audio_path and os.path.isfile(audio_path):
+        job.update(progress=3, message="Detecting lyrics…")
+        from features.song_video.audio_analyzer import _transcribe_lyrics
+        lyrics_text = _transcribe_lyrics(audio_path)
+        if lyrics_text:
+            log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
 
     job.update(progress=4, message="Planning music video story arc…")
     try:

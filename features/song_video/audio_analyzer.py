@@ -207,7 +207,4 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
     if not result["mood"] or result["mood"] == "cinematic":
         result["mood"] = _mood_from_analysis(result.get("mode"), result["energy"])
 
-    # ── Lyric detection via faster-whisper ────────────────────────────────
-    result["lyrics_text"] = _transcribe_lyrics(audio_path)
-
     return result
