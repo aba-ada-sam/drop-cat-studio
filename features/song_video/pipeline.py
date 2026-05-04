@@ -27,7 +27,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 # Each clip already starts from the extracted last frame of the previous one,
 # so the two images at the splice point are nearly identical — a 0.3 s blend
 # is genuinely imperceptible while still smoothing any motion-direction change.
-_XFADE_DUR = 0.3
+_XFADE_DUR = 0.15
 
 
 def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = _XFADE_DUR) -> bool:
@@ -275,20 +275,33 @@ def run_song_prep(job, photo_path, settings):
     from app import get_llm_router
     llm_router = get_llm_router()
 
+    import concurrent.futures
+
     n_clips       = int(settings.get("num_clips", 10))
+    clip_dur      = float(settings.get("clip_duration", 8.0))
     user_idea     = settings.get("video_prompt", "") or settings.get("user_direction", "")
     variety_theme = settings.get("variety_theme", "")
     analysis      = settings.get("audio_analysis", {})
     audio_path    = settings.get("audio_path", "")
-    # lyrics_text: user-typed override takes priority; otherwise auto-detect now
     lyrics_text   = (settings.get("lyrics_text") or "").strip()
 
-    if not lyrics_text and audio_path and os.path.isfile(audio_path):
-        job.update(progress=3, message="Detecting lyrics…")
-        from features.song_video.audio_analyzer import _transcribe_lyrics
-        lyrics_text = _transcribe_lyrics(audio_path)
-        if lyrics_text:
-            log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
+    # Run beat alignment + lyric detection concurrently — both CPU, no GPU needed.
+    job.update(progress=2, message="Analysing beat structure and detecting lyrics…")
+    from features.song_video.audio_analyzer import compute_clip_durations, _transcribe_lyrics
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        fut_beats  = pool.submit(compute_clip_durations, audio_path, n_clips, clip_dur, 20.0)
+        fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
+
+        clip_durations = fut_beats.result()
+        if fut_lyrics is not None:
+            detected = fut_lyrics.result()
+            if detected:
+                lyrics_text = detected
+                log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
+
+    settings["_clip_durations"] = clip_durations
+    log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
 
     job.update(progress=4, message="Planning music video story arc…")
     try:
@@ -319,18 +332,19 @@ def run_song_pipeline(job, photo_path, settings):
         return job.stop_event.is_set()
 
     # ── Settings ──────────────────────────────────────────────────────────
-    n_clips      = int(settings.get("num_clips", 10))
-    clip_dur     = float(settings.get("clip_duration", 8.0))
-    model_name   = settings.get("model_name", "LTX-2 Dev19B Distilled")
-    resolution   = settings.get("resolution", "580p")
-    ow           = settings.get("override_width")
-    oh           = settings.get("override_height")
-    steps        = int(settings.get("video_steps", 30))
-    guidance     = float(settings.get("video_guidance", 7.5))
-    seed         = int(settings.get("video_seed", -1))
-    audio_path   = settings.get("audio_path", "")   # user's uploaded song
-    audio_dur    = float(settings.get("audio_duration", 0.0))
-    story_arc    = settings.pop("_story_arc", [])
+    n_clips       = int(settings.get("num_clips", 10))
+    clip_dur      = float(settings.get("clip_duration", 8.0))
+    clip_durations = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
+    model_name    = settings.get("model_name", "LTX-2 Dev19B Distilled")
+    resolution    = settings.get("resolution", "580p")
+    ow            = settings.get("override_width")
+    oh            = settings.get("override_height")
+    steps         = int(settings.get("video_steps", 30))
+    guidance      = float(settings.get("video_guidance", 7.5))
+    seed          = int(settings.get("video_seed", -1))
+    audio_path    = settings.get("audio_path", "")   # user's uploaded song
+    audio_dur     = float(settings.get("audio_duration", 0.0))
+    story_arc     = settings.pop("_story_arc", [])
 
     if not story_arc:
         story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
@@ -382,13 +396,14 @@ def run_song_pipeline(job, photo_path, settings):
         finalized         = _finalize_prompt(clip_prompt, model_name)
         clip_start_image  = start_image_path if start_image_path else prepped_photo
         clip_out          = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+        this_dur          = clip_durations[i] if i < len(clip_durations) else clip_dur
 
         try:
             clip_path = video_generator.generate_video(
                 image_path=clip_start_image,
                 prompt=finalized,
                 out_path=clip_out,
-                duration=clip_dur,
+                duration=this_dur,
                 model_name=model_name,
                 resolution=resolution,
                 override_width=int(ow) if ow else None,
@@ -438,15 +453,15 @@ def run_song_pipeline(job, photo_path, settings):
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips…")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # ── Phase 2: Concatenate ──────────────────────────────────────────────
-    # Plain stream-copy concat: no re-encode, no dissolve, instant cuts.
-    # With consistent style tokens in every prompt and frame-seeded continuity,
-    # hard cuts at matched-frame boundaries are cleaner than a dissolve that
-    # visually reveals any residual colour-grade difference between clips.
+    # ── Phase 2: Concatenate with short crossfade ─────────────────────────
+    # 0.15s xfade: imperceptible duration but smooths the frame discontinuity
+    # at each cut. Style-consistent prompts (STYLE RULE) mean there's no longer
+    # a colour-grade mismatch to reveal, so the dissolve works cleanly.
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips(clip_paths, concat_path):
-        log.warning("[song-video] Concat failed — using first clip")
-        concat_path = clip_paths[0]
+    if not _concat_clips_xfade(clip_paths, concat_path, fade_dur=_XFADE_DUR):
+        log.warning("[song-video] xfade concat failed — falling back to hard cuts")
+        if not _concat_clips(clip_paths, concat_path):
+            concat_path = clip_paths[0]
 
     # ── Phase 3: Merge with user's audio (loop clips to fill song if needed) ─
     job.update(progress=88, message="Looping clips to fill song duration…")
