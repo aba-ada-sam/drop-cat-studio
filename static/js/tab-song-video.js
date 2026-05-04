@@ -26,9 +26,9 @@ export function init(panel) {
   let _model         = 'LTX-2 Dev19B Distilled';
   let _clipDur       = 8;
   let _numClips      = 0;     // auto-calculated
-  let _qualityPx     = 720;   // best quality by default
-  let _outW          = 1280;
-  let _outH          = 720;
+  let _qualityPx     = 480;   // share-friendly: small file, fast to generate
+  let _outW          = 864;
+  let _outH          = 480;
   let _steps         = 30;    // 30 steps produces noticeably sharper output
   let _guidance      = 7.5;
   let _jobId         = null;
