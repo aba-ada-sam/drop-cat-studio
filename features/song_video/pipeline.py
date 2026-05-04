@@ -111,17 +111,21 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI that will be set to music.
 Each prompt describes one 8-20 second clip of continuous physical action.
-Clips must chain visually — each picks up from where the previous ended.
 
-The energy level tells you HOW to write each clip:
+STORY RULE — CRITICAL: All clips are one unbroken story. The SAME subject and
+scene established in Clip 01 continue through every clip. Do NOT introduce new
+subjects, locations, or settings mid-story. The viewer must feel they are
+watching a single continuous sequence, not a montage of unrelated scenes.
+
+The energy level tells you HOW the subject moves in each clip:
   HIGH energy → explosive verbs: erupts, slams, whips, surges, tears, launches
   MED energy  → dynamic verbs: flows, pulses, swings, arcs, spirals, unfolds
   LOW energy  → graceful verbs: drifts, glides, sways, breathes, melts, settles
 
 Rules:
 - 30-50 words per prompt, one tight paragraph, no camera moves as the primary event
-- Describe what the SUBJECT is doing — body, hair, fabric, environment all in motion
-- Narrative arc: open the scene → build → peak → resolve
+- Each clip picks up motion exactly where the previous clip ended
+- Narrative arc across all clips: establish → build tension → peak → resolve
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -132,6 +136,7 @@ def _generate_song_arc(
     analysis: dict,
     user_idea: str,
     photo_path: str | None,
+    variety_theme: str = "",
 ) -> list[str]:
     """Generate N motion prompts calibrated to the song's energy profile."""
     energy_profile = analysis.get("energy_profile", [])
@@ -156,11 +161,16 @@ def _generate_song_arc(
     bpm_str = f"{bpm} BPM" if bpm else ""
     song_desc = ", ".join(filter(None, [key_str, bpm_str, mood]))
 
+    story_direction = (user_idea or "").strip() or "a compelling cinematic music video"
+    style_line = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
+
     user_msg = (
         f"Song character: {song_desc or 'cinematic'}\n"
-        f"User idea: {(user_idea or '').strip() or 'Create a compelling music video'}\n\n"
-        f"Energy level per clip ({n_clips} clips):\n{energy_text}\n\n"
-        f"Generate exactly {n_clips} motion prompts that match these energy levels."
+        f"Story direction: {story_direction}\n"
+        f"{style_line}"
+        f"\nEnergy level per clip ({n_clips} clips):\n{energy_text}\n\n"
+        f"Generate exactly {n_clips} motion prompts that continue the SAME story "
+        f"and match these energy levels."
     )
 
     try:
@@ -231,13 +241,14 @@ def run_song_prep(job, photo_path, settings):
     from app import get_llm_router
     llm_router = get_llm_router()
 
-    n_clips   = int(settings.get("num_clips", 10))
-    user_idea = settings.get("video_prompt", "") or settings.get("user_direction", "")
-    analysis  = settings.get("audio_analysis", {})
+    n_clips       = int(settings.get("num_clips", 10))
+    user_idea     = settings.get("video_prompt", "") or settings.get("user_direction", "")
+    variety_theme = settings.get("variety_theme", "")
+    analysis      = settings.get("audio_analysis", {})
 
     job.update(progress=4, message="Planning music video story arc…")
     try:
-        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path)
+        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:

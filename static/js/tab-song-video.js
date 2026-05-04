@@ -643,13 +643,12 @@ export function init(panel) {
     _stopAfter = false;
     createBtn.disabled = true;
 
-    // Build video prompt — mix in a variety theme if AI variety is on
-    let prompt = ideaInput.value.trim();
-    if (_aiVariety) {
-      const theme = _VARIETY_THEMES[_varietyIdx % _VARIETY_THEMES.length];
-      _varietyIdx++;
-      prompt = prompt ? `${prompt} — ${theme}` : theme;
-    }
+    // Variety is a visual-style modifier, never the story itself.
+    // Pass it as a separate field so the arc LLM keeps the narrative thread.
+    const prompt = ideaInput.value.trim();
+    const varietyTheme = _aiVariety
+      ? _VARIETY_THEMES[(_varietyIdx++) % _VARIETY_THEMES.length]
+      : '';
 
     // Update loop status bar
     if (_loopMode) {
@@ -665,6 +664,7 @@ export function init(panel) {
           audio_path:     _audioPath,
           photo_path:     _imagePath || '',
           video_prompt:   prompt,
+          variety_theme:  varietyTheme,
           user_direction: 'cinematic music video, visual energy matches song dynamics',
           audio_analysis: _audioAnalysis || undefined,
           model:          _model,

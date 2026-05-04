@@ -171,6 +171,7 @@ async def generate(request: Request):
 
     settings = {
         "video_prompt":    body.get("video_prompt", ""),
+        "variety_theme":   body.get("variety_theme", ""),
         "user_direction":  body.get("user_direction", "music video, cinematic, energetic"),
         "audio_path":      audio_path,
         "audio_duration":  audio_dur,
