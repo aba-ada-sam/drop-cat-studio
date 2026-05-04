@@ -111,6 +111,8 @@ class LLMRouter:
         if system:
             kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
+        if not resp.content:
+            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) — possible content policy refusal")
         return desanitize(resp.content[0].text)
 
     def _anthropic_vision(self, prompt, images_b64, tier, max_tokens, system):
@@ -134,6 +136,8 @@ class LLMRouter:
         if system:
             kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
+        if not resp.content:
+            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) — possible content policy refusal")
         return desanitize(resp.content[0].text)
 
     # ── OpenAI ────────────────────────────────────────────────────────────────

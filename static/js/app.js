@@ -7,8 +7,8 @@
 // tab-imports.js removed — import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260503e';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260503c';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260504j';
-import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260504j';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260504k';
+import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260504k';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260503i';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260429e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
@@ -1077,8 +1077,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Sidebar job feed ──────────────────────────────────────────────────────
   const _feedEl = document.getElementById('job-feed');
-  const _feedCards = new Map(); // job_id → card element
-  const _feedDone  = [];        // completed job ids, newest-first (capped at 5)
+  const _feedCards    = new Map(); // job_id → card element
+  const _feedDone     = [];        // completed job ids, newest-first (capped at 5)
+  const _feedDismissed = new Set(); // job ids the user explicitly closed
 
   function _thumbUrl(job) {
     const src = job.meta?.source_image;
@@ -1140,6 +1141,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.remove();
       if (id) {
         _feedCards.delete(id);
+        _feedDismissed.add(id);
         const idx = _feedDone.indexOf(id);
         if (idx !== -1) _feedDone.splice(idx, 1);
       }
@@ -1192,6 +1194,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Update/create active cards (running first, then queued)
       const seen = new Set();
       for (const job of active) {
+        if (_feedDismissed.has(job.id)) continue;
         seen.add(job.id);
         if (!_feedCards.has(job.id)) {
           const card = _makeCard(job);
@@ -1203,7 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Add freshly completed jobs to top (newest-first, max 5)
       for (const job of done) {
-        if (_feedDone.includes(job.id)) continue;
+        if (_feedDone.includes(job.id) || _feedDismissed.has(job.id)) continue;
         _feedDone.unshift(job.id);
         if (_feedDone.length > 5) {
           const old = _feedDone.pop();

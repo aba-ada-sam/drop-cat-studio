@@ -124,12 +124,12 @@ subsequent clip prompt. The AI renderer locks visual style from these tokens —
 inconsistent style tags are the #1 cause of jarring aesthetic shifts between
 clips.
 
-FACE RULE — CRITICAL: Never write close-up face shots. Never describe things
-happening TO a character's body (impacts, wounds, eruptions on skin). Describe
-ENVIRONMENT motion and SCENE energy instead — light, colour, atmosphere,
-landscapes, abstract forces, silhouettes in wide shot. If characters appear,
-show them at distance or from behind. The renderer distorts faces badly under
-high-energy prompts; keep faces out of frame entirely.
+FRAME RULE — CRITICAL: Never write close-up face shots. Never describe direct
+action against a character's body. Focus on ENVIRONMENT and ATMOSPHERE — light,
+colour, landscape, abstract forces, wide establishing shots. If characters
+appear, show them small and distant or viewed from behind. The renderer
+produces poor quality output whenever faces are prominent; keep faces out
+of the main frame entirely.
 
 The energy level tells you HOW the scene moves in each clip:
   HIGH energy → explosive environment: light erupts, landscape surges, colours
