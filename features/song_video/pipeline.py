@@ -18,6 +18,66 @@ from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
 from features.fun_videos.multi_pipeline import _concat_clips
 
+
+def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 0.5) -> bool:
+    """Concatenate clips with xfade crossfade dissolves between each pair.
+
+    Falls back to plain concat on any ffmpeg error so the pipeline never stalls.
+    """
+    if len(clip_paths) == 1:
+        shutil.copy2(clip_paths[0], out_path)
+        return True
+
+    # Probe each clip duration — needed to compute xfade offsets
+    durations: list[float] = []
+    for p in clip_paths:
+        d = probe_duration(p)
+        durations.append(d if d and d > fade_dur * 2 else 8.0)
+
+    # Build filter_complex: chain xfade filters
+    # xfade offset = sum of (dur[i] - fade_dur) for all previous clips
+    filter_parts: list[str] = []
+    offset = 0.0
+    prev = "[0:v]"
+    for i in range(1, len(clip_paths)):
+        offset += durations[i - 1] - fade_dur
+        cur    = f"[{i}:v]"
+        label  = f"[xf{i}]" if i < len(clip_paths) - 1 else "[vout]"
+        filter_parts.append(
+            f"{prev}{cur}xfade=transition=fade:duration={fade_dur:.3f}:offset={offset:.3f}{label}"
+        )
+        prev = label
+
+    filter_complex = "; ".join(filter_parts)
+
+    cmd = (
+        [
+            "ffmpeg", "-y",
+        ]
+        + [arg for p in clip_paths for arg in ["-i", p]]
+        + [
+            "-filter_complex", filter_complex,
+            "-map", "[vout]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-an",
+            out_path,
+        ]
+    )
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=600)
+        if r.returncode == 0 and Path(out_path).exists():
+            return True
+        log.warning(
+            "[song-video] xfade concat failed (rc=%d), falling back to plain concat:\n%s",
+            r.returncode,
+            r.stderr.decode(errors="replace")[-2000:],
+        )
+    except Exception as e:
+        log.warning("[song-video] xfade concat exception: %s — falling back to plain concat", e)
+
+    return _concat_clips(clip_paths, out_path)
+
 log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
@@ -302,7 +362,7 @@ def run_song_pipeline(job, photo_path, settings):
 
     # ── Phase 2: Concatenate ──────────────────────────────────────────────
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips(clip_paths, concat_path):
+    if not _concat_clips_xfade(clip_paths, concat_path):
         log.warning("[song-video] Concat failed — using first clip")
         concat_path = clip_paths[0]
 

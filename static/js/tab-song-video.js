@@ -512,10 +512,16 @@ export function init(panel) {
   // ── Watcher ───────────────────────────────────────────────────────────────
   let _activePoller = null;
 
-  function _watchJob(job_id) {
+  function _watchJob(job_id, timeoutSec = 0) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
     _showProgress(2, 'Planning story arc…');
     stopBtn.style.display = '';
+
+    // Derive maxPolls from server-reported timeout so long multi-clip jobs don't
+    // time out client-side before the server finishes (default 10 min = 400 polls).
+    const maxPolls = timeoutSec > 0
+      ? Math.max(400, Math.ceil((timeoutSec + 300) * 1000 / 1500))
+      : 400;
 
     return new Promise(resolve => {
       const poller = pollJob(job_id,
@@ -558,6 +564,7 @@ export function init(panel) {
           _showError(err);
           resolve(false);
         },
+        1500, maxPolls,
       );
       _activePoller = poller;
     });
@@ -607,7 +614,7 @@ export function init(panel) {
       });
       _jobId = resp.job_id;
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: _jobId } }));
-      _watchJob(_jobId);
+      _watchJob(_jobId, resp.timeout_sec || 0);
     } catch (e) {
       createBtn.disabled = false;
       loopStatusRow.style.display = 'none';
