@@ -23,15 +23,19 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-# Crossfade duration in seconds.  1.0 s is cinema-standard and works well
-# because clip N+1 starts from the last frame of clip N — the two images are
-# nearly identical at the splice point, so a long dissolve is almost invisible
-# at the cut but removes all hard edges.
-_XFADE_DUR = 1.0
+# 0.3 s is the standard "invisible cut" duration in professional editing.
+# Each clip already starts from the extracted last frame of the previous one,
+# so the two images at the splice point are nearly identical — a 0.3 s blend
+# is genuinely imperceptible while still smoothing any motion-direction change.
+_XFADE_DUR = 0.3
 
 
 def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = _XFADE_DUR) -> bool:
-    """Concatenate clips with xfade crossfade dissolves between each pair.
+    """Concatenate clips with short xfade dissolves between each pair.
+
+    Each input stream is normalised to 24 fps before the xfade chain so that
+    any framerate mismatch between WanGP clips can't produce arithmetic glitches
+    in the offset calculation or visual strobing during the blend.
 
     Falls back to plain concat on any ffmpeg error so the pipeline never stalls.
     """
@@ -40,31 +44,39 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
         return True
 
     # Probe each clip duration — needed to compute xfade offsets.
-    # Guard: clip must be at least 3× the fade so the overlap never consumes
-    # more than a third of the clip on either side.
-    min_dur = fade_dur * 3
+    # Guard: clip must be at least 4× the fade so the overlap never eats into
+    # a meaningful portion of a short clip.
+    min_dur = fade_dur * 4
     durations: list[float] = []
     for p in clip_paths:
         d = probe_duration(p)
         durations.append(d if d and d > min_dur else max(min_dur + 0.1, 8.0))
 
-    # Build filter_complex: chain xfade filters.
-    # xfade offset = cumulative sum of (dur[i] - fade_dur) so each transition
-    # begins exactly fade_dur seconds before the previous clip ends.
-    filter_parts: list[str] = []
+    # Normalise each stream to 24 fps + square pixels before xfade.
+    norm_parts: list[str] = []
+    norm_labels: list[str] = []
+    for i in range(len(clip_paths)):
+        lbl = f"[n{i}]"
+        norm_parts.append(f"[{i}:v]fps=fps=24,setsar=1{lbl}")
+        norm_labels.append(lbl)
+
+    # Chain xfade filters.
+    # offset = cumulative sum of (dur[i] - fade_dur): the point (in the output
+    # timeline) where the next clip's blend begins.
+    xfade_parts: list[str] = []
     offset = 0.0
-    prev = "[0:v]"
+    prev = norm_labels[0]
     for i in range(1, len(clip_paths)):
         offset += durations[i - 1] - fade_dur
-        cur   = f"[{i}:v]"
+        cur   = norm_labels[i]
         label = f"[xf{i}]" if i < len(clip_paths) - 1 else "[vout]"
-        filter_parts.append(
+        xfade_parts.append(
             f"{prev}{cur}xfade=transition=fade"
             f":duration={fade_dur:.3f}:offset={offset:.3f}{label}"
         )
         prev = label
 
-    filter_complex = "; ".join(filter_parts)
+    filter_complex = "; ".join(norm_parts + xfade_parts)
 
     cmd = (
         ["ffmpeg", "-y"]
@@ -72,8 +84,6 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
         + [
             "-filter_complex", filter_complex,
             "-map", "[vout]",
-            # High-quality encode: slow preset + crf 17 preserves fine motion
-            # detail lost by the dissolve recompression.
             "-c:v", "libx264", "-preset", "slow", "-crf", "17",
             "-pix_fmt", "yuv420p",
             "-an",
