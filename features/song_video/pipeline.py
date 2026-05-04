@@ -117,6 +117,13 @@ scene established in Clip 01 continue through every clip. Do NOT introduce new
 subjects, locations, or settings mid-story. The viewer must feel they are
 watching a single continuous sequence, not a montage of unrelated scenes.
 
+STYLE RULE — CRITICAL: In Clip 01, choose a specific visual aesthetic (e.g.
+"warm oil-painting animation, amber and gold tones, soft painterly texture").
+You MUST copy those EXACT style words verbatim to the very start of EVERY
+subsequent clip prompt. The AI renderer locks visual style from these tokens —
+inconsistent style tags are the #1 cause of jarring aesthetic shifts between
+clips.
+
 The energy level tells you HOW the subject moves in each clip:
   HIGH energy → explosive verbs: erupts, slams, whips, surges, tears, launches
   MED energy  → dynamic verbs: flows, pulses, swings, arcs, spirals, unfolds
@@ -401,8 +408,12 @@ def run_song_pipeline(job, photo_path, settings):
     job.meta["clips_generated"] = len(clip_paths)
 
     # ── Phase 2: Concatenate ──────────────────────────────────────────────
+    # Plain stream-copy concat: no re-encode, no dissolve, instant cuts.
+    # With consistent style tokens in every prompt and frame-seeded continuity,
+    # hard cuts at matched-frame boundaries are cleaner than a dissolve that
+    # visually reveals any residual colour-grade difference between clips.
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips_xfade(clip_paths, concat_path):
+    if not _concat_clips(clip_paths, concat_path):
         log.warning("[song-video] Concat failed — using first clip")
         concat_path = clip_paths[0]
 
