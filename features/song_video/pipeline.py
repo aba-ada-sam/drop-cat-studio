@@ -110,33 +110,40 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
-Each prompt describes one 8-20 second standalone clip. Clips are cut together to music.
+Each prompt is one 8-20 second clip. All clips together tell ONE coherent story.
 
-VARIETY RULE — CRITICAL: Every clip MUST be visually DISTINCT from every other.
-Each clip is a completely different "scene" — different location, different color
-palette, different subject, different lighting. Think: aerial mountain sweep, then
-neon rain-slick street, then deep ocean bioluminescence, then desert heat shimmer,
-then abstract plasma/fire, then arctic aurora. The cuts must feel like channel
-changes, not slow drift of the same image.
-DO NOT repeat locations, color temperatures, or subject matter across clips.
+STORY RULE: Every clip follows the SAME character or subject in the SAME story world
+established in Clip 01. The story PROGRESSES — each clip is a different MOMENT or
+PHASE of the journey, not a frozen repeat of the same scene.
+Example story arc: lone figure at mountain base → climbing through forest →
+breaking into open alpine ridge → summit in blazing wind → descent at dusk →
+arriving home, transformed.
 
-FRAME RULE — CRITICAL: No close-up faces. No direct action on a character's body.
-Show environment, atmosphere, landscape, abstract motion, or distant silhouettes.
-Wide and environmental shots only — the renderer distorts prominent faces.
+SHOT RULE — CRITICAL: Each clip MUST use a different shot type than adjacent clips.
+Rotate through: wide establishing shot, medium shot, close detail (hands/objects/
+texture), aerial overhead, low angle, silhouette against sky, POV. A music video
+that never changes framing is as boring as one that never changes scene. Describe
+the shot distance and angle explicitly in every prompt.
 
-ENERGY RULE — Match clip motion intensity to the energy label:
-  HIGH → explosive, fast, visceral: swirling plasma, crashing surf, fire surging
-         upward, crowd blur, neon streaks, lightning arcs, smoke rushing, colour
-         avalanche — everything in violent motion simultaneously
-  MED  → flowing, rhythmic, dynamic: fabric billowing in wind, rain on glass,
-         light sweeping across landscape, shapes morphing, slow aerial drift
-  LOW  → still, breathing, cinematic: mist curling at dawn, embers floating,
-         water-surface reflection, single flame, fog rolling through forest
+STYLE RULE: Establish a specific color palette and look in Clip 01 (e.g. "cinematic
+wide shot, warm amber and deep shadow, golden-hour light"). Carry that COLOR
+TEMPERATURE and MOOD through every clip — but the composition and framing MUST
+change each clip.
+
+FRAME RULE: No close-up face shots. No direct action on a character's body.
+For close shots use hands, feet, objects, texture. The renderer distorts faces.
+
+ENERGY RULE — energy label sets motion speed and intensity:
+  HIGH → violent scene motion: rushing water, fire surge, wind blast, fast travel,
+         crashing, swirling storm, rapid movement through environment
+  MED  → dynamic flow: fabric in wind, light sweeping landscape, steady travel,
+         rippling water, drifting smoke, rhythmic natural motion
+  LOW  → held, breathing: mist settling, single candle, still water, slow dawn,
+         a moment of stillness before or after action
 
 Rules:
-- 30-50 words per prompt, one tight paragraph, no camera moves as the primary event
-- No repeated locations, palettes, or subjects — every clip is a new world
-- Visual arc: striking open → build intensity → peak → release/breathe
+- 30-50 words per prompt — include shot type, subject action, and environment
+- Story progresses across clips: arrival → challenge → peak → resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
