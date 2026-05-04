@@ -540,7 +540,6 @@ export function init(panel) {
           const out = Array.isArray(j.output) ? j.output[0] : j.output;
           if (out) {
             _showResult(out);
-            pushToGallery('song-video', out, ideaInput.value.trim() || 'Music video', -1, {});
           } else {
             _hideProgress();
             toast('Job finished but produced no output — check the Queue tab for details', 'error');
