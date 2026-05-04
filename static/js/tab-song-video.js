@@ -92,6 +92,8 @@ export function init(panel) {
 
   function _renderAnalysis(a) {
     analysisCard.innerHTML = '';
+
+    // ── Header chips ──────────────────────────────────────────────────────
     const chips = [
       a.duration_display && { icon: '♪', text: a.duration_display },
       a.bpm              && { icon: '♩', text: `${a.bpm} BPM` },
@@ -123,6 +125,56 @@ export function init(panel) {
     analysisCard.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px;', text: 'Song analysis' }));
     analysisCard.appendChild(chipRow);
     analysisCard.appendChild(clipsNote);
+
+    // ── Per-clip energy strip ─────────────────────────────────────────────
+    // Shows what the AI actually sees when writing motion prompts, so you can
+    // spot if the song reads as uniformly MED and adjust the idea accordingly.
+    const profile = a.energy_profile || [];
+    const labels  = a.clip_energy_labels || [];
+    if (profile.length > 0) {
+      const LABEL_COLOR = { HIGH: '#e05c5c', MED: '#d4a017', LOW: '#5b9bd4' };
+
+      const stripWrap = el('div', { style: 'display:flex; flex-direction:column; gap:4px;' });
+      stripWrap.appendChild(el('div', {
+        style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;',
+        text: 'Per-clip energy (what the AI reads)',
+      }));
+
+      const strip = el('div', {
+        style: 'display:flex; gap:2px; align-items:flex-end; height:36px; width:100%;',
+      });
+
+      profile.forEach((e, i) => {
+        const lbl   = labels[i] || (e > 0.7 ? 'HIGH' : e > 0.35 ? 'MED' : 'LOW');
+        const color = LABEL_COLOR[lbl] || 'var(--accent)';
+        const pct   = Math.max(20, Math.round(e * 100));  // min 20% so LOW bars are visible
+        const bar   = el('div', {
+          title: `Clip ${i + 1}: ${lbl} (${Math.round(e * 100)}%)`,
+          style: [
+            'flex:1; min-width:4px; border-radius:2px 2px 0 0;',
+            `height:${pct}%; background:${color};`,
+            'cursor:default; transition:opacity .15s;',
+          ].join(' '),
+        });
+        bar.addEventListener('mouseenter', () => { bar.style.opacity = '0.7'; });
+        bar.addEventListener('mouseleave', () => { bar.style.opacity = '1'; });
+        strip.appendChild(bar);
+      });
+
+      // Label legend
+      const legend = el('div', { style: 'display:flex; gap:12px; flex-wrap:wrap;' });
+      [['HIGH', '#e05c5c', 'explosive action'], ['MED', '#d4a017', 'dynamic motion'], ['LOW', '#5b9bd4', 'graceful/slow']].forEach(([lbl, col, desc]) => {
+        legend.appendChild(el('span', {
+          style: `font-size:.7rem; color:${col};`,
+          text: `■ ${lbl} — ${desc}`,
+        }));
+      });
+
+      stripWrap.appendChild(strip);
+      stripWrap.appendChild(legend);
+      analysisCard.appendChild(stripWrap);
+    }
+
     analysisCard.style.display = 'flex';
 
     // Apply suggestions to settings; clamp to current quality ceiling
