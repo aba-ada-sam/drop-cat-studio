@@ -144,6 +144,7 @@ def _generate_song_arc(
     user_idea: str,
     photo_path: str | None,
     variety_theme: str = "",
+    lyrics_text: str = "",
 ) -> list[str]:
     """Generate N motion prompts calibrated to the song's energy profile."""
     energy_profile = analysis.get("energy_profile", [])
@@ -169,12 +170,17 @@ def _generate_song_arc(
     song_desc = ", ".join(filter(None, [key_str, bpm_str, mood]))
 
     story_direction = (user_idea or "").strip() or "a compelling cinematic music video"
-    style_line = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
+    style_line  = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
+    lyrics_line = (
+        f"\nSong lyrics / theme (first ~2 min):\n{lyrics_text[:800].strip()}\n"
+        if lyrics_text and lyrics_text.strip() else ""
+    )
 
     user_msg = (
         f"Song character: {song_desc or 'cinematic'}\n"
         f"Story direction: {story_direction}\n"
         f"{style_line}"
+        f"{lyrics_line}"
         f"\nEnergy level per clip ({n_clips} clips):\n{energy_text}\n\n"
         f"Generate exactly {n_clips} motion prompts that continue the SAME story "
         f"and match these energy levels."
@@ -258,10 +264,12 @@ def run_song_prep(job, photo_path, settings):
     user_idea     = settings.get("video_prompt", "") or settings.get("user_direction", "")
     variety_theme = settings.get("variety_theme", "")
     analysis      = settings.get("audio_analysis", {})
+    # lyrics_text: explicit user override takes priority, then whatever the analyzer detected
+    lyrics_text   = (settings.get("lyrics_text") or analysis.get("lyrics_text", "")).strip()
 
     job.update(progress=4, message="Planning music video story arc…")
     try:
-        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme)
+        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:

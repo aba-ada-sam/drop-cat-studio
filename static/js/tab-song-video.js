@@ -33,6 +33,7 @@ export function init(panel) {
   let _guidance      = 7.5;
   let _jobId         = null;
   let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
+  let _lyricsTextarea = null;  // editable lyrics field — ref set by _renderAnalysis
   let _loopMode      = false;
   let _aiVariety     = true;  // on by default — every run gets a fresh visual theme
   let _loopCount     = 0;
@@ -174,6 +175,18 @@ export function init(panel) {
       stripWrap.appendChild(legend);
       analysisCard.appendChild(stripWrap);
     }
+
+    // ── Lyrics section ────────────────────────────────────────────────────
+    _lyricsTextarea = el('textarea', {
+      rows: '3',
+      style: 'width:100%; resize:vertical; font-size:.78rem; color:var(--text-2); font-family:inherit; background:var(--bg-input,var(--bg-raised)); border:1px solid var(--border-2); border-radius:4px; padding:6px 8px; box-sizing:border-box;',
+      placeholder: 'No lyrics detected (instrumental?) — type theme words to guide the story',
+    });
+    _lyricsTextarea.value = (a.lyrics_text || '').trim();
+    analysisCard.appendChild(el('div', { style: 'display:flex; flex-direction:column; gap:4px; margin-top:4px;' }, [
+      el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Detected lyrics — edit to correct' }),
+      _lyricsTextarea,
+    ]));
 
     analysisCard.style.display = 'flex';
 
@@ -665,6 +678,7 @@ export function init(panel) {
           photo_path:     _imagePath || '',
           video_prompt:   prompt,
           variety_theme:  varietyTheme,
+          lyrics_text:    _lyricsTextarea ? _lyricsTextarea.value.trim() : '',
           user_direction: 'cinematic music video, visual energy matches song dynamics',
           audio_analysis: _audioAnalysis || undefined,
           model:          _model,

@@ -7,6 +7,7 @@ Install librosa with: pip install librosa
 import logging
 import math
 import os
+import re
 from pathlib import Path
 
 from core.ffmpeg_utils import probe_duration
@@ -50,6 +51,46 @@ def _mood_from_analysis(mode: str | None, energy: str) -> str:
     return "euphoric" if energy == "high" else ("peaceful" if energy == "low" else "uplifting")
 
 
+_WHISPER_NOISE = re.compile(
+    r'\[.*?\]|\(.*?\)|♪|♫|\bmm+\b|\buh+\b|\bah+\b', re.IGNORECASE
+)
+
+
+def _transcribe_lyrics(audio_path: str, max_seconds: float = 120.0) -> str:
+    """Transcribe up to max_seconds of audio using faster-whisper.
+
+    Returns cleaned lyric text, or empty string if unavailable/instrumental.
+    First call downloads the base model (~74 MB, cached afterwards).
+    """
+    try:
+        from faster_whisper import WhisperModel
+        log.info("[song-video] Transcribing lyrics (faster-whisper base)…")
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+        segments, _info = model.transcribe(
+            audio_path,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+            condition_on_previous_text=False,
+        )
+        lines: list[str] = []
+        for seg in segments:
+            if seg.start > max_seconds:
+                break
+            cleaned = _WHISPER_NOISE.sub("", seg.text).strip()
+            if cleaned:
+                lines.append(cleaned)
+        text = " ".join(lines).strip()
+        log.info("[song-video] Lyrics detected: %d chars", len(text))
+        return text
+    except ImportError:
+        log.debug("[song-video] faster-whisper not installed — skipping lyric detection")
+        return ""
+    except Exception as e:
+        log.warning("[song-video] Lyric transcription failed: %s", e)
+        return ""
+
+
 def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
     """Analyze an audio file and return a structured analysis dict.
 
@@ -66,6 +107,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         suggested_clip_dur int    BPM-aligned clip length in seconds
         suggested_num_clips int   ceil(duration / suggested_clip_dur)
         has_rich_analysis bool    True if librosa ran successfully
+        lyrics_text       str     AI-transcribed lyrics (first ~2 min), may be empty
     """
     result: dict = {
         "duration": 0.0,
@@ -80,6 +122,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         "suggested_clip_dur": suggested_clip_dur or 8,
         "suggested_num_clips": 0,
         "has_rich_analysis": False,
+        "lyrics_text": "",
     }
 
     # ── Basic duration via ffprobe ────────────────────────────────────────
@@ -163,5 +206,8 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
     result["suggested_num_clips"] = max(1, math.ceil(dur / result["suggested_clip_dur"]))
     if not result["mood"] or result["mood"] == "cinematic":
         result["mood"] = _mood_from_analysis(result.get("mode"), result["energy"])
+
+    # ── Lyric detection via faster-whisper ────────────────────────────────
+    result["lyrics_text"] = _transcribe_lyrics(audio_path)
 
     return result
