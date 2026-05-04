@@ -22,7 +22,7 @@ html { font-size: 16px; }
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: transparent;
+  background: var(--bg);
   color: var(--text);
   line-height: 1.55;
   height: 100vh;
