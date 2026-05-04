@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file
+from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
 from features.fun_videos.multi_pipeline import _concat_clips
@@ -109,40 +109,34 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
 # ── Energy-aware story arc ────────────────────────────────────────────────────
 
 _SONG_ARC_SYSTEM = """\
-You write motion prompts for an image-to-video AI that will be set to music.
-Each prompt describes one 8-20 second clip of continuous physical action.
+You write motion prompts for an image-to-video AI generating a music video.
+Each prompt describes one 8-20 second standalone clip. Clips are cut together to music.
 
-STORY RULE — CRITICAL: All clips are one unbroken story. The SAME subject and
-scene established in Clip 01 continue through every clip. Do NOT introduce new
-subjects, locations, or settings mid-story. The viewer must feel they are
-watching a single continuous sequence, not a montage of unrelated scenes.
+VARIETY RULE — CRITICAL: Every clip MUST be visually DISTINCT from every other.
+Each clip is a completely different "scene" — different location, different color
+palette, different subject, different lighting. Think: aerial mountain sweep, then
+neon rain-slick street, then deep ocean bioluminescence, then desert heat shimmer,
+then abstract plasma/fire, then arctic aurora. The cuts must feel like channel
+changes, not slow drift of the same image.
+DO NOT repeat locations, color temperatures, or subject matter across clips.
 
-STYLE RULE — CRITICAL: In Clip 01, choose a specific visual aesthetic (e.g.
-"warm oil-painting animation, amber and gold tones, soft painterly texture").
-You MUST copy those EXACT style words verbatim to the very start of EVERY
-subsequent clip prompt. The AI renderer locks visual style from these tokens —
-inconsistent style tags are the #1 cause of jarring aesthetic shifts between
-clips.
+FRAME RULE — CRITICAL: No close-up faces. No direct action on a character's body.
+Show environment, atmosphere, landscape, abstract motion, or distant silhouettes.
+Wide and environmental shots only — the renderer distorts prominent faces.
 
-FRAME RULE — CRITICAL: Never write close-up face shots. Never describe direct
-action against a character's body. Focus on ENVIRONMENT and ATMOSPHERE — light,
-colour, landscape, abstract forces, wide establishing shots. If characters
-appear, show them small and distant or viewed from behind. The renderer
-produces poor quality output whenever faces are prominent; keep faces out
-of the main frame entirely.
-
-The energy level tells you HOW the scene moves in each clip:
-  HIGH energy → explosive environment: light erupts, landscape surges, colours
-                explode, wind tears through, energy rips across the horizon
-  MED energy  → dynamic scene: light flows, shapes pulse, atmosphere swings,
-                colour arcs across the sky, forms spiral and unfold
-  LOW energy  → graceful atmosphere: mist drifts, light glides, colours sway,
-                air breathes, shadows melt, stillness settles
+ENERGY RULE — Match clip motion intensity to the energy label:
+  HIGH → explosive, fast, visceral: swirling plasma, crashing surf, fire surging
+         upward, crowd blur, neon streaks, lightning arcs, smoke rushing, colour
+         avalanche — everything in violent motion simultaneously
+  MED  → flowing, rhythmic, dynamic: fabric billowing in wind, rain on glass,
+         light sweeping across landscape, shapes morphing, slow aerial drift
+  LOW  → still, breathing, cinematic: mist curling at dawn, embers floating,
+         water-surface reflection, single flame, fog rolling through forest
 
 Rules:
 - 30-50 words per prompt, one tight paragraph, no camera moves as the primary event
-- Each clip picks up motion exactly where the previous clip ended
-- Narrative arc across all clips: establish → build tension → peak → resolve
+- No repeated locations, palettes, or subjects — every clip is a new world
+- Visual arc: striking open → build intensity → peak → release/breathe
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -381,7 +375,6 @@ def run_song_pipeline(job, photo_path, settings):
 
     # ── Phase 1: Generate clips ───────────────────────────────────────────
     clip_paths: list[str] = []
-    start_image_path: str | None = None
 
     prepped_photo: str | None = None
     if photo_path and os.path.isfile(photo_path):
@@ -403,9 +396,12 @@ def run_song_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}")
 
-        finalized         = _finalize_prompt(clip_prompt, model_name)
-        clip_start_image  = start_image_path if start_image_path else prepped_photo
-        clip_out          = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+        finalized = _finalize_prompt(clip_prompt, model_name)
+        # Each clip generates independently so prompts can place the camera in a
+        # completely different world. Clip 0 uses the user's photo as a visual
+        # anchor; subsequent clips are pure text-to-video for maximum variety.
+        clip_start_image = prepped_photo if i == 0 else None
+        clip_out         = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur          = clip_durations[i] if i < len(clip_durations) else clip_dur
 
         try:
@@ -441,14 +437,6 @@ def run_song_pipeline(job, photo_path, settings):
 
         clip_paths.append(clip_path)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
-
-        if i < len(story_arc) - 1:
-            frame_out = str(job_dir / f"frame_{i:02d}.jpg")
-            if extract_last_frame_to_file(clip_path, frame_out):
-                start_image_path = frame_out
-            else:
-                log.warning("[song-video] Frame extraction failed for clip %d", i + 1)
-                start_image_path = None
 
     if forge_unloaded:
         reload_checkpoint()
