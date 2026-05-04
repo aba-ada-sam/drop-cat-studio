@@ -157,10 +157,6 @@ async def lifespan(app: FastAPI):
                 jm.cleanup()
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
 
-    # System tray icon — skip when launched from manager.pyw (it has its own)
-    if not os.environ.get("DCS_MANAGED"):
-        from core import tray as _tray
-        _tray.start_tray()
 
     _port = _g.get("port", 7860)
     log.info("Drop Cat Go Studio ready on http://127.0.0.1:%d", _port)
