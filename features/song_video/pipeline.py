@@ -30,6 +30,16 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 _XFADE_DUR = 0.15
 
 
+def _extract_frame_at(video_path: str, out_path: str, seek_secs: float) -> str | None:
+    """Extract one frame at seek_secs into the video. Returns out_path or None."""
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-ss", f"{max(0.0, seek_secs):.3f}", "-i", video_path,
+         "-frames:v", "1", "-q:v", "2", out_path],
+        capture_output=True, timeout=30,
+    )
+    return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
+
+
 def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = _XFADE_DUR) -> bool:
     """Concatenate clips with short xfade dissolves between each pair.
 
@@ -412,6 +422,7 @@ def run_song_pipeline(job, photo_path, settings):
         prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
 
     _last_error: list[str | None] = [None]
+    _chain_frame: str | None = None   # last frame of previous clip → first frame of next
 
     for i, clip_prompt in enumerate(story_arc):
         if _stopped():
@@ -428,10 +439,14 @@ def run_song_pipeline(job, photo_path, settings):
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
-        # Each clip generates independently so prompts can place the camera in a
-        # completely different world. Clip 0 uses the user's photo as a visual
-        # anchor; subsequent clips are pure text-to-video for maximum variety.
-        clip_start_image = prepped_photo if i == 0 else None
+        # Clip 0: use the user's uploaded photo as visual anchor.
+        # Clips 1+: use the last frame of the previous clip so transitions are
+        # seamless. The SHOT RULE forces a different camera angle/framing each
+        # clip so the chained start-frame doesn't cause visual freeze.
+        if i == 0:
+            clip_start_image = prepped_photo
+        else:
+            clip_start_image = _chain_frame   # None if extraction failed — falls back to T2V
         clip_out         = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur          = clip_durations[i] if i < len(clip_durations) else clip_dur
 
@@ -480,6 +495,16 @@ def run_song_pipeline(job, photo_path, settings):
                 log.debug("[song-video] Clip %d trimmed %.2fs → %.2fs", clip_num, actual_dur, this_dur)
 
         clip_paths.append(clip_path)
+
+        # Extract the frame at the beat cut point (start of the xfade region)
+        # and use it as the first frame of the next clip for seamless transitions.
+        if i < n_clips - 1:
+            frame_path = str(job_dir / f"chain_{i:02d}.jpg")
+            seek = max(0.0, this_dur - _XFADE_DUR - 0.05)
+            _chain_frame = _extract_frame_at(clip_path, frame_path, seek)
+            if not _chain_frame:
+                log.debug("[song-video] Frame extraction failed for clip %d — next clip uses T2V", clip_num)
+
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
     if forge_unloaded:

@@ -6,6 +6,7 @@ import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { el, pathToUrl } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
+// v=20260504o
 
 export function receiveHandoff(data) {
   // no-op — this tab doesn't currently receive handoffs
@@ -392,7 +393,7 @@ export function init(panel) {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
 
-  const MAX_CLIPS = 6;  // 6 clips × ~50s ≈ 5 min unique content — fills most songs without looping
+  const MAX_CLIPS = 30;  // hard safety cap — 30 × 8s = 4 min of unique content at minimum clip length
 
   function _refreshClipCount() {
     if (!_audioDuration) {
@@ -401,14 +402,26 @@ export function init(panel) {
       timeWarn.style.display = 'none';
       return;
     }
-    _numClips = Math.min(MAX_CLIPS, Math.max(1, Math.ceil(_audioDuration / _clipDur)));
+    // Generate exactly enough clips to cover the full song — no looping.
+    // Use suggested_num_clips from analysis when available (BPM-aligned),
+    // otherwise compute from raw duration ÷ clip length.
+    const rawNeeded = Math.ceil(_audioDuration / _clipDur);
+    const suggested = _audioAnalysis?.suggested_num_clips;
+    _numClips = Math.min(MAX_CLIPS, Math.max(1, suggested || rawNeeded));
 
     const songMins = Math.floor(_audioDuration / 60), songSecs = Math.round(_audioDuration % 60);
     const songDisplay = `${songMins}:${String(songSecs).padStart(2, '0')}`;
-    const estMin = Math.round(_numClips * 0.7), estMax = Math.round(_numClips * 1.1);
-    clipSummary.textContent = `${_numClips} clips generated, looped to fill ${songDisplay} — est. ${estMin}–${estMax} min`;
+    // Rough per-clip generation time: ~30s at Draft 360P, ~50s at higher quality
+    const secsPerClip = _qualityPx <= 360 ? 30 : (_qualityPx <= 480 ? 40 : 55);
+    const estMin = Math.round(_numClips * secsPerClip / 60);
+    const loops = rawNeeded > _numClips ? ` — song fills ${(rawNeeded / _numClips).toFixed(1)}× loop` : ' — no looping';
+    clipSummary.textContent = `${_numClips} clips cover ${songDisplay}${loops} — est. ~${estMin} min`;
 
-    timeWarn.style.display = 'none';
+    timeWarn.style.display = _numClips >= 20
+      ? '' : 'none';
+    if (_numClips >= 20) {
+      timeWarn.textContent = `⚠ ${_numClips} clips is a long generation run (~${estMin} min). Consider raising the per-clip length to generate fewer clips.`;
+    }
   }
 
   clipSlider.addEventListener('input', () => {
