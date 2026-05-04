@@ -51,7 +51,7 @@ export function init(panel) {
   // ── Heading ───────────────────────────────────────────────────────────────
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
     el('div', { style: 'font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px;', text: 'Music Video' }),
-    el('div', { style: 'font-size:.85rem; color:var(--text-3);', text: 'Drop a song. AI reads its energy and generates a full-length video to match.' }),
+    el('div', { style: 'font-size:.85rem; color:var(--text-3);', text: 'Drop a song. AI reads its energy and chains as many clips as needed to cover the full length.' }),
   ]));
 
   // ── Song drop zone ────────────────────────────────────────────────────────
@@ -301,7 +301,7 @@ export function init(panel) {
   const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: `${_outW} × ${_outH}` });
 
   // Clip count summary + time estimate
-  const clipSummary = el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Drop a song to calculate clip count.' });
+  const clipSummary = el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Drop a song → number of clips is calculated automatically from song length ÷ per-clip length.' });
   const timeWarn    = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
@@ -362,7 +362,7 @@ export function init(panel) {
 
   root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Clip length' }),
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Per-clip length' }),
       clipSlider, clipLabel,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
