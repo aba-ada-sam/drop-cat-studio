@@ -28,12 +28,17 @@ def _bars_to_seconds(bpm: float, bars: int) -> float:
 
 
 def _suggest_clip_dur(bpm: float | None) -> int:
-    """Pick a musically-aligned clip duration in seconds (8–20s range)."""
+    """Pick a musically-aligned clip duration in seconds (8–19s range).
+
+    Ceiling is 19s: LTX-2 at 25fps reaches 481 latent frames at ~19.24s,
+    the exact WanGP sliding-window threshold. 20s produces 501 frames and
+    triggers 2-window mode, doubling per-clip generation time.
+    """
     if bpm and bpm > 0:
         for bars in _BARS_PER_CLIP_OPTIONS:
             secs = _bars_to_seconds(bpm, bars)
-            if 8 <= secs <= 20:
-                return max(8, min(20, round(secs)))
+            if 8 <= secs <= 19:
+                return max(8, min(19, round(secs)))
     return 8  # fallback
 
 
@@ -55,7 +60,7 @@ def compute_clip_durations(
     audio_path: str,
     n_clips: int,
     min_dur: float = 8.0,
-    max_dur: float = 20.0,
+    max_dur: float = 19.0,
 ) -> list[float]:
     """Compute beat/onset-aligned clip durations for exactly n_clips clips.
 
