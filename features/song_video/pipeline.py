@@ -84,7 +84,7 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
         + [
             "-filter_complex", filter_complex,
             "-map", "[vout]",
-            "-c:v", "libx264", "-preset", "slow", "-crf", "17",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-pix_fmt", "yuv420p",
             "-an",
             out_path,
@@ -179,17 +179,23 @@ def _generate_song_arc(
             b64 = encode_image_b64(photo_path)
             if b64:
                 frames = [b64]
+        # max_tokens must cover n_clips × ~50 words each plus JSON overhead.
+        # 1500 was too small for >20 clips; 4096 handles up to ~60 clips safely.
+        max_tok = max(2048, n_clips * 80)
         if frames:
             text = llm_router.route_vision(
                 user_msg, frames,
-                tier=TIER_BALANCED, system=_SONG_ARC_SYSTEM, max_tokens=1500,
+                tier=TIER_BALANCED, system=_SONG_ARC_SYSTEM, max_tokens=max_tok,
             )
         else:
             text = llm_router.route(
                 [{"role": "user", "content": user_msg}],
-                tier=TIER_BALANCED, system=_SONG_ARC_SYSTEM, max_tokens=1500,
+                tier=TIER_BALANCED, system=_SONG_ARC_SYSTEM, max_tokens=max_tok,
             )
         data = parse_json_response(text)
+        if data is None:
+            log.warning("[song-video] Story arc: LLM returned no parseable JSON — raw: %.200s", text)
+            raise ValueError("No JSON in LLM response")
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
             result = [str(c) for c in clips[:n_clips]]
