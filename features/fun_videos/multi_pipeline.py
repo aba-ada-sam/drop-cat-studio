@@ -358,6 +358,7 @@ def run_multi_pipeline(job, photo_path, settings):
     # ── Phase 3: Audio ────────────────────────────────────────────────────
     if skip_audio:
         job.output = concat_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Multi-video done ({len(clip_paths)} clips, no audio)"
         if forge_unloaded:
             reload_checkpoint()
@@ -442,6 +443,7 @@ def run_multi_pipeline(job, photo_path, settings):
     if not audio_path:
         _log(f"[warning] Audio failed: {audio_err} — returning video only")
         job.output = concat_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Multi-video done ({len(clip_paths)} clips, audio failed)"
         return
 
@@ -455,6 +457,7 @@ def run_multi_pipeline(job, photo_path, settings):
 
     if merged:
         job.output = merged
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "music_prompt": music_prompt})
         job.message = f"Multi-video complete! ({len(clip_paths)} clips)"
 
@@ -498,6 +501,7 @@ def run_multi_pipeline(job, photo_path, settings):
                 pass
     else:
         job.output = concat_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Multi-video done ({len(clip_paths)} clips, audio merge failed)"
         try:
             from core.session import get_current as get_session

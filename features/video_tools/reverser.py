@@ -177,6 +177,9 @@ def process_batch(job, file_list: list[str], settings: dict):
 
     if not job.stop_event.is_set():
         job.output = results[0] if results else None
+        from core.inbox import copy_to_inbox
+        for _r in results:
+            copy_to_inbox(_r)
         job.meta["outputs"] = results
         job.meta["total"] = total
         job.meta["processed"] = len(results)

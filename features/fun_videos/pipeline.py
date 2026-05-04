@@ -386,6 +386,7 @@ def run_pipeline(job, photo_path, settings):
     # ── Early exit for video-only ────────────────────────────────────────
     if skip_audio:
         job.output = video_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = "Video generated (no audio)"
         _gallery(video_path)
         return
@@ -394,6 +395,7 @@ def run_pipeline(job, photo_path, settings):
     # WanGP already embedded audio via MMAudio — skip ACE-Step entirely.
     if use_mmaudio:
         job.output = video_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = "Video generated with LTX-2 native audio"
         _gallery(video_path)
         try:
@@ -480,6 +482,7 @@ def run_pipeline(job, photo_path, settings):
     if not audio_path:
         _log(f"[warning] Audio failed: {audio_err} — returning video only")
         job.output = video_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Video generated (audio failed: {audio_err})"
         _gallery(video_path)
         return
@@ -499,6 +502,7 @@ def run_pipeline(job, photo_path, settings):
     from core.session import get_current as get_session
     if merged:
         job.output = merged
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta["final_path"] = merged
         job.message = "Complete!"
         _gallery(merged, {"music_prompt": music_prompt})
@@ -515,6 +519,7 @@ def run_pipeline(job, photo_path, settings):
                 log.debug("Could not delete raw intermediate: %s", e)
     else:
         job.output = video_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = "Video generated (audio merge failed)"
         _gallery(video_path)
         try:

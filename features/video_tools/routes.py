@@ -147,6 +147,7 @@ async def mix_music(request: Request):
         )
         if result["success"]:
             job.output = result["output_path"]
+            from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
             job.message = "Music mixed successfully"
         else:
             raise RuntimeError(result["error"])

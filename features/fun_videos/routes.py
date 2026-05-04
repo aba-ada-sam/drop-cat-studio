@@ -605,6 +605,7 @@ async def add_music(request: Request):
             pass
 
         job.output = merged
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Done — music prompt: {music_prompt[:60]}"
 
     label = f"Add music: {Path(video_path).stem[:24]}"

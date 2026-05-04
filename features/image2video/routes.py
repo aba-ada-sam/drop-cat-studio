@@ -145,6 +145,9 @@ def _i2v_worker(job, image_specs, settings):
 
     if not job.stop_event.is_set():
         job.output = outputs[0] if outputs else None
+        from core.inbox import copy_to_inbox
+        for _out in outputs:
+            copy_to_inbox(str(OUTPUT_DIR / _out))
         job.meta["outputs"] = outputs
         job.message = f"Done! Created {len(outputs)} video(s)." if output_mode == "separate" else "Done!"
         from core.session import get_current as get_session

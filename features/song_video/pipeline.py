@@ -480,6 +480,7 @@ def run_song_pipeline(job, photo_path, settings):
 
     if merged:
         job.output = merged
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
         job.message = f"Music video complete! ({len(clip_paths)} clips)"
 
@@ -521,6 +522,7 @@ def run_song_pipeline(job, photo_path, settings):
     else:
         # Merge failed — return the concat without audio
         job.output = concat_path
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Music video done ({len(clip_paths)} clips — audio merge failed)"
         try:
             from core.session import get_current as get_session

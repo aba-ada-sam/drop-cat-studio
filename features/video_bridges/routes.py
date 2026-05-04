@@ -282,6 +282,7 @@ def _bridges_worker(job, items, settings):
 
     if result:
         job.output = result
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Complete! {num_bridges} bridge(s) generated"
         from core.session import get_current as get_session
         get_session().add_file(Path(result).name, "video", "video_bridges", path=result)
