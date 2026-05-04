@@ -114,7 +114,11 @@ def compute_clip_durations(
                 chosen = max(lo, min(hi, ideal))
             boundaries.append(chosen)
 
-        boundaries.append(total_dur)
+        # Cap the last clip to max_dur — do NOT extend it to total_dur.
+        # The merge step loops the video to fill the song, so a 116-second
+        # last clip is never needed and would hit WanGP sliding-window mode.
+        last_end = min(total_dur, boundaries[-1] + max_dur)
+        boundaries.append(last_end)
         durations = [round(boundaries[j + 1] - boundaries[j], 3) for j in range(n_clips)]
         log.info("[song-video] Beat-aligned durations: %s", durations)
         return durations

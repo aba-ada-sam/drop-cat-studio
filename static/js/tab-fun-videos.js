@@ -535,17 +535,17 @@ export function init(panel) {
     seedIn,
   ]));
 
-  const durSlider = createSlider(settingsCard, { label: 'Duration (seconds)', min: 2, max: 20, step: 1, value: 14 });
+  const durSlider = createSlider(settingsCard, { label: 'Duration (seconds)', min: 2, max: 20, step: 1, value: 8 });
 
   const slidersGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' });
   settingsCard.appendChild(slidersGrid);
-  const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 40  });
+  const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 8   });
   const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 8.5 });
 
   modelSel.addEventListener('change', () => {
     const m = _models[modelSel.value];
     if (!m) return;
-    durSlider.value = Math.min(parseFloat(durSlider.value) || 14, m.max_sec);
+    durSlider.value = Math.min(parseFloat(durSlider.value) || 8, m.max_sec);
     modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'×'+m.res[1] : ''}  •  ${m.fps}fps`;
   });
 

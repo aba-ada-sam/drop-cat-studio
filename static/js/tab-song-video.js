@@ -391,7 +391,7 @@ export function init(panel) {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
 
-  const MAX_CLIPS = 6;  // generates 6 clips then loops to fill the full song
+  const MAX_CLIPS = 4;  // generates 4 clips then loops to fill the full song
 
   function _refreshClipCount() {
     if (!_audioDuration) {
@@ -404,7 +404,7 @@ export function init(panel) {
 
     const songMins = Math.floor(_audioDuration / 60), songSecs = Math.round(_audioDuration % 60);
     const songDisplay = `${songMins}:${String(songSecs).padStart(2, '0')}`;
-    clipSummary.textContent = `${_numClips} clips generated, looped to fill ${songDisplay} — est. ${_numClips * 2}–${_numClips * 3} min`;
+    clipSummary.textContent = `${_numClips} clips generated, looped to fill ${songDisplay} — est. ${_numClips}–${_numClips * 2} min`;
 
     timeWarn.style.display = 'none';
   }
