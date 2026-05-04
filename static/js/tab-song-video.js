@@ -55,7 +55,7 @@ export function init(panel) {
   ]));
 
   // ── Song drop zone ────────────────────────────────────────────────────────
-  const audioInput    = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac', style: 'display:none' });
+  const audioInput    = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mpeg,.mpg', style: 'display:none' });
   const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a, mpeg…)' });
   const audioPreview  = el('audio', { controls: '', style: 'display:none; width:100%; margin-top:8px;' });
   const audioClearBtn = el('button', {
