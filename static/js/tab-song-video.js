@@ -417,11 +417,7 @@ export function init(panel) {
     const loops = rawNeeded > _numClips ? ` — song fills ${(rawNeeded / _numClips).toFixed(1)}× loop` : ' — no looping';
     clipSummary.textContent = `${_numClips} clips cover ${songDisplay}${loops} — est. ~${estMin} min`;
 
-    timeWarn.style.display = _numClips >= 20
-      ? '' : 'none';
-    if (_numClips >= 20) {
-      timeWarn.textContent = `⚠ ${_numClips} clips is a long generation run (~${estMin} min). Consider raising the per-clip length to generate fewer clips.`;
-    }
+    timeWarn.style.display = 'none';
   }
 
   clipSlider.addEventListener('input', () => {
