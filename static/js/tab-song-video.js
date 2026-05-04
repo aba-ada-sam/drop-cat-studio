@@ -26,9 +26,9 @@ export function init(panel) {
   let _model         = 'LTX-2 Dev19B Distilled';
   let _clipDur       = 8;
   let _numClips      = 0;     // auto-calculated
-  let _qualityPx     = 480;   // share-friendly: small file, fast to generate
-  let _outW          = 864;
-  let _outH          = 480;
+  let _qualityPx     = 360;   // Draft by default — fastest, still watchable on screen
+  let _outW          = 640;
+  let _outH          = 352;
   let _steps         = 4;     // LTX Distilled is designed for 4-8 steps — 30 is wasted time
   let _guidance      = 7.5;
   let _jobId         = null;
@@ -56,9 +56,10 @@ export function init(panel) {
   ];
 
   const QUALITIES = [
-    { label: '480P', px: 480, maxSec: 20 },
-    { label: '580P', px: 580, maxSec: 20 },
-    { label: '720P', px: 720, maxSec: 16 },
+    { label: 'Draft  360P', px: 360, maxSec: 19 },  // ~640×352 — fastest, ~35% fewer pixels than 480P
+    { label: '480P',        px: 480, maxSec: 19 },
+    { label: '580P',        px: 580, maxSec: 19 },
+    { label: '720P',        px: 720, maxSec: 14 },   // high res: cap clips shorter to avoid sliding window
   ];
 
   function _computeDims(px) {
@@ -347,7 +348,7 @@ export function init(panel) {
   const CHIP_ON   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
 
   // Clip length
-  const clipSlider = el('input', { type: 'range', min: '8', max: '20', value: '8', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const clipSlider = el('input', { type: 'range', min: '8', max: '19', value: '8', step: '1', style: 'flex:1; accent-color:var(--accent);' });
   const clipLabel  = el('span',  { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:28px; text-align:right;', text: '8s' });
 
   // Quality chips
