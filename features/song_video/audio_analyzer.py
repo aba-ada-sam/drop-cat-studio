@@ -56,6 +56,31 @@ def _mood_from_analysis(mode: str | None, energy: str) -> str:
     return "euphoric" if energy == "high" else ("peaceful" if energy == "low" else "uplifting")
 
 
+def _place_boundaries(
+    peak_times, peak_strengths, total_dur: float, n_clips: int,
+    min_dur: float, max_dur: float,
+) -> list[float]:
+    """Shared boundary-placement logic used by both clip functions."""
+    import numpy as np
+    boundaries = [0.0]
+    for i in range(1, n_clips):
+        prev  = boundaries[-1]
+        ideal = total_dur * i / n_clips
+        lo, hi = prev + min_dur, prev + max_dur
+        mask = (peak_times >= lo) & (peak_times <= hi)
+        if mask.any():
+            cands     = peak_times[mask]
+            strengths = peak_strengths[mask]
+            proximity = 1.0 / (1.0 + np.abs(cands - ideal))
+            chosen    = float(cands[np.argmax(strengths * proximity)])
+        else:
+            chosen = max(lo, min(hi, ideal))
+        boundaries.append(chosen)
+    last_end = min(total_dur, boundaries[-1] + max_dur)
+    boundaries.append(last_end)
+    return boundaries
+
+
 def compute_clip_durations(
     audio_path: str,
     n_clips: int,
@@ -82,48 +107,19 @@ def compute_clip_durations(
         import numpy as np
 
         y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(total_dur, 300))
-
-        # Onset strength — detects drum hits, bass drops, chord attacks, vocal entries
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-
-        # Peak-pick with minimum spacing of half a clip to avoid micro-cuts
+        onset_env  = librosa.onset.onset_strength(y=y, sr=sr)
         min_frames = int(sr / 512 * min_dur * 0.5)
         peaks = librosa.util.peak_pick(
             onset_env,
-            pre_max=4, post_max=4,
-            pre_avg=4, post_avg=8,
-            delta=0.4,
-            wait=max(1, min_frames),
+            pre_max=4, post_max=4, pre_avg=4, post_avg=8,
+            delta=0.4, wait=max(1, min_frames),
         )
         if len(peaks) < 2:
             return default
 
         peak_times     = librosa.frames_to_time(peaks, sr=sr)
         peak_strengths = onset_env[peaks]
-
-        # Greedily place n_clips-1 cut points, each from the strongest onset
-        # within the allowed window for that cut, weighted toward the ideal position.
-        boundaries = [0.0]
-        for i in range(1, n_clips):
-            prev  = boundaries[-1]
-            ideal = total_dur * i / n_clips
-            lo, hi = prev + min_dur, prev + max_dur
-
-            mask = (peak_times >= lo) & (peak_times <= hi)
-            if mask.any():
-                cands     = peak_times[mask]
-                strengths = peak_strengths[mask]
-                proximity = 1.0 / (1.0 + np.abs(cands - ideal))
-                chosen    = float(cands[np.argmax(strengths * proximity)])
-            else:
-                chosen = max(lo, min(hi, ideal))
-            boundaries.append(chosen)
-
-        # Cap the last clip to max_dur — do NOT extend it to total_dur.
-        # The merge step loops the video to fill the song, so a 116-second
-        # last clip is never needed and would hit WanGP sliding-window mode.
-        last_end = min(total_dur, boundaries[-1] + max_dur)
-        boundaries.append(last_end)
+        boundaries     = _place_boundaries(peak_times, peak_strengths, total_dur, n_clips, min_dur, max_dur)
         durations = [round(boundaries[j + 1] - boundaries[j], 3) for j in range(n_clips)]
         log.info("[song-video] Beat-aligned durations: %s", durations)
         return durations
@@ -131,6 +127,84 @@ def compute_clip_durations(
     except Exception as e:
         log.warning("[song-video] Beat alignment failed (%s) — using equal durations", e)
         return default
+
+
+def compute_clip_plan(
+    audio_path: str,
+    n_clips: int,
+    min_dur: float = 8.0,
+    max_dur: float = 19.0,
+    xfade_dur: float = 0.0,
+) -> tuple[list[float], list[float]]:
+    """Beat-aligned clip plan with per-clip peak-beat positions.
+
+    Returns:
+        durations      list[float]  clip lengths in seconds; all clips except
+                                    the last are extended by xfade_dur so the
+                                    dissolve overlap cancels out and cuts land
+                                    exactly on the beat in the final merged video.
+        beat_positions list[float]  0.0–1.0 position of the strongest onset
+                                    within each clip (0 = start, 1 = end).
+                                    Used to write build-to-climax vs open-with-
+                                    impact motion arcs in the LLM story prompt.
+    """
+    total_dur = probe_duration(audio_path)
+    if total_dur <= 0 or n_clips <= 0:
+        return [min_dur] * max(1, n_clips), [0.5] * max(1, n_clips)
+
+    equal_dur   = total_dur / n_clips
+    default_dur = max(min_dur, min(max_dur, equal_dur))
+    default_durs  = [round(default_dur, 3)] * n_clips
+    default_beats = [0.5] * n_clips
+
+    try:
+        import librosa
+        import numpy as np
+
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(total_dur, 300))
+        onset_env  = librosa.onset.onset_strength(y=y, sr=sr)
+        min_frames = int(sr / 512 * min_dur * 0.5)
+        peaks = librosa.util.peak_pick(
+            onset_env,
+            pre_max=4, post_max=4, pre_avg=4, post_avg=8,
+            delta=0.4, wait=max(1, min_frames),
+        )
+        if len(peaks) < 2:
+            return default_durs, default_beats
+
+        peak_times     = librosa.frames_to_time(peaks, sr=sr)
+        peak_strengths = onset_env[peaks]
+        boundaries     = _place_boundaries(peak_times, peak_strengths, total_dur, n_clips, min_dur, max_dur)
+        durations      = [round(boundaries[j + 1] - boundaries[j], 3) for j in range(n_clips)]
+
+        # Where does the strongest onset fall WITHIN each clip? (0.0 = start, 1.0 = end)
+        beat_positions: list[float] = []
+        for j in range(n_clips):
+            clip_start = boundaries[j]
+            clip_end   = boundaries[j + 1]
+            clip_len   = clip_end - clip_start
+            mask = (peak_times >= clip_start) & (peak_times < clip_end)
+            if mask.any():
+                cands    = peak_times[mask]
+                strs     = peak_strengths[mask]
+                hit_time = float(cands[np.argmax(strs)])
+                pos      = (hit_time - clip_start) / clip_len if clip_len > 0 else 0.5
+                beat_positions.append(round(max(0.0, min(1.0, pos)), 2))
+            else:
+                beat_positions.append(0.5)
+
+        # Xfade compensation: each clip (except last) is made xfade_dur longer so
+        # the overlap consumed by the dissolve restores the cut to the beat time.
+        if xfade_dur > 0:
+            for j in range(n_clips - 1):
+                durations[j] = round(min(max_dur, durations[j] + xfade_dur), 3)
+
+        log.info("[song-video] Clip plan: durations=%s beat_pos=%s", durations, beat_positions)
+        return durations, beat_positions
+
+    except Exception as e:
+        log.warning("[song-video] Clip plan failed (%s) — using equal durations", e)
+        return default_durs, default_beats
 
 
 _WHISPER_NOISE = re.compile(

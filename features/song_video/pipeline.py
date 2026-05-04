@@ -141,11 +141,30 @@ ENERGY RULE — energy label sets motion speed and intensity:
   LOW  → held, breathing: mist settling, single candle, still water, slow dawn,
          a moment of stillness before or after action
 
+BEAT TIMING RULE — the beat position tells you WHEN peak motion should occur:
+  EARLY beat (0-33%): motion erupts from frame one — sudden burst, instant velocity,
+                      explosive action from the very start, full intensity immediately
+  MID beat (34-66%): steady build to a central PEAK — accelerate into the midpoint,
+                     reach maximum intensity at center, then sustain or release
+  LATE beat (67-100%): long mounting tension — motion builds the full clip length,
+                       erupts or crashes in the final seconds
+Write your motion arc so the visual climax lands ON the beat position. Use words
+like "suddenly erupts", "builds toward a shattering peak", "culminates in", or
+"explodes open" to signal WHERE the intensity peaks.
+
 Rules:
 - 30-50 words per prompt — include shot type, subject action, and environment
 - Story progresses across clips: arrival → challenge → peak → resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
+
+
+def _beat_timing_label(pos: float) -> str:
+    if pos <= 0.33:
+        return f"EARLY beat ({int(pos * 100)}%) — open with impact"
+    if pos <= 0.66:
+        return f"MID beat ({int(pos * 100)}%) — build to center peak"
+    return f"LATE beat ({int(pos * 100)}%) — build throughout, erupt at end"
 
 
 def _generate_song_arc(
@@ -156,6 +175,7 @@ def _generate_song_arc(
     photo_path: str | None,
     variety_theme: str = "",
     lyrics_text: str = "",
+    beat_positions: list[float] | None = None,
 ) -> list[str]:
     """Generate N motion prompts calibrated to the song's energy profile."""
     energy_profile = analysis.get("energy_profile", [])
@@ -165,7 +185,7 @@ def _generate_song_arc(
     mode   = analysis.get("mode", "")
     mood   = analysis.get("mood", "cinematic")
 
-    # Build per-clip energy hint lines
+    # Build per-clip energy + beat timing hint lines
     clip_hints = []
     for i in range(n_clips):
         if i < len(clip_labels):
@@ -173,7 +193,8 @@ def _generate_song_arc(
             pct   = int((energy_profile[i] if i < len(energy_profile) else 0.5) * 100)
         else:
             label, pct = "MED", 50
-        clip_hints.append(f"Clip {i + 1:02d}: {label} ({pct}%)")
+        bp = beat_positions[i] if beat_positions and i < len(beat_positions) else 0.5
+        clip_hints.append(f"Clip {i + 1:02d}: {label} ({pct}%), {_beat_timing_label(bp)}")
 
     energy_text = "\n".join(clip_hints)
     key_str = f"{key} {mode}".strip() if key else ""
@@ -298,13 +319,13 @@ def run_song_prep(job, photo_path, settings):
 
     # Run beat alignment + lyric detection concurrently — both CPU, no GPU needed.
     job.update(progress=2, message="Analysing beat structure and detecting lyrics…")
-    from features.song_video.audio_analyzer import compute_clip_durations, _transcribe_lyrics
+    from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_beats  = pool.submit(compute_clip_durations, audio_path, n_clips, clip_dur, 19.0)
+        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 19.0, _XFADE_DUR)
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
 
-        clip_durations = fut_beats.result()
+        clip_durations, beat_positions = fut_beats.result()
         if fut_lyrics is not None:
             detected = fut_lyrics.result()
             if detected:
@@ -312,11 +333,13 @@ def run_song_prep(job, photo_path, settings):
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
 
     settings["_clip_durations"] = clip_durations
-    log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
+    settings["_beat_positions"] = beat_positions
+    log.info("[song-video] Clip durations (beat-aligned, xfade-compensated): %s", clip_durations)
+    log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
     job.update(progress=4, message="Planning music video story arc…")
     try:
-        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
+        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text, beat_positions)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:
@@ -343,10 +366,11 @@ def run_song_pipeline(job, photo_path, settings):
         return job.stop_event.is_set()
 
     # ── Settings ──────────────────────────────────────────────────────────
-    n_clips       = int(settings.get("num_clips", 10))
-    clip_dur      = float(settings.get("clip_duration", 8.0))
+    n_clips        = int(settings.get("num_clips", 10))
+    clip_dur       = float(settings.get("clip_duration", 8.0))
     clip_durations = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
-    model_name    = settings.get("model_name", "LTX-2 Dev19B Distilled")
+    beat_positions = settings.pop("_beat_positions", None) or [0.5] * n_clips
+    model_name     = settings.get("model_name", "LTX-2 Dev19B Distilled")
     resolution    = settings.get("resolution", "580p")
     ow            = settings.get("override_width")
     oh            = settings.get("override_height")
@@ -441,6 +465,19 @@ def run_song_pipeline(job, photo_path, settings):
         if not clip_path:
             _log(f"[error] Clip {clip_num} produced no output — stopping early")
             break
+
+        # Trim clip to exact beat-aligned duration so timing errors don't
+        # accumulate across clips. WanGP may over/undershoot by up to ~0.5s.
+        actual_dur = probe_duration(clip_path)
+        if actual_dur and abs(actual_dur - this_dur) > 0.08:
+            trimmed = clip_out.replace(".mp4", "_t.mp4")
+            trim_r = subprocess.run(
+                ["ffmpeg", "-y", "-i", clip_path, "-t", str(this_dur), "-c", "copy", trimmed],
+                capture_output=True, timeout=60,
+            )
+            if trim_r.returncode == 0 and Path(trimmed).exists():
+                os.replace(trimmed, clip_path)
+                log.debug("[song-video] Clip %d trimmed %.2fs → %.2fs", clip_num, actual_dur, this_dur)
 
         clip_paths.append(clip_path)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
