@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 UPLOADS_DIR  = Path(__file__).resolve().parent.parent.parent / "uploads"
-AUDIO_EXTS   = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
+AUDIO_EXTS   = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus", ".mpeg", ".mpg"}
 IMAGE_EXTS   = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 MAX_AUDIO_MB = 100
 
@@ -50,7 +50,7 @@ async def upload_audio(files: list[UploadFile] = File(...)):
             "duration_display": f"{mins}:{secs:02d}",
         })
     if not saved:
-        raise HTTPException(400, "No valid audio file found (accepted: mp3, wav, flac, ogg, m4a, aac)")
+        raise HTTPException(400, "No valid audio file found (accepted: mp3, wav, flac, ogg, m4a, aac, mpeg)")
     return {"files": saved}
 
 

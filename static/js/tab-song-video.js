@@ -56,7 +56,7 @@ export function init(panel) {
 
   // ── Song drop zone ────────────────────────────────────────────────────────
   const audioInput    = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac', style: 'display:none' });
-  const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a…)' });
+  const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a, mpeg…)' });
   const audioPreview  = el('audio', { controls: '', style: 'display:none; width:100%; margin-top:8px;' });
   const audioClearBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
@@ -173,7 +173,7 @@ export function init(panel) {
   audioDropZone.addEventListener('drop', async e => {
     e.preventDefault();
     audioDropZone.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac|opus)$/i.test(f.name));
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac|opus|mpeg|mpg)$/i.test(f.name));
     if (!files.length) return;
     try {
       const data = await apiUpload('/api/song-video/upload-audio', files);
