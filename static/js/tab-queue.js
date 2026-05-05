@@ -2,7 +2,7 @@
  * Queue tab -- GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
-import { api } from './api.js?v=20260504p';
+import { api } from './api.js?v=20260505e';
 import { toast } from './shell/toast.js?v=20260503a';
 import { el, pathToUrl } from './components.js?v=20260429b';
 
@@ -569,13 +569,6 @@ function _showModal(job) {
   liveBlock.appendChild(messageEl);
   box.appendChild(liveBlock);
 
-  // -- Clip thumbnails strip --
-  const stripWrap   = el('div', { style: 'display:none; flex-direction:column; gap:6px;' });
-  const stripTitle  = el('div', { style: 'font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Clips' });
-  const stripRow    = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
-  stripWrap.appendChild(stripTitle); stripWrap.appendChild(stripRow);
-  box.appendChild(stripWrap);
-
   // -- Source image + prompt (compact) --
   const metaRow = el('div', { style: 'display:flex; gap:12px; align-items:flex-start;' });
   const srcImg  = el('img', { style: 'display:none; max-width:140px; max-height:100px; border-radius:6px; object-fit:cover;' });
@@ -619,9 +612,9 @@ function _showModal(job) {
 
   // -- Initial render + start the live refresh loop --
   _modalState = { jobId: job.id, lastEta: null, lastEtaAt: 0 };
-  _renderModal(job, { stageLabel, stepBadge, etaBadge, barFill, messageEl, stripWrap, stripRow,
+  _renderModal(job, { stageLabel, stepBadge, etaBadge, barFill, messageEl,
     srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
-  _startModalRefresh({ stageLabel, stepBadge, etaBadge, barFill, messageEl, stripWrap, stripRow,
+  _startModalRefresh({ stageLabel, stepBadge, etaBadge, barFill, messageEl,
     srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
 }
 
@@ -673,45 +666,6 @@ function _renderModal(job, els) {
   // Message line
   els.messageEl.textContent = job.message || '';
   els.messageEl.style.display = job.message ? '' : 'none';
-
-  // Clip thumbnail strip
-  const partials = Array.isArray(job.meta?.partial_clips) ? job.meta.partial_clips : [];
-  const total    = job.meta?.clips_total || job.meta?.num_clips || 0;
-  if (partials.length || total > 0) {
-    els.stripWrap.style.display = 'flex';
-    els.stripTitle && (els.stripWrap.firstChild.textContent =
-      `Clips (${partials.length}${total ? ` / ${total}` : ''})`);
-    // Render thumbs for completed clips. Dedupe by path so we don't blow away
-    // already-loaded <img> elements on every poll.
-    const existing = new Set(Array.from(els.stripRow.querySelectorAll('img'))
-      .map(img => img.dataset.path));
-    for (const p of partials) {
-      if (existing.has(p)) continue;
-      const slot = el('div', { style: 'width:88px; height:50px; border-radius:4px; background:var(--surface-3); overflow:hidden; flex-shrink:0; position:relative;' });
-      const img  = el('img', { style: 'width:100%; height:100%; object-fit:cover; display:block;' });
-      img.dataset.path = p;
-      img.src = `/api/thumbnail?path=${encodeURIComponent(p)}&size=200`;
-      img.onerror = () => { img.style.display = 'none'; };
-      slot.appendChild(img);
-      els.stripRow.appendChild(slot);
-    }
-    // Pending placeholders for clips not yet generated
-    const pendingNeeded = Math.max(0, total - partials.length);
-    const existingPending = els.stripRow.querySelectorAll('[data-pending]').length;
-    if (pendingNeeded !== existingPending) {
-      els.stripRow.querySelectorAll('[data-pending]').forEach(n => n.remove());
-      for (let i = 0; i < pendingNeeded; i++) {
-        const ph = el('div', {
-          style: 'width:88px; height:50px; border-radius:4px; background:var(--surface-3); border:1px dashed var(--border-2); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:.7rem;',
-          text: '...',
-        });
-        ph.dataset.pending = '1';
-        els.stripRow.appendChild(ph);
-      }
-    }
-  } else {
-    els.stripWrap.style.display = 'none';
-  }
 
   // Source image
   if (job.meta?.source_image) {
