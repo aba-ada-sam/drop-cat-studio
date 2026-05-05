@@ -213,6 +213,12 @@ async def generate(request: Request):
         "clip_duration": clip_dur,
         "audio_name":    audio_name,
         "audio_duration": audio_dur,
+        # Full settings dict so the queue modal can branch this job back into
+        # the source tab and pre-fill all the controls. Strip private fields
+        # (those starting with "_") and the audio_analysis blob (large + not
+        # a UI control).
+        "settings":      {k: v for k, v in settings.items()
+                          if not k.startswith("_") and k != "audio_analysis"},
     })
     return {
         "job_id":    job.id,

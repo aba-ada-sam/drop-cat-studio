@@ -260,6 +260,8 @@ def run_song_prep(job, photo_path, settings):
     lyrics_text   = (settings.get("lyrics_text") or "").strip()
 
     # Run beat alignment + lyric detection concurrently -- both CPU, no GPU needed.
+    job.meta["stage"] = "analyzing"
+    job.meta["clips_total"] = n_clips
     job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
@@ -279,6 +281,7 @@ def run_song_prep(job, photo_path, settings):
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
+    job.meta["stage"] = "planning"
     job.update(progress=4, message="Planning music video story arc...")
     try:
         arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
@@ -288,6 +291,7 @@ def run_song_prep(job, photo_path, settings):
         log.warning("[song-video] Story arc failed: %s", e)
         settings["_story_arc"] = [user_idea or "Subject erupts into motion"] * n_clips
 
+    job.meta["stage"] = "waiting-gpu"
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
 
 
@@ -475,6 +479,14 @@ def run_song_pipeline(job, photo_path, settings):
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
 
+        # Push partial clip path into job.meta so the queue modal can render
+        # a thumbnail strip that grows as each clip completes -- gives the
+        # user real "yes it's working" feedback during the long render.
+        job.meta["partial_clips"] = list(clip_paths)
+        job.meta["clips_done"]    = len(clip_paths)
+        job.meta["clips_total"]   = n_clips
+        job.meta["stage"]         = "generating"
+
         # Extract the actual last frame and use it as the start image of the
         # next clip. Hard-cut chaining works because both clips share the
         # identical boundary frame, making the cut invisible when motion is
@@ -503,6 +515,7 @@ def run_song_pipeline(job, photo_path, settings):
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Song video failed: {raw}")
 
+    job.meta["stage"] = "concatenating"
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
 
@@ -513,6 +526,7 @@ def run_song_pipeline(job, photo_path, settings):
         concat_path = clip_paths[0]
 
     # -- Phase 3: Merge with user's audio (loop clips to fill song if needed) -
+    job.meta["stage"] = "merging"
     job.update(progress=88, message="Looping clips to fill song duration...")
 
     model_tag  = model_name.split()[0].lower()

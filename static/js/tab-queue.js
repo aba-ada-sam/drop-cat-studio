@@ -1,5 +1,5 @@
 ﻿/**
- * Queue tab — GPU job queue with full user control.
+ * Queue tab -- GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
 import { api } from './api.js?v=20260504p';
@@ -12,25 +12,39 @@ let _knownIds    = new Set();
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
 
-// ── Public ────────────────────────────────────────────────────────────────────
+// -- Public --------------------------------------------------------------------
 
 export function init(panel) {
   _root = panel;
   _root.innerHTML = '';
   _root.style.cssText = 'display:flex; flex-direction:column; height:100%; overflow:hidden;';
+  _injectStyles();
   _buildShell();
   _poll();
   _startPoll();
+}
+
+function _injectStyles() {
+  if (document.getElementById('queue-modal-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'queue-modal-styles';
+  s.textContent = `
+    @keyframes dcs-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .35; transform: scale(.7); }
+    }
+  `;
+  document.head.appendChild(s);
 }
 
 export function pause()  { _stopPoll(); }
 export function resume() { _startPoll(); }
 export function openJobModal(job) { _showModal(job); }
 
-// ── Shell (toolbar + list area, built once) ───────────────────────────────────
+// -- Shell (toolbar + list area, built once) -----------------------------------
 
 function _buildShell() {
-  // ── Toolbar ──
+  // -- Toolbar --
   const toolbar = el('div', {
     style: 'display:flex; align-items:center; gap:8px; padding:12px 16px; flex-shrink:0; border-bottom:1px solid var(--border-2);',
   });
@@ -134,14 +148,14 @@ function _buildShell() {
   // Check for a saved queue on first render
   _checkRestoreBtn();
 
-  // ── Scrollable list ──
+  // -- Scrollable list --
   const list = el('div', {
     id: 'queue-list',
     style: 'flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:8px;',
   });
   _root.appendChild(list);
 
-  // ── Empty state ──
+  // -- Empty state --
   const empty = el('div', {
     id: 'queue-empty',
     style: 'display:none; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; color:var(--text-3); font-size:.85rem;',
@@ -178,7 +192,7 @@ function _syncPauseBtn() {
   btn.style.color      = _paused ? 'var(--bg-base)' : '';
 }
 
-// ── Polling ───────────────────────────────────────────────────────────────────
+// -- Polling -------------------------------------------------------------------
 
 function _startPoll() {
   if (_pollTimer) return;
@@ -225,7 +239,7 @@ function _notifyCompletions(data) {
   }
 }
 
-// ── Rendering ─────────────────────────────────────────────────────────────────
+// -- Rendering -----------------------------------------------------------------
 
 function _render(data) {
   const list = document.getElementById('queue-list');
@@ -281,7 +295,7 @@ function _sectionHead(text) {
   });
 }
 
-// ── Job card ──────────────────────────────────────────────────────────────────
+// -- Job card ------------------------------------------------------------------
 
 function _jobCard(job, active, idx, total) {
   const isRunning   = job.status === 'running';
@@ -448,82 +462,353 @@ function _statusChip(job) {
   });
 }
 
-// ── Detail modal ──────────────────────────────────────────────────────────────
+// -- Detail modal --------------------------------------------------------------
+//
+// Rebuilt to be LIVE: while an active job is open, we re-poll /api/jobs/{id}
+// every 1.5 s and refresh the progress bar, stage chip, ETA countdown, and
+// the strip of clip thumbnails as new clips finish. For done/failed jobs we
+// add an AI feedback box that branches the source tab with the user's note.
+
+const _STAGE_LABELS = {
+  'analyzing':       'Analyzing audio',
+  'planning':        'Planning story arc',
+  'waiting-gpu':     'Waiting for GPU',
+  'generating':      'Generating clips',
+  'concatenating':   'Concatenating clips',
+  'merging':         'Merging audio',
+};
+
+let _modalState = null;  // { jobId, refreshTimer, etaTimer, lastEta, ... }
+
+function _stopModalTimers() {
+  if (!_modalState) return;
+  if (_modalState.refreshTimer) clearInterval(_modalState.refreshTimer);
+  if (_modalState.etaTimer)     clearInterval(_modalState.etaTimer);
+  _modalState = null;
+}
+
+function _parseMessage(msg) {
+  // "Clip 3/5 -- step 4/8 -- ~2m 30s left" -> structured fields.
+  const out = { clipNum: null, clipTotal: null, step: null, stepTotal: null, etaSec: null };
+  if (!msg) return out;
+  const clip = msg.match(/Clip\s+(\d+)\s*\/\s*(\d+)/i);
+  if (clip) { out.clipNum = +clip[1]; out.clipTotal = +clip[2]; }
+  const step = msg.match(/step\s+(\d+)\s*\/\s*(\d+)/i);
+  if (step) { out.step = +step[1]; out.stepTotal = +step[2]; }
+  const eta  = msg.match(/~?\s*(?:(\d+)\s*m)?\s*(\d+)\s*s\s*(?:left|remaining)?/i);
+  if (eta) {
+    const m = parseInt(eta[1] || '0', 10);
+    const s = parseInt(eta[2] || '0', 10);
+    out.etaSec = m * 60 + s;
+  }
+  return out;
+}
+
+function _formatEta(sec) {
+  if (sec == null || sec < 0) return '';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
 
 function _showModal(job) {
+  _stopModalTimers();
   document.getElementById('queue-job-modal')?.remove();
-
-  const isDone   = job.status === 'done';
-  const isActive = job.status === 'running' || job.status === 'queued';
-  const isFailed = job.status === 'error' || job.status === 'stopped';
 
   const overlay = el('div', {
     id: 'queue-job-modal',
     style: 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.82); display:flex; align-items:center; justify-content:center;',
   });
-  overlay.addEventListener('click', e => {
-    if (e.target === overlay) { overlay.querySelector('video')?.pause(); overlay.remove(); }
-  });
+  function _close() {
+    _stopModalTimers();
+    overlay.querySelector('video')?.pause();
+    overlay.remove();
+  }
+  overlay.addEventListener('click', e => { if (e.target === overlay) _close(); });
 
   const box = el('div', {
     style: 'background:var(--surface-1); border-radius:12px; padding:20px; max-width:min(860px,90vw); width:100%; display:flex; flex-direction:column; gap:14px; max-height:90vh; overflow:auto;',
   });
 
-  const hdr = el('div', { style: 'display:flex; align-items:center; gap:10px;' });
-  hdr.appendChild(el('span', { style: 'font-size:.95rem; font-weight:700; flex:1; color:var(--text-1);', text: job.label || job.type }));
-  hdr.appendChild(_statusChip(job));
-  const closeX = el('button', { class: 'btn btn-sm', text: '✕', style: 'padding:2px 8px;' });
-  closeX.addEventListener('click', () => { overlay.querySelector('video')?.pause(); overlay.remove(); });
-  hdr.appendChild(closeX);
+  // -- Header --
+  const hdr        = el('div', { style: 'display:flex; align-items:center; gap:10px;' });
+  const titleEl    = el('span', { style: 'font-size:.95rem; font-weight:700; flex:1; color:var(--text-1);', text: job.label || job.type });
+  const chipSlot   = el('span', { style: 'display:inline-flex; align-items:center;' });
+  chipSlot.appendChild(_statusChip(job));
+  const closeX     = el('button', { class: 'btn btn-sm', text: 'X', style: 'padding:2px 8px;' });
+  closeX.addEventListener('click', _close);
+  hdr.appendChild(titleEl); hdr.appendChild(chipSlot); hdr.appendChild(closeX);
   box.appendChild(hdr);
 
-  if (isDone) {
+  // -- Output video (when done) --
+  const videoSlot = el('div');
+  box.appendChild(videoSlot);
+
+  // -- Live progress block --
+  const liveBlock   = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
+  const stageRow    = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:.82rem;' });
+  const heartbeat   = el('span', {
+    style: 'display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--accent); animation:dcs-pulse 1.1s ease-in-out infinite;',
+  });
+  const stageLabel  = el('span', { style: 'font-weight:600; color:var(--text-1);', text: '' });
+  const stepBadge   = el('span', { style: 'font-size:.72rem; padding:2px 7px; border-radius:4px; background:var(--surface-3); color:var(--text-2);', text: '' });
+  const etaBadge    = el('span', { style: 'margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent); font-weight:600;', text: '' });
+  stageRow.appendChild(heartbeat); stageRow.appendChild(stageLabel); stageRow.appendChild(stepBadge); stageRow.appendChild(etaBadge);
+
+  const barWrap = el('div', { style: 'height:8px; background:var(--surface-3); border-radius:4px; overflow:hidden;' });
+  const barFill = el('div', { style: 'height:100%; background:var(--accent); width:0%; border-radius:4px; transition:width .5s;' });
+  barWrap.appendChild(barFill);
+
+  const messageEl = el('div', {
+    style: 'font-size:.82rem; color:var(--text-2); padding:8px 10px; background:var(--surface-2); border-radius:6px; min-height:20px;',
+  });
+
+  liveBlock.appendChild(stageRow);
+  liveBlock.appendChild(barWrap);
+  liveBlock.appendChild(messageEl);
+  box.appendChild(liveBlock);
+
+  // -- Clip thumbnails strip --
+  const stripWrap   = el('div', { style: 'display:none; flex-direction:column; gap:6px;' });
+  const stripTitle  = el('div', { style: 'font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Clips' });
+  const stripRow    = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  stripWrap.appendChild(stripTitle); stripWrap.appendChild(stripRow);
+  box.appendChild(stripWrap);
+
+  // -- Source image + prompt (compact) --
+  const metaRow = el('div', { style: 'display:flex; gap:12px; align-items:flex-start;' });
+  const srcImg  = el('img', { style: 'display:none; max-width:140px; max-height:100px; border-radius:6px; object-fit:cover;' });
+  srcImg.onerror = () => { srcImg.style.display = 'none'; };
+  const promptCol = el('div', { style: 'flex:1; display:flex; flex-direction:column; gap:4px;' });
+  metaRow.appendChild(srcImg); metaRow.appendChild(promptCol);
+  box.appendChild(metaRow);
+
+  // -- Error block --
+  const errorEl = el('div', {
+    style: 'display:none; font-size:.82rem; color:var(--red, #c41e3a); padding:10px 12px; background:var(--surface-2); border-radius:6px; white-space:pre-wrap; word-break:break-word;',
+  });
+  box.appendChild(errorEl);
+
+  // -- AI feedback / branch (rendered when terminal) --
+  const feedbackBlock = el('div', { style: 'display:none; flex-direction:column; gap:8px; padding:12px; background:var(--surface-2); border-radius:8px;' });
+  const feedbackTitle = el('div', { style: 'font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3);', text: 'Tell the AI what to change' });
+  const feedbackHelp  = el('div', { style: 'font-size:.74rem; color:var(--text-3); line-height:1.4;', text: 'Type how you want the next attempt different (e.g. "make the second clip slower", "darker mood, less camera motion"). The source tab opens with the original settings pre-loaded.' });
+  const feedbackInput = el('textarea', {
+    rows: '2',
+    placeholder: 'e.g. Slower pace, darker mood, more dramatic camera moves',
+    style: 'width:100%; resize:vertical; font-size:.85rem;',
+  });
+  const feedbackBtnRow = el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' });
+  const branchBtn       = el('button', { class: 'btn btn-primary btn-sm', text: 'Branch with feedback' });
+  const branchPlainBtn  = el('button', { class: 'btn btn-sm', text: 'Branch (same settings, no feedback)' });
+  feedbackBtnRow.appendChild(branchBtn); feedbackBtnRow.appendChild(branchPlainBtn);
+  feedbackBlock.appendChild(feedbackTitle);
+  feedbackBlock.appendChild(feedbackHelp);
+  feedbackBlock.appendChild(feedbackInput);
+  feedbackBlock.appendChild(feedbackBtnRow);
+  box.appendChild(feedbackBlock);
+
+  branchBtn.addEventListener('click', () => _doBranch(job, feedbackInput.value.trim(), _close));
+  branchPlainBtn.addEventListener('click', () => _doBranch(job, '', _close));
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  // -- Initial render + start the live refresh loop --
+  _modalState = { jobId: job.id, lastEta: null, lastEtaAt: 0 };
+  _renderModal(job, { stageLabel, stepBadge, etaBadge, barFill, messageEl, stripWrap, stripRow,
+    srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
+  _startModalRefresh({ stageLabel, stepBadge, etaBadge, barFill, messageEl, stripWrap, stripRow,
+    srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
+}
+
+function _renderModal(job, els) {
+  const isDone   = job.status === 'done';
+  const isActive = job.status === 'running' || job.status === 'queued';
+  const isFailed = job.status === 'error' || job.status === 'stopped';
+
+  // Status chip (re-render in case status changed)
+  els.chipSlot.innerHTML = '';
+  els.chipSlot.appendChild(_statusChip(job));
+
+  // Heartbeat: pulsing while active, static while terminal
+  els.heartbeat.style.animation = isActive ? 'dcs-pulse 1.1s ease-in-out infinite' : 'none';
+  els.heartbeat.style.background = isFailed ? 'var(--red, #c41e3a)' : isDone ? '#3fa84a' : 'var(--accent)';
+
+  // Stage label
+  const stage = job.meta?.stage || (isDone ? 'done' : isFailed ? 'failed' : 'running');
+  const parsed = _parseMessage(job.message);
+  let stageText = _STAGE_LABELS[stage] || (isDone ? 'Complete' : isFailed ? 'Stopped' : 'Working');
+  if (stage === 'generating' && parsed.clipNum && parsed.clipTotal) {
+    stageText = `Clip ${parsed.clipNum} of ${parsed.clipTotal}`;
+  }
+  els.stageLabel.textContent = stageText;
+
+  // Step badge ("step 4/8" inside a clip)
+  if (parsed.step && parsed.stepTotal) {
+    els.stepBadge.textContent = `step ${parsed.step}/${parsed.stepTotal}`;
+    els.stepBadge.style.display = '';
+  } else {
+    els.stepBadge.style.display = 'none';
+  }
+
+  // ETA: track in modalState so the tick-down timer can update between polls
+  if (parsed.etaSec != null) {
+    _modalState.lastEta   = parsed.etaSec;
+    _modalState.lastEtaAt = Date.now();
+    els.etaBadge.textContent = _formatEta(parsed.etaSec) + ' left';
+  } else if (!isActive) {
+    els.etaBadge.textContent = '';
+  }
+
+  // Progress bar
+  const pct = Math.max(0, Math.min(100, job.progress || 0));
+  els.barFill.style.width = `${pct}%`;
+  if (isDone)   els.barFill.style.background = '#3fa84a';
+  if (isFailed) els.barFill.style.background = 'var(--red, #c41e3a)';
+
+  // Message line
+  els.messageEl.textContent = job.message || '';
+  els.messageEl.style.display = job.message ? '' : 'none';
+
+  // Clip thumbnail strip
+  const partials = Array.isArray(job.meta?.partial_clips) ? job.meta.partial_clips : [];
+  const total    = job.meta?.clips_total || job.meta?.num_clips || 0;
+  if (partials.length || total > 0) {
+    els.stripWrap.style.display = 'flex';
+    els.stripTitle && (els.stripWrap.firstChild.textContent =
+      `Clips (${partials.length}${total ? ` / ${total}` : ''})`);
+    // Render thumbs for completed clips. Dedupe by path so we don't blow away
+    // already-loaded <img> elements on every poll.
+    const existing = new Set(Array.from(els.stripRow.querySelectorAll('img'))
+      .map(img => img.dataset.path));
+    for (const p of partials) {
+      if (existing.has(p)) continue;
+      const slot = el('div', { style: 'width:88px; height:50px; border-radius:4px; background:var(--surface-3); overflow:hidden; flex-shrink:0; position:relative;' });
+      const img  = el('img', { style: 'width:100%; height:100%; object-fit:cover; display:block;' });
+      img.dataset.path = p;
+      img.src = `/api/thumbnail?path=${encodeURIComponent(p)}&size=200`;
+      img.onerror = () => { img.style.display = 'none'; };
+      slot.appendChild(img);
+      els.stripRow.appendChild(slot);
+    }
+    // Pending placeholders for clips not yet generated
+    const pendingNeeded = Math.max(0, total - partials.length);
+    const existingPending = els.stripRow.querySelectorAll('[data-pending]').length;
+    if (pendingNeeded !== existingPending) {
+      els.stripRow.querySelectorAll('[data-pending]').forEach(n => n.remove());
+      for (let i = 0; i < pendingNeeded; i++) {
+        const ph = el('div', {
+          style: 'width:88px; height:50px; border-radius:4px; background:var(--surface-3); border:1px dashed var(--border-2); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:.7rem;',
+          text: '...',
+        });
+        ph.dataset.pending = '1';
+        els.stripRow.appendChild(ph);
+      }
+    }
+  } else {
+    els.stripWrap.style.display = 'none';
+  }
+
+  // Source image
+  if (job.meta?.source_image) {
+    const url = `/api/thumbnail?path=${encodeURIComponent(job.meta.source_image)}&size=280`;
+    if (els.srcImg.src !== url) els.srcImg.src = url;
+    els.srcImg.style.display = '';
+  } else {
+    els.srcImg.style.display = 'none';
+  }
+
+  // Prompt
+  els.promptCol.innerHTML = '';
+  if (job.meta?.prompt) {
+    els.promptCol.appendChild(el('span', { style: 'font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Prompt' }));
+    els.promptCol.appendChild(el('span', { style: 'font-size:.82rem; color:var(--text-2); line-height:1.4;', text: job.meta.prompt }));
+  }
+
+  // Error
+  if (isFailed && (job.error || job.message)) {
+    els.errorEl.textContent = job.error || job.message;
+    els.errorEl.style.display = '';
+  } else {
+    els.errorEl.style.display = 'none';
+  }
+
+  // Output video (only render once, on the transition into done)
+  if (isDone && !els.videoSlot.querySelector('video')) {
+    els.videoSlot.innerHTML = '';
     const out = _bestOutput(job);
     if (out) {
       const vid = document.createElement('video');
       vid.controls = true;
-      vid.style.cssText = 'width:100%; max-height:60vh; border-radius:8px; background:#000;';
+      vid.style.cssText = 'width:100%; max-height:55vh; border-radius:8px; background:#000;';
       vid.src = pathToUrl(out);
-      box.appendChild(vid);
-    } else {
-      box.appendChild(el('div', { style: 'color:var(--text-3); font-size:.85rem;', text: 'No output file recorded.' }));
+      els.videoSlot.appendChild(vid);
     }
+  } else if (!isDone && els.videoSlot.querySelector('video')) {
+    els.videoSlot.innerHTML = '';
   }
 
-  if (isActive) {
-    const pct = job.progress || 0;
-    const barWrap = el('div', { style: 'height:8px; background:var(--surface-3); border-radius:4px; overflow:hidden;' });
-    barWrap.appendChild(el('div', { style: `height:100%; background:var(--accent); width:${pct}%; border-radius:4px; transition:width .5s;` }));
-    box.appendChild(barWrap);
+  // Feedback box: only useful once the job is terminal AND we have settings to branch with
+  const hasSettings = !!(job.meta?.settings && Object.keys(job.meta.settings).length);
+  if ((isDone || isFailed) && hasSettings) {
+    els.feedbackBlock.style.display = 'flex';
+  } else {
+    els.feedbackBlock.style.display = 'none';
+  }
+}
+
+function _startModalRefresh(els) {
+  if (!_modalState) return;
+
+  // Re-poll the job every 1.5 s
+  _modalState.refreshTimer = setInterval(async () => {
+    if (!_modalState) return;
+    try {
+      const fresh = await api(`/api/jobs/${_modalState.jobId}`);
+      if (fresh && fresh.id) _renderModal(fresh, els);
+    } catch (_) { /* network blip; next tick will retry */ }
+  }, 1500);
+
+  // Tick the ETA down every second between polls so the number visibly counts
+  _modalState.etaTimer = setInterval(() => {
+    if (!_modalState || _modalState.lastEta == null) return;
+    const elapsed = (Date.now() - _modalState.lastEtaAt) / 1000;
+    const remaining = Math.max(0, _modalState.lastEta - elapsed);
+    els.etaBadge.textContent = remaining > 0 ? `${_formatEta(remaining)} left` : '';
+  }, 1000);
+}
+
+async function _doBranch(job, feedback, closeFn) {
+  const tabId   = job.meta?.feature === 'song_video' ? 'song-video'
+              : job.meta?.feature === 'fun_videos'  ? 'fun-videos'
+              : job.meta?.feature || '';
+  const settings = job.meta?.settings || {};
+  if (!tabId || !Object.keys(settings).length) {
+    toast('No source tab or settings to branch from', 'error');
+    return;
   }
 
-  if (isFailed && (job.error || job.message)) {
-    box.appendChild(el('div', {
-      style: 'font-size:.82rem; color:var(--red, #c41e3a); padding:10px 12px; background:var(--surface-2); border-radius:6px; white-space:pre-wrap; word-break:break-word;',
-      text: job.error || job.message,
-    }));
-  } else if (job.message) {
-    box.appendChild(el('div', {
-      style: 'font-size:.85rem; color:var(--text-2); padding:8px 10px; background:var(--surface-2); border-radius:6px;',
-      text: job.message,
-    }));
-  }
+  // Navigate to the source tab so its lazy-init runs and registers its applier
+  const tabBtn = document.querySelector(`.rail-tab[data-tab="${tabId}"]`);
+  if (tabBtn) tabBtn.click();
 
-  if (job.meta?.prompt) {
-    const p = el('div', { style: 'display:flex; flex-direction:column; gap:4px;' });
-    p.appendChild(el('span', { style: 'font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Prompt' }));
-    p.appendChild(el('span', { style: 'font-size:.82rem; color:var(--text-2);', text: job.meta.prompt }));
-    box.appendChild(p);
-  }
+  // Apply the original settings, then optionally run the feedback through askAI
+  // so the AI mutates them per the user's note before they hit Generate.
+  const { applySettingsToTab, askAI } = await import('./shell/ai-intent.js?v=20260503h');
+  setTimeout(async () => {
+    const ok = applySettingsToTab(tabId, settings);
+    if (!ok) {
+      toast(`Open the ${tabId} tab first`, 'info');
+      return;
+    }
+    if (feedback) {
+      try { await askAI(feedback); }
+      catch (e) { toast(`AI feedback failed: ${e.message}`, 'warn'); }
+    }
+    toast(feedback ? 'Branched with feedback. Click Generate to run.' : 'Branched. Tweak and click Generate.', 'success');
+  }, 100);
 
-  if (isActive && job.meta?.source_image) {
-    const img = el('img', { style: 'max-width:160px; border-radius:6px; align-self:flex-start;' });
-    img.src = `/api/thumbnail?path=${encodeURIComponent(job.meta.source_image)}&size=240`;
-    img.onerror = () => img.remove();
-    box.appendChild(img);
-  }
-
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
+  closeFn();
 }
 

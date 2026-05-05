@@ -590,12 +590,20 @@ async def list_jobs():
     return _g["job_manager"].queue_status()
 
 
-_THUMBNAIL_NO_SUPPORT = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+_THUMBNAIL_VIDEO_EXT  = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+_THUMBNAIL_NO_SUPPORT = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
 
 @app.get("/api/thumbnail")
 async def get_thumbnail(path: str, size: int = 120):
-    """Serve a scaled-down thumbnail of any image path."""
+    """Serve a scaled-down thumbnail of an image or video file.
+
+    For images: PIL thumbnail. For videos: ffmpeg extracts a midpoint frame,
+    then PIL scales it. The queue modal uses this to show clip-by-clip
+    progress as a row of thumbnails while a multi-clip job runs.
+    """
     import io
+    import subprocess
+    import tempfile
     from pathlib import Path as _Path
     from fastapi.responses import Response as _Resp
     try:
@@ -603,8 +611,33 @@ async def get_thumbnail(path: str, size: int = 120):
         p = _Path(path)
         if not p.is_file():
             return JSONResponse({"error": "Not found"}, status_code=404)
-        if p.suffix.lower() in _THUMBNAIL_NO_SUPPORT:
+        suf = p.suffix.lower()
+        if suf in _THUMBNAIL_NO_SUPPORT:
             return JSONResponse({"error": "No thumbnail for this file type"}, status_code=415)
+
+        if suf in _THUMBNAIL_VIDEO_EXT:
+            from core.ffmpeg_utils import probe_duration
+            dur = probe_duration(str(p)) or 0.0
+            seek = max(0.0, min(dur * 0.5, dur - 0.1))
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-ss", f"{seek:.3f}", "-i", str(p),
+                     "-frames:v", "1", "-q:v", "3", tmp_path],
+                    capture_output=True, timeout=10,
+                )
+                if r.returncode != 0 or not _Path(tmp_path).is_file():
+                    return JSONResponse({"error": "ffmpeg frame extraction failed"}, status_code=500)
+                with _Img.open(tmp_path) as img:
+                    img.thumbnail((size * 2, size * 2))
+                    buf = io.BytesIO()
+                    img.convert("RGB").save(buf, format="JPEG", quality=75)
+            finally:
+                try: os.remove(tmp_path)
+                except OSError: pass
+            return _Resp(content=buf.getvalue(), media_type="image/jpeg")
+
         with _Img.open(p) as img:
             img.thumbnail((size * 2, size * 2))
             buf = io.BytesIO()

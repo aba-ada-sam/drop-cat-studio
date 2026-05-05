@@ -19,7 +19,7 @@ export function init(panel) {
   });
   panel.appendChild(root);
 
-  // ── State ─────────────────────────────────────────────────────────────────
+  // -- State -----------------------------------------------------------------
   let _audioPath     = null;
   let _audioDuration = 0;
   let _audioAnalysis = null;
@@ -71,13 +71,13 @@ export function init(panel) {
   }
   [_outW, _outH] = _computeDims(_qualityPx);
 
-  // ── Heading ───────────────────────────────────────────────────────────────
+  // -- Heading ---------------------------------------------------------------
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
     el('div', { style: 'font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px;', text: 'Music Video' }),
     el('div', { style: 'font-size:.85rem; color:var(--text-3);', text: 'Drop a song. AI reads its energy and chains as many clips as needed to cover the full length.' }),
   ]));
 
-  // ── Song drop zone ────────────────────────────────────────────────────────
+  // -- Song drop zone --------------------------------------------------------
   const audioInput    = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mpeg,.mpg', style: 'display:none' });
   const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a, mpeg…)' });
   const audioPreview  = el('audio', { controls: '', style: 'display:none; width:100%; margin-top:8px;' });
@@ -96,7 +96,7 @@ export function init(panel) {
   function _renderAnalysis(a) {
     analysisCard.innerHTML = '';
 
-    // ── Header chips ──────────────────────────────────────────────────────
+    // -- Header chips ------------------------------------------------------
     const chips = [
       a.duration_display && { icon: '♪', text: a.duration_display },
       a.bpm              && { icon: '♩', text: `${a.bpm} BPM` },
@@ -129,7 +129,7 @@ export function init(panel) {
     analysisCard.appendChild(chipRow);
     analysisCard.appendChild(clipsNote);
 
-    // ── Per-clip energy strip ─────────────────────────────────────────────
+    // -- Per-clip energy strip ---------------------------------------------
     // Shows what the AI actually sees when writing motion prompts, so you can
     // spot if the song reads as uniformly MED and adjust the idea accordingly.
     const profile = a.energy_profile || [];
@@ -178,7 +178,7 @@ export function init(panel) {
       analysisCard.appendChild(stripWrap);
     }
 
-    // ── Lyrics section ────────────────────────────────────────────────────
+    // -- Lyrics section ----------------------------------------------------
     _lyricsTextarea = el('textarea', {
       rows: '3',
       style: 'width:100%; resize:vertical; font-size:.78rem; color:var(--text-2); font-family:inherit; background:var(--bg-input,var(--bg-raised)); border:1px solid var(--border-2); border-radius:4px; padding:6px 8px; box-sizing:border-box;',
@@ -279,7 +279,7 @@ export function init(panel) {
   });
   root.appendChild(audioInput);
 
-  // ── Anchor image (optional) ───────────────────────────────────────────────
+  // -- Anchor image (optional) -----------------------------------------------
   const imgInput    = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
   const imgPreview  = el('img', { style: 'display:none; max-height:140px; object-fit:contain; border-radius:6px;' });
   const imgHint     = el('div', { style: 'color:var(--text-3); font-size:.82rem; text-align:center;', text: 'Drop anchor image (optional — sets the visual style for all clips)' });
@@ -342,7 +342,7 @@ export function init(panel) {
     imgInput.value = '';
   });
 
-  // ── Story idea ────────────────────────────────────────────────────────────
+  // -- Story idea ------------------------------------------------------------
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.9rem;',
@@ -353,7 +353,7 @@ export function init(panel) {
     ideaInput,
   ]));
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // -- Settings --------------------------------------------------------------
   const CHIP_BASE = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
   const CHIP_ON   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
 
@@ -496,7 +496,7 @@ export function init(panel) {
     clipSummary, timeWarn, _advToggle, _advBody,
   ]));
 
-  // ── Create / Queue buttons ────────────────────────────────────────────────
+  // -- Create / Queue buttons ------------------------------------------------
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Generate Music Video',
@@ -511,7 +511,7 @@ export function init(panel) {
   root.appendChild(createBtn);
   root.appendChild(queueBtn);
 
-  // ── Loop + variety toggles ─────────────────────────────────────────────────
+  // -- Loop + variety toggles -------------------------------------------------
   const _CHIP = 'border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:.8rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s,border-color .15s;';
   const _CHIP_ON = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
 
@@ -540,7 +540,7 @@ export function init(panel) {
     loopCountEl.textContent += ' — stopping after this one…';
   });
 
-  // ── Progress + result ─────────────────────────────────────────────────────
+  // -- Progress + result -----------------------------------------------------
   const progressWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   const progressBar  = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
   const progressFill = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
@@ -608,7 +608,7 @@ export function init(panel) {
     }
   });
 
-  // ── Watcher ───────────────────────────────────────────────────────────────
+  // -- Watcher ---------------------------------------------------------------
   let _activePoller = null;
 
   function _watchJob(job_id, timeoutSec = 0) {
@@ -670,7 +670,7 @@ export function init(panel) {
     });
   }
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+  // -- Submit ----------------------------------------------------------------
   function _buildPayload() {
     const varietyTheme = _aiVariety
       ? _VARIETY_THEMES[(_varietyIdx++) % _VARIETY_THEMES.length]
@@ -744,4 +744,42 @@ export function init(panel) {
   });
 
   createBtn.addEventListener('click', _submitJob);
+
+  // -- Palette AI intent + queue-modal branching -----------------------------
+  // Keep applier minimal: the high-value fields are the story idea (text
+  // prompt) and the slider controls. Audio/image stay as whatever the user
+  // currently has loaded -- branching is meant for "redo with a tweak".
+  import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
+    registerTabAI('song-video', {
+      getContext: () => ({
+        prompt:        ideaInput.value,
+        video_steps:   Number(stepsSlider.value) || _steps,
+        video_guidance: Number(guidSlider.value) || _guidance,
+        clip_duration: Number(clipSlider.value)  || _clipDur,
+      }),
+      applySettings: (s) => {
+        if (typeof s.video_prompt === 'string' && s.video_prompt.trim()) {
+          ideaInput.value = s.video_prompt.trim();
+        } else if (typeof s.prompt === 'string' && s.prompt.trim()) {
+          ideaInput.value = s.prompt.trim();
+        }
+        if (typeof s.prompt_append === 'string' && s.prompt_append.trim()) {
+          const cur = ideaInput.value.trim();
+          ideaInput.value = cur ? `${cur}, ${s.prompt_append.trim()}` : s.prompt_append.trim();
+        }
+        if (typeof s.video_steps === 'number') {
+          _steps = Math.max(4, Math.min(50, s.video_steps));
+          stepsSlider.value = String(_steps); stepsLabel.textContent = String(_steps);
+        }
+        if (typeof s.video_guidance === 'number') {
+          _guidance = Math.max(1, Math.min(20, s.video_guidance));
+          guidSlider.value = String(_guidance); guidLabel.textContent = String(_guidance);
+        }
+        if (typeof s.clip_duration === 'number') {
+          _clipDur = Math.max(8, Math.min(parseInt(clipSlider.max) || 19, s.clip_duration));
+          clipSlider.value = String(_clipDur); clipLabel.textContent = `${_clipDur}s`;
+        }
+      },
+    });
+  }).catch(() => {});
 }
