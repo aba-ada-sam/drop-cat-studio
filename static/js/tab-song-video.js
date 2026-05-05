@@ -6,7 +6,7 @@ import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
 import { el, pathToUrl } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
-// v=20260504o
+// v=20260504p
 
 export function receiveHandoff(data) {
   // no-op — this tab doesn't currently receive handoffs
@@ -393,7 +393,7 @@ export function init(panel) {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
 
-  const MAX_CLIPS = 30;  // hard safety cap — 30 × 8s = 4 min of unique content at minimum clip length
+  const MAX_CLIPS = 50;  // matches backend cap — 50 × 8s = 6.7 min of unique content at minimum clip length
 
   function _refreshClipCount() {
     if (!_audioDuration) {
