@@ -131,7 +131,7 @@ export function init(panel) {
   const suffixInput = el('input', {
     type: 'text', placeholder: 'Style suffix…',
     style: 'flex:1; font-size:.8rem',
-    value: '(depth blur)',
+    value: '',
   });
   const wildcardToggle = el('input', { type: 'checkbox', id: 'sd-smart-wc', checked: true, style: 'cursor:pointer' });
   const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });

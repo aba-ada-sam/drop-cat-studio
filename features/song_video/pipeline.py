@@ -23,11 +23,10 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-# 0.3 s is the standard "invisible cut" duration in professional editing.
-# Each clip already starts from the extracted last frame of the previous one,
-# so the two images at the splice point are nearly identical — a 0.3 s blend
-# is genuinely imperceptible while still smoothing any motion-direction change.
-_XFADE_DUR = 0.15
+# 0.5 s cross-dissolve: visible enough to smooth motion-direction changes at
+# clip boundaries without feeling like a long wipe. Each clip is generated
+# with +0.5s extra via xfade compensation so cuts still land on the beat.
+_XFADE_DUR = 0.5
 
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
@@ -429,6 +428,17 @@ def run_song_pipeline(job, photo_path, settings):
 
     # ── Phase 1: Generate clips ───────────────────────────────────────────
     clip_paths: list[str] = []
+    analysis_data  = settings.get("audio_analysis", {})
+    energy_labels  = analysis_data.get("clip_energy_labels", [])
+
+    # Energy → direct motion-speed vocabulary for WanGP.
+    # Injected after the LLM story prompt so the renderer gets explicit cues
+    # regardless of how well the LLM translated the energy label.
+    _ENERGY_MOTION = {
+        "HIGH": "extremely fast motion, explosive burst of speed, dynamic blur, rapid kinetic energy",
+        "MED":  "steady flowing motion, smooth continuous movement, rhythmic energy",
+        "LOW":  "slow graceful motion, gentle drift, serene stillness, unhurried pace",
+    }
 
     prepped_photo: str | None = None
     if photo_path and os.path.isfile(photo_path):
@@ -459,7 +469,9 @@ def run_song_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}{_et}")
 
-        finalized = _finalize_prompt(clip_prompt, model_name)
+        energy_label = energy_labels[i] if i < len(energy_labels) else "MED"
+        energy_motion = _ENERGY_MOTION.get(energy_label.upper(), _ENERGY_MOTION["MED"])
+        finalized = _finalize_prompt(f"{clip_prompt.rstrip('.,;')}, {energy_motion}", model_name)
         # Clip 0: use the user's uploaded photo as visual anchor.
         # Clips 1+: use the last frame of the previous clip so transitions are
         # seamless. The SHOT RULE forces a different camera angle/framing each

@@ -443,7 +443,7 @@ async def enhance_prompt(request: Request):
         "idea":         str,            # required
         "regional":     bool,           # default False
         "regions_n":    int,            # default 3, clamped to [1, 4]
-        "suffix":       str,            # default "(depth blur)"
+        "suffix":       str,            # default ""
         "provider":     "local"|"cloud",# default "local" (Ollama)
         "allow_rrated": bool            # only meaningful when provider="cloud"
       }
@@ -466,7 +466,7 @@ async def enhance_prompt(request: Request):
     regions_n = int(body.get("regions_n", 3) or 3)
     suffix = body.get("suffix")
     if suffix is None:
-        suffix = cfg.get("sd_step1_default_suffix") or "(depth blur)"
+        suffix = cfg.get("sd_step1_default_suffix") or ""
 
     provider = (body.get("provider") or "local").strip().lower()
     allow_rrated = bool(body.get("allow_rrated", False))
