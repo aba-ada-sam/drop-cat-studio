@@ -60,7 +60,13 @@ def _place_boundaries(
     peak_times, peak_strengths, total_dur: float, n_clips: int,
     min_dur: float, max_dur: float,
 ) -> list[float]:
-    """Shared boundary-placement logic used by both clip functions."""
+    """Shared boundary-placement logic used by both clip functions.
+
+    Clamps each chosen boundary to <= total_dur so the final clip can never
+    have a negative duration when n_clips * min_dur exceeds total_dur. The
+    caller still gets n_clips boundaries, but the trailing ones may collapse
+    to zero-length when the song is too short for the requested clip count.
+    """
     import numpy as np
     boundaries = [0.0]
     for i in range(1, n_clips):
@@ -75,9 +81,9 @@ def _place_boundaries(
             chosen    = float(cands[np.argmax(strengths * proximity)])
         else:
             chosen = max(lo, min(hi, ideal))
-        boundaries.append(chosen)
+        boundaries.append(min(chosen, total_dur))
     last_end = min(total_dur, boundaries[-1] + max_dur)
-    boundaries.append(last_end)
+    boundaries.append(max(last_end, boundaries[-1]))
     return boundaries
 
 
