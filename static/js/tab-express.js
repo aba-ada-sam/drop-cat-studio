@@ -148,7 +148,21 @@ export function init(panel) {
     _updateRatioAvailability(); // re-applies all chip styles with new active
   }
 
+  function _resetPromptsForNewImage() {
+    // Wipe AI-generated text so the next "Create Story" reads the new image
+    // instead of recycling prompts from the previous one.
+    if (typeof ideaInput !== 'undefined' && ideaInput) ideaInput.value = '';
+    if (typeof lyricInput !== 'undefined' && lyricInput) lyricInput.value = '';
+    if (typeof talkInput !== 'undefined' && talkInput) talkInput.value = '';
+    if (typeof talkReplyEl !== 'undefined' && talkReplyEl) {
+      talkReplyEl.textContent = '';
+      talkReplyEl.style.display = 'none';
+    }
+    _chatHistory = [];
+  }
+
   function _applyImage(path, url) {
+    if (path !== _imagePath) _resetPromptsForNewImage();
     _imagePath = path;
     preview.src = url;
     preview.style.display = '';
@@ -166,6 +180,7 @@ export function init(panel) {
     dropHint.style.display = '';
     dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     clearImgBtn.style.display = 'none';
+    _resetPromptsForNewImage();
   });
 
   dropZone.addEventListener('click', e => {

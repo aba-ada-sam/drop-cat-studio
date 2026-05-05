@@ -230,6 +230,14 @@ export function init(panel) {
   previewCard.appendChild(previewVid);
   previewCard.appendChild(previewClear);
 
+  // Wipe the motion prompt when the source image changes so the auto-gen
+  // refills it from the NEW image instead of recycling text written for the
+  // previous one. Defined here as a closure so the listeners below can call
+  // it; promptTA is declared further down but exists by the time these fire.
+  function _wipeMotionPrompt() {
+    if (typeof promptTA !== 'undefined' && promptTA) promptTA.value = '';
+  }
+
   previewClear.addEventListener('click', () => {
     _startImagePath = null;
     _startVideoPath = null;
@@ -240,9 +248,11 @@ export function init(panel) {
     // Un-check video toggle
     videoChk.checked = false;
     videoCard.style.display = 'none';
+    _wipeMotionPrompt();
   });
 
   _applyStart = (path, url) => {
+    if (path !== _startImagePath) _wipeMotionPrompt();
     _startImagePath = path;
     _startVideoPath = null;
     previewImg.src = url || pathToUrl(path);

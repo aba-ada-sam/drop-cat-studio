@@ -292,7 +292,15 @@ export function init(panel) {
   root.appendChild(imgDropZone);
   root.appendChild(imgInput);
 
+  function _resetStoryIdea() {
+    // Story idea was written for the previous image -- next generation should
+    // re-read the new anchor instead of recycling the old prompt. Lyrics stay
+    // because they are tied to the audio, not the image.
+    if (typeof ideaInput !== 'undefined' && ideaInput) ideaInput.value = '';
+  }
+
   function _applyImage(path, url) {
+    if (path !== _imagePath) _resetStoryIdea();
     _imagePath = path;
     imgPreview.src = url; imgPreview.style.display = '';
     imgHint.style.display = 'none';
@@ -306,6 +314,7 @@ export function init(panel) {
     imgHint.style.display = '';
     imgClearBtn.style.display = 'none';
     imgDropZone.classList.remove('drop-zone-loaded');
+    _resetStoryIdea();
   });
   imgDropZone.addEventListener('click', e => {
     if (imgPreview.contains(e.target) || e.target === imgPreview) return;
