@@ -63,6 +63,11 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
         onError(job.error || job.message || `Job ${job.status}`);
         return;
       }
+      // Guard against null/unknown status — avoids 10-minute poll loop on server errors
+      if (job.status && job.status !== 'running' && job.status !== 'queued') {
+        onError(`Unexpected job status: ${job.status}`);
+        return;
+      }
       onProgress(job);
       timer = setTimeout(tick, interval);
     } catch (e) {

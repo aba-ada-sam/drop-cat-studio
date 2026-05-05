@@ -81,6 +81,14 @@ def generate_video(
     if num_frames % 2 == 0:
         num_frames += 1  # WanGP requires odd frame count
 
+    # Hard-cap to model's max_sec: LTX-2 at 481 frames triggers 2-window mode
+    # (doubles generation time). The odd-adjustment above can push 480 → 481.
+    max_sec = model_info.get("max_sec", 19)
+    frame_cap = int(max_sec * fps)
+    if frame_cap % 2 == 0:
+        frame_cap -= 1  # keep cap odd so min() can't land on an even number
+    num_frames = min(num_frames, frame_cap)
+
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     # Wait for the persistent worker (it may still be loading after a cold start).

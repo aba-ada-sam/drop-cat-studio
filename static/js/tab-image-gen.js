@@ -2,7 +2,7 @@
  * Drop Cat Go Studio -- Image Generation tab.
  * Direct interface to Forge SD for txt2img and img2img.
  */
-import { api } from './api.js?v=20260503b';
+import { api } from './api.js?v=20260504p';
 import { createSlider, createDropZone, el } from './components.js?v=20260429b';
 import { toast } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';

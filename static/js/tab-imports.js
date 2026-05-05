@@ -6,7 +6,7 @@
  * - Start a new project
  * - Browse and restore previous work
  */
-import { api } from './api.js?v=20260503b';
+import { api } from './api.js?v=20260504p';
 import { createDropZone, el } from './components.js?v=20260429b';
 import { toast } from './shell/toast.js?v=20260503a';
 

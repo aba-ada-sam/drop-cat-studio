@@ -2,7 +2,7 @@
  * Drop Cat Go Studio — Express mode.
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260503b';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260504p';
 import { el, pathToUrl } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';

@@ -2,7 +2,7 @@
  * Queue tab — GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
-import { api } from './api.js?v=20260503b';
+import { api } from './api.js?v=20260504p';
 import { toast } from './shell/toast.js?v=20260503a';
 import { el, pathToUrl } from './components.js?v=20260429b';
 
