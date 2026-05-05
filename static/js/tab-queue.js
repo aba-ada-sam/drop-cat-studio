@@ -90,7 +90,6 @@ function _buildShell() {
     class: 'btn btn-sm',
     text: '💾 Save Queue',
     title: 'Save waiting jobs to disk — restore them after a restart',
-    style: 'display:none;',
   });
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
@@ -244,7 +243,7 @@ function _render(data) {
   const saveBtn      = document.getElementById('queue-save-btn');
   if (cancelAllBtn) cancelAllBtn.style.display = queued.length > 0 ? '' : 'none';
   if (clearBtn)     clearBtn.style.display     = completed.length > 0 ? '' : 'none';
-  if (saveBtn)      saveBtn.style.display      = queued.length > 0 ? '' : 'none';
+  if (saveBtn)      saveBtn.style.display      = '';
 
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';
