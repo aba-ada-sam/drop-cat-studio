@@ -1,8 +1,15 @@
 """Song Video pipeline: audio file → N chained video clips → merge with original audio.
 
-Energy-aware: the LLM reads per-clip energy levels from the audio analysis
-and writes motion prompts that match the song's dynamics — explosive action
-on loud sections, graceful motion on quiet ones.
+Beat-synced architecture:
+  1. Audio analyzer extracts beat times + per-clip target peak position
+  2. LLM writes a single story arc, one prompt per clip, each with a clear
+     visual climax (the LLM does NOT try to time the climax — it just makes
+     sure each clip has one)
+  3. WanGP renders each clip; we then run frame-difference motion analysis
+     to find where the visual climax actually landed
+  4. ffmpeg piecewise speed-ramp warps the clip so the natural climax slides
+     onto the audio's beat timestamp. Clip duration is preserved.
+  5. Hard-cut concat — boundaries chain via identical first/last frames
 
 No ACE-Step involved. The user's uploaded song is the audio track.
 """
@@ -152,6 +159,16 @@ Camera moves should feel MOTIVATED by the story — a zoom-out after a summit re
 the scale; a dolly-forward into darkness builds tension. Do NOT describe static shots.
 Each move naturally evolves FROM the previous clip's final frame since clips are chained.
 
+MOTION ARC RULE — every clip must have ONE clear visual climax — a single moment of
+maximum action — not uniform motion throughout. Examples of strong arcs:
+  - quiet build → dolly accelerates → object impacts / camera meets subject
+  - subject enters frame → moves through space → reaches a defined position
+  - environment is still → wind/fire/water surges → returns toward calm
+A clip that's "fast all the way through" or "slow all the way through" has no peak.
+Build a *trajectory* the eye can follow toward a single moment of release.
+The exact timing of the climax inside the clip is handled automatically — your job
+is to ensure there IS one clear climax, not to time it precisely.
+
 STYLE RULE: Establish a specific color palette and look in Clip 01 (e.g. "cinematic
 wide shot, warm amber and deep shadow, golden-hour light"). Carry that COLOR
 TEMPERATURE and MOOD through every clip — but the composition and framing MUST
@@ -160,38 +177,11 @@ change each clip.
 FRAME RULE: No close-up face shots. No direct action on a character's body.
 For close shots use hands, feet, objects, texture. The renderer distorts faces.
 
-ENERGY RULE — energy label sets motion speed and intensity:
-  HIGH → violent scene motion: rushing water, fire surge, wind blast, fast travel,
-         crashing, swirling storm, rapid movement through environment
-  MED  → dynamic flow: fabric in wind, light sweeping landscape, steady travel,
-         rippling water, drifting smoke, rhythmic natural motion
-  LOW  → held, breathing: mist settling, single candle, still water, slow dawn,
-         a moment of stillness before or after action
-
-BEAT TIMING RULE — the beat position tells you WHEN peak motion should occur:
-  EARLY beat (0-33%): motion erupts from frame one — sudden burst, instant velocity,
-                      explosive action from the very start, full intensity immediately
-  MID beat (34-66%): steady build to a central PEAK — accelerate into the midpoint,
-                     reach maximum intensity at center, then sustain or release
-  LATE beat (67-100%): long mounting tension — motion builds the full clip length,
-                       erupts or crashes in the final seconds
-Write your motion arc so the visual climax lands ON the beat position. Use words
-like "suddenly erupts", "builds toward a shattering peak", "culminates in", or
-"explodes open" to signal WHERE the intensity peaks.
-
 Rules:
 - 30-50 words per prompt — include shot type, subject action, and environment
 - Story progresses across clips: arrival → challenge → peak → resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
-
-
-def _beat_timing_label(pos: float) -> str:
-    if pos <= 0.33:
-        return f"EARLY beat ({int(pos * 100)}%) — open with impact"
-    if pos <= 0.66:
-        return f"MID beat ({int(pos * 100)}%) — build to center peak"
-    return f"LATE beat ({int(pos * 100)}%) — build throughout, erupt at end"
 
 
 def _generate_song_arc(
@@ -202,26 +192,27 @@ def _generate_song_arc(
     photo_path: str | None,
     variety_theme: str = "",
     lyrics_text: str = "",
-    beat_positions: list[float] | None = None,
+    beat_positions: list[float] | None = None,  # accepted for back-compat, unused
 ) -> list[str]:
-    """Generate N motion prompts calibrated to the song's energy profile."""
-    energy_profile = analysis.get("energy_profile", [])
-    clip_labels    = analysis.get("clip_energy_labels", [])
+    """Generate N motion prompts that follow a single story across the song.
+
+    Beat alignment is handled in post-generation by the motion analyzer +
+    speed ramp — the LLM only needs to ensure each clip has one clear visual
+    climax, not time it precisely.
+    """
+    clip_labels = analysis.get("clip_energy_labels", [])
     bpm    = analysis.get("bpm")
     key    = analysis.get("key", "")
     mode   = analysis.get("mode", "")
     mood   = analysis.get("mood", "cinematic")
 
-    # Build per-clip energy + beat timing hint lines
+    # Per-clip pacing label only — no percentages, no beat-timing instructions.
+    # The label hints at narrative intensity (intro / climb / peak / release)
+    # without dictating motion adjectives.
     clip_hints = []
     for i in range(n_clips):
-        if i < len(clip_labels):
-            label = clip_labels[i]
-            pct   = int((energy_profile[i] if i < len(energy_profile) else 0.5) * 100)
-        else:
-            label, pct = "MED", 50
-        bp = beat_positions[i] if beat_positions and i < len(beat_positions) else 0.5
-        clip_hints.append(f"Clip {i + 1:02d}: {label} ({pct}%), {_beat_timing_label(bp)}")
+        label = clip_labels[i] if i < len(clip_labels) else "MED"
+        clip_hints.append(f"Clip {i + 1:02d}: {label} energy section")
 
     energy_text = "\n".join(clip_hints)
     key_str = f"{key} {mode}".strip() if key else ""
@@ -240,9 +231,9 @@ def _generate_song_arc(
         f"Story direction: {story_direction}\n"
         f"{style_line}"
         f"{lyrics_line}"
-        f"\nEnergy level per clip ({n_clips} clips):\n{energy_text}\n\n"
+        f"\nNarrative pacing per clip ({n_clips} clips):\n{energy_text}\n\n"
         f"Generate exactly {n_clips} motion prompts that continue the SAME story "
-        f"and match these energy levels."
+        f"and follow this pacing."
     )
 
     try:
@@ -439,17 +430,6 @@ def run_song_pipeline(job, photo_path, settings):
 
     # ── Phase 1: Generate clips ───────────────────────────────────────────
     clip_paths: list[str] = []
-    analysis_data  = settings.get("audio_analysis", {})
-    energy_labels  = analysis_data.get("clip_energy_labels", [])
-
-    # Energy → direct motion-speed vocabulary for WanGP.
-    # Injected after the LLM story prompt so the renderer gets explicit cues
-    # regardless of how well the LLM translated the energy label.
-    _ENERGY_MOTION = {
-        "HIGH": "extremely fast motion, explosive burst of speed, dynamic blur, rapid kinetic energy",
-        "MED":  "steady flowing motion, smooth continuous movement, rhythmic energy",
-        "LOW":  "slow graceful motion, gentle drift, serene stillness, unhurried pace",
-    }
 
     prepped_photo: str | None = None
     if photo_path and os.path.isfile(photo_path):
@@ -480,9 +460,7 @@ def run_song_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}{_et}")
 
-        energy_label = energy_labels[i] if i < len(energy_labels) else "MED"
-        energy_motion = _ENERGY_MOTION.get(energy_label.upper(), _ENERGY_MOTION["MED"])
-        finalized = _finalize_prompt(f"{clip_prompt.rstrip('.,;')}, {energy_motion}", model_name)
+        finalized = _finalize_prompt(clip_prompt, model_name)
         # Clip 0: use the user's uploaded photo as visual anchor.
         # Clips 1+: use the last frame of the previous clip so transitions are
         # seamless. The SHOT RULE forces a different camera angle/framing each
@@ -537,6 +515,45 @@ def run_song_pipeline(job, photo_path, settings):
             if trim_r.returncode == 0 and Path(trimmed).exists():
                 os.replace(trimmed, clip_path)
                 log.debug("[song-video] Clip %d trimmed %.2fs → %.2fs", clip_num, actual_dur, this_dur)
+
+        # ── Beat-sync via motion peak detection + speed ramp ────────────────
+        # The LLM gave us a story arc with a clear visual climax in each clip,
+        # but the climax lands wherever WanGP put it — not on the song's beat.
+        # We detect the natural peak via frame differencing then warp the clip
+        # so that peak slides onto target_time. Total clip duration is
+        # preserved, so downstream concat math doesn't change.
+        # Use the actual clip duration after the trim so target_time can't
+        # land beyond the real end if the trim couldn't bring duration into spec.
+        post_trim_dur = probe_duration(clip_path) or this_dur
+        beat_pos      = beat_positions[i] if i < len(beat_positions) else 0.5
+        target_time   = beat_pos * post_trim_dur
+        ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
+        job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} — syncing peak to beat…")
+        try:
+            from features.song_video.motion_analyzer import align_clip_to_beat
+            applied, info = align_clip_to_beat(
+                clip_path, target_time, post_trim_dur, ramped_out,
+            )
+            if applied and Path(ramped_out).exists():
+                # Replace the original with the ramped version. The chain
+                # frame we extract below now comes from the ramped clip,
+                # so the next clip's start frame still matches what plays.
+                os.replace(ramped_out, clip_path)
+                _log(
+                    f"[info] Clip {clip_num} beat-synced: peak {info['natural_time']:.2f}s "
+                    f"→ {info['target_time']:.2f}s (conf {info['confidence']:.2f})"
+                )
+            else:
+                # Clean up partial output if the ramp aborted mid-write.
+                if os.path.exists(ramped_out):
+                    try:
+                        os.remove(ramped_out)
+                    except OSError:
+                        pass
+                if info.get("reason"):
+                    log.debug("[song-video] Clip %d sync skipped: %s", clip_num, info["reason"])
+        except Exception as e:
+            log.warning("[song-video] Beat-sync exception on clip %d: %s — keeping original", clip_num, e)
 
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
