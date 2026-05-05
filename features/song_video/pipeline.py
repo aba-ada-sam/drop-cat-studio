@@ -23,23 +23,34 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-# 0.5 s cross-dissolve: visible enough to smooth motion-direction changes at
-# clip boundaries without feeling like a long wipe. Each clip is generated
-# with +0.5s extra via xfade compensation so cuts still land on the beat.
-_XFADE_DUR = 0.5
+# Hard cut — 0 dissolve. Clips chain via the actual last frame so the content
+# at the boundary is identical; a dissolve would make the seam more visible,
+# not less. Beat-flash post-processing syncs visual events to audio peaks.
+_XFADE_DUR = 0.0
 
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
-    """Extract the last frame of a video. Returns out_path or None.
+    """Extract the actual last frame of a video as a JPEG.
 
-    Uses -sseof to seek from the end of the file — reliable even when the
-    clip is slightly shorter than expected due to keyframe-aligned trimming.
+    Probes the duration first then seeks to 2 frames before the end, so the
+    extracted frame is the true final frame rather than an arbitrary point
+    0.5s before end. This matters for seamless hard-cut chaining — clip N+1
+    must start from the exact same frame that clip N ended on.
     """
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-sseof", "-0.5", "-i", video_path,
-         "-frames:v", "1", "-q:v", "2", out_path],
-        capture_output=True, timeout=30,
-    )
+    dur = probe_duration(video_path)
+    if dur and dur > 0.1:
+        seek = max(0.0, dur - 0.08)  # 2 frames before end at 25 fps
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-ss", f"{seek:.4f}", "-i", video_path,
+             "-frames:v", "1", "-q:v", "2", out_path],
+            capture_output=True, timeout=30,
+        )
+    else:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-sseof", "-0.1", "-i", video_path,
+             "-frames:v", "1", "-q:v", "2", out_path],
+            capture_output=True, timeout=30,
+        )
     return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
 
 
@@ -117,6 +128,76 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
         log.warning("[song-video] xfade concat exception: %s — falling back to plain concat", e)
 
     return _concat_clips(clip_paths, out_path)
+
+
+def _apply_beat_flash(
+    video_path: str,
+    out_path: str,
+    beat_times: list[float],
+    beat_strengths: list[float],
+    log_fn=None,
+) -> bool:
+    """Stamp brief brightness flashes onto the video at each beat timestamp.
+
+    Strong beats (top 40% by onset strength) get a sharper flash (brightness
+    +0.28) while weaker beats get a subtler pulse (+0.12). Each flash is
+    0.06 s (~1.5 frames at 25 fps) — long enough to register, short enough
+    to feel like a hit rather than a glow.
+
+    Returns True on success, False on any ffmpeg error (caller keeps original).
+    """
+    if not beat_times:
+        return False
+
+    from core.ffmpeg_utils import probe_duration
+    video_dur = probe_duration(video_path) or 0.0
+
+    # Classify beats: top 40% by strength = strong flash, rest = subtle
+    threshold = sorted(beat_strengths)[max(0, int(len(beat_strengths) * 0.60))] if beat_strengths else 0.5
+    flash_dur = 0.06
+
+    strong_parts = []
+    subtle_parts = []
+    for t, s in zip(beat_times, beat_strengths if beat_strengths else [0.5] * len(beat_times)):
+        if t + flash_dur > video_dur:
+            continue
+        expr = f"between(t,{t:.3f},{t + flash_dur:.3f})"
+        if s >= threshold:
+            strong_parts.append(expr)
+        else:
+            subtle_parts.append(expr)
+
+    if not strong_parts and not subtle_parts:
+        return False
+
+    filters = []
+    if strong_parts:
+        filters.append(f"eq=brightness=0.28:saturation=1.15:enable='{'+'.join(strong_parts)}'")
+    if subtle_parts:
+        filters.append(f"eq=brightness=0.12:enable='{'+'.join(subtle_parts)}'")
+
+    # Chain filters — each one applies only when its enable expression is true
+    filter_chain = ",".join(filters)
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vf", filter_chain,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-pix_fmt", "yuv420p", "-an",
+        out_path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=600)
+        if r.returncode == 0 and Path(out_path).exists():
+            if log_fn:
+                log_fn(f"[info] Beat flash applied: {len(strong_parts)} strong + {len(subtle_parts)} subtle hits")
+            return True
+        err = r.stderr.decode(errors="replace")[-500:]
+        log.warning("[song-video] beat_flash ffmpeg error: %s", err)
+        if log_fn:
+            log_fn(f"[warning] Beat flash failed — using un-flashed concat")
+    except Exception as e:
+        log.warning("[song-video] beat_flash exception: %s", e)
+    return False
 
 
 # ── Energy-aware story arc ────────────────────────────────────────────────────
@@ -530,10 +611,11 @@ def run_song_pipeline(job, photo_path, settings):
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
 
-        # Extract the last frame and use it as the start image of the next clip
-        # so the transition is seamless — both sides of the xfade open from the
-        # same frame. CAMERA MOTION RULE in the system prompt ensures each clip
-        # describes a move that naturally evolves from that shared frame.
+        # Extract the actual last frame and use it as the start image of the
+        # next clip. Hard-cut chaining works because both clips share the
+        # identical boundary frame, making the cut invisible when motion is
+        # continuous. CAMERA MOTION RULE in the system prompt ensures each clip
+        # starts from a natural continuation of that shared frame.
         if i < n_clips - 1:
             frame_path = str(job_dir / f"chain_{i:02d}.jpg")
             _chain_frame = _extract_last_frame(clip_path, frame_path)
@@ -560,15 +642,23 @@ def run_song_pipeline(job, photo_path, settings):
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips…")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # ── Phase 2: Concatenate with short crossfade ─────────────────────────
-    # 0.15s xfade: imperceptible duration but smooths the frame discontinuity
-    # at each cut. Style-consistent prompts (STYLE RULE) mean there's no longer
-    # a colour-grade mismatch to reveal, so the dissolve works cleanly.
+    # ── Phase 2: Hard-cut concat ─────────────────────────────────────────────
+    # No dissolve — clips chain via the identical last/first frame.
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips_xfade(clip_paths, concat_path, fade_dur=_XFADE_DUR):
-        log.warning("[song-video] xfade concat failed — falling back to hard cuts")
-        if not _concat_clips(clip_paths, concat_path):
-            concat_path = clip_paths[0]
+    if not _concat_clips(clip_paths, concat_path):
+        concat_path = clip_paths[0]
+
+    # ── Phase 2b: Beat-flash sync ─────────────────────────────────────────────
+    # Apply brief brightness pulses at each detected beat so visual "events"
+    # land exactly on the audio peaks. Strong beats get a larger flash.
+    beat_times     = analysis_data.get("beat_times", [])
+    beat_strengths = analysis_data.get("beat_strengths", [])
+    if beat_times and os.path.isfile(concat_path):
+        job.update(progress=82, message="Syncing flashes to beats…")
+        flashed = str(job_dir / f"flashed_{job.id[:6]}.mp4")
+        flashed_ok = _apply_beat_flash(concat_path, flashed, beat_times, beat_strengths, log_fn=_log)
+        if flashed_ok:
+            concat_path = flashed
 
     # ── Phase 3: Merge with user's audio (loop clips to fill song if needed) ─
     job.update(progress=88, message="Looping clips to fill song duration…")

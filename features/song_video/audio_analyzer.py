@@ -283,6 +283,8 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         "suggested_num_clips": 0,
         "has_rich_analysis": False,
         "lyrics_text": "",
+        "beat_times": [],
+        "beat_strengths": [],
     }
 
     # ── Basic duration via ffprobe ────────────────────────────────────────
@@ -304,11 +306,22 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         # Load mono, 22050 Hz — good enough for beat/key analysis, fast to load
         y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 300))
 
-        # BPM — beat_track returns a scalar in librosa 0.10+ and a 1-element
-        # ndarray in 0.9.x; np.atleast_1d handles both safely.
-        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        # BPM + beat timestamps.
+        # beat_track returns a scalar in librosa 0.10+ and a 1-element ndarray in 0.9.x.
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
         bpm = float(np.atleast_1d(tempo)[0])
         result["bpm"] = max(40, min(240, round(bpm)))
+
+        all_beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+        # Pair each beat with its onset strength for flash weighting later.
+        onset_env_full = librosa.onset.onset_strength(y=y, sr=sr)
+        bt_strengths = []
+        for bf in beat_frames:
+            idx = int(min(bf, len(onset_env_full) - 1))
+            bt_strengths.append(float(onset_env_full[idx]))
+        max_str = max(bt_strengths) if bt_strengths else 1.0
+        result["beat_times"]     = [round(float(t), 3) for t in all_beat_times if float(t) < dur]
+        result["beat_strengths"] = [round(s / max_str, 3) for s in bt_strengths[:len(result["beat_times"])]]
 
         # Key via chroma
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
