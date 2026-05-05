@@ -36,9 +36,9 @@ def find_motion_peak(video_path: str) -> tuple[float, float] | None:
     pixel glitch.
 
     Returns (peak_time_seconds, normalized_confidence) or None on failure.
-    Confidence is the ratio peak_value / mean_value — values >= 1.5 indicate
+    Confidence is the ratio peak_value / mean_value — values >= 1.3 indicate
     a clearly defined peak; below that the clip is roughly uniform motion
-    and ramping it provides little benefit.
+    and ramping it provides little benefit (see align_clip_to_beat min_confidence).
     """
     try:
         import cv2
@@ -184,7 +184,7 @@ def align_clip_to_beat(
     pipeline can surface in its progress messages and logs:
         natural_time   — detected peak time in seconds (may be None)
         target_time    — caller-supplied beat time
-        confidence     — peak/mean motion ratio (>1.5 is a clean peak)
+        confidence     — peak/mean motion ratio (>1.3 is a clean peak)
         applied        — True if speed ramp was actually written
         reason         — human-readable explanation when applied=False
 

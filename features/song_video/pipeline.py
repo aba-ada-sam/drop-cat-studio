@@ -24,16 +24,11 @@ from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
 from features.fun_videos.multi_pipeline import _concat_clips
+from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
-
-
-# Hard cut — 0 dissolve. Clips chain via the actual last frame so the content
-# at the boundary is identical; a dissolve would make the seam more visible,
-# not less. Beat-flash post-processing syncs visual events to audio peaks.
-_XFADE_DUR = 0.0
 
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
@@ -61,83 +56,7 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
 
 
-def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = _XFADE_DUR) -> bool:
-    """Concatenate clips with short xfade dissolves between each pair.
-
-    Each input stream is normalised to 24 fps before the xfade chain so that
-    any framerate mismatch between WanGP clips can't produce arithmetic glitches
-    in the offset calculation or visual strobing during the blend.
-
-    Falls back to plain concat on any ffmpeg error so the pipeline never stalls.
-    """
-    if len(clip_paths) == 1:
-        shutil.copy2(clip_paths[0], out_path)
-        return True
-
-    # Probe each clip duration — needed to compute xfade offsets.
-    # Guard: clip must be at least 4× the fade so the overlap never eats into
-    # a meaningful portion of a short clip.
-    min_dur = fade_dur * 4
-    durations: list[float] = []
-    for p in clip_paths:
-        d = probe_duration(p)
-        durations.append(d if d and d > min_dur else max(min_dur + 0.1, 8.0))
-
-    # Normalise each stream to 24 fps + square pixels before xfade.
-    norm_parts: list[str] = []
-    norm_labels: list[str] = []
-    for i in range(len(clip_paths)):
-        lbl = f"[n{i}]"
-        norm_parts.append(f"[{i}:v]fps=fps=24,setsar=1{lbl}")
-        norm_labels.append(lbl)
-
-    # Chain xfade filters.
-    # offset = cumulative sum of (dur[i] - fade_dur): the point (in the output
-    # timeline) where the next clip's blend begins.
-    xfade_parts: list[str] = []
-    offset = 0.0
-    prev = norm_labels[0]
-    for i in range(1, len(clip_paths)):
-        offset += durations[i - 1] - fade_dur
-        cur   = norm_labels[i]
-        label = f"[xf{i}]" if i < len(clip_paths) - 1 else "[vout]"
-        xfade_parts.append(
-            f"{prev}{cur}xfade=transition=fade"
-            f":duration={fade_dur:.3f}:offset={offset:.3f}{label}"
-        )
-        prev = label
-
-    filter_complex = "; ".join(norm_parts + xfade_parts)
-
-    cmd = (
-        ["ffmpeg", "-y"]
-        + [arg for p in clip_paths for arg in ["-i", p]]
-        + [
-            "-filter_complex", filter_complex,
-            "-map", "[vout]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            "-an",
-            out_path,
-        ]
-    )
-
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=600)
-        if r.returncode == 0 and Path(out_path).exists():
-            return True
-        log.warning(
-            "[song-video] xfade concat failed (rc=%d), falling back to plain concat:\n%s",
-            r.returncode,
-            r.stderr.decode(errors="replace")[-2000:],
-        )
-    except Exception as e:
-        log.warning("[song-video] xfade concat exception: %s — falling back to plain concat", e)
-
-    return _concat_clips(clip_paths, out_path)
-
-
-# ── Energy-aware story arc ────────────────────────────────────────────────────
+# ── Story arc generation ──────────────────────────────────────────────────────
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
@@ -192,7 +111,6 @@ def _generate_song_arc(
     photo_path: str | None,
     variety_theme: str = "",
     lyrics_text: str = "",
-    beat_positions: list[float] | None = None,  # accepted for back-compat, unused
 ) -> list[str]:
     """Generate N motion prompts that follow a single story across the song.
 
@@ -327,7 +245,7 @@ def _merge_video_audio_trim(
 # ── Prep phase ────────────────────────────────────────────────────────────────
 
 def run_song_prep(job, photo_path, settings):
-    """Phase 0: energy-aware story arc — LLM only, no GPU."""
+    """Phase 0: beat plan + lyric detection + LLM story arc. CPU only, no GPU."""
     from app import get_llm_router
     llm_router = get_llm_router()
 
@@ -346,7 +264,7 @@ def run_song_prep(job, photo_path, settings):
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 19.0, _XFADE_DUR)
+        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 19.0)
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
 
         clip_durations, beat_positions = fut_beats.result()
@@ -358,12 +276,12 @@ def run_song_prep(job, photo_path, settings):
 
     settings["_clip_durations"] = clip_durations
     settings["_beat_positions"] = beat_positions
-    log.info("[song-video] Clip durations (beat-aligned, xfade-compensated): %s", clip_durations)
+    log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
     job.update(progress=4, message="Planning music video story arc…")
     try:
-        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text, beat_positions)
+        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:
@@ -530,7 +448,6 @@ def run_song_pipeline(job, photo_path, settings):
         ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
         job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} — syncing peak to beat…")
         try:
-            from features.song_video.motion_analyzer import align_clip_to_beat
             applied, info = align_clip_to_beat(
                 clip_path, target_time, post_trim_dur, ramped_out,
             )

@@ -134,19 +134,17 @@ def compute_clip_plan(
     n_clips: int,
     min_dur: float = 8.0,
     max_dur: float = 19.0,
-    xfade_dur: float = 0.0,
 ) -> tuple[list[float], list[float]]:
     """Beat-aligned clip plan with per-clip peak-beat positions.
 
     Returns:
-        durations      list[float]  clip lengths in seconds; all clips except
-                                    the last are extended by xfade_dur so the
-                                    dissolve overlap cancels out and cuts land
-                                    exactly on the beat in the final merged video.
+        durations      list[float]  clip lengths in seconds, with each boundary
+                                    snapped to the nearest strong onset within
+                                    [min_dur, max_dur] of the previous boundary.
         beat_positions list[float]  0.0–1.0 position of the strongest onset
                                     within each clip (0 = start, 1 = end).
-                                    Used to write build-to-climax vs open-with-
-                                    impact motion arcs in the LLM story prompt.
+                                    The pipeline post-warps each generated clip
+                                    so its visual peak lands at this position.
     """
     total_dur = probe_duration(audio_path)
     if total_dur <= 0 or n_clips <= 0:
@@ -192,16 +190,6 @@ def compute_clip_plan(
                 beat_positions.append(round(max(0.0, min(1.0, pos)), 2))
             else:
                 beat_positions.append(0.5)
-
-        # Xfade compensation: each clip (except last) is made xfade_dur longer so
-        # the overlap consumed by the dissolve restores the cut to the beat time.
-        # Cap the base duration first so that base + xfade_dur never exceeds max_dur —
-        # without this, clips already at max_dur get clamped back to max_dur and the
-        # compensation is silently lost, drifting the next cut off the beat.
-        if xfade_dur > 0:
-            for j in range(n_clips - 1):
-                base = min(durations[j], max_dur - xfade_dur)
-                durations[j] = round(base + xfade_dur, 3)
 
         log.info("[song-video] Clip plan: durations=%s beat_pos=%s", durations, beat_positions)
         return durations, beat_positions
