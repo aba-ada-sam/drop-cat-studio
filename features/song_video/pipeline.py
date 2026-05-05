@@ -551,7 +551,9 @@ def run_song_pipeline(job, photo_path, settings):
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
 
     # Trim to exact song duration so the video doesn't overhang
-    effective_dur = audio_dur if audio_dur > 0 else probe_duration(audio_path)
+    effective_dur = audio_dur if audio_dur > 0 else (probe_duration(audio_path) or 0.0)
+    if effective_dur <= 0:
+        raise RuntimeError("Cannot determine audio duration — file may be missing or corrupt")
     merged = _merge_video_audio_trim(concat_path, audio_path, final_path, effective_dur)
 
     if merged:

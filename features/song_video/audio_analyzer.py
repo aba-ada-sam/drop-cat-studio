@@ -195,9 +195,13 @@ def compute_clip_plan(
 
         # Xfade compensation: each clip (except last) is made xfade_dur longer so
         # the overlap consumed by the dissolve restores the cut to the beat time.
+        # Cap the base duration first so that base + xfade_dur never exceeds max_dur —
+        # without this, clips already at max_dur get clamped back to max_dur and the
+        # compensation is silently lost, drifting the next cut off the beat.
         if xfade_dur > 0:
             for j in range(n_clips - 1):
-                durations[j] = round(min(max_dur, durations[j] + xfade_dur), 3)
+                base = min(durations[j], max_dur - xfade_dur)
+                durations[j] = round(base + xfade_dur, 3)
 
         log.info("[song-video] Clip plan: durations=%s beat_pos=%s", durations, beat_positions)
         return durations, beat_positions
