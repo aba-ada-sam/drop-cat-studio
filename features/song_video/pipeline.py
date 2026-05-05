@@ -30,10 +30,14 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 _XFADE_DUR = 0.15
 
 
-def _extract_frame_at(video_path: str, out_path: str, seek_secs: float) -> str | None:
-    """Extract one frame at seek_secs into the video. Returns out_path or None."""
+def _extract_last_frame(video_path: str, out_path: str) -> str | None:
+    """Extract the last frame of a video. Returns out_path or None.
+
+    Uses -sseof to seek from the end of the file — reliable even when the
+    clip is slightly shorter than expected due to keyframe-aligned trimming.
+    """
     r = subprocess.run(
-        ["ffmpeg", "-y", "-ss", f"{max(0.0, seek_secs):.3f}", "-i", video_path,
+        ["ffmpeg", "-y", "-sseof", "-0.5", "-i", video_path,
          "-frames:v", "1", "-q:v", "2", out_path],
         capture_output=True, timeout=30,
     )
@@ -129,11 +133,14 @@ Example story arc: lone figure at mountain base → climbing through forest →
 breaking into open alpine ridge → summit in blazing wind → descent at dusk →
 arriving home, transformed.
 
-SHOT RULE — CRITICAL: Each clip MUST use a different shot type than adjacent clips.
-Rotate through: wide establishing shot, medium shot, close detail (hands/objects/
-texture), aerial overhead, low angle, silhouette against sky, POV. A music video
-that never changes framing is as boring as one that never changes scene. Describe
-the shot distance and angle explicitly in every prompt.
+CAMERA MOTION RULE — every clip must have a purposeful camera MOVE that creates
+visual dynamism. Pick one per clip and describe it explicitly:
+  zoom out (pull back to reveal), zoom in (push toward subject), slow pan left/right,
+  dolly forward (glide through environment), tilt up (sweep from ground to sky),
+  orbit/arc (camera circles the subject), crane up, drift (slow float).
+Camera moves should feel MOTIVATED by the story — a zoom-out after a summit reveals
+the scale; a dolly-forward into darkness builds tension. Do NOT describe static shots.
+Each move naturally evolves FROM the previous clip's final frame since clips are chained.
 
 STYLE RULE: Establish a specific color palette and look in Clip 01 (e.g. "cinematic
 wide shot, warm amber and deep shadow, golden-hour light"). Carry that COLOR
@@ -234,9 +241,10 @@ def _generate_song_arc(
             b64 = encode_image_b64(photo_path)
             if b64:
                 frames = [b64]
-        # max_tokens must cover n_clips × ~50 words each plus JSON overhead.
-        # 1500 was too small for >20 clips; 4096 handles up to ~60 clips safely.
-        max_tok = max(3000, n_clips * 100)
+        # Budget ~150 tokens per clip (50-word prompt ≈ 70 tokens + JSON overhead).
+        # 3000 was too small for 27+ clips and caused truncated responses, triggering
+        # the last-prompt-repeated fallback which made clips look identical.
+        max_tok = max(6000, n_clips * 150)
         if frames:
             text = llm_router.route_vision(
                 user_msg, frames,
@@ -254,8 +262,13 @@ def _generate_song_arc(
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
             result = [str(c) for c in clips[:n_clips]]
+            # If LLM returned fewer clips than requested (truncated response),
+            # cycle through what we have rather than repeating the last prompt —
+            # repeating causes visually identical consecutive clips.
+            src = len(result)
             while len(result) < n_clips:
-                result.append(result[-1])
+                result.append(result[len(result) % src])
+            log.info("[song-video] Story arc: %d prompts from LLM, padded to %d", src, n_clips)
             return result
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
@@ -496,12 +509,13 @@ def run_song_pipeline(job, photo_path, settings):
 
         clip_paths.append(clip_path)
 
-        # Extract the frame at the beat cut point (start of the xfade region)
-        # and use it as the first frame of the next clip for seamless transitions.
+        # Extract the last frame and use it as the start image of the next clip
+        # so the transition is seamless — both sides of the xfade open from the
+        # same frame. CAMERA MOTION RULE in the system prompt ensures each clip
+        # describes a move that naturally evolves from that shared frame.
         if i < n_clips - 1:
             frame_path = str(job_dir / f"chain_{i:02d}.jpg")
-            seek = max(0.0, this_dur - _XFADE_DUR - 0.05)
-            _chain_frame = _extract_frame_at(clip_path, frame_path, seek)
+            _chain_frame = _extract_last_frame(clip_path, frame_path)
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d — next clip uses T2V", clip_num)
 

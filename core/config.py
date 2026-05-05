@@ -17,7 +17,7 @@ DEFAULTS: dict = {
     # ── Global (shared across features) ──────────────────────────────────
     "debug_mode": False,            # show service terminal windows when True
     "gpu_job_timeout_seconds": 1800, # max seconds before a GPU job is killed (30 min)
-    "gpu_queue_max_depth": 10,       # max jobs waiting in the GPU queue
+    "gpu_queue_max_depth": 200,      # max jobs waiting in the GPU queue
     "wan2gp_root": "",
     "wan2gp_python": "",            # auto-detected if blank
     "wan_model": "LTX-2 Dev19B Distilled",
