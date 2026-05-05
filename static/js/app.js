@@ -1138,12 +1138,17 @@ document.addEventListener('DOMContentLoaded', () => {
     dismiss.addEventListener('click', e => {
       e.stopPropagation();
       const id = card._job?.id;
+      const status = card._job?.status;
       card.remove();
       if (id) {
         _feedCards.delete(id);
         _feedDismissed.add(id);
         const idx = _feedDone.indexOf(id);
         if (idx !== -1) _feedDone.splice(idx, 1);
+        // Cancel the server-side job if it's still active
+        if (status === 'running' || status === 'queued') {
+          fetch(`/api/jobs/${id}/stop`, { method: 'POST' }).catch(() => {});
+        }
       }
     });
     card.appendChild(dismiss);
@@ -1160,7 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return d;
   }
 
-  function _updateCard(card, job) {
+  function _updateCard(card, job, queueInfo = null) {
     card._job = job;  // keep modal data fresh on every poll
     const pct = job.progress || 0;
 
@@ -1171,8 +1176,12 @@ document.addEventListener('DOMContentLoaded', () => {
       card._sta.textContent = job.message || 'Running…';
     } else if (job.status === 'queued') {
       card.classList.add('jf-queued');
-      card._bar.style.width = '0%';
-      card._sta.textContent = 'Waiting in queue…';
+      // width set to 100% by CSS; animation handled by .jf-queued .jf-bar
+      if (queueInfo && queueInfo.total > 1) {
+        card._sta.textContent = queueInfo.pos === 1 ? 'Up next' : `Queue position ${queueInfo.pos} of ${queueInfo.total}`;
+      } else {
+        card._sta.textContent = 'Up next';
+      }
     } else if (job.status === 'done') {
       card.classList.add('jf-done');
       card._bar.style.width = '100%';
@@ -1193,6 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update/create active cards (running first, then queued)
       const seen = new Set();
+      const queuedJobs = (data.queued || []).filter(j => !_feedDismissed.has(j.id));
       for (const job of active) {
         if (_feedDismissed.has(job.id)) continue;
         seen.add(job.id);
@@ -1201,7 +1211,8 @@ document.addEventListener('DOMContentLoaded', () => {
           _feedEl.prepend(card);
           _feedCards.set(job.id, card);
         }
-        _updateCard(_feedCards.get(job.id), job);
+        const qPos = queuedJobs.findIndex(j => j.id === job.id);
+        _updateCard(_feedCards.get(job.id), job, qPos >= 0 ? { pos: qPos + 1, total: queuedJobs.length } : null);
       }
 
       // Add freshly completed jobs to top (newest-first, max 5)

@@ -2172,7 +2172,7 @@ textarea:focus { border-color: var(--accent); }
   transition: border-color .2s;
 }
 .jf-card.jf-running { border-color: var(--accent, #d4a017); }
-.jf-card.jf-queued  { border-color: rgba(255,255,255,.1); opacity: .65; }
+.jf-card.jf-queued  { border-color: rgba(255,255,255,.1); }
 .jf-card.jf-done    { border-color: rgba(74,222,128,.35); }
 .jf-card.jf-error   { border-color: rgba(196,30,58,.5); }
 
@@ -2205,8 +2205,18 @@ textarea:focus { border-color: var(--accent); }
 .jf-bar-wrap {
   height: 3px; background: var(--border, rgba(255,255,255,.06)); border-radius: 2px; overflow: hidden;
 }
+@keyframes jf-march {
+  to { background-position: 20px 0; }
+}
 .jf-bar { height: 100%; border-radius: 2px; background: var(--accent, #d4a017); transition: width .5s; }
-.jf-card.jf-queued .jf-bar { background: rgba(255,255,255,.2); }
+.jf-card.jf-queued .jf-bar {
+  width: 100% !important; transition: none;
+  background: repeating-linear-gradient(90deg,
+    rgba(255,255,255,.18) 0, rgba(255,255,255,.18) 10px,
+    rgba(255,255,255,.07) 10px, rgba(255,255,255,.07) 20px);
+  background-size: 20px 100%;
+  animation: jf-march .7s linear infinite;
+}
 .jf-card.jf-done   .jf-bar { background: #4ade80; width: 100% !important; }
 .jf-card.jf-error  .jf-bar { background: var(--red, #c41e3a); width: 100% !important; }
 
