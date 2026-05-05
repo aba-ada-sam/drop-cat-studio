@@ -238,19 +238,23 @@ class JobManager:
         with self._lock:
             if job_type in GPU_JOB_TYPES:
                 max_depth = int(cfg.get("gpu_queue_max_depth") or 3)
+                # Only count jobs that actually hold or are waiting for the GPU.
+                # "preparing" jobs are doing CPU work (LLM calls) and have not
+                # yet entered the GPU queue -- counting them would block new
+                # submissions while the GPU sits idle.
                 active_gpu = sum(
                     1 for j in self._jobs.values()
                     if j.type in GPU_JOB_TYPES and j.status in ("running", "queued")
                 )
                 if active_gpu >= max_depth:
                     raise RuntimeError(
-                        f"Queue is full ({active_gpu}/{max_depth} video jobs) — "
+                        f"Queue is full ({active_gpu}/{max_depth} video jobs) -- "
                         f"wait for a video to finish before adding more"
                     )
             self._jobs[job.id] = job
 
         def _run_prep():
-            job.status = "running"
+            job.status = "preparing"
             try:
                 prep_fn(job, *args, **kwargs)
             except Exception as e:
@@ -350,7 +354,7 @@ class JobManager:
         with self._lock:
             all_jobs = list(self._jobs.values())
         running = sorted(
-            [j.to_dict() for j in all_jobs if j.status == "running"],
+            [j.to_dict() for j in all_jobs if j.status in ("running", "preparing")],
             key=lambda j: j["created_at"],
         )
         queued = sorted(

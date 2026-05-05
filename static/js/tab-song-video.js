@@ -644,8 +644,14 @@ export function init(panel) {
             toast('Job finished but produced no output — check the Queue tab for details', 'error');
           }
           if (_loopMode && !_stopAfter) {
-            // Kick off the next generation automatically
-            setTimeout(_submitJob, 1500);
+            // Kick off the next generation automatically. _submitJob is async so
+            // we wrap it to catch any rejection -- without the wrapper, an API
+            // error (e.g. 429 queue-full) is an unhandled rejection that kills
+            // the loop silently and leaves createBtn.disabled permanently true.
+            setTimeout(() => _submitJob().catch(e => {
+              createBtn.disabled = false;
+              toast(`Loop stopped: ${e.message || e}`, 'error');
+            }), 1500);
           } else {
             createBtn.disabled = false;
             queueBtn.style.display = 'none';

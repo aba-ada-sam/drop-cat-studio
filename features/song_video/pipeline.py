@@ -276,6 +276,10 @@ def run_song_prep(job, photo_path, settings):
                 lyrics_text = detected
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
 
+    # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
+    # collapses trailing boundaries to total_dur, producing zero-duration clips.
+    # ffmpeg -t 0 then writes an empty file and all subsequent clips fail.
+    clip_durations = [max(8.0, d) for d in clip_durations]
     settings["_clip_durations"] = clip_durations
     settings["_beat_positions"] = beat_positions
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
@@ -490,10 +494,16 @@ def run_song_pipeline(job, photo_path, settings):
         # Push partial clip path into job.meta so the queue modal can render
         # a thumbnail strip that grows as each clip completes -- gives the
         # user real "yes it's working" feedback during the long render.
-        job.meta["partial_clips"] = list(clip_paths)
-        job.meta["clips_done"]    = len(clip_paths)
-        job.meta["clips_total"]   = n_clips
-        job.meta["stage"]         = "generating"
+        # Single update() call so the poll thread never sees a partially-written
+        # state (e.g. clips_done incremented but partial_clips not yet extended),
+        # which would cause the pending-placeholder count to go negative and
+        # flicker the queue modal strip on every poll tick.
+        job.meta.update({
+            "partial_clips": list(clip_paths),
+            "clips_done":    len(clip_paths),
+            "clips_total":   n_clips,
+            "stage":         "generating",
+        })
 
         # Extract the actual last frame and use it as the start image of the
         # next clip. Hard-cut chaining works because both clips share the
@@ -513,15 +523,19 @@ def run_song_pipeline(job, photo_path, settings):
         else:
             _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
-    if forge_unloaded:
-        reload_checkpoint()
-
     if _stopped():
+        if forge_unloaded:
+            reload_checkpoint()
         return
 
     if not clip_paths:
+        if forge_unloaded:
+            reload_checkpoint()
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Song video failed: {raw}")
+
+    if forge_unloaded:
+        reload_checkpoint()
 
     job.meta["stage"] = "concatenating"
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")

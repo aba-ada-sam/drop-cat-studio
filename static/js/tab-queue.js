@@ -445,6 +445,7 @@ function _bestOutput(job) {
 
 function _statusChip(job) {
   const map = {
+    preparing: ['Preparing',  'var(--accent)'],
     running:   ['Generating', 'var(--accent)'],
     queued:    ['Waiting',    'var(--text-3)'],
     done:      ['Done',       '#4caf50'],
@@ -626,7 +627,7 @@ function _showModal(job) {
 
 function _renderModal(job, els) {
   const isDone   = job.status === 'done';
-  const isActive = job.status === 'running' || job.status === 'queued';
+  const isActive = job.status === 'running' || job.status === 'queued' || job.status === 'preparing';
   const isFailed = job.status === 'error' || job.status === 'stopped';
 
   // Status chip (re-render in case status changed)

@@ -67,6 +67,8 @@ def _generate_story_arc(
                 tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
             )
         data = parse_json_response(text)
+        if data is None:
+            raise ValueError("No JSON in LLM response")
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
             result = [str(c) for c in clips[:n_clips]]
@@ -90,8 +92,12 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     ) as f:
         for p in clip_paths:
-            # ffmpeg concat demuxer expects forward slashes; escape any embedded single quotes
-            fwd = p.replace("\\", "/").replace("'", r"\'")
+            # ffmpeg concat demuxer: forward slashes required on Windows; single
+            # quotes inside the file '...' entry must be doubled ("''"), not
+            # backslash-escaped -- the concat demuxer uses its own quoting rules,
+            # not shell quoting, so r"\'" is silently invalid and breaks on paths
+            # with an apostrophe (e.g. "Andrew's PC").
+            fwd = p.replace("\\", "/").replace("'", "''")
             f.write(f"file '{fwd}'\n")
         list_path = f.name
     try:
