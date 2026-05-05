@@ -591,25 +591,27 @@ function _showModal(job) {
 
   // -- AI feedback / branch (rendered when terminal) --
   const feedbackBlock = el('div', { style: 'display:none; flex-direction:column; gap:8px; padding:12px; background:var(--surface-2); border-radius:8px;' });
-  const feedbackTitle = el('div', { style: 'font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3);', text: 'Tell the AI what to change' });
-  const feedbackHelp  = el('div', { style: 'font-size:.74rem; color:var(--text-3); line-height:1.4;', text: 'Type how you want the next attempt different (e.g. "make the second clip slower", "darker mood, less camera motion"). The source tab opens with the original settings pre-loaded.' });
+  const feedbackTitle = el('div', { style: 'font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3);', text: 'Make another version' });
+  const feedbackHelp  = el('div', { style: 'font-size:.74rem; color:var(--text-3); line-height:1.4;', text: 'Describe what you want changed and click Tweak. The source tab opens with the original settings pre-loaded and the AI adjusts them per your note before you click Generate.' });
   const feedbackInput = el('textarea', {
     rows: '2',
-    placeholder: 'e.g. Slower pace, darker mood, more dramatic camera moves',
+    placeholder: 'e.g. slower pace, darker mood, less camera motion',
     style: 'width:100%; resize:vertical; font-size:.85rem;',
   });
   const feedbackBtnRow = el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' });
-  const branchBtn       = el('button', { class: 'btn btn-primary btn-sm', text: 'Branch with feedback' });
-  const branchPlainBtn  = el('button', { class: 'btn btn-sm', text: 'Branch (same settings, no feedback)' });
-  feedbackBtnRow.appendChild(branchBtn); feedbackBtnRow.appendChild(branchPlainBtn);
+  const tweakBtn        = el('button', { class: 'btn btn-primary btn-sm', text: 'Tweak this video' });
+  const rerunBtn        = el('button', { class: 'btn btn-sm', text: 'Re-run same settings' });
+  const contBtn         = el('button', { class: 'btn btn-sm', text: 'Create continuation', title: 'Extract the last frame of this video and use it as the start image for the next generation' });
+  feedbackBtnRow.appendChild(tweakBtn); feedbackBtnRow.appendChild(rerunBtn); feedbackBtnRow.appendChild(contBtn);
   feedbackBlock.appendChild(feedbackTitle);
   feedbackBlock.appendChild(feedbackHelp);
   feedbackBlock.appendChild(feedbackInput);
   feedbackBlock.appendChild(feedbackBtnRow);
   box.appendChild(feedbackBlock);
 
-  branchBtn.addEventListener('click', () => _doBranch(job, feedbackInput.value.trim(), _close));
-  branchPlainBtn.addEventListener('click', () => _doBranch(job, '', _close));
+  tweakBtn.addEventListener('click', () => _doBranch(job, feedbackInput.value.trim(), _close));
+  rerunBtn.addEventListener('click', () => _doBranch(job, '', _close));
+  contBtn.addEventListener('click', () => _doContinuation(job, _close));
 
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -777,6 +779,55 @@ function _startModalRefresh(els) {
     const remaining = Math.max(0, _modalState.lastEta - elapsed);
     els.etaBadge.textContent = remaining > 0 ? `${_formatEta(remaining)} left` : '';
   }, 1000);
+}
+
+async function _doContinuation(job, closeFn) {
+  const output = _bestOutput(job);
+  if (!output) {
+    toast('No output video found for this job', 'error');
+    return;
+  }
+
+  const tabId    = job.meta?.feature === 'song_video' ? 'song-video' : job.meta?.feature || '';
+  const settings = job.meta?.settings || {};
+  if (!tabId || !Object.keys(settings).length) {
+    toast('No source tab or settings to continue from', 'error');
+    return;
+  }
+
+  const contBtn = document.querySelector('#queue-job-modal .btn[title*="last frame"]');
+  if (contBtn) { contBtn.disabled = true; contBtn.textContent = '...'; }
+
+  let frameData;
+  try {
+    frameData = await api('/api/song-video/extract-frame', {
+      method: 'POST',
+      body: JSON.stringify({ video_path: output }),
+    });
+  } catch (e) {
+    toast(`Could not extract last frame: ${e.message}`, 'error');
+    if (contBtn) { contBtn.disabled = false; contBtn.textContent = 'Create continuation'; }
+    return;
+  }
+
+  // Navigate to the source tab and apply settings with photo_path overridden
+  // to the extracted last frame so the next generation starts from where this
+  // one ended.
+  const tabBtn = document.querySelector(`.rail-tab[data-tab="${tabId}"]`);
+  if (tabBtn) tabBtn.click();
+
+  const { applySettingsToTab } = await import('./shell/ai-intent.js?v=20260503h');
+  setTimeout(() => {
+    const merged = { ...settings, photo_path: frameData.path };
+    const ok = applySettingsToTab(tabId, merged);
+    if (!ok) {
+      toast(`Open the ${tabId} tab first`, 'info');
+      return;
+    }
+    toast('Continuation ready -- adjust the story idea then click Generate.', 'success');
+  }, 100);
+
+  closeFn();
 }
 
 async function _doBranch(job, feedback, closeFn) {

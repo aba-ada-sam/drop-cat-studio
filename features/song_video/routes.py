@@ -6,6 +6,7 @@ that fits the song's duration using chained I2V clips.
 import asyncio
 import math
 import os
+import subprocess
 import uuid
 import logging
 from pathlib import Path
@@ -226,4 +227,49 @@ async def generate(request: Request):
         "clip_dur":  clip_dur,
         "audio_dur": audio_dur,
         "timeout_sec": timeout_sec,
+    }
+
+
+@router.post("/extract-frame")
+async def extract_frame(request: Request):
+    """Extract the last frame from a video file and save it to uploads/.
+
+    Used by the queue modal's 'Create continuation' button so the next
+    generation can start from exactly where the previous video ended.
+
+    Body: { video_path: str }
+    Returns: { path, url, width, height }
+    """
+    from PIL import Image
+    from core.ffmpeg_utils import probe_duration
+
+    body = await request.json()
+    video_path = body.get("video_path", "")
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, f"Video file not found: {video_path}")
+
+    dur = await asyncio.to_thread(probe_duration, video_path)
+    if not dur or dur <= 0:
+        raise HTTPException(400, "Could not determine video duration")
+
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_lastframe.jpg"
+    seek = max(0.0, dur - 0.08)
+
+    r = await asyncio.to_thread(
+        subprocess.run,
+        ["ffmpeg", "-y", "-ss", f"{seek:.4f}", "-i", video_path,
+         "-frames:v", "1", "-q:v", "2", str(dest)],
+        capture_output=True, timeout=30,
+    )
+    if r.returncode != 0 or not dest.exists():
+        raise HTTPException(500, "Failed to extract last frame from video")
+
+    img = Image.open(str(dest))
+    w, h = img.size
+    return {
+        "path":   str(dest),
+        "url":    f"/uploads/{dest.name}",
+        "width":  w,
+        "height": h,
     }

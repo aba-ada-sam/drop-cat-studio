@@ -254,7 +254,7 @@ def _generate_via_worker(
                 progress_fn(step, total)
         except Exception:
             pass
-        time.sleep(3)
+        time.sleep(2)
 
     if log_fn:
         log_fn("[error] Worker generation timed out (600s)")

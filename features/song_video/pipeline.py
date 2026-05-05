@@ -62,43 +62,43 @@ _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
 Each prompt is one 8-20 second clip. All clips together tell ONE coherent story.
 
-STORY RULE: Every clip follows the SAME character or subject in the SAME story world
-established in Clip 01. The story PROGRESSES -- each clip is a different MOMENT or
-PHASE of the journey, not a frozen repeat of the same scene.
-Example story arc: lone figure at mountain base -> climbing through forest ->
-breaking into open alpine ridge -> summit in blazing wind -> descent at dusk ->
-arriving home, transformed.
+WORLD RULE: Clip 01 must establish a SPECIFIC, NAMED setting.
+Name the location, the material, the light source, and the subject.
+Good: "A woman in a red coat on a rain-slick Tokyo street under sodium lamps"
+Bad: "a figure in a dramatic landscape bathed in ethereal light"
+Every subsequent clip stays in this world. Same subject, same place, different
+MOMENT or CAMERA POSITION. Never teleport to a new environment between clips.
 
-CAMERA MOTION RULE -- every clip must have a purposeful camera MOVE that creates
-visual dynamism. Pick one per clip and describe it explicitly:
+ANTI-SLOP RULE: Every word must earn its place.
+Banned words and phrases: blazing, sweeping, ethereal, cinematic, dramatic,
+luminous, breathtaking, majestic, haunting, mesmerizing, pulsing with energy,
+bathed in light, awash in color, transcendent, otherworldly.
+Replace vague adjectives with PHYSICAL SPECIFICS:
+  NOT "blazing fire" -- WRITE "orange flames eating a wooden chair leg"
+  NOT "dramatic shadows" -- WRITE "hard ceiling light casting black bar shadows on concrete"
+  NOT "sweeping landscape" -- WRITE "flat wheat field stretching to a grey horizon"
+
+CAMERA MOTION RULE -- every clip must have exactly ONE purposeful camera MOVE:
   zoom out (pull back to reveal), zoom in (push toward subject), slow pan left/right,
   dolly forward (glide through environment), tilt up (sweep from ground to sky),
-  orbit/arc (camera circles the subject), crane up, drift (slow float).
-Camera moves should feel MOTIVATED by the story -- a zoom-out after a summit reveals
-the scale; a dolly-forward into darkness builds tension. Do NOT describe static shots.
-Each move naturally evolves FROM the previous clip's final frame since clips are chained.
+  orbit/arc (camera circles subject), crane up, drift (slow float).
+The move must be physically motivated by the story moment. Do NOT describe static shots.
+Each move evolves from the previous clip's final frame since clips are chained.
 
 MOTION ARC RULE -- every clip must have ONE clear visual climax -- a single moment of
-maximum action -- not uniform motion throughout. Examples of strong arcs:
-  - quiet build -> dolly accelerates -> object impacts / camera meets subject
-  - subject enters frame -> moves through space -> reaches a defined position
-  - environment is still -> wind/fire/water surges -> returns toward calm
-A clip that's "fast all the way through" or "slow all the way through" has no peak.
-Build a *trajectory* the eye can follow toward a single moment of release.
-The exact timing of the climax inside the clip is handled automatically -- your job
-is to ensure there IS one clear climax, not to time it precisely.
-
-STYLE RULE: Establish a specific color palette and look in Clip 01 (e.g. "cinematic
-wide shot, warm amber and deep shadow, golden-hour light"). Carry that COLOR
-TEMPERATURE and MOOD through every clip -- but the composition and framing MUST
-change each clip.
+maximum action -- not uniform motion throughout:
+  - quiet build -> dolly accelerates -> object ARRIVES or IMPACTS
+  - subject moves through space -> REACHES a defined position
+  - environment is still -> a force (water, fire, wind) SURGES then settles
+A clip that is "fast all the way through" or "slow all the way through" has no peak.
+Build a trajectory the eye can follow toward a single moment of release.
 
 FRAME RULE: No close-up face shots. No direct action on a character's body.
-For close shots use hands, feet, objects, texture. The renderer distorts faces.
+For close shots use hands, feet, objects, textures, materials.
 
 Rules:
-- 30-50 words per prompt -- include shot type, subject action, and environment
-- Story progresses across clips: arrival -> challenge -> peak -> resolution
+- 20-35 words per prompt -- specific noun + verb + environment, no filler adjectives
+- Story progresses: arrival -> challenge -> peak -> resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -137,7 +137,7 @@ def _generate_song_arc(
     bpm_str = f"{bpm} BPM" if bpm else ""
     song_desc = ", ".join(filter(None, [key_str, bpm_str, mood]))
 
-    story_direction = (user_idea or "").strip() or "a compelling cinematic music video"
+    story_direction = (user_idea or "").strip() or "a music video that visually matches the song's mood and energy"
     style_line  = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
     lyrics_line = (
         f"\nSong lyrics / theme (first ~2 min):\n{lyrics_text[:800].strip()}\n"
@@ -192,7 +192,7 @@ def _generate_song_arc(
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
 
-    base = user_idea or "Sweeping landscape at golden hour, light surges across the horizon, colours bloom and shift with the energy of the music, wide cinematic shot"
+    base = user_idea or "Wide shot of open landscape, camera dollies forward slowly as subject moves toward the horizon, warm late-afternoon light"
     return [base] * n_clips
 
 
@@ -391,8 +391,16 @@ def run_song_pipeline(job, photo_path, settings):
             clip_start_image = prepped_photo
         else:
             clip_start_image = _chain_frame   # None if extraction failed -- falls back to T2V
-        clip_out         = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
-        this_dur          = clip_durations[i] if i < len(clip_durations) else clip_dur
+        clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+        this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
+
+        # When chaining from a previous clip's last frame, back off guidance so
+        # the start-image conditioning has more weight than the text prompt.
+        # At guidance=7.5 the text dominates and the scene shifts visually;
+        # at ~4.5 the start frame's content anchors the visuals while the text
+        # guides only motion and camera. Clip 0 uses the full user-set guidance
+        # because there's no chain frame to anchor -- just the initial photo.
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.6)
 
         try:
             clip_path = video_generator.generate_video(
@@ -405,7 +413,7 @@ def run_song_pipeline(job, photo_path, settings):
                 override_width=int(ow) if ow else None,
                 override_height=int(oh) if oh else None,
                 steps=steps,
-                guidance=guidance,
+                guidance=effective_guidance,
                 seed=seed,
                 stop_check=_stopped,
                 log_fn=_log,
