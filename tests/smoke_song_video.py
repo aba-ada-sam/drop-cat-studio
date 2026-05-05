@@ -1,15 +1,15 @@
 """Smoketest the song-video beat-sync pipeline without touching the GPU.
 
 Exercises:
-  1. audio_analyzer.analyze()        — librosa BPM/key/beats extraction
-  2. audio_analyzer.compute_clip_plan() — beat-aligned durations + positions
-  3. motion_analyzer.find_motion_peak() — cv2 frame-diff peak detection
-  4. motion_analyzer.speed_ramp_to_target() — ffmpeg piecewise time warp
-  5. motion_analyzer.align_clip_to_beat() — end-to-end on a real clip
-  6. pipeline._generate_song_arc()    — LLM story arc generation
+  1. audio_analyzer.analyze()        -- librosa BPM/key/beats extraction
+  2. audio_analyzer.compute_clip_plan() -- beat-aligned durations + positions
+  3. motion_analyzer.find_motion_peak() -- cv2 frame-diff peak detection
+  4. motion_analyzer.speed_ramp_to_target() -- ffmpeg piecewise time warp
+  5. motion_analyzer.align_clip_to_beat() -- end-to-end on a real clip
+  6. pipeline._generate_song_arc()    -- LLM story arc generation
   7. pipeline imports + module integrity
 
-Skips: anything that calls WanGP (clip generation) — see CLAUDE.md.
+Skips: anything that calls WanGP (clip generation) -- see CLAUDE.md.
 """
 import os
 import sys
@@ -55,7 +55,7 @@ print(f"sample video: {VIDEO}")
 print()
 
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
+# -- Tests ---------------------------------------------------------------------
 
 print("[imports]")
 
@@ -184,7 +184,7 @@ def t_ramp_in_bounds():
     import tempfile
     dur = probe_duration(VIDEO)
     t_nat, _ = find_motion_peak(VIDEO)
-    # Modest shift — keep ratio in range
+    # Modest shift -- keep ratio in range
     target = max(1.5, t_nat - 1.5) if t_nat > 3.0 else t_nat + 1.5
     target = min(dur - 1.5, target)
     out = os.path.join(tempfile.gettempdir(), "smoke_ramp.mp4")
@@ -205,7 +205,7 @@ def t_ramp_out_of_bounds():
     import tempfile
     dur = probe_duration(VIDEO)
     out = os.path.join(tempfile.gettempdir(), "smoke_ramp_extreme.mp4")
-    # Pull peak from 90% to 10% — way outside [0.55, 1.8] ratio bounds
+    # Pull peak from 90% to 10% -- way outside [0.55, 1.8] ratio bounds
     ok = speed_ramp_to_target(VIDEO, out, dur * 0.9, dur * 0.1, dur)
     assert not ok, "ramp should reject extreme ratio"
     if os.path.exists(out):
@@ -217,7 +217,7 @@ def t_ramp_edge():
     from features.song_video.motion_analyzer import speed_ramp_to_target
     import tempfile
     out = os.path.join(tempfile.gettempdir(), "smoke_ramp_edge.mp4")
-    # t_natural=0.1s is inside the 0.4s edge buffer — should reject
+    # t_natural=0.1s is inside the 0.4s edge buffer -- should reject
     ok = speed_ramp_to_target("nonexistent.mp4", out, 0.1, 4.0, 8.0)
     assert not ok, "ramp should reject edge-time peaks before invoking ffmpeg"
 
@@ -257,9 +257,9 @@ def t_align_already_on_beat():
     dur = probe_duration(VIDEO)
     t_nat, _ = find_motion_peak(VIDEO)
     out = os.path.join(tempfile.gettempdir(), "smoke_already.mp4")
-    # Target = natural peak → should short-circuit with "already on beat"
+    # Target = natural peak -> should short-circuit with "already on beat"
     applied, info = align_clip_to_beat(VIDEO, t_nat, dur, out)
-    assert not applied, "should not ramp when target ≈ natural"
+    assert not applied, "should not ramp when target ~ natural"
     assert "already on beat" in info["reason"] or "uniform" in info["reason"], info["reason"]
 
 

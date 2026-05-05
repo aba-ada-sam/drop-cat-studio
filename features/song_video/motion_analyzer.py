@@ -1,7 +1,7 @@
 """Motion-peak detection and beat-aligned speed-ramping for song-video clips.
 
 The song-video pipeline generates clips whose *internal* motion peaks land
-wherever the AI decides — usually not on the audio's beat. This module fixes
+wherever the AI decides -- usually not on the audio's beat. This module fixes
 that by:
 
   1. Detecting WHERE inside each clip the visual action peaks (frame diff)
@@ -10,7 +10,7 @@ that by:
 
 The ramp preserves total clip duration: the segment before the natural peak
 plays at one speed, the segment after at a different speed, and they meet at
-the target time. Ratios are clamped so the warp stays musically natural —
+the target time. Ratios are clamped so the warp stays musically natural --
 clips that would need extreme speedup/slowdown are returned untouched.
 
 Optional dependency: opencv-python. If cv2 is missing, find_motion_peak()
@@ -36,7 +36,7 @@ def find_motion_peak(video_path: str) -> tuple[float, float] | None:
     pixel glitch.
 
     Returns (peak_time_seconds, normalized_confidence) or None on failure.
-    Confidence is the ratio peak_value / mean_value — values >= 1.3 indicate
+    Confidence is the ratio peak_value / mean_value -- values >= 1.3 indicate
     a clearly defined peak; below that the clip is roughly uniform motion
     and ramping it provides little benefit (see align_clip_to_beat min_confidence).
     """
@@ -44,7 +44,7 @@ def find_motion_peak(video_path: str) -> tuple[float, float] | None:
         import cv2
         import numpy as np
     except ImportError:
-        log.info("[motion-analyzer] opencv-python not installed — skipping motion peak detection")
+        log.info("[motion-analyzer] opencv-python not installed -- skipping motion peak detection")
         return None
 
     cap = cv2.VideoCapture(video_path)
@@ -106,7 +106,7 @@ def speed_ramp_to_target(
     Math:
       Segment 1 [0, t_natural] is replayed in [0, t_target]
         speed factor s1 = t_target / t_natural
-        (s1 < 1 → segment plays faster; > 1 → slower)
+        (s1 < 1 -> segment plays faster; > 1 -> slower)
       Segment 2 [t_natural, dur] is replayed in [t_target, dur]
         speed factor s2 = (dur - t_target) / (dur - t_natural)
 
@@ -115,7 +115,7 @@ def speed_ramp_to_target(
     we return False so the caller keeps the original clip.
 
     ffmpeg setpts semantics: setpts=PTS*X stretches duration by X.
-    X<1 → faster output, X>1 → slower output.
+    X<1 -> faster output, X>1 -> slower output.
     """
     edge = 0.4  # don't ramp peaks too close to clip edges (no room to warp)
     if (
@@ -133,7 +133,7 @@ def speed_ramp_to_target(
     min_ratio = 1.0 / max_ratio
     if not (min_ratio <= s1 <= max_ratio and min_ratio <= s2 <= max_ratio):
         log.debug(
-            "[motion-analyzer] ramp out of bounds: s1=%.2f s2=%.2f (clamp %.2f-%.2f) — keeping original",
+            "[motion-analyzer] ramp out of bounds: s1=%.2f s2=%.2f (clamp %.2f-%.2f) -- keeping original",
             s1, s2, min_ratio, max_ratio,
         )
         return False
@@ -158,7 +158,7 @@ def speed_ramp_to_target(
         r = subprocess.run(cmd, capture_output=True, timeout=180)
         if r.returncode == 0 and Path(out_path).exists():
             log.info(
-                "[motion-analyzer] ramp ok: %.2fs→%.2fs in %.1fs clip (s1=%.2f, s2=%.2f)",
+                "[motion-analyzer] ramp ok: %.2fs->%.2fs in %.1fs clip (s1=%.2f, s2=%.2f)",
                 t_natural, t_target, dur, s1, s2,
             )
             return True
@@ -182,13 +182,13 @@ def align_clip_to_beat(
 
     Returns (applied, info_dict). info_dict carries diagnostic fields the
     pipeline can surface in its progress messages and logs:
-        natural_time   — detected peak time in seconds (may be None)
-        target_time    — caller-supplied beat time
-        confidence     — peak/mean motion ratio (>1.3 is a clean peak)
-        applied        — True if speed ramp was actually written
-        reason         — human-readable explanation when applied=False
+        natural_time   -- detected peak time in seconds (may be None)
+        target_time    -- caller-supplied beat time
+        confidence     -- peak/mean motion ratio (>1.3 is a clean peak)
+        applied        -- True if speed ramp was actually written
+        reason         -- human-readable explanation when applied=False
 
-    The caller decides what to do with applied=False clips — generally it
+    The caller decides what to do with applied=False clips -- generally it
     should keep the original generated clip unmodified.
     """
     info: dict = {
@@ -208,7 +208,7 @@ def align_clip_to_beat(
     info["confidence"] = conf
 
     if conf < min_confidence:
-        info["reason"] = f"motion is uniform (conf={conf:.2f}) — ramping won't help"
+        info["reason"] = f"motion is uniform (conf={conf:.2f}) -- ramping won't help"
         return False, info
 
     if abs(t_nat - target_time) < 0.25:

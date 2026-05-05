@@ -1,15 +1,15 @@
-"""Song Video pipeline: audio file → N chained video clips → merge with original audio.
+"""Song Video pipeline: audio file -> N chained video clips -> merge with original audio.
 
 Beat-synced architecture:
   1. Audio analyzer extracts beat times + per-clip target peak position
   2. LLM writes a single story arc, one prompt per clip, each with a clear
-     visual climax (the LLM does NOT try to time the climax — it just makes
+     visual climax (the LLM does NOT try to time the climax -- it just makes
      sure each clip has one)
   3. WanGP renders each clip; we then run frame-difference motion analysis
      to find where the visual climax actually landed
   4. ffmpeg piecewise speed-ramp warps the clip so the natural climax slides
      onto the audio's beat timestamp. Clip duration is preserved.
-  5. Hard-cut concat — boundaries chain via identical first/last frames
+  5. Hard-cut concat -- boundaries chain via identical first/last frames
 
 No ACE-Step involved. The user's uploaded song is the audio track.
 """
@@ -36,7 +36,7 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
 
     Probes the duration first then seeks to 2 frames before the end, so the
     extracted frame is the true final frame rather than an arbitrary point
-    0.5s before end. This matters for seamless hard-cut chaining — clip N+1
+    0.5s before end. This matters for seamless hard-cut chaining -- clip N+1
     must start from the exact same frame that clip N ended on.
     """
     dur = probe_duration(video_path)
@@ -56,49 +56,49 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
 
 
-# ── Story arc generation ──────────────────────────────────────────────────────
+# -- Story arc generation ------------------------------------------------------
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
 Each prompt is one 8-20 second clip. All clips together tell ONE coherent story.
 
 STORY RULE: Every clip follows the SAME character or subject in the SAME story world
-established in Clip 01. The story PROGRESSES — each clip is a different MOMENT or
+established in Clip 01. The story PROGRESSES -- each clip is a different MOMENT or
 PHASE of the journey, not a frozen repeat of the same scene.
-Example story arc: lone figure at mountain base → climbing through forest →
-breaking into open alpine ridge → summit in blazing wind → descent at dusk →
+Example story arc: lone figure at mountain base -> climbing through forest ->
+breaking into open alpine ridge -> summit in blazing wind -> descent at dusk ->
 arriving home, transformed.
 
-CAMERA MOTION RULE — every clip must have a purposeful camera MOVE that creates
+CAMERA MOTION RULE -- every clip must have a purposeful camera MOVE that creates
 visual dynamism. Pick one per clip and describe it explicitly:
   zoom out (pull back to reveal), zoom in (push toward subject), slow pan left/right,
   dolly forward (glide through environment), tilt up (sweep from ground to sky),
   orbit/arc (camera circles the subject), crane up, drift (slow float).
-Camera moves should feel MOTIVATED by the story — a zoom-out after a summit reveals
+Camera moves should feel MOTIVATED by the story -- a zoom-out after a summit reveals
 the scale; a dolly-forward into darkness builds tension. Do NOT describe static shots.
 Each move naturally evolves FROM the previous clip's final frame since clips are chained.
 
-MOTION ARC RULE — every clip must have ONE clear visual climax — a single moment of
-maximum action — not uniform motion throughout. Examples of strong arcs:
-  - quiet build → dolly accelerates → object impacts / camera meets subject
-  - subject enters frame → moves through space → reaches a defined position
-  - environment is still → wind/fire/water surges → returns toward calm
+MOTION ARC RULE -- every clip must have ONE clear visual climax -- a single moment of
+maximum action -- not uniform motion throughout. Examples of strong arcs:
+  - quiet build -> dolly accelerates -> object impacts / camera meets subject
+  - subject enters frame -> moves through space -> reaches a defined position
+  - environment is still -> wind/fire/water surges -> returns toward calm
 A clip that's "fast all the way through" or "slow all the way through" has no peak.
 Build a *trajectory* the eye can follow toward a single moment of release.
-The exact timing of the climax inside the clip is handled automatically — your job
+The exact timing of the climax inside the clip is handled automatically -- your job
 is to ensure there IS one clear climax, not to time it precisely.
 
 STYLE RULE: Establish a specific color palette and look in Clip 01 (e.g. "cinematic
 wide shot, warm amber and deep shadow, golden-hour light"). Carry that COLOR
-TEMPERATURE and MOOD through every clip — but the composition and framing MUST
+TEMPERATURE and MOOD through every clip -- but the composition and framing MUST
 change each clip.
 
 FRAME RULE: No close-up face shots. No direct action on a character's body.
 For close shots use hands, feet, objects, texture. The renderer distorts faces.
 
 Rules:
-- 30-50 words per prompt — include shot type, subject action, and environment
-- Story progresses across clips: arrival → challenge → peak → resolution
+- 30-50 words per prompt -- include shot type, subject action, and environment
+- Story progresses across clips: arrival -> challenge -> peak -> resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -115,7 +115,7 @@ def _generate_song_arc(
     """Generate N motion prompts that follow a single story across the song.
 
     Beat alignment is handled in post-generation by the motion analyzer +
-    speed ramp — the LLM only needs to ensure each clip has one clear visual
+    speed ramp -- the LLM only needs to ensure each clip has one clear visual
     climax, not time it precisely.
     """
     clip_labels = analysis.get("clip_energy_labels", [])
@@ -124,7 +124,7 @@ def _generate_song_arc(
     mode   = analysis.get("mode", "")
     mood   = analysis.get("mood", "cinematic")
 
-    # Per-clip pacing label only — no percentages, no beat-timing instructions.
+    # Per-clip pacing label only -- no percentages, no beat-timing instructions.
     # The label hints at narrative intensity (intro / climb / peak / release)
     # without dictating motion adjectives.
     clip_hints = []
@@ -160,7 +160,7 @@ def _generate_song_arc(
             b64 = encode_image_b64(photo_path)
             if b64:
                 frames = [b64]
-        # Budget ~150 tokens per clip (50-word prompt ≈ 70 tokens + JSON overhead).
+        # Budget ~150 tokens per clip (50-word prompt ~ 70 tokens + JSON overhead).
         # 3000 was too small for 27+ clips and caused truncated responses, triggering
         # the last-prompt-repeated fallback which made clips look identical.
         max_tok = max(6000, n_clips * 150)
@@ -176,13 +176,13 @@ def _generate_song_arc(
             )
         data = parse_json_response(text)
         if data is None:
-            log.warning("[song-video] Story arc: LLM returned no parseable JSON — raw: %.200s", text)
+            log.warning("[song-video] Story arc: LLM returned no parseable JSON -- raw: %.200s", text)
             raise ValueError("No JSON in LLM response")
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
             result = [str(c) for c in clips[:n_clips]]
             # If LLM returned fewer clips than requested (truncated response),
-            # cycle through what we have rather than repeating the last prompt —
+            # cycle through what we have rather than repeating the last prompt --
             # repeating causes visually identical consecutive clips.
             src = len(result)
             while len(result) < n_clips:
@@ -242,7 +242,7 @@ def _merge_video_audio_trim(
     return None
 
 
-# ── Prep phase ────────────────────────────────────────────────────────────────
+# -- Prep phase ----------------------------------------------------------------
 
 def run_song_prep(job, photo_path, settings):
     """Phase 0: beat plan + lyric detection + LLM story arc. CPU only, no GPU."""
@@ -259,8 +259,8 @@ def run_song_prep(job, photo_path, settings):
     audio_path    = settings.get("audio_path", "")
     lyrics_text   = (settings.get("lyrics_text") or "").strip()
 
-    # Run beat alignment + lyric detection concurrently — both CPU, no GPU needed.
-    job.update(progress=2, message="Analysing beat structure and detecting lyrics…")
+    # Run beat alignment + lyric detection concurrently -- both CPU, no GPU needed.
+    job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -279,7 +279,7 @@ def run_song_prep(job, photo_path, settings):
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
-    job.update(progress=4, message="Planning music video story arc…")
+    job.update(progress=4, message="Planning music video story arc...")
     try:
         arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
         settings["_story_arc"] = arc
@@ -288,13 +288,13 @@ def run_song_prep(job, photo_path, settings):
         log.warning("[song-video] Story arc failed: %s", e)
         settings["_story_arc"] = [user_idea or "Subject erupts into motion"] * n_clips
 
-    job.update(progress=10, message="Story arc ready, waiting for GPU…")
+    job.update(progress=10, message="Story arc ready, waiting for GPU...")
 
 
-# ── GPU phase ─────────────────────────────────────────────────────────────────
+# -- GPU phase -----------------------------------------------------------------
 
 def run_song_pipeline(job, photo_path, settings):
-    """Song-video GPU pipeline: N chained clips → concat → merge with user's audio."""
+    """Song-video GPU pipeline: N chained clips -> concat -> merge with user's audio."""
     from app import gallery_push
     from features.fun_videos import video_generator
     from services.forge_client import unload_checkpoint, reload_checkpoint
@@ -307,7 +307,7 @@ def run_song_pipeline(job, photo_path, settings):
     def _stopped():
         return job.stop_event.is_set()
 
-    # ── Settings ──────────────────────────────────────────────────────────
+    # -- Settings ----------------------------------------------------------
     n_clips        = int(settings.get("num_clips", 10))
     clip_dur       = float(settings.get("clip_duration", 8.0))
     clip_durations = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
@@ -326,7 +326,7 @@ def run_song_pipeline(job, photo_path, settings):
     if not story_arc:
         story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
     if not audio_path or not os.path.isfile(audio_path):
-        raise RuntimeError("Audio file not found — please re-upload the song")
+        raise RuntimeError("Audio file not found -- please re-upload the song")
 
     ts      = time.strftime("%Y-%m-%d")
     slug    = Path(photo_path).stem[:14].replace(" ", "_") if photo_path else "songvid"
@@ -343,10 +343,10 @@ def run_song_pipeline(job, photo_path, settings):
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
 
-    # ── Free VRAM ─────────────────────────────────────────────────────────
+    # -- Free VRAM ---------------------------------------------------------
     forge_unloaded = unload_checkpoint()
 
-    # ── Phase 1: Generate clips ───────────────────────────────────────────
+    # -- Phase 1: Generate clips -------------------------------------------
     clip_paths: list[str] = []
 
     prepped_photo: str | None = None
@@ -354,7 +354,7 @@ def run_song_pipeline(job, photo_path, settings):
         prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
 
     _last_error: list[str | None] = [None]
-    _chain_frame: str | None = None   # last frame of previous clip → first frame of next
+    _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
     for i, clip_prompt in enumerate(story_arc):
@@ -369,14 +369,14 @@ def run_song_pipeline(job, photo_path, settings):
         if _clip_secs:
             avg = sum(_clip_secs) / len(_clip_secs)
             rem = (n_clips - i) * avg
-            eta_str = f" — ~{int(rem // 60)}m {int(rem % 60):02d}s left"
+            eta_str = f" -- ~{int(rem // 60)}m {int(rem % 60):02d}s left"
 
-        job.update(progress=pct_start, message=f"Clip {clip_num}/{n_clips}{eta_str}…")
+        job.update(progress=pct_start, message=f"Clip {clip_num}/{n_clips}{eta_str}...")
         _clip_t0 = time.time()
 
         def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num, _et=eta_str):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
-            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}{_et}")
+            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}{_et}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
         # Clip 0: use the user's uploaded photo as visual anchor.
@@ -386,7 +386,7 @@ def run_song_pipeline(job, photo_path, settings):
         if i == 0:
             clip_start_image = prepped_photo
         else:
-            clip_start_image = _chain_frame   # None if extraction failed — falls back to T2V
+            clip_start_image = _chain_frame   # None if extraction failed -- falls back to T2V
         clip_out         = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur          = clip_durations[i] if i < len(clip_durations) else clip_dur
 
@@ -418,7 +418,7 @@ def run_song_pipeline(job, photo_path, settings):
             break
 
         if not clip_path:
-            _log(f"[error] Clip {clip_num} produced no output — stopping early")
+            _log(f"[error] Clip {clip_num} produced no output -- stopping early")
             break
 
         # Trim clip to exact beat-aligned duration so timing errors don't
@@ -432,11 +432,11 @@ def run_song_pipeline(job, photo_path, settings):
             )
             if trim_r.returncode == 0 and Path(trimmed).exists():
                 os.replace(trimmed, clip_path)
-                log.debug("[song-video] Clip %d trimmed %.2fs → %.2fs", clip_num, actual_dur, this_dur)
+                log.debug("[song-video] Clip %d trimmed %.2fs -> %.2fs", clip_num, actual_dur, this_dur)
 
-        # ── Beat-sync via motion peak detection + speed ramp ────────────────
+        # -- Beat-sync via motion peak detection + speed ramp ----------------
         # The LLM gave us a story arc with a clear visual climax in each clip,
-        # but the climax lands wherever WanGP put it — not on the song's beat.
+        # but the climax lands wherever WanGP put it -- not on the song's beat.
         # We detect the natural peak via frame differencing then warp the clip
         # so that peak slides onto target_time. Total clip duration is
         # preserved, so downstream concat math doesn't change.
@@ -446,7 +446,7 @@ def run_song_pipeline(job, photo_path, settings):
         beat_pos      = beat_positions[i] if i < len(beat_positions) else 0.5
         target_time   = beat_pos * post_trim_dur
         ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
-        job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} — syncing peak to beat…")
+        job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} -- syncing peak to beat...")
         try:
             applied, info = align_clip_to_beat(
                 clip_path, target_time, post_trim_dur, ramped_out,
@@ -458,7 +458,7 @@ def run_song_pipeline(job, photo_path, settings):
                 os.replace(ramped_out, clip_path)
                 _log(
                     f"[info] Clip {clip_num} beat-synced: peak {info['natural_time']:.2f}s "
-                    f"→ {info['target_time']:.2f}s (conf {info['confidence']:.2f})"
+                    f"-> {info['target_time']:.2f}s (conf {info['confidence']:.2f})"
                 )
             else:
                 # Clean up partial output if the ramp aborted mid-write.
@@ -470,7 +470,7 @@ def run_song_pipeline(job, photo_path, settings):
                 if info.get("reason"):
                     log.debug("[song-video] Clip %d sync skipped: %s", clip_num, info["reason"])
         except Exception as e:
-            log.warning("[song-video] Beat-sync exception on clip %d: %s — keeping original", clip_num, e)
+            log.warning("[song-video] Beat-sync exception on clip %d: %s -- keeping original", clip_num, e)
 
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
@@ -484,12 +484,12 @@ def run_song_pipeline(job, photo_path, settings):
             frame_path = str(job_dir / f"chain_{i:02d}.jpg")
             _chain_frame = _extract_last_frame(clip_path, frame_path)
             if not _chain_frame:
-                log.debug("[song-video] Frame extraction failed for clip %d — next clip uses T2V", clip_num)
+                log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
 
         if _clip_secs and clip_num < n_clips:
             avg = sum(_clip_secs) / len(_clip_secs)
             rem = (n_clips - clip_num) * avg
-            _log(f"[info] Clip {clip_num}/{n_clips} complete — ~{int(rem // 60)}m {int(rem % 60):02d}s remaining")
+            _log(f"[info] Clip {clip_num}/{n_clips} complete -- ~{int(rem // 60)}m {int(rem % 60):02d}s remaining")
         else:
             _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
@@ -500,20 +500,20 @@ def run_song_pipeline(job, photo_path, settings):
         return
 
     if not clip_paths:
-        raw = _last_error[0] or "No clips generated — check WanGP is running"
+        raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Song video failed: {raw}")
 
-    job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips…")
+    job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # ── Phase 2: Hard-cut concat ─────────────────────────────────────────────
-    # No dissolve — clips chain via the identical last/first frame.
+    # -- Phase 2: Hard-cut concat ---------------------------------------------
+    # No dissolve -- clips chain via the identical last/first frame.
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
     if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]
 
-    # ── Phase 3: Merge with user's audio (loop clips to fill song if needed) ─
-    job.update(progress=88, message="Looping clips to fill song duration…")
+    # -- Phase 3: Merge with user's audio (loop clips to fill song if needed) -
+    job.update(progress=88, message="Looping clips to fill song duration...")
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
@@ -521,7 +521,7 @@ def run_song_pipeline(job, photo_path, settings):
     # Trim to exact song duration so the video doesn't overhang
     effective_dur = audio_dur if audio_dur > 0 else (probe_duration(audio_path) or 0.0)
     if effective_dur <= 0:
-        raise RuntimeError("Cannot determine audio duration — file may be missing or corrupt")
+        raise RuntimeError("Cannot determine audio duration -- file may be missing or corrupt")
     merged = _merge_video_audio_trim(concat_path, audio_path, final_path, effective_dur)
 
     if merged:
@@ -566,10 +566,10 @@ def run_song_pipeline(job, photo_path, settings):
             except Exception:
                 pass
     else:
-        # Merge failed — return the concat without audio
+        # Merge failed -- return the concat without audio
         job.output = concat_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Music video done ({len(clip_paths)} clips — audio merge failed)"
+        job.message = f"Music video done ({len(clip_paths)} clips -- audio merge failed)"
         try:
             from core.session import get_current as get_session
             get_session().add_file(Path(concat_path).name, "video", "song_video", path=concat_path)

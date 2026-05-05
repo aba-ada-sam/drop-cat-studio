@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 # Bars per clip options, in preference order.
-# We pick the first option that lands within WanGP's 8–20s range.
+# We pick the first option that lands within WanGP's 8-20s range.
 _BARS_PER_CLIP_OPTIONS = [8, 4, 16]
 
 
@@ -28,7 +28,7 @@ def _bars_to_seconds(bpm: float, bars: int) -> float:
 
 
 def _suggest_clip_dur(bpm: float | None) -> int:
-    """Pick a musically-aligned clip duration in seconds (8–19s range).
+    """Pick a musically-aligned clip duration in seconds (8-19s range).
 
     Ceiling is 19s: LTX-2 at 25fps reaches 481 latent frames at ~19.24s,
     the exact WanGP sliding-window threshold. 20s produces 501 frames and
@@ -131,7 +131,7 @@ def compute_clip_durations(
         return durations
 
     except Exception as e:
-        log.warning("[song-video] Beat alignment failed (%s) — using equal durations", e)
+        log.warning("[song-video] Beat alignment failed (%s) -- using equal durations", e)
         return default
 
 
@@ -147,7 +147,7 @@ def compute_clip_plan(
         durations      list[float]  clip lengths in seconds, with each boundary
                                     snapped to the nearest strong onset within
                                     [min_dur, max_dur] of the previous boundary.
-        beat_positions list[float]  0.0–1.0 position of the strongest onset
+        beat_positions list[float]  0.0-1.0 position of the strongest onset
                                     within each clip (0 = start, 1 = end).
                                     The pipeline post-warps each generated clip
                                     so its visual peak lands at this position.
@@ -201,12 +201,13 @@ def compute_clip_plan(
         return durations, beat_positions
 
     except Exception as e:
-        log.warning("[song-video] Clip plan failed (%s) — using equal durations", e)
+        log.warning("[song-video] Clip plan failed (%s) -- using equal durations", e)
         return default_durs, default_beats
 
 
 _WHISPER_NOISE = re.compile(
-    r'\[.*?\]|\(.*?\)|♪|♫|\bmm+\b|\buh+\b|\bah+\b', re.IGNORECASE
+    '\\[.*?\\]|\\(.*?\\)|\u266a|\u266b|\\bmm+\\b|\\buh+\\b|\\bah+\\b',
+    re.IGNORECASE,
 )
 
 
@@ -218,7 +219,7 @@ def _transcribe_lyrics(audio_path: str, max_seconds: float = 120.0) -> str:
     """
     try:
         from faster_whisper import WhisperModel
-        log.info("[song-video] Transcribing lyrics (faster-whisper base)…")
+        log.info("[song-video] Transcribing lyrics (faster-whisper base)...")
         model = WhisperModel("base", device="cpu", compute_type="int8")
         segments, _info = model.transcribe(
             audio_path,
@@ -238,7 +239,7 @@ def _transcribe_lyrics(audio_path: str, max_seconds: float = 120.0) -> str:
         log.info("[song-video] Lyrics detected: %d chars", len(text))
         return text
     except ImportError:
-        log.debug("[song-video] faster-whisper not installed — skipping lyric detection")
+        log.debug("[song-video] faster-whisper not installed -- skipping lyric detection")
         return ""
     except Exception as e:
         log.warning("[song-video] Lyric transcription failed: %s", e)
@@ -256,7 +257,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         mode              str|None  "major" | "minor"
         mood              str     derived from mode + energy
         energy            str     "low" | "moderate" | "high"
-        energy_profile    list    per-clip energy 0.0–1.0 (empty if no librosa)
+        energy_profile    list    per-clip energy 0.0-1.0 (empty if no librosa)
         clip_energy_labels list   ["HIGH", "MED", "LOW", ...]
         suggested_clip_dur int    BPM-aligned clip length in seconds
         suggested_num_clips int   ceil(duration / suggested_clip_dur)
@@ -281,7 +282,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         "beat_strengths": [],
     }
 
-    # ── Basic duration via ffprobe ────────────────────────────────────────
+    # -- Basic duration via ffprobe ----------------------------------------
     dur = probe_duration(audio_path)
     if dur <= 0:
         log.warning("[song-video] Could not probe duration for %s", audio_path)
@@ -291,13 +292,13 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
     mins, secs = divmod(int(dur), 60)
     result["duration_display"] = f"{mins}:{secs:02d}"
 
-    # ── Rich analysis via librosa ─────────────────────────────────────────
+    # -- Rich analysis via librosa -----------------------------------------
     try:
         import librosa
         import numpy as np
 
         log.info("[song-video] Running librosa analysis on %s", Path(audio_path).name)
-        # Load mono, 22050 Hz — good enough for beat/key analysis, fast to load
+        # Load mono, 22050 Hz -- good enough for beat/key analysis, fast to load
         y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 300))
 
         # BPM + beat timestamps.
@@ -355,13 +356,13 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         result["mood"] = _mood_from_analysis(result["mode"], result["energy"])
         result["has_rich_analysis"] = True
         log.info(
-            "[song-video] Analysis done: %d BPM, %s %s, %s energy, %d clips × %ds",
+            "[song-video] Analysis done: %d BPM, %s %s, %s energy, %d clips x %ds",
             result["bpm"], result["key"], result["mode"],
             result["energy"], n_clips, clip_dur_secs,
         )
 
     except ImportError:
-        log.info("[song-video] librosa not installed — using ffprobe-only analysis. "
+        log.info("[song-video] librosa not installed -- using ffprobe-only analysis. "
                  "Run: pip install librosa  for BPM/key/energy features.")
         result["suggested_clip_dur"] = suggested_clip_dur or 8
 
@@ -369,7 +370,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         log.warning("[song-video] librosa analysis failed: %s", e)
         result["suggested_clip_dur"] = suggested_clip_dur or 8
 
-    # ── Always recalculate clip count from final clip dur ─────────────────
+    # -- Always recalculate clip count from final clip dur -----------------
     result["suggested_num_clips"] = max(1, math.ceil(dur / result["suggested_clip_dur"]))
     if not result["mood"] or result["mood"] == "cinematic":
         result["mood"] = _mood_from_analysis(result.get("mode"), result["energy"])
