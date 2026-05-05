@@ -130,76 +130,6 @@ def _concat_clips_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 
     return _concat_clips(clip_paths, out_path)
 
 
-def _apply_beat_flash(
-    video_path: str,
-    out_path: str,
-    beat_times: list[float],
-    beat_strengths: list[float],
-    log_fn=None,
-) -> bool:
-    """Stamp brief brightness flashes onto the video at each beat timestamp.
-
-    Strong beats (top 40% by onset strength) get a sharper flash (brightness
-    +0.28) while weaker beats get a subtler pulse (+0.12). Each flash is
-    0.06 s (~1.5 frames at 25 fps) — long enough to register, short enough
-    to feel like a hit rather than a glow.
-
-    Returns True on success, False on any ffmpeg error (caller keeps original).
-    """
-    if not beat_times:
-        return False
-
-    from core.ffmpeg_utils import probe_duration
-    video_dur = probe_duration(video_path) or 0.0
-
-    # Classify beats: top 40% by strength = strong flash, rest = subtle
-    threshold = sorted(beat_strengths)[max(0, int(len(beat_strengths) * 0.60))] if beat_strengths else 0.5
-    flash_dur = 0.06
-
-    strong_parts = []
-    subtle_parts = []
-    for t, s in zip(beat_times, beat_strengths if beat_strengths else [0.5] * len(beat_times)):
-        if t + flash_dur > video_dur:
-            continue
-        expr = f"between(t,{t:.3f},{t + flash_dur:.3f})"
-        if s >= threshold:
-            strong_parts.append(expr)
-        else:
-            subtle_parts.append(expr)
-
-    if not strong_parts and not subtle_parts:
-        return False
-
-    filters = []
-    if strong_parts:
-        filters.append(f"eq=brightness=0.28:saturation=1.15:enable='{'+'.join(strong_parts)}'")
-    if subtle_parts:
-        filters.append(f"eq=brightness=0.12:enable='{'+'.join(subtle_parts)}'")
-
-    # Chain filters — each one applies only when its enable expression is true
-    filter_chain = ",".join(filters)
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vf", filter_chain,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-pix_fmt", "yuv420p", "-an",
-        out_path,
-    ]
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=600)
-        if r.returncode == 0 and Path(out_path).exists():
-            if log_fn:
-                log_fn(f"[info] Beat flash applied: {len(strong_parts)} strong + {len(subtle_parts)} subtle hits")
-            return True
-        err = r.stderr.decode(errors="replace")[-500:]
-        log.warning("[song-video] beat_flash ffmpeg error: %s", err)
-        if log_fn:
-            log_fn(f"[warning] Beat flash failed — using un-flashed concat")
-    except Exception as e:
-        log.warning("[song-video] beat_flash exception: %s", e)
-    return False
-
-
 # ── Energy-aware story arc ────────────────────────────────────────────────────
 
 _SONG_ARC_SYSTEM = """\
@@ -647,18 +577,6 @@ def run_song_pipeline(job, photo_path, settings):
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
     if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]
-
-    # ── Phase 2b: Beat-flash sync ─────────────────────────────────────────────
-    # Apply brief brightness pulses at each detected beat so visual "events"
-    # land exactly on the audio peaks. Strong beats get a larger flash.
-    beat_times     = analysis_data.get("beat_times", [])
-    beat_strengths = analysis_data.get("beat_strengths", [])
-    if beat_times and os.path.isfile(concat_path):
-        job.update(progress=82, message="Syncing flashes to beats…")
-        flashed = str(job_dir / f"flashed_{job.id[:6]}.mp4")
-        flashed_ok = _apply_beat_flash(concat_path, flashed, beat_times, beat_strengths, log_fn=_log)
-        if flashed_ok:
-            concat_path = flashed
 
     # ── Phase 3: Merge with user's audio (loop clips to fill song if needed) ─
     job.update(progress=88, message="Looping clips to fill song duration…")
