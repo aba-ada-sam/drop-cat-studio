@@ -386,25 +386,29 @@ def run_song_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}{_et}")
 
-        finalized = _finalize_prompt(clip_prompt, model_name)
         # Clip 0: use the user's uploaded photo as visual anchor.
-        # Clips 1+: use the last frame of the previous clip so transitions are
-        # seamless. The SHOT RULE forces a different camera angle/framing each
-        # clip so the chained start-frame doesn't cause visual freeze.
+        # Clips 1+: use the in-motion boundary frame extracted from the trimmed
+        # end of the previous clip. Falls back to T2V if extraction failed.
         if i == 0:
             clip_start_image = prepped_photo
+            prompt_to_use = clip_prompt
         else:
-            clip_start_image = _chain_frame   # None if extraction failed -- falls back to T2V
+            clip_start_image = _chain_frame
+            # Prefix chain prompts with a scene-lock instruction so the text
+            # reinforces visual continuity alongside the start-image conditioning.
+            if clip_start_image:
+                prompt_to_use = "Continue same scene and subject. " + clip_prompt
+            else:
+                prompt_to_use = clip_prompt
+        finalized = _finalize_prompt(prompt_to_use, model_name)
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
-        # When chaining from a previous clip's last frame, back off guidance so
-        # the start-image conditioning has more weight than the text prompt.
-        # At guidance=7.5 the text dominates and the scene shifts visually;
-        # at ~4.5 the start frame's content anchors the visuals while the text
-        # guides only motion and camera. Clip 0 uses the full user-set guidance
-        # because there's no chain frame to anchor -- just the initial photo.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.6)
+        # Back off guidance for chain clips so the start-image has dominant
+        # weight. At 7.5 the text overrides the start frame and characters
+        # change scene. At 3.5 the start frame anchors visual content while
+        # the text guides camera motion only.
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.45)
 
         try:
             clip_path = video_generator.generate_video(
@@ -488,28 +492,36 @@ def run_song_pipeline(job, photo_path, settings):
         except Exception as e:
             log.warning("[song-video] Beat-sync exception on clip %d: %s -- keeping original", clip_num, e)
 
+        # LTX-2 bakes a ~0.2s fade-out into the tail of every clip.
+        # Trim intermediate clips before chain-frame extraction so the shared
+        # boundary frame is in-motion, not a fade-out still. Without this trim
+        # the hard cut looks like fade-out/fade-in: clip N fades to near-still,
+        # clip N+1 starts from that same near-still and slowly wakes up.
+        # Leave the last clip untrimmed so the video ends with a natural fade.
+        if i < n_clips - 1:
+            clip_real_dur = probe_duration(clip_path) or this_dur
+            trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
+            tail_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
+            tr = subprocess.run(
+                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
+                capture_output=True, timeout=60,
+            )
+            if tr.returncode == 0 and Path(tail_out).exists():
+                os.replace(tail_out, clip_path)
+            else:
+                log.debug("[song-video] Clip %d tail-trim failed -- using full clip", clip_num)
+
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
 
-        # Push partial clip path into job.meta so the queue modal can render
-        # a thumbnail strip that grows as each clip completes -- gives the
-        # user real "yes it's working" feedback during the long render.
-        # Single update() call so the poll thread never sees a partially-written
-        # state (e.g. clips_done incremented but partial_clips not yet extended),
-        # which would cause the pending-placeholder count to go negative and
-        # flicker the queue modal strip on every poll tick.
         job.meta.update({
-            "partial_clips": list(clip_paths),
-            "clips_done":    len(clip_paths),
-            "clips_total":   n_clips,
-            "stage":         "generating",
+            "clips_done":  len(clip_paths),
+            "clips_total": n_clips,
+            "stage":       "generating",
         })
 
-        # Extract the actual last frame and use it as the start image of the
-        # next clip. Hard-cut chaining works because both clips share the
-        # identical boundary frame, making the cut invisible when motion is
-        # continuous. CAMERA MOTION RULE in the system prompt ensures each clip
-        # starts from a natural continuation of that shared frame.
+        # Extract the in-motion boundary frame (now the last frame of the
+        # trimmed clip) and feed it as the start image for the next clip.
         if i < n_clips - 1:
             frame_path = str(job_dir / f"chain_{i:02d}.jpg")
             _chain_frame = _extract_last_frame(clip_path, frame_path)
