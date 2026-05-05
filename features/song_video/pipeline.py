@@ -436,6 +436,7 @@ def run_song_pipeline(job, photo_path, settings):
 
     _last_error: list[str | None] = [None]
     _chain_frame: str | None = None   # last frame of previous clip → first frame of next
+    _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
     for i, clip_prompt in enumerate(story_arc):
         if _stopped():
@@ -445,11 +446,18 @@ def run_song_pipeline(job, photo_path, settings):
         pct_start = 10 + int((i / n_clips) * 68)
         pct_end   = 10 + int(((i + 1) / n_clips) * 68)
 
-        job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}…")
+        eta_str = ""
+        if _clip_secs:
+            avg = sum(_clip_secs) / len(_clip_secs)
+            rem = (n_clips - i) * avg
+            eta_str = f" — ~{int(rem // 60)}m {int(rem % 60):02d}s left"
 
-        def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num):
+        job.update(progress=pct_start, message=f"Clip {clip_num}/{n_clips}{eta_str}…")
+        _clip_t0 = time.time()
+
+        def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num, _et=eta_str):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
-            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}")
+            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}{_et}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
         # Clip 0: use the user's uploaded photo as visual anchor.
@@ -508,6 +516,7 @@ def run_song_pipeline(job, photo_path, settings):
                 log.debug("[song-video] Clip %d trimmed %.2fs → %.2fs", clip_num, actual_dur, this_dur)
 
         clip_paths.append(clip_path)
+        _clip_secs.append(time.time() - _clip_t0)
 
         # Extract the last frame and use it as the start image of the next clip
         # so the transition is seamless — both sides of the xfade open from the
@@ -519,7 +528,12 @@ def run_song_pipeline(job, photo_path, settings):
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d — next clip uses T2V", clip_num)
 
-        _log(f"[info] Clip {clip_num}/{n_clips} complete")
+        if _clip_secs and clip_num < n_clips:
+            avg = sum(_clip_secs) / len(_clip_secs)
+            rem = (n_clips - clip_num) * avg
+            _log(f"[info] Clip {clip_num}/{n_clips} complete — ~{int(rem // 60)}m {int(rem % 60):02d}s remaining")
+        else:
+            _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
     if forge_unloaded:
         reload_checkpoint()
