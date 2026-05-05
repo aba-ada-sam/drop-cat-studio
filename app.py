@@ -490,6 +490,81 @@ async def cancel_all_queued():
     return {"ok": True, "cancelled": count}
 
 
+@app.get("/api/jobs/save-queue")
+async def get_save_queue_info():
+    """Return info about any previously saved queue file."""
+    from core.job_manager import QUEUE_SAVE_FILE
+    if not QUEUE_SAVE_FILE.exists():
+        return {"has_save": False, "count": 0, "saved_at": None}
+    try:
+        import json as _json
+        data = _json.loads(QUEUE_SAVE_FILE.read_text(encoding="utf-8"))
+        return {"has_save": True, "count": len(data.get("jobs", [])), "saved_at": data.get("saved_at")}
+    except Exception:
+        return {"has_save": False, "count": 0, "saved_at": None}
+
+
+@app.post("/api/jobs/save-queue")
+async def save_queue():
+    """Serialize all waiting jobs to queue_save.json."""
+    import asyncio as _asyncio
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = await _asyncio.to_thread(_g["job_manager"].save_queue)
+    return {"ok": True, "saved": count}
+
+
+@app.post("/api/jobs/restore-queue")
+async def restore_queue():
+    """Re-submit jobs from queue_save.json."""
+    import asyncio as _asyncio
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+
+    from features.song_video.pipeline import run_song_prep, run_song_pipeline
+    from features.fun_videos.pipeline import run_prep, run_pipeline
+    from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
+    from features.video_bridges.routes import _bridges_worker
+    from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE
+
+    jm = _g["job_manager"]
+
+    def _make_fun_video(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit_with_prep(JOB_FUN_VIDEO, run_prep, run_pipeline,
+                                   photo_path, settings, label=label)
+
+    def _make_fun_multi(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_multi_prep, run_multi_pipeline,
+                                   photo_path, settings, label=label)
+
+    def _make_song_video(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        n_clips    = int(settings.get("num_clips", 10))
+        timeout    = timeout_seconds or max(1800, n_clips * 300 + 900)
+        return jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_song_prep, run_song_pipeline,
+                                   photo_path, settings, label=label, timeout_seconds=timeout)
+
+    def _make_bridge(args, label, timeout_seconds):
+        items    = list(args[0]) if args else []
+        settings = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit(JOB_BRIDGE, _bridges_worker, items, settings, label=label)
+
+    registry = {
+        "fun_video":       _make_fun_video,
+        "fun_multi_video": _make_fun_multi,
+        "song_video":      _make_song_video,
+        "bridge":          _make_bridge,
+    }
+
+    restored, failed = await _asyncio.to_thread(jm.restore_queue, registry)
+    return {"ok": True, "restored": restored, "failed": failed}
+
+
 @app.post("/api/jobs/{job_id}/retry")
 async def retry_job(job_id: str):
     if _g["job_manager"] is None:

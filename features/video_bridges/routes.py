@@ -335,4 +335,5 @@ async def start_generation(request: Request):
         )
     except RuntimeError as e:
         raise HTTPException(429, str(e))
+    job.meta["feature"] = "bridge"
     return {"job_id": job.id}

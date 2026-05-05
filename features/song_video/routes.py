@@ -205,6 +205,7 @@ async def generate(request: Request):
         raise HTTPException(429, str(e))
 
     job.meta.update({
+        "feature":       "song_video",
         "source_image":  photo_path or "",
         "prompt":        settings.get("video_prompt", "")[:120],
         "model":         settings.get("model_name", ""),

@@ -307,6 +307,7 @@ async def make_it(request: Request):
     except RuntimeError as e:
         raise HTTPException(429, str(e))
     job.meta.update({
+        "feature":      "fun_video",
         "source_image": photo_path or "",
         "prompt": settings.get("video_prompt", "")[:120],
         "model": settings.get("model_name", ""),
@@ -371,6 +372,7 @@ async def make_it_multi(request: Request):
         raise HTTPException(429, str(e))
 
     job.meta.update({
+        "feature":       "fun_multi_video",
         "source_image":  photo_path or "",
         "prompt":        settings.get("video_prompt", "")[:120],
         "model":         settings.get("model_name", ""),

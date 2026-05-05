@@ -85,8 +85,55 @@ function _buildShell() {
     _poll();
   });
 
-  toolbar.append(pauseBtn, cancelAllBtn, clearBtn);
+  const saveBtn = el('button', {
+    id: 'queue-save-btn',
+    class: 'btn btn-sm',
+    text: '💾 Save Queue',
+    title: 'Save waiting jobs to disk — restore them after a restart',
+    style: 'display:none;',
+  });
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '…';
+    const r = await api('/api/jobs/save-queue', { method: 'POST' }).catch(() => null);
+    saveBtn.disabled = false;
+    if (r?.saved != null) {
+      toast(`Saved ${r.saved} job${r.saved !== 1 ? 's' : ''} to disk`, 'info');
+      _checkRestoreBtn();
+    } else {
+      toast('Save failed', 'error');
+    }
+    saveBtn.textContent = '💾 Save Queue';
+  });
+
+  const restoreBtn = el('button', {
+    id: 'queue-restore-btn',
+    class: 'btn btn-sm',
+    title: 'Re-queue jobs saved before last restart',
+    style: 'display:none; background:var(--accent); color:var(--bg-base);',
+  });
+  restoreBtn.addEventListener('click', async () => {
+    restoreBtn.disabled = true;
+    restoreBtn.textContent = '…';
+    const r = await api('/api/jobs/restore-queue', { method: 'POST' }).catch(() => null);
+    restoreBtn.disabled = false;
+    restoreBtn.style.display = 'none';
+    if (r?.restored != null) {
+      const msg = r.failed > 0
+        ? `Restored ${r.restored} job${r.restored !== 1 ? 's' : ''} (${r.failed} failed)`
+        : `Restored ${r.restored} job${r.restored !== 1 ? 's' : ''}`;
+      toast(msg, 'info');
+      _poll();
+    } else {
+      toast('Restore failed', 'error');
+    }
+  });
+
+  toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, restoreBtn);
   _root.appendChild(toolbar);
+
+  // Check for a saved queue on first render
+  _checkRestoreBtn();
 
   // ── Scrollable list ──
   const list = el('div', {
@@ -103,6 +150,22 @@ function _buildShell() {
   empty.appendChild(el('div', { style: 'font-size:2rem;', text: '✓' }));
   empty.appendChild(el('div', { text: 'Queue is clear' }));
   list.appendChild(empty);
+}
+
+async function _checkRestoreBtn() {
+  const btn = document.getElementById('queue-restore-btn');
+  if (!btn) return;
+  try {
+    const info = await api('/api/jobs/save-queue');
+    if (info?.has_save && info.count > 0) {
+      btn.textContent = `♻ Restore ${info.count} saved job${info.count !== 1 ? 's' : ''}`;
+      btn.style.display = '';
+    } else {
+      btn.style.display = 'none';
+    }
+  } catch (_) {
+    btn.style.display = 'none';
+  }
 }
 
 function _syncPauseBtn() {
@@ -178,8 +241,10 @@ function _render(data) {
   // Show/hide toolbar buttons
   const cancelAllBtn = document.getElementById('queue-cancel-all-btn');
   const clearBtn     = document.getElementById('queue-clear-btn');
+  const saveBtn      = document.getElementById('queue-save-btn');
   if (cancelAllBtn) cancelAllBtn.style.display = queued.length > 0 ? '' : 'none';
   if (clearBtn)     clearBtn.style.display     = completed.length > 0 ? '' : 'none';
+  if (saveBtn)      saveBtn.style.display      = queued.length > 0 ? '' : 'none';
 
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';

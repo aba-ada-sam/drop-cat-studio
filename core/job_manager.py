@@ -4,16 +4,20 @@ All features that use WanGP (Fun Videos, Video Bridges) share a single
 GPU queue so only one generation runs at a time. Non-GPU jobs (Image2Video,
 Video Tools, SD Prompts) run on their own independent threads.
 """
+import json
 import logging
 import threading
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import Callable
 
 from core import config as cfg
 
 log = logging.getLogger(__name__)
+
+QUEUE_SAVE_FILE = Path(__file__).resolve().parent.parent / "queue_save.json"
 
 # Job types
 JOB_I2V = "i2v"
@@ -365,6 +369,82 @@ class JobManager:
             "gpu_queue_length": len(self._gpu_queue),
             "paused": self._paused,
         }
+
+    def save_queue(self) -> int:
+        """Write all waiting (queued) jobs to QUEUE_SAVE_FILE. Returns count saved."""
+        with self._lock:
+            waiting = [j for j in self._jobs.values() if j.status == "queued"]
+        waiting.sort(key=lambda j: j.created_at)
+
+        records = []
+        for job in waiting:
+            feature = job.meta.get("feature")
+            if not feature:
+                continue
+            if len(job._worker_args) < 2:
+                continue
+            # Strip internal prep-phase keys (_story_arc, _clip_durations, etc.) —
+            # prep will re-run on restore so fresh values are computed.
+            raw_settings = job._worker_args[1]
+            settings = {k: v for k, v in raw_settings.items() if not k.startswith("_")} \
+                if isinstance(raw_settings, dict) else raw_settings
+            try:
+                serialized = [job._worker_args[0], settings]
+                json.dumps(serialized, default=str)
+            except Exception as e:
+                log.warning("[queue-save] Job %s not JSON-serializable, skipping: %s", job.id, e)
+                continue
+            records.append({
+                "feature":         feature,
+                "label":           job.label,
+                "timeout_seconds": job.timeout_seconds,
+                "args":            serialized,
+            })
+
+        QUEUE_SAVE_FILE.write_text(
+            json.dumps({"saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "jobs": records},
+                       indent=2, default=str),
+            encoding="utf-8",
+        )
+        log.info("[queue-save] Saved %d queued jobs to %s", len(records), QUEUE_SAVE_FILE)
+        return len(records)
+
+    def restore_queue(self, registry: dict) -> tuple[int, int]:
+        """Re-submit jobs from QUEUE_SAVE_FILE using registry[feature](args, label, timeout).
+
+        Returns (restored_count, failed_count).
+        """
+        if not QUEUE_SAVE_FILE.exists():
+            return 0, 0
+        try:
+            data = json.loads(QUEUE_SAVE_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.error("[queue-restore] Could not read save file: %s", e)
+            return 0, 0
+
+        restored = failed = 0
+        for record in data.get("jobs", []):
+            feature = record.get("feature")
+            handler = registry.get(feature)
+            if not handler:
+                log.warning("[queue-restore] No restore handler for %r — skipping", feature)
+                failed += 1
+                continue
+            try:
+                job = handler(
+                    record.get("args", []),
+                    label=record.get("label", feature),
+                    timeout_seconds=record.get("timeout_seconds"),
+                )
+                if job:
+                    restored += 1
+                    log.info("[queue-restore] Restored %r job — new id %s", feature, job.id)
+            except Exception as e:
+                log.error("[queue-restore] Failed to restore %r job: %s", feature, e)
+                failed += 1
+
+        log.info("[queue-restore] Restored %d, failed %d", restored, failed)
+        return restored, failed
 
     def cleanup(self, max_age_hours: int = 24):
         """Remove old completed jobs from memory."""
