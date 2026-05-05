@@ -161,6 +161,9 @@ class LLMRouter:
             messages=all_messages,
             max_tokens=max_tokens,
         )
+        if not resp.choices or resp.choices[0].message.content is None:
+            reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
+            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) — possible content policy refusal")
         return desanitize(resp.choices[0].message.content)
 
     def _openai_vision(self, prompt, images_b64, tier, max_tokens, system):
@@ -184,6 +187,9 @@ class LLMRouter:
             messages=all_messages,
             max_tokens=max_tokens,
         )
+        if not resp.choices or resp.choices[0].message.content is None:
+            reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
+            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) — possible content policy refusal")
         return desanitize(resp.choices[0].message.content)
 
     # ── Retry ─────────────────────────────────────────────────────────────────
