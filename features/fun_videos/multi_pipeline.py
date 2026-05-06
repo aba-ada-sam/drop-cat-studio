@@ -21,6 +21,17 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
+_FALLBACK_PHASES = [
+    "erupts into full motion, kinetic energy explodes outward",
+    "surges forward with raw power, movement intensifies",
+    "tears through space, momentum builds",
+    "launches into dramatic action, force ripples outward",
+    "crashes through with unstoppable drive",
+    "pulls back, revealing scale of movement",
+    "slams into peak intensity, motion at full power",
+    "reaches final explosive beat, energy released",
+]
+
 
 # ── Story arc generation ──────────────────────────────────────────────────────
 
@@ -81,18 +92,6 @@ def _generate_story_arc(
     except Exception as e:
         log.warning("[multi] Story arc LLM call failed: %s", e)
 
-    # Fallback: build varied clips from the base idea using different action phases
-    # so clips are not visually identical
-    _FALLBACK_PHASES = [
-        "erupts into full motion, kinetic energy explodes outward",
-        "surges forward with raw power, movement intensifies",
-        "tears through space, momentum builds",
-        "launches into dramatic action, force ripples outward",
-        "crashes through with unstoppable drive",
-        "pulls back, revealing scale of movement",
-        "slams into peak intensity, motion at full power",
-        "reaches final explosive beat, energy released",
-    ]
     base = (initial_idea.strip() + ", ") if initial_idea else ""
     return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
 
@@ -165,7 +164,8 @@ def run_multi_prep(job, photo_path, settings):
         log.info("[multi] Story arc (%d clips): %s", n_clips, [a[:40] for a in arc])
     except Exception as e:
         log.warning("[multi] Story arc failed: %s", e)
-        settings["_story_arc"] = [user_idea or "Subject erupts into motion"] * n_clips
+        base = (user_idea.strip() + ", ") if user_idea else ""
+        settings["_story_arc"] = [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
 
     if skip_audio:
         job.update(progress=10, message="Story arc ready, waiting for GPU...")
@@ -247,8 +247,8 @@ def run_multi_pipeline(job, photo_path, settings):
     story_arc     = settings.pop("_story_arc", [])
 
     if not story_arc:
-        base = settings.get("video_prompt", "") or "Subject erupts into motion"
-        story_arc = [base] * n_clips
+        base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
+        story_arc = [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
 
     ts      = time.strftime("%Y-%m-%d")
     slug    = Path(photo_path).stem[:16].replace(" ", "_") if photo_path else "multivid"

@@ -371,9 +371,6 @@ def _generate_via_subprocess(
 
 def merge_video_audio(video_path: str, audio_path: str, out_path: str, log_fn=None) -> str | None:
     """Merge video and audio via ffmpeg."""
-    from core.ffmpeg_utils import probe_duration
-    video_dur = probe_duration(video_path)
-
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,

@@ -462,10 +462,21 @@ async def brainstorm(request: Request):
 
     try:
         if image_path and os.path.isfile(image_path):
+            # route_vision takes a single prompt string, not a messages array.
+            # Fold the last 8 history turns into the prompt as plain text so the
+            # AI has prior-turn context instead of treating every message as the first.
+            if history:
+                hist_lines = []
+                for h in history[-8:]:
+                    role = "Assistant" if h.get("role") == "assistant" else "User"
+                    hist_lines.append(f"{role}: {h.get('content', '').strip()}")
+                vision_prompt = "\n".join(hist_lines) + "\n\n" + user_content
+            else:
+                vision_prompt = user_content
             b64 = await asyncio.to_thread(encode_image_b64, image_path)
             result = await asyncio.to_thread(
                 llm_router.route_vision,
-                prompt=user_content,
+                prompt=vision_prompt,
                 images_b64=[b64] if b64 else [],
                 system=system,
                 tier=_TIER,
