@@ -81,9 +81,20 @@ def _generate_story_arc(
     except Exception as e:
         log.warning("[multi] Story arc LLM call failed: %s", e)
 
-    # Fallback: repeat the base idea
-    base = initial_idea or "Subject erupts into motion, energy bursts through the frame"
-    return [base] * n_clips
+    # Fallback: build varied clips from the base idea using different action phases
+    # so clips are not visually identical
+    _FALLBACK_PHASES = [
+        "erupts into full motion, kinetic energy explodes outward",
+        "surges forward with raw power, movement intensifies",
+        "tears through space, momentum builds",
+        "launches into dramatic action, force ripples outward",
+        "crashes through with unstoppable drive",
+        "pulls back, revealing scale of movement",
+        "slams into peak intensity, motion at full power",
+        "reaches final explosive beat, energy released",
+    ]
+    base = (initial_idea.strip() + ", ") if initial_idea else ""
+    return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
 
 
 # ── ffmpeg clip concatenation ─────────────────────────────────────────────────

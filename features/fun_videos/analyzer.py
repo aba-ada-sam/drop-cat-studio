@@ -69,10 +69,15 @@ For landscapes: wind, weather, water, fire all moving together.
 Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
 
 MUSIC_PROMPT_SYSTEM = """You are a music director suggesting background music for a short AI-generated video.
-Prefer energetic, characterful music — avoid vague ambient pads. Pick a real genre (pop, hip-hop, folk, funk, punk, etc.) with distinctive instrumentation and a strong hook feel.
+Pick a real, specific genre with authentic instrumentation and raw character. Describe it the way a producer would: instruments, tempo feel, production texture, energy level.
+
+BANNED WORDS -- never use these (they produce muzak): cinematic, ethereal, haunting, dramatic, sweeping, majestic, epic, atmospheric, lush, soaring, pulsing.
+
+Good examples: "outlaw country, fingerpicked acoustic, upright bass, brushed snare, dry room sound" or "early 80s post-punk, angular guitar riffs, trebly bass, tense rhythm section" or "high-energy cumbia, brass stabs, accordion hook, driving percussion" or "garage blues rock, overdriven Strat, loose drums, live room sound".
+
 Return ONLY valid JSON:
 {
-  "music_prompt": "specific genre, energy level, key instruments — e.g. 'driving indie rock, punchy drums, distorted guitar, anthemic'",
+  "music_prompt": "genre + instrumentation + production texture",
   "bpm": 120,
   "key_suggestion": "optional key/scale",
   "reasoning": "brief explanation of why this music fits"
@@ -292,7 +297,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
                 force_provider="ollama",
             )
             result = parse_json_response(text)
-            return result or {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80}
+            return result or {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80}
         except Exception as e:
             log.warning("Music prompt vision call failed, falling back to text: %s", e)
 
@@ -311,7 +316,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
             tier=TIER_FAST, system=MUSIC_PROMPT_SYSTEM, max_tokens=300,
         )
         result = parse_json_response(text)
-        return result or {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80}
+        return result or {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80}
     except Exception as e:
         log.warning("Music prompt text generation failed: %s", e)
-        return {"music_prompt": "cinematic ambient, warm strings, gentle piano", "bpm": 80, "error": str(e)}
+        return {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80, "error": str(e)}
