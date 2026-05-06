@@ -379,7 +379,12 @@ def run_song_pipeline(job, photo_path, settings):
         prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
 
     _last_error: list[str | None] = [None]
-    _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
+    # V2V continuity: last 2s of clip N fed as video conditioning to clip N+1.
+    # V2V is stronger than single-frame I2V for LTX-2 -- temporal context prevents
+    # the model from drifting to a fresh scene based on the text prompt alone.
+    _CHAIN_SECS = 2.0
+    _chain_video: str | None = None   # V2V source for next clip
+    _chain_frame: str | None = None   # I2V fallback if chain video extraction fails
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
     # Cumulative start times so each clip gets its corresponding audio segment
@@ -410,36 +415,22 @@ def run_song_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}{_et}")
 
-        # Clip 0: use the user's uploaded photo as visual anchor.
-        # Clips 1+: use the in-motion boundary frame extracted from the trimmed
-        # end of the previous clip. Falls back to T2V if extraction failed.
+        # Clip 0: I2V from user's photo.
+        # Clips 1+: V2V from last 2s of previous clip (stronger than single-frame I2V).
         if i == 0:
-            clip_start_image = prepped_photo
-            prompt_to_use = clip_prompt
+            start_image = prepped_photo
+            start_video = None
         else:
-            clip_start_image = _chain_frame
-            # Prefix chain prompts with a scene-lock instruction so the text
-            # reinforces visual continuity alongside the start-image conditioning.
-            if clip_start_image:
-                prompt_to_use = "Continue same scene and subject. " + clip_prompt
-            else:
-                prompt_to_use = clip_prompt
-        finalized = _finalize_prompt(prompt_to_use, model_name)
+            start_image = _chain_frame   # I2V fallback if chain video extraction failed
+            start_video = _chain_video   # None if extraction failed
+        finalized = _finalize_prompt(clip_prompt, model_name)
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
-        # Back off guidance for chain clips so the start-image has dominant
-        # weight. At 7.5 the text overrides the start frame and characters
-        # change scene. At 3.5 the start frame anchors visual content while
-        # the text guides camera motion only.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.7)
-
-        # Extract the audio segment for this clip's time window so LTX-2 can
-        # condition the video generation directly on the music. WAV avoids MP3
-        # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
         try:
             clip_path = video_generator.generate_video(
-                image_path=clip_start_image,
+                image_path=start_image,
+                start_video_path=start_video,
                 prompt=finalized,
                 out_path=clip_out,
                 duration=this_dur,
@@ -448,7 +439,7 @@ def run_song_pipeline(job, photo_path, settings):
                 override_width=int(ow) if ow else None,
                 override_height=int(oh) if oh else None,
                 steps=steps,
-                guidance=effective_guidance,
+                guidance=guidance,
                 seed=seed,
                 stop_check=_stopped,
                 log_fn=_log,
@@ -547,13 +538,27 @@ def run_song_pipeline(job, photo_path, settings):
             "stage":       "generating",
         })
 
-        # Extract the in-motion boundary frame (now the last frame of the
-        # trimmed clip) and feed it as the start image for the next clip.
+        # Extract last _CHAIN_SECS as V2V source for the next clip.
+        # Fall back to single-frame I2V if video extraction fails.
         if i < n_clips - 1:
-            frame_path = str(job_dir / f"chain_{i:02d}.jpg")
-            _chain_frame = _extract_last_frame(clip_path, frame_path)
-            if not _chain_frame:
-                log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
+            trimmed_dur = probe_duration(clip_path) or this_dur
+            tail_start = max(0.0, trimmed_dur - _CHAIN_SECS)
+            chain_vid_out = str(job_dir / f"chain_v_{i:02d}.mp4")
+            cv = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{tail_start:.4f}", "-i", clip_path,
+                 "-t", f"{_CHAIN_SECS:.4f}", "-c", "copy", chain_vid_out],
+                capture_output=True, timeout=30,
+            )
+            if cv.returncode == 0 and Path(chain_vid_out).exists():
+                _chain_video = chain_vid_out
+                _chain_frame = None
+                log.debug("[song-video] Chain video extracted for clip %d -> V2V", clip_num)
+            else:
+                _chain_video = None
+                frame_path = str(job_dir / f"chain_{i:02d}.jpg")
+                _chain_frame = _extract_last_frame(clip_path, frame_path)
+                if not _chain_frame:
+                    log.debug("[song-video] All chain extraction failed for clip %d", clip_num)
 
         if _clip_secs and clip_num < n_clips:
             avg = sum(_clip_secs) / len(_clip_secs)

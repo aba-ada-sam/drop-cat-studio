@@ -280,9 +280,15 @@ def run_multi_pipeline(job, photo_path, settings):
 
     # ── Phase 1: Generate clips sequentially ──────────────────────────────
     clip_paths: list[str] = []
-    start_image_path: str | None = None   # None → clip 0 uses original photo
+    # V2V continuity: clip 0 uses the user's photo (I2V); clips 1+ use the
+    # last 2 seconds of the previous clip as video conditioning (V2V).
+    # V2V conditioning is far stronger than single-frame I2V for LTX-2 --
+    # the model has actual temporal context to continue from rather than a
+    # still image it can largely ignore in favour of the text prompt.
+    _CHAIN_SECS = 2.0
+    chain_video_path: str | None = None   # V2V source for next clip
+    chain_image_path: str | None = None   # I2V fallback if tail extraction fails
 
-    # Pre-process the original photo to exact WanGP dimensions
     prepped_photo: str | None = None
     if photo_path and os.path.isfile(photo_path):
         prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
@@ -303,19 +309,22 @@ def run_multi_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
-        clip_start_image = start_image_path if start_image_path else prepped_photo
+        finalized = _finalize_prompt(clip_prompt, model_name)
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-        # Scene-lock prefix on chain clips: forces the text encoder to keep the
-        # same visual world instead of generating a fresh scene from the text alone.
-        # Without this, LTX-2 treats each clip independently and changes subject/setting.
-        prompt_to_use = ("Continue same scene and subject. " + clip_prompt) if (i > 0 and clip_start_image) else clip_prompt
-        finalized = _finalize_prompt(prompt_to_use, model_name)
-        effective_guidance = guidance
+        # Clip 0: I2V from user's photo.
+        # Clips 1+: prefer V2V from chain video; fall back to I2V from chain frame.
+        if i == 0:
+            start_image = prepped_photo
+            start_video = None
+        else:
+            start_image = chain_image_path   # fallback only if chain_video failed
+            start_video = chain_video_path   # None if prev extraction failed
 
         try:
             clip_path = video_generator.generate_video(
-                image_path=clip_start_image,
+                image_path=start_image,
+                start_video_path=start_video,
                 prompt=finalized,
                 out_path=clip_out,
                 duration=clip_dur,
@@ -324,7 +333,7 @@ def run_multi_pipeline(job, photo_path, settings):
                 override_width=int(ow) if ow else None,
                 override_height=int(oh) if oh else None,
                 steps=steps,
-                guidance=effective_guidance,
+                guidance=guidance,
                 seed=seed,
                 stop_check=_stopped,
                 log_fn=_log,
@@ -334,43 +343,52 @@ def run_multi_pipeline(job, photo_path, settings):
             err = str(e)
             _log(f"[error] Clip {clip_num} failed: {err}")
             _last_error[0] = err
-            # Check for VRAM OOM — restart WanGP and abort
             if "out of memory" in err.lower() or "cuda error" in err.lower():
                 from services import manager as _svc
                 threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
             break
 
         if not clip_path:
-            _log(f"[error] Clip {clip_num} produced no output — stopping early")
+            _log(f"[error] Clip {clip_num} produced no output -- stopping early")
             break
 
         clip_paths.append(clip_path)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
-        # Trim LTX-2 fade-out tail before chain frame extraction so the shared
-        # boundary frame is in-motion, not a near-static fade-out frame.
         if i < len(story_arc) - 1:
+            # Trim LTX-2 fade-out tail so the chain boundary is in-motion.
             clip_real_dur = probe_duration(clip_path) or clip_dur
             trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
-            tail_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
+            trim_out = str(job_dir / f"clip_{i:02d}_t.mp4")
             tr = subprocess.run(
-                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
+                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", trim_out],
                 capture_output=True, timeout=60,
             )
-            if tr.returncode == 0 and Path(tail_out).exists():
-                os.replace(tail_out, clip_path)
-            else:
-                log.debug("[multi] Clip %d tail-trim failed -- using full clip", i + 1)
+            if tr.returncode == 0 and Path(trim_out).exists():
+                os.replace(trim_out, clip_path)
 
-        # Extract last frame for the next clip's start_image
-        if i < len(story_arc) - 1:
-            frame_out = str(job_dir / f"frame_{i:02d}.jpg")
-            if extract_last_frame_to_file(clip_path, frame_out):
-                start_image_path = frame_out
-                log.debug("[multi] Frame %d extracted -> %s", i + 1, frame_out)
+            # Extract last _CHAIN_SECS as the V2V source for the next clip.
+            trimmed_dur = probe_duration(clip_path) or trim_to
+            tail_start = max(0.0, trimmed_dur - _CHAIN_SECS)
+            chain_vid_out = str(job_dir / f"chain_{i:02d}.mp4")
+            cv = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{tail_start:.4f}", "-i", clip_path,
+                 "-t", f"{_CHAIN_SECS:.4f}", "-c", "copy", chain_vid_out],
+                capture_output=True, timeout=30,
+            )
+            if cv.returncode == 0 and Path(chain_vid_out).exists():
+                chain_video_path = chain_vid_out
+                chain_image_path = None
+                log.debug("[multi] Chain video extracted for clip %d -> V2V", i + 1)
             else:
-                log.warning("[multi] Frame extraction failed for clip %d -- next clip starts blind", i + 1)
-                start_image_path = None
+                # V2V extraction failed -- fall back to single frame I2V
+                chain_video_path = None
+                frame_out = str(job_dir / f"frame_{i:02d}.jpg")
+                chain_image_path = frame_out if extract_last_frame_to_file(clip_path, frame_out) else None
+                if chain_image_path:
+                    log.debug("[multi] Chain video failed -- falling back to I2V frame for clip %d", i + 1)
+                else:
+                    log.warning("[multi] All chain extraction failed for clip %d -- next clip starts blind", i + 1)
 
     if _stopped():
         if forge_unloaded:
