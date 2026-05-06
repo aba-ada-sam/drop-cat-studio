@@ -41,15 +41,35 @@ def _post(url: str, payload: dict, timeout: int = 30) -> dict | None:
         return None
 
 
+_AUTHENTICITY_MARKERS = (
+    "authentic", "raw", "gritty", "organic", "lo-fi", "lo fi",
+    "vintage", "underground", "indie", "soul", "real",
+    "not generic", "not polished", "not pop", "distinct character",
+)
+
+
 def _lyrics_request_vocals(lyrics: str) -> bool:
     text = (lyrics or "").strip().lower()
     return bool(text) and text not in {"[inst]", "[instrumental]"}
 
 
+def _add_style_guardrails(prompt: str) -> str:
+    """Append authenticity qualifiers if the prompt has no genre-identity signals.
+
+    Steers ACE-Step away from default generic pop/lite-FM production.
+    """
+    if not prompt:
+        return prompt
+    lower = prompt.lower()
+    if not any(m in lower for m in _AUTHENTICITY_MARKERS):
+        return prompt.rstrip(", ") + ", distinct character, authentic energy, not generic pop"
+    return prompt
+
+
 def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
     normalized = (prompt or "").strip()
     if instrumental or not _lyrics_request_vocals(lyrics):
-        return normalized
+        return _add_style_guardrails(normalized)
 
     prompt_lower = normalized.lower()
     vocal_keywords = (
@@ -60,26 +80,17 @@ def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
         normalized = (normalized.rstrip(", ") + ", lead vocal") if normalized else "lead vocal"
         prompt_lower = normalized.lower()
 
+    # Always nudge vocals to open immediately -- never gate this on [intro] markup.
+    # _ensure_intro() is no longer called, but even if lyrics contain [intro] the user
+    # wrote it intentionally; the timing hint still helps ACE-Step start vocals promptly.
     pacing_keywords = (
         "from the opening", "from the start", "early vocal", "vocals enter early",
-        "immediate vocal", "lead vocal up front",
+        "immediate vocal", "lead vocal up front", "straight to verse", "no intro",
     )
-    leading = [l.strip().lower() for l in (lyrics or "").splitlines() if l.strip()][:3]
-    starts_with_intro = any(l.startswith("[intro") or l.startswith("[instrumental") for l in leading)
-    if not starts_with_intro and not any(kw in prompt_lower for kw in pacing_keywords):
-        normalized = (normalized.rstrip(", ") + ", vocals enter early") if normalized else "vocals enter early"
+    if not any(kw in prompt_lower for kw in pacing_keywords):
+        normalized = (normalized.rstrip(", ") + ", vocals from the opening, straight to verse") if normalized else "vocals from the opening, straight to verse"
 
-    return normalized
-
-
-def _ensure_intro(lyrics: str) -> str:
-    text = (lyrics or "").strip()
-    if not text:
-        return text
-    first = next((l.strip().lower() for l in text.splitlines() if l.strip()), "")
-    if first.startswith("[intro") or first.startswith("[instrumental"):
-        return text
-    return f"[intro]\n\n{text}"
+    return _add_style_guardrails(normalized)
 
 
 def _extract_audio_url(item: dict) -> str | None:
@@ -150,9 +161,11 @@ def generate_audio(
     duration = max(5.0, min(float(duration), MAX_DURATION))
     has_vocals = not instrumental and _lyrics_request_vocals(lyrics)
 
-    effective_lyrics = _ensure_intro(lyrics) if has_vocals else ""
-    effective_prompt = _normalize_prompt(prompt, instrumental, effective_lyrics)
-    effective_prompt = effective_prompt or "cinematic ambient music, atmospheric, instrumental"
+    # Pass lyrics as-is -- do NOT inject [intro] markup; it causes ACE-Step to
+    # produce a long blank intro that eats 2/3 of the track before vocals enter.
+    effective_lyrics = lyrics.strip() if has_vocals else ""
+    effective_prompt = _normalize_prompt(prompt, instrumental, lyrics)
+    effective_prompt = effective_prompt or "atmospheric music, organic texture, instrumental, distinct character"
 
     payload = {
         "prompt": effective_prompt,
