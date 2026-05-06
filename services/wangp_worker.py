@@ -69,7 +69,7 @@ def _install_tqdm_hook():
             def update(self, n=1):
                 super().update(n)
                 # Only track bars that look like inference step bars (total >= 5)
-                if _step_hook and self.total and self.total >= 5:
+                if _step_hook and self.total and self.total >= 2:
                     try:
                         _step_hook(int(self.n), int(self.total))
                     except Exception:

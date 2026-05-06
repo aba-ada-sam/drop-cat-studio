@@ -432,19 +432,11 @@ def run_song_pipeline(job, photo_path, settings):
         # weight. At 7.5 the text overrides the start frame and characters
         # change scene. At 3.5 the start frame anchors visual content while
         # the text guides camera motion only.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.45)
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.7)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
         # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
-        clip_audio_seg: str | None = None
-        if audio_path and os.path.isfile(audio_path):
-            seg_path = str(job_dir / f"audio_seg_{i:02d}.wav")
-            seg_start = _clip_start_times[i] if i < len(_clip_start_times) else 0.0
-            clip_audio_seg = _extract_audio_segment(audio_path, seg_start, this_dur, seg_path)
-            if not clip_audio_seg:
-                log.warning("[song-video] Audio segment extraction failed for clip %d -- text-only mode", clip_num)
-
         try:
             clip_path = video_generator.generate_video(
                 image_path=clip_start_image,
@@ -458,7 +450,6 @@ def run_song_pipeline(job, photo_path, settings):
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
-                audio_source=clip_audio_seg,
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
