@@ -78,15 +78,17 @@ let _activePoller   = null;
 let _models         = {};
 let _applyStart     = null;
 let _applyVideoFn   = null;
+let _pendingHandoff = null; // queued before tab first visit; applied on init
 
 export function receiveHandoff(data) {
   if (!data.path) return;
-  if (data.type === 'video') {
-    if (_applyVideoFn) _applyVideoFn(data.path, data.url || '');
-    else if (_applyStart) toast('Open Create Videos tab first', 'info');
-  } else if (data.type === 'image') {
-    if (_applyStart) _applyStart(data.path, data.url || '');
-    else toast('Open Create Videos tab first', 'info');
+  if (data.type === 'video' && _applyVideoFn) {
+    _applyVideoFn(data.path, data.url || '');
+  } else if (data.type === 'image' && _applyStart) {
+    _applyStart(data.path, data.url || '');
+  } else {
+    // Tab not yet initialized -- queue it; init() will pick it up
+    _pendingHandoff = data;
   }
 }
 
@@ -144,68 +146,108 @@ export function init(panel) {
     });
   }
 
+  const _FV_DISMISSED_KEY = 'fv_dismissed_media';
+  function _getFvDismissed() {
+    try { return new Set(JSON.parse(localStorage.getItem(_FV_DISMISSED_KEY) || '[]')); }
+    catch (_) { return new Set(); }
+  }
+  function _saveFvDismissed(s) {
+    try { localStorage.setItem(_FV_DISMISSED_KEY, JSON.stringify([...s].slice(-300))); }
+    catch (_) {}
+  }
+
   async function loadRecentMedia() {
     try {
-      const data = await api('/api/gallery?limit=60');
-      const items = (data.items || data || []).slice(0, 48);
+      const [galleryRes, sessionRes] = await Promise.allSettled([
+        api('/api/gallery'),
+        api('/api/session/images'),
+      ]);
+
+      const dismissed = _getFvDismissed();
+      const seen = new Set();
+      const items = [];
+
+      for (const item of (galleryRes.status === 'fulfilled' ? (galleryRes.value.items || galleryRes.value || []) : [])) {
+        const rawUrl = item.url || '';
+        const url  = pathToUrl(rawUrl) || rawUrl;
+        const path = item.metadata?.path || rawUrl;
+        if (!url || seen.has(url) || dismissed.has(url)) continue;
+        seen.add(url);
+        const vid = _isVideo(rawUrl);
+        items.push({ url, path, vid, thumbSrc: vid ? null : (pathToUrl(item.thumbnail) || url) });
+      }
+
+      for (const img of (sessionRes.status === 'fulfilled' ? (sessionRes.value.images || []) : [])) {
+        const rawUrl = img.url || img.path || '';
+        const url  = pathToUrl(rawUrl) || rawUrl;
+        const path = img.path || rawUrl;
+        if (!url || seen.has(url) || dismissed.has(url)) continue;
+        seen.add(url);
+        items.push({ url, path, vid: false, thumbSrc: url });
+      }
+
       mediaGrid.innerHTML = '';
       _selectedThumb = null;
+
       if (!items.length) {
         mediaGrid.appendChild(el('div', {
           style: 'grid-column:1/-1; text-align:center; padding:32px 0; color:var(--text-3); font-size:.82rem;',
-          text: 'Nothing yet — generate something first.',
+          text: 'Nothing yet -- generate or upload something first.',
         }));
         return;
       }
-      for (const item of items) {
-        const rawUrl = item.url;
-        const url    = pathToUrl(rawUrl) || rawUrl;   // convert Windows paths → /output/...
-        const path   = item.metadata?.path || rawUrl;
-        const vid    = _isVideo(rawUrl);
 
+      for (const item of items.slice(0, 60)) {
         const wrap = el('div', {
           style: 'position:relative; cursor:pointer; background:var(--surface-2); border-radius:6px; overflow:hidden;',
         });
-
-        // Images: use thumbnail/url directly. Videos: canvas-extract a frame.
-        const imgThumbSrc = vid ? null : (pathToUrl(item.thumbnail) || url);
 
         const thumb = el('img', {
           style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; border:2px solid transparent; transition:border-color .15s; display:block;',
         });
         wrap.appendChild(thumb);
 
-        const applyClick = () => {
-          wrap.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; });
+        const dismissBtn = el('button', {
+          style: 'position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.7);color:#fff;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;z-index:2;',
+          title: 'Remove from list',
+          text: 'x',
+        });
+        dismissBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          wrap.remove();
+          const d = _getFvDismissed();
+          d.add(item.url);
+          _saveFvDismissed(d);
+          if (!mediaGrid.children.length) loadRecentMedia();
+        });
+        wrap.appendChild(dismissBtn);
+
+        wrap.addEventListener('click', e => {
+          if (e.target === dismissBtn) return;
+          mediaGrid.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; });
           if (_selectedThumb) _selectedThumb.style.borderColor = 'transparent';
           thumb.style.borderColor = 'var(--accent)';
           _selectedThumb = thumb;
-          if (vid) _applyVideo(path, url);
-          else     _applyStart(path, url);
-        };
-        wrap.addEventListener('click', applyClick);
+          if (item.vid) _applyVideo(item.path, item.url);
+          else          _applyStart(item.path, item.url);
+        });
 
-        if (imgThumbSrc) {
-          thumb.src = imgThumbSrc;
+        if (item.thumbSrc) {
+          thumb.src = item.thumbSrc;
           thumb.onerror = () => { thumb.replaceWith(_mediaFallback(false)); };
-        } else if (vid) {
-          // Async frame extraction — show fallback until it resolves
+        } else if (item.vid) {
           const fb = _mediaFallback(true);
           wrap.insertBefore(fb, thumb);
           thumb.style.display = 'none';
-          _videoThumb(url).then(dataUrl => {
-            if (dataUrl) {
-              fb.remove();
-              thumb.src = dataUrl;
-              thumb.style.display = '';
-            }
+          _videoThumb(item.url).then(dataUrl => {
+            if (dataUrl) { fb.remove(); thumb.src = dataUrl; thumb.style.display = ''; }
           });
         }
 
-        if (vid) {
+        if (item.vid) {
           wrap.appendChild(el('div', {
             style: 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;',
-          }, [el('div', { style: 'background:rgba(0,0,0,.55); border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff;', text: '▶' })]));
+          }, [el('div', { style: 'background:rgba(0,0,0,.55); border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff;', text: '>' })]));
         }
 
         mediaGrid.appendChild(wrap);
@@ -278,6 +320,12 @@ export function init(panel) {
     videoClearBtn.style.display = '';
   }
   _applyVideoFn = _applyVideo;
+
+  // Drain any handoff that arrived before this tab was initialized
+  if (_pendingHandoff) {
+    const ph = _pendingHandoff; _pendingHandoff = null;
+    receiveHandoff(ph);
+  }
 
   // ── Start video (video-to-video) ──────────────────────────────────────────
   let _startVideoPath = null;

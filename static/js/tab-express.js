@@ -213,7 +213,7 @@ export function init(panel) {
   // ── Recent images strip ───────────────────────────────────────────────────
   const recentWrap = el('div', { style: 'display:none;' });
   const recentRow  = el('div', { style: 'display:flex; gap:6px; overflow-x:auto; padding:2px 0;' });
-  recentWrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:5px;', text: 'Recent images — click to use' }));
+  recentWrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:5px;', text: 'Recent images -- click to use' }));
   recentWrap.appendChild(recentRow);
   root.appendChild(recentWrap);
 
@@ -229,9 +229,10 @@ export function init(panel) {
 
   async function _loadRecent() {
     try {
-      // Gather images from gallery + source images used in recent video jobs
-      const [galleryData, jobsData] = await Promise.allSettled([
-        apiFetch('/api/gallery?limit=24', { context: 'express.recent' }),
+      // Gather images from gallery + session images + source images from recent jobs
+      const [galleryData, sessionData, jobsData] = await Promise.allSettled([
+        apiFetch('/api/gallery', { context: 'express.recent' }),
+        apiFetch('/api/session/images', { context: 'express.recent.session' }),
         apiFetch('/api/jobs', { context: 'express.recent.jobs' }),
       ]);
 
@@ -243,8 +244,20 @@ export function init(panel) {
       if (galleryData.status === 'fulfilled') {
         for (const i of (galleryData.value.items || [])) {
           if (/\.(mp4|webm|mov)/i.test(i.url)) continue;
+          const url  = pathToUrl(i.url) || i.url;
           const path = i.metadata?.path || i.url;
-          if (!seen.has(path) && !dismissed.has(path)) { seen.add(path); items.push({ url: i.url, path, title: i.prompt || '' }); }
+          if (!seen.has(url) && !dismissed.has(url)) { seen.add(url); items.push({ url, path, title: i.prompt || '' }); }
+        }
+      }
+
+      // Session images (may not yet be in gallery)
+      if (sessionData.status === 'fulfilled') {
+        for (const img of (sessionData.value.images || [])) {
+          const url  = pathToUrl(img.url || img.path || '') || img.url || img.path || '';
+          const path = img.path || img.url || '';
+          if (!url || seen.has(url) || dismissed.has(url)) continue;
+          seen.add(url);
+          items.push({ url, path, title: img.name || '' });
         }
       }
 
@@ -254,7 +267,6 @@ export function init(panel) {
           const src = job.meta?.source_image;
           if (!src || seen.has(src) || dismissed.has(src)) continue;
           seen.add(src);
-          const url = src.startsWith('/') ? src : `/output/${src.split('/output/').pop()}`;
           items.push({ url: `/api/thumbnail?path=${encodeURIComponent(src)}&size=120`, path: src, title: job.label || 'Used in video' });
         }
       }

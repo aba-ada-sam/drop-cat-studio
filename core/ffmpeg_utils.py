@@ -208,6 +208,32 @@ def extract_last_frame_to_file(video_path: str | Path, out_path: str | Path) -> 
         return False
 
 
+def extract_first_frame_to_file(video_path: str | Path, out_path: str | Path) -> bool:
+    """Extract a frame near the start of a video and save it as a JPEG file.
+
+    Uses 3% of duration (or 0.1s minimum) to skip any black-frame leader.
+    Returns True on success, False on failure.
+    """
+    dur = probe_duration(video_path)
+    seek = max(0.1, dur * 0.03) if dur > 0 else 0.1
+    try:
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", f"{seek:.3f}",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(out_path),
+            ],
+            capture_output=True, timeout=30,
+        )
+        return r.returncode == 0 and Path(out_path).exists()
+    except Exception as e:
+        log.debug("extract_first_frame_to_file(%s) failed: %s", video_path, e)
+        return False
+
+
 def sample_frames_temporal(
     video_path: str | Path,
     max_frames: int = 12,

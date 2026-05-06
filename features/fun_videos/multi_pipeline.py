@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file
+from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file, extract_first_frame_to_file
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt, _sample_music_frames
 
@@ -435,15 +435,84 @@ def run_multi_pipeline(job, photo_path, settings):
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Multi-video failed: {raw}")
 
-    job.update(progress=76, message=f"Concatenating {len(clip_paths)} clips...")
+    job.update(progress=76, message=f"All {len(clip_paths)} clips done -- generating transitions...")
     job.meta["clips_generated"] = len(clip_paths)
     job.meta["clip_paths"] = clip_paths
 
-    # ── Phase 2: Concatenate ──────────────────────────────────────────────
+    # ── Phase 2a: Generate AI bridge clips between adjacent story clips ────
+    # Each bridge is a short WanGP clip with start=last_frame_i and
+    # end=first_frame_{i+1}, constraining both ends so the transition is
+    # visually locked rather than a hard cut or a blind xfade.
+    bridge_clips: list[str | None] = []
+    if len(clip_paths) > 1 and not _stopped():
+        from features.video_bridges.bridge_generator import generate_bridge
+        n_bridges = len(clip_paths) - 1
+        for i in range(n_bridges):
+            if _stopped():
+                bridge_clips.append(None)
+                continue
+
+            pct = 76 + int((i / n_bridges) * 8)  # 76..84%
+            job.update(progress=pct,
+                       message=f"Transition {i + 1}/{n_bridges}: morphing clip {i + 1} -> {i + 2}...")
+
+            frame_a = str(job_dir / f"frame_{i:02d}.jpg")          # last frame of clip_i
+            frame_b = str(job_dir / f"bfirst_{i + 1:02d}.jpg")     # first frame of clip_{i+1}
+
+            # Extract first frame of the next clip
+            got_b = (
+                os.path.isfile(frame_a) and
+                extract_first_frame_to_file(clip_paths[i + 1], frame_b)
+            )
+            if not got_b:
+                log.warning("[multi] Could not extract boundary frames for bridge %d -- skipping", i)
+                bridge_clips.append(None)
+                continue
+
+            bridge_out = str(job_dir / f"bridge_{i:02d}.mp4")
+            bridge_path = generate_bridge(
+                frame_a_path=frame_a,
+                frame_b_path=frame_b,
+                prompt="smooth seamless transition, fluid cinematic motion, natural flow",
+                out_path=bridge_out,
+                duration=2.0,
+                model_name=model_name,
+                resolution=resolution,
+                steps=max(12, steps // 2),
+                guidance=guidance,
+                seed=seed,
+                use_end_frame=True,
+                allow_fallback=True,
+                stop_check=_stopped,
+                log_fn=_log,
+            )
+            bridge_clips.append(bridge_path if bridge_path and os.path.isfile(bridge_path) else None)
+            log.info("[multi] Bridge %d/%d: %s", i + 1, n_bridges,
+                     "ok" if bridge_clips[-1] else "fallback/skipped")
+
+    # ── Phase 2b: Compile clips + bridges into one video ─────────────────
+    job.update(progress=85, message="Compiling clips with transitions...")
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_with_xfade(clip_paths, concat_path):
-        log.warning("[multi] Concat failed -- using first clip only")
-        concat_path = clip_paths[0]
+
+    if bridge_clips and not _stopped():
+        from features.video_bridges.bridge_generator import compile_with_bridges
+        compiled = compile_with_bridges(
+            segment_paths=clip_paths,
+            bridge_paths=bridge_clips,
+            out_path=concat_path,
+            resolution=resolution,
+            log_fn=_log,
+        )
+        if not compiled:
+            log.warning("[multi] compile_with_bridges failed -- falling back to xfade concat")
+            compiled = None
+    else:
+        compiled = None
+
+    if not compiled:
+        if not _concat_with_xfade(clip_paths, concat_path):
+            log.warning("[multi] Concat failed -- using first clip only")
+            concat_path = clip_paths[0]
 
     job.meta["concat_path"] = concat_path
 
