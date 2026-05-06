@@ -902,6 +902,10 @@ def shutdown_all():
     for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc),
                         ("Forge", _forge_proc)]:
         _kill_proc(proc, label)
+    # Belt+suspenders: kill by port for processes we didn't spawn (or lost the handle to)
+    _kill_by_port(WANGP_WORKER_PORT, "WanGP")
+    _kill_by_port(ACESTEP_PORT, "ACE-Step")
+    _kill_stale_gpu_processes()
     _wangp_worker_proc = None
     _acestep_proc = None
     _forge_proc = None

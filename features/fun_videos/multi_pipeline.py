@@ -310,7 +310,7 @@ def run_multi_pipeline(job, photo_path, settings):
         # Back off guidance for chain clips so start-image has dominant weight.
         # At full guidance the text overrides the start frame and characters drift.
         # At 0.45x the start frame anchors visual content while text guides motion.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.45)
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(1.0, guidance * 0.45)
 
         try:
             clip_path = video_generator.generate_video(

@@ -68,19 +68,39 @@ For landscapes: wind, weather, water, fire all moving together.
 
 Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
 
-MUSIC_PROMPT_SYSTEM = """You are a music director suggesting background music for a short AI-generated video.
-Pick a real, specific genre with authentic instrumentation and raw character. Describe it the way a producer would: instruments, tempo feel, production texture, energy level.
+MUSIC_PROMPT_SYSTEM = """You are a music director for an eclectic video production studio.
 
-BANNED WORDS -- never use these (they produce muzak): cinematic, ethereal, haunting, dramatic, sweeping, majestic, epic, atmospheric, lush, soaring, pulsing.
+The audience has broad taste: French chanson, gypsy/Balkan punk, post-punk and new wave,
+garage blues, indie folk, sea shanties, electro swing, anarcho-punk, delta blues, Americana,
+psychedelic indie, klezmer, cumbia, polka, novelty and character songs.
 
-Good examples: "outlaw country, fingerpicked acoustic, upright bass, brushed snare, dry room sound" or "early 80s post-punk, angular guitar riffs, trebly bass, tense rhythm section" or "high-energy cumbia, brass stabs, accordion hook, driving percussion" or "garage blues rock, overdriven Strat, loose drums, live room sound".
+Pick a real, specific genre that fits the video. Use producer vocabulary: instruments, tempo
+feel, production texture, energy. One sentence max for music_prompt.
+
+BANNED WORDS -- lazy descriptors that produce generic output: cinematic, ethereal, haunting,
+dramatic, sweeping, majestic, epic, atmospheric, lush, soaring, pulsing.
+
+NEVER suggest these genres (they are boring and wrong for this audience): 90s rock, post-grunge,
+grunge, mainstream alternative, soft rock, light rock, adult contemporary, smooth jazz,
+generic pop, radio rock, Nickelback-style anything.
+
+Good examples of the RIGHT direction:
+- "high-energy gypsy punk, accordion stabs, frantic violin, pounding rhythm section"
+- "early 80s post-punk, angular guitar, trebly bass, cold mechanical drums"
+- "delta blues, slide guitar, single-mic room sound, lazy swing feel"
+- "French chanson, accordion, upright bass, dry brushed snare, smoky bistro feel"
+- "anarcho-folk, fingerpicked acoustic, tuneful group vocals, raw honest energy"
+- "electro swing, muted trumpet, vintage brass, punchy syncopated kick, speakeasy feel"
+- "high-energy cumbia, brass stabs, accordion hook, driving congas"
+- "sea shanty, unison male voices, fiddle, bodhran, no reverb, working-class stomp"
+- "garage blues rock, overdriven Strat, loose drums, live room bleed, raw take"
 
 Return ONLY valid JSON:
 {
   "music_prompt": "genre + instrumentation + production texture",
   "bpm": 120,
   "key_suggestion": "optional key/scale",
-  "reasoning": "brief explanation of why this music fits"
+  "reasoning": "one sentence on why this fits"
 }"""
 
 LYRICS_SYSTEM = """You are a sardonic, witty songwriter with a gift for irony and gentle mockery.
