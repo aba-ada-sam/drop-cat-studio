@@ -228,13 +228,16 @@ def open_app_window(port: int) -> "subprocess.Popen | None":
     profile_dir = str(ROOT / ".chrome_profile")
     for path in chrome_paths:
         if os.path.isfile(path):
-            proc = subprocess.Popen([
+            args = [
                 path,
                 f"--app={url}",
                 f"--user-data-dir={profile_dir}",
                 "--window-size=1400,900",
                 "--window-position=100,50",
-            ])
+            ]
+            if ICO_PATH.exists():
+                args.append(f"--app-icon={ICO_PATH}")
+            proc = subprocess.Popen(args)
             log.info("Opened Chrome --app on port %d (profile: %s)", port, profile_dir)
             return proc
     # Chrome not found — fall back to default browser (can't track close)
