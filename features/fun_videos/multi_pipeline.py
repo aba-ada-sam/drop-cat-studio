@@ -98,6 +98,62 @@ def _generate_story_arc(
 
 # ── ffmpeg clip concatenation ─────────────────────────────────────────────────
 
+def _concat_with_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 0.5) -> bool:
+    """Concatenate clips with crossfade transitions via ffmpeg xfade filter.
+
+    xfade offset for clip i = sum(dur[0..i-1]) - i * fade_dur.
+    Falls back to hard-cut concat if probing or encoding fails.
+    """
+    if not clip_paths:
+        return False
+    if len(clip_paths) == 1:
+        shutil.copy2(clip_paths[0], out_path)
+        return Path(out_path).exists()
+
+    durations = []
+    for p in clip_paths:
+        d = probe_duration(p)
+        if not d or d <= fade_dur:
+            log.warning("[multi] Cannot probe duration for %s -- hard cut fallback", p)
+            return _concat_clips(clip_paths, out_path)
+        durations.append(d)
+
+    # Build a chained xfade filter: each pair (prev_out, clip_i) fades at the
+    # cumulative timeline offset where clip i should start bleeding in.
+    filter_parts = []
+    cumulative = 0.0
+    prev_label = "[0:v]"
+    for i in range(1, len(clip_paths)):
+        cumulative += durations[i - 1]
+        offset = max(0.1, cumulative - i * fade_dur)
+        next_label = f"[{i}:v]"
+        out_label = "[v]" if i == len(clip_paths) - 1 else f"[xf{i}]"
+        filter_parts.append(
+            f"{prev_label}{next_label}"
+            f"xfade=transition=fade:duration={fade_dur:.3f}:offset={offset:.4f}"
+            f"{out_label}"
+        )
+        prev_label = out_label
+
+    cmd = ["ffmpeg", "-y"]
+    for p in clip_paths:
+        cmd += ["-i", p]
+    cmd += [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[v]", "-an",
+        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        out_path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=600)
+        if r.returncode == 0 and Path(out_path).exists():
+            return True
+        log.error("[multi] xfade failed:\n%s", r.stderr.decode(errors="replace")[-1500:])
+    except Exception as e:
+        log.error("[multi] xfade exception: %s", e)
+    return _concat_clips(clip_paths, out_path)
+
+
 def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
     """Losslessly concatenate video clips using ffmpeg concat demuxer."""
     with tempfile.NamedTemporaryFile(
@@ -307,10 +363,7 @@ def run_multi_pipeline(job, photo_path, settings):
         clip_start_image = start_image_path if start_image_path else prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-        # Back off guidance for chain clips so start-image has dominant weight.
-        # At full guidance the text overrides the start frame and characters drift.
-        # At 0.45x the start frame anchors visual content while text guides motion.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(1.0, guidance * 0.45)
+        effective_guidance = guidance
 
         try:
             clip_path = video_generator.generate_video(
@@ -388,8 +441,8 @@ def run_multi_pipeline(job, photo_path, settings):
 
     # ── Phase 2: Concatenate ──────────────────────────────────────────────
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips(clip_paths, concat_path):
-        log.warning("[multi] Concat failed — falling back to first clip")
+    if not _concat_with_xfade(clip_paths, concat_path):
+        log.warning("[multi] Concat failed -- using first clip only")
         concat_path = clip_paths[0]
 
     job.meta["concat_path"] = concat_path
