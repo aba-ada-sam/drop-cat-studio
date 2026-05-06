@@ -505,13 +505,12 @@ def _shutdown(srv: "ServerManager") -> None:
     log.info("Shutting down")
     try:
         from services import manager as svc
-        for svc_name in ("wangp", "acestep"):
-            try:
-                svc.stop_service(svc_name)
-            except Exception:
-                pass
-    except Exception:
-        pass
+        # shutdown_all() uses three kill layers: proc handle, port scan, and
+        # wmic process-name scan. The last layer is the reliable backstop when
+        # _assign_to_job() failed (e.g. process already in Pinokio Job Object).
+        svc.shutdown_all()
+    except Exception as e:
+        log.warning("Service cleanup error: %s", e)
     srv.stop()
     clear_port_file()
     os._exit(0)

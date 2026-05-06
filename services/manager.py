@@ -99,8 +99,18 @@ def _assign_to_job(proc: subprocess.Popen) -> None:
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         handle = k32.OpenProcess(PROCESS_ALL_ACCESS, False, proc.pid)
         if handle:
-            k32.AssignProcessToJobObject(_JOB_HANDLE, handle)
+            ok = k32.AssignProcessToJobObject(_JOB_HANDLE, handle)
             k32.CloseHandle(handle)
+            if not ok:
+                # Fails if the process is already in a Job Object that forbids
+                # nesting (e.g. Pinokio's Job Object on Windows 7). On Windows 8+
+                # nested jobs are supported; this error means something else.
+                # shutdown_all()._kill_stale_gpu_processes() is the backstop.
+                log.warning(
+                    "Job Object: could not assign PID %d (error %d) -- "
+                    "process will be killed by name scan on shutdown",
+                    proc.pid, ctypes.get_last_error(),
+                )
     except Exception as exc:
         log.debug("Could not assign PID %s to Job Object: %s", proc.pid, exc)
 
