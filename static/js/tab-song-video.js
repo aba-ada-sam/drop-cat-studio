@@ -783,6 +783,10 @@ export function init(panel) {
           _clipDur = Math.max(8, Math.min(parseInt(clipSlider.max) || 19, s.clip_duration));
           clipSlider.value = String(_clipDur); clipLabel.textContent = `${_clipDur}s`;
         }
+        // photo_path is the extracted last frame passed by _doContinuation
+        if (typeof s.photo_path === 'string' && s.photo_path.trim()) {
+          _applyImage(s.photo_path, pathToUrl(s.photo_path) || s.photo_path);
+        }
       },
     });
   }).catch(() => {});

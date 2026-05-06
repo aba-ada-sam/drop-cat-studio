@@ -311,6 +311,15 @@ async def make_it(request: Request):
         "source_image": photo_path or "",
         "prompt": settings.get("video_prompt", "")[:120],
         "model": settings.get("model_name", ""),
+        "settings": {
+            "prompt":       settings.get("video_prompt", "")[:240],
+            "steps":        settings.get("video_steps"),
+            "guidance":     settings.get("video_guidance"),
+            "duration_sec": settings.get("video_duration"),
+            "source_image": photo_path or "",
+            "model":        settings.get("model_name", ""),
+            "seed":         settings.get("video_seed"),
+        },
     })
     return {"job_id": job.id}
 
@@ -378,6 +387,15 @@ async def make_it_multi(request: Request):
         "model":         settings.get("model_name", ""),
         "num_clips":     n_clips,
         "clip_duration": clip_dur,
+        "settings": {
+            "prompt":       settings.get("video_prompt", "")[:240],
+            "steps":        settings.get("video_steps"),
+            "guidance":     settings.get("video_guidance"),
+            "duration_sec": clip_dur,
+            "source_image": photo_path or "",
+            "model":        settings.get("model_name", ""),
+            "seed":         settings.get("video_seed"),
+        },
     })
     return {"job_id": job.id}
 

@@ -743,7 +743,10 @@ async function _doContinuation(job, closeFn) {
     return;
   }
 
-  const tabId    = job.meta?.feature === 'song_video' ? 'song-video' : job.meta?.feature || '';
+  const _feat = job.meta?.feature || '';
+  const tabId = _feat === 'song_video' ? 'song-video'
+              : (_feat === 'fun_video' || _feat === 'fun_videos' || _feat === 'fun_multi_video') ? 'fun-videos'
+              : _feat.replace(/_/g, '-');
   const settings = job.meta?.settings || {};
   if (!tabId || !Object.keys(settings).length) {
     toast('No source tab or settings to continue from', 'error');
@@ -786,9 +789,10 @@ async function _doContinuation(job, closeFn) {
 }
 
 async function _doBranch(job, feedback, closeFn) {
-  const tabId   = job.meta?.feature === 'song_video' ? 'song-video'
-              : job.meta?.feature === 'fun_videos'  ? 'fun-videos'
-              : job.meta?.feature || '';
+  const _feat2  = job.meta?.feature || '';
+  const tabId   = _feat2 === 'song_video' ? 'song-video'
+              : (_feat2 === 'fun_video' || _feat2 === 'fun_videos' || _feat2 === 'fun_multi_video') ? 'fun-videos'
+              : _feat2.replace(/_/g, '-');
   const settings = job.meta?.settings || {};
   if (!tabId || !Object.keys(settings).length) {
     toast('No source tab or settings to branch from', 'error');

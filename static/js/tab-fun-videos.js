@@ -1225,9 +1225,11 @@ export function init(panel) {
         }
         // Restore the source image into the start drop zone
         if (typeof s.source_image === 'string' && s.source_image.trim() && _applyStart) {
-          const imgPath = s.source_image;
-          const imgUrl  = pathToUrl(imgPath) || imgPath;
-          _applyStart(imgPath, imgUrl);
+          _applyStart(s.source_image, pathToUrl(s.source_image) || s.source_image);
+        }
+        // photo_path is the extracted last frame passed by _doContinuation
+        if (typeof s.photo_path === 'string' && s.photo_path.trim() && _applyStart) {
+          _applyStart(s.photo_path, pathToUrl(s.photo_path) || s.photo_path);
         }
       },
     });
