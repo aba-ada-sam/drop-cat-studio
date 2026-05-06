@@ -186,7 +186,7 @@ def generate_audio(
     if bpm is not None:
         try:
             bpm_int = int(bpm)
-            if bpm_int > 0:
+            if 20 <= bpm_int <= 300:
                 payload["bpm"] = bpm_int
         except (TypeError, ValueError):
             pass

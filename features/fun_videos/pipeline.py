@@ -418,6 +418,7 @@ def run_pipeline(job, photo_path, settings):
                     settings["bpm"] = music_result["bpm"]
         except Exception as e:
             _log(f"[warning] Music analysis failed: {e}")
+        if not music_prompt:
             music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
     else:
         job.update(progress=65, message="Using pre-generated music direction...")

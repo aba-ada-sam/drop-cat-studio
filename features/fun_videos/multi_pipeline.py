@@ -423,6 +423,7 @@ def run_multi_pipeline(job, photo_path, settings):
                     settings["bpm"] = result["bpm"]
         except Exception as e:
             log.warning("[multi] Post-video music analysis failed: %s", e)
+        if not music_prompt:
             music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
     else:
         job.update(progress=78, message="Using pre-generated music direction…")
