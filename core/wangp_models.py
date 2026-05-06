@@ -73,6 +73,7 @@ SAFE_DEFAULTS: dict = {
     "audio_guide2": None,
     "custom_guide": None,
     "audio_prompt_type": "",
+    "audio_scale": 1.0,
     "MMAudio_setting": 0,
     "image_mode": 0,        # 0=video output, >0=image output -- always want video
     "model_mode": "",

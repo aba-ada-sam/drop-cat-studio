@@ -175,11 +175,23 @@ def _do_generate(params: dict) -> dict:
     # "tea" gives ~25-35% speedup with negligible quality loss at 480p and below.
     # Pass cache_type="" in params to disable for a specific job if needed.
     defaults["skip_steps_cache_type"] = params.get("cache_type", "tea")
-    # MMAudio: enable LTX-2 native audio when requested
+    # MMAudio: enable post-processing audio when requested (Wan models only)
     if params.get("mmaudio"):
         defaults["MMAudio_setting"] = 1
     else:
         defaults["MMAudio_setting"] = 0     # never inherit a saved MMAudio=1
+    # LTX-2 audio conditioning: "A" mode generates video synchronized with the
+    # provided audio segment at model level. Set explicitly (not via setdefault)
+    # to override any stale audio_prompt_type saved in WanGP's settings file.
+    audio_source_path = params.get("audio_source")
+    if audio_source_path and os.path.isfile(audio_source_path):
+        defaults["audio_source"]      = os.path.abspath(audio_source_path)
+        defaults["audio_prompt_type"] = "A"
+        defaults["audio_scale"]       = float(params.get("audio_scale", 1.0))
+    else:
+        defaults["audio_source"]      = None
+        defaults["audio_prompt_type"] = ""
+        defaults["audio_scale"]       = 1.0
     # LoRA settings override defaults when provided
     if activated_loras:
         defaults["activated_loras"] = activated_loras

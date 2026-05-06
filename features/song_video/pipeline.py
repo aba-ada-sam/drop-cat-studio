@@ -31,6 +31,23 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
+def _extract_audio_segment(audio_path: str, start_time: float, duration: float, out_path: str) -> str | None:
+    """Cut [start_time, start_time+duration] from audio as a stereo 44100 Hz WAV.
+
+    Transcoding to WAV avoids MP3 frame-boundary issues when seeking, and gives
+    LTX-2 a format it can reliably decode with torchaudio.
+    """
+    r = subprocess.run(
+        ["ffmpeg", "-y",
+         "-ss", f"{start_time:.4f}", "-t", f"{duration:.4f}",
+         "-i", audio_path,
+         "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
+         out_path],
+        capture_output=True, timeout=30,
+    )
+    return out_path if r.returncode == 0 and Path(out_path).exists() else None
+
+
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     """Extract the actual last frame of a video as a JPEG.
 
@@ -365,6 +382,13 @@ def run_song_pipeline(job, photo_path, settings):
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
+    # Cumulative start times so each clip gets its corresponding audio segment
+    _clip_start_times: list[float] = []
+    _t = 0.0
+    for _d in clip_durations:
+        _clip_start_times.append(_t)
+        _t += _d
+
     for i, clip_prompt in enumerate(story_arc):
         if _stopped():
             break
@@ -410,6 +434,17 @@ def run_song_pipeline(job, photo_path, settings):
         # the text guides camera motion only.
         effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.45)
 
+        # Extract the audio segment for this clip's time window so LTX-2 can
+        # condition the video generation directly on the music. WAV avoids MP3
+        # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
+        clip_audio_seg: str | None = None
+        if audio_path and os.path.isfile(audio_path):
+            seg_path = str(job_dir / f"audio_seg_{i:02d}.wav")
+            seg_start = _clip_start_times[i] if i < len(_clip_start_times) else 0.0
+            clip_audio_seg = _extract_audio_segment(audio_path, seg_start, this_dur, seg_path)
+            if not clip_audio_seg:
+                log.warning("[song-video] Audio segment extraction failed for clip %d -- text-only mode", clip_num)
+
         try:
             clip_path = video_generator.generate_video(
                 image_path=clip_start_image,
@@ -423,6 +458,7 @@ def run_song_pipeline(job, photo_path, settings):
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
+                audio_source=clip_audio_seg,
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,

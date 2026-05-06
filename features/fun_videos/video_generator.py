@@ -59,6 +59,7 @@ def generate_video(
     end_image_path: str | None = None,
     start_video_path: str | None = None,
     loras: list | None = None,
+    audio_source: str | None = None,
     stop_check=None,
     log_fn=None,
     progress_fn=None,
@@ -112,7 +113,7 @@ def generate_video(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
-            mmaudio=mmaudio,
+            mmaudio=mmaudio, audio_source=audio_source,
         )
 
     # Only fall back to subprocess if the worker process is not running at all
@@ -133,6 +134,7 @@ def _generate_via_worker(
     steps, guidance, seed, model_name, end_image_path,
     start_video_path, loras, stop_check, log_fn, progress_fn=None,
     mmaudio: bool = False,
+    audio_source: str | None = None,
 ) -> str | None:
     """Generate via persistent worker on port 7899."""
     payload = {
@@ -147,6 +149,8 @@ def _generate_via_worker(
         "seed": seed,
         "mmaudio": mmaudio,
     }
+    if audio_source and os.path.isfile(audio_source):
+        payload["audio_source"] = os.path.abspath(audio_source)
     if start_video_path and os.path.isfile(start_video_path):
         payload["start_video"] = os.path.abspath(start_video_path)
     elif image_path:
