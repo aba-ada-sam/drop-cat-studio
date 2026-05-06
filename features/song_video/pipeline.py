@@ -649,6 +649,12 @@ def run_song_pipeline(job, photo_path, settings):
                 os.remove(concat_path)
             except Exception:
                 pass
+        # Remove per-clip audio segment WAVs (conditioning inputs, not output audio)
+        for seg in job_dir.glob("audio_seg_*.wav"):
+            try:
+                seg.unlink()
+            except Exception:
+                pass
     else:
         # Merge failed -- return the concat without audio
         job.output = concat_path
@@ -659,3 +665,8 @@ def run_song_pipeline(job, photo_path, settings):
             get_session().add_file(Path(concat_path).name, "video", "song_video", path=concat_path)
         except Exception:
             pass
+        for seg in job_dir.glob("audio_seg_*.wav"):
+            try:
+                seg.unlink()
+            except Exception:
+                pass

@@ -188,6 +188,7 @@ def _do_generate(params: dict) -> dict:
         defaults["audio_source"]      = os.path.abspath(audio_source_path)
         defaults["audio_prompt_type"] = "A"
         defaults["audio_scale"]       = float(params.get("audio_scale", 1.0))
+        print(f"[worker] audio conditioning: type=A scale={defaults['audio_scale']} src={os.path.basename(audio_source_path)}", flush=True)
     else:
         defaults["audio_source"]      = None
         defaults["audio_prompt_type"] = ""
