@@ -560,7 +560,7 @@ async def add_music(request: Request):
                 log.warning("Music analysis failed: %s", e)
 
         if not music_prompt:
-            music_prompt = "cinematic ambient, warm strings, gentle piano"
+            music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
 
         instrumental = cfg_settings.get("instrumental", False)
         lyrics = ""

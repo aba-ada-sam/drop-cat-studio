@@ -413,12 +413,12 @@ def run_pipeline(job, photo_path, settings):
             frames = _sample_music_frames(video_path, llm_router)
             if frames:
                 music_result = analyzer.generate_music_prompt(llm_router, frames, user_direction)
-                music_prompt = music_result.get("music_prompt", "cinematic ambient, warm strings")
+                music_prompt = music_result.get("music_prompt", "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums")
                 if not settings.get("bpm") and music_result.get("bpm"):
                     settings["bpm"] = music_result["bpm"]
         except Exception as e:
             _log(f"[warning] Music analysis failed: {e}")
-            music_prompt = "cinematic ambient, warm strings, gentle piano"
+            music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
     else:
         job.update(progress=65, message="Using pre-generated music direction...")
 
