@@ -448,6 +448,10 @@ class JobManager:
                 failed += 1
 
         log.info("[queue-restore] Restored %d, failed %d", restored, failed)
+        try:
+            QUEUE_SAVE_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
         return restored, failed
 
     def cleanup(self, max_age_hours: int = 24):

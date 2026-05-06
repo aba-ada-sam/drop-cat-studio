@@ -255,9 +255,13 @@ function _render(data) {
   const cancelAllBtn = document.getElementById('queue-cancel-all-btn');
   const clearBtn     = document.getElementById('queue-clear-btn');
   const saveBtn      = document.getElementById('queue-save-btn');
+  const restoreBtn   = document.getElementById('queue-restore-btn');
   if (cancelAllBtn) cancelAllBtn.style.display = queued.length > 0 ? '' : 'none';
   if (clearBtn)     clearBtn.style.display     = completed.length > 0 ? '' : 'none';
   if (saveBtn)      saveBtn.style.display      = '';
+  // Hide restore button when jobs are already live; retry check when queue is empty.
+  if (restoreBtn && total > 0) restoreBtn.style.display = 'none';
+  if (total === 0) _checkRestoreBtn();
 
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';
