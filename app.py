@@ -608,6 +608,11 @@ async def get_thumbnail(path: str, size: int = 120):
     from fastapi.responses import Response as _Resp
     try:
         from PIL import Image as _Img
+        # Accept URL-style paths like /output/... or /uploads/... in addition to
+        # absolute filesystem paths.  Resolve them relative to the app root.
+        _url_prefixes = ('/output/', '/uploads/', '/static/')
+        if any(path.startswith(pfx) for pfx in _url_prefixes):
+            path = str(_Path(__file__).resolve().parent / path.lstrip('/'))
         p = _Path(path)
         if not p.is_file():
             return JSONResponse({"error": "Not found"}, status_code=404)

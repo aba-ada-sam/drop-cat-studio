@@ -200,7 +200,9 @@ function _makeCard(item) {
     mediaEl = document.createElement('video');
     mediaEl.src = item.url;
     mediaEl.preload = 'none';
-    mediaEl.poster = item.thumbnail || '';
+    mediaEl.poster = item.url
+        ? `/api/thumbnail?path=${encodeURIComponent(item.url)}&size=300`
+        : (item.thumbnail || '');
     mediaEl.style.cssText = 'width:100%;height:100%;object-fit:cover';
     mediaEl.muted = true;
     card.addEventListener('mouseenter', () => mediaEl.play().catch(() => {}));
