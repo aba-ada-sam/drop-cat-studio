@@ -174,7 +174,7 @@ async def generate(request: Request):
         "video_prompt":    body.get("video_prompt", ""),
         "variety_theme":   body.get("variety_theme", ""),
         "lyrics_text":     body.get("lyrics_text", ""),
-        "user_direction":  body.get("user_direction", "music video, cinematic, energetic"),
+        "user_direction":  body.get("user_direction", "music video, energetic, bold"),
         "audio_path":      audio_path,
         "audio_duration":  audio_dur,
         "audio_analysis":  analysis,
@@ -265,8 +265,8 @@ async def extract_frame(request: Request):
     if r.returncode != 0 or not dest.exists():
         raise HTTPException(500, "Failed to extract last frame from video")
 
-    img = Image.open(str(dest))
-    w, h = img.size
+    with Image.open(str(dest)) as img:
+        w, h = img.size
     return {
         "path":   str(dest),
         "url":    f"/uploads/{dest.name}",

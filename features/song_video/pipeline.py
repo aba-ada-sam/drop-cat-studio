@@ -139,7 +139,7 @@ def _generate_song_arc(
     bpm    = analysis.get("bpm")
     key    = analysis.get("key", "")
     mode   = analysis.get("mode", "")
-    mood   = analysis.get("mood", "cinematic")
+    mood   = analysis.get("mood", "")
 
     # Per-clip pacing label only -- no percentages, no beat-timing instructions.
     # The label hints at narrative intensity (intro / climb / peak / release)
@@ -162,7 +162,7 @@ def _generate_song_arc(
     )
 
     user_msg = (
-        f"Song character: {song_desc or 'cinematic'}\n"
+        f"Song character: {song_desc or 'dynamic track'}\n"
         f"Story direction: {story_direction}\n"
         f"{style_line}"
         f"{lyrics_line}"

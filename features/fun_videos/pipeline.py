@@ -36,8 +36,8 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 # Quality suffixes appended to every video prompt before sending to WanGP.
 # These are model-family specific tags the models were trained on.
 _PROMPT_SUFFIXES = {
-    "ltx":  "cinematic motion, high quality, photorealistic, sharp focus",
-    "wan":  "cinematic motion, smooth animation, photorealistic, high quality, detailed",
+    "ltx":  "smooth fluid motion, high quality, photorealistic, sharp focus",
+    "wan":  "smooth animation, photorealistic, high quality, detailed",
 }
 
 def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:

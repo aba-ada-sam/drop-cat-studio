@@ -25,14 +25,14 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 # ── Story arc generation ──────────────────────────────────────────────────────
 
 _STORY_ARC_SYSTEM = """\
-You are a cinematic director planning a multi-clip short film.
-Generate sequential motion prompts — each describes 8-12 seconds of continuous physical action.
+You are a visual storytelling director planning a multi-clip short film.
+Generate sequential motion prompts -- each describes 8-12 seconds of continuous physical action.
 Clips must connect visually: each prompt picks up from where the previous clip ended.
 
 Rules:
 - Each prompt: 30-50 words, begins with an explosive action verb
-- Describe subject motion only — no camera moves as the primary event
-- Narrative arc: establish scene → build tension → climax or resolution
+- Describe subject motion only -- no camera moves as the primary event
+- Narrative arc: establish scene -> build tension -> climax or resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -44,7 +44,7 @@ def _generate_story_arc(
     photo_path: str | None,
 ) -> list[str]:
     """Generate N sequential motion prompts that form a narrative arc."""
-    idea_text = (initial_idea or "").strip() or "Create an exciting cinematic short film"
+    idea_text = (initial_idea or "").strip() or "Create an exciting action-packed short film"
     user_msg = (
         f"Initial idea: {idea_text}\n"
         f"Number of clips: {n_clips}\n\n"
@@ -72,9 +72,11 @@ def _generate_story_arc(
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
             result = [str(c) for c in clips[:n_clips]]
-            # Pad if LLM returned fewer than requested
+            # Pad if LLM returned fewer than requested -- cycle to avoid
+            # consecutive visually identical clips from repeating the last prompt
+            src = len(result)
             while len(result) < n_clips:
-                result.append(result[-1])
+                result.append(result[len(result) % src])
             return result
     except Exception as e:
         log.warning("[multi] Story arc LLM call failed: %s", e)
@@ -145,7 +147,7 @@ def run_multi_prep(job, photo_path, settings):
     lyric_direction = settings.get("lyric_direction", "")
 
     # ── Story arc ─────────────────────────────────────────────────────────
-    job.update(progress=3, message="Planning story arc…")
+    job.update(progress=3, message="Planning story arc...")
     try:
         arc = _generate_story_arc(llm_router, user_idea, n_clips, photo_path)
         settings["_story_arc"] = arc
@@ -155,7 +157,7 @@ def run_multi_prep(job, photo_path, settings):
         settings["_story_arc"] = [user_idea or "Subject erupts into motion"] * n_clips
 
     if skip_audio:
-        job.update(progress=10, message="Story arc ready, waiting for GPU…")
+        job.update(progress=10, message="Story arc ready, waiting for GPU...")
         return
 
     # ── Music direction ────────────────────────────────────────────────────
@@ -195,7 +197,7 @@ def run_multi_prep(job, photo_path, settings):
         except Exception as e:
             log.warning("[multi] Lyrics prep failed: %s", e)
 
-    job.update(progress=10, message="Story arc ready, waiting for GPU…")
+    job.update(progress=10, message="Story arc ready, waiting for GPU...")
 
 
 # ── GPU phase ─────────────────────────────────────────────────────────────────
@@ -284,15 +286,20 @@ def run_multi_pipeline(job, photo_path, settings):
         pct_start = 10 + int((i / n_clips) * 65)
         pct_end   = 10 + int(((i + 1) / n_clips) * 65)
 
-        job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}…")
+        job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}...")
 
         def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
-            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} — step {step}/{total}")
+            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
         clip_start_image = start_image_path if start_image_path else prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+
+        # Back off guidance for chain clips so start-image has dominant weight.
+        # At full guidance the text overrides the start frame and characters drift.
+        # At 0.45x the start frame anchors visual content while text guides motion.
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.45)
 
         try:
             clip_path = video_generator.generate_video(
@@ -305,7 +312,7 @@ def run_multi_pipeline(job, photo_path, settings):
                 override_width=int(ow) if ow else None,
                 override_height=int(oh) if oh else None,
                 steps=steps,
-                guidance=guidance,
+                guidance=effective_guidance,
                 seed=seed,
                 stop_check=_stopped,
                 log_fn=_log,
@@ -328,14 +335,29 @@ def run_multi_pipeline(job, photo_path, settings):
         clip_paths.append(clip_path)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
+        # Trim LTX-2 fade-out tail before chain frame extraction so the shared
+        # boundary frame is in-motion, not a near-static fade-out frame.
+        if i < len(story_arc) - 1:
+            clip_real_dur = probe_duration(clip_path) or clip_dur
+            trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
+            tail_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
+            tr = subprocess.run(
+                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
+                capture_output=True, timeout=60,
+            )
+            if tr.returncode == 0 and Path(tail_out).exists():
+                os.replace(tail_out, clip_path)
+            else:
+                log.debug("[multi] Clip %d tail-trim failed -- using full clip", i + 1)
+
         # Extract last frame for the next clip's start_image
         if i < len(story_arc) - 1:
             frame_out = str(job_dir / f"frame_{i:02d}.jpg")
             if extract_last_frame_to_file(clip_path, frame_out):
                 start_image_path = frame_out
-                log.debug("[multi] Frame %d extracted → %s", i + 1, frame_out)
+                log.debug("[multi] Frame %d extracted -> %s", i + 1, frame_out)
             else:
-                log.warning("[multi] Frame extraction failed for clip %d — next clip starts blind", i + 1)
+                log.warning("[multi] Frame extraction failed for clip %d -- next clip starts blind", i + 1)
                 start_image_path = None
 
     if _stopped():
@@ -346,10 +368,10 @@ def run_multi_pipeline(job, photo_path, settings):
     if not clip_paths:
         if forge_unloaded:
             reload_checkpoint()
-        raw = _last_error[0] or "No clips generated — check WanGP is running"
+        raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Multi-video failed: {raw}")
 
-    job.update(progress=76, message=f"Concatenating {len(clip_paths)} clips…")
+    job.update(progress=76, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
     job.meta["clip_paths"] = clip_paths
 
@@ -412,7 +434,7 @@ def run_multi_pipeline(job, photo_path, settings):
             "Nothing ever stays the same"
         )
 
-    job.update(progress=82, message="Generating audio for full story…")
+    job.update(progress=82, message="Generating audio for full story...")
     forge_was_unloaded = forge_unloaded or unload_checkpoint()
 
     total_dur = probe_duration(concat_path)
@@ -421,7 +443,7 @@ def run_multi_pipeline(job, photo_path, settings):
     def _audio_progress(elapsed_s):
         job.update(
             progress=82 + min(8, int(elapsed_s) // 10),
-            message=f"Generating audio… {elapsed_s}s elapsed",
+            message=f"Generating audio... {elapsed_s}s elapsed",
         )
 
     try:

@@ -6,8 +6,6 @@ import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260429b';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
-// v=20260504p
-
 export function receiveHandoff(data) {
   // no-op — this tab doesn't currently receive handoffs
 }
@@ -43,17 +41,17 @@ export function init(panel) {
 
   const _VARIETY_THEMES = [
     'Abstract geometric forms and flowing light, motion-blurred energy trails',
-    'Sweeping epic landscape — mountains, forests, dramatic skies at golden hour',
-    'Urban night — neon-lit rain-slick streets, city pulse and electric glow',
-    'Underwater world — bioluminescent drift, slow ethereal motion, deep blues',
-    'Cosmic journey — nebula clouds, star fields, galactic scale, time-lapse universe',
-    'Fire and molten metal — ember cascades, plasma arcs, blazing intensity',
-    'Dancers and performers — fabric billowing, choreographic peaks and lulls',
-    'Desert and canyon — heat shimmer, red rock, ancient silent power',
-    'Arctic and aurora — frozen geometry, northern lights, crystalline stillness',
-    'Macro nature — water droplets, insect wings, pollen in shafts of light',
-    'Surreal dreamscape — floating objects, impossible architecture, fluid reality',
-    'Storm and lightning — dark clouds, electric chaos, rain-drenched intensity',
+    'Wide flat plains at golden hour, crops bending in wind, long shadows reaching east',
+    'Urban night -- neon-lit rain-slick streets, city pulse and electric glow',
+    'Underwater world -- bioluminescent drift, slow graceful motion, deep blues',
+    'Space journey -- nebula clouds, star fields, vast scale, time-lapse universe',
+    'Fire and molten metal -- ember cascades, plasma arcs, intense heat shimmer',
+    'Dancers and performers -- fabric billowing, choreographic peaks and lulls',
+    'Desert and canyon -- heat shimmer, red rock, ancient silent stone',
+    'Arctic and aurora -- frozen geometry, northern lights, crystalline stillness',
+    'Macro nature -- water droplets, insect wings, pollen in shafts of light',
+    'Surreal dreamscape -- floating objects, impossible architecture, fluid reality',
+    'Storm and lightning -- dark clouds, electric chaos, rain-drenched intensity',
   ];
 
   const QUALITIES = [
@@ -687,7 +685,7 @@ export function init(panel) {
       video_prompt:   ideaInput.value.trim(),
       variety_theme:  varietyTheme,
       lyrics_text:    _lyricsTextarea ? _lyricsTextarea.value.trim() : '',
-      user_direction: 'cinematic music video, visual energy matches song dynamics',
+      user_direction: 'music video where visual energy matches song dynamics',
       audio_analysis: _audioAnalysis || undefined,
       model:          _model,
       clip_duration:  _clipDur,

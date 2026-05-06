@@ -87,54 +87,6 @@ def _place_boundaries(
     return boundaries
 
 
-def compute_clip_durations(
-    audio_path: str,
-    n_clips: int,
-    min_dur: float = 8.0,
-    max_dur: float = 19.0,
-) -> list[float]:
-    """Compute beat/onset-aligned clip durations for exactly n_clips clips.
-
-    Snaps each clip boundary to the nearest strong musical onset within
-    the allowed duration window, so video cuts happen when something in the
-    music actually hits rather than at an arbitrary fixed interval.
-    Falls back to equal durations if librosa is unavailable.
-    """
-    total_dur = probe_duration(audio_path)
-    if total_dur <= 0 or n_clips <= 0:
-        return [min_dur] * max(1, n_clips)
-
-    equal_dur = total_dur / n_clips
-    default_dur = max(min_dur, min(max_dur, equal_dur))
-    default = [round(default_dur, 3)] * n_clips
-
-    try:
-        import librosa
-        import numpy as np
-
-        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(total_dur, 300))
-        onset_env  = librosa.onset.onset_strength(y=y, sr=sr)
-        min_frames = int(sr / 512 * min_dur * 0.5)
-        peaks = librosa.util.peak_pick(
-            onset_env,
-            pre_max=4, post_max=4, pre_avg=4, post_avg=8,
-            delta=0.4, wait=max(1, min_frames),
-        )
-        if len(peaks) < 2:
-            return default
-
-        peak_times     = librosa.frames_to_time(peaks, sr=sr)
-        peak_strengths = onset_env[peaks]
-        boundaries     = _place_boundaries(peak_times, peak_strengths, total_dur, n_clips, min_dur, max_dur)
-        durations = [round(boundaries[j + 1] - boundaries[j], 3) for j in range(n_clips)]
-        log.info("[song-video] Beat-aligned durations: %s", durations)
-        return durations
-
-    except Exception as e:
-        log.warning("[song-video] Beat alignment failed (%s) -- using equal durations", e)
-        return default
-
-
 def compute_clip_plan(
     audio_path: str,
     n_clips: int,
@@ -270,7 +222,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
         "bpm": None,
         "key": None,
         "mode": None,
-        "mood": "cinematic",
+        "mood": "",
         "energy": "moderate",
         "energy_profile": [],
         "clip_energy_labels": [],
@@ -372,7 +324,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
 
     # -- Always recalculate clip count from final clip dur -----------------
     result["suggested_num_clips"] = max(1, math.ceil(dur / result["suggested_clip_dur"]))
-    if not result["mood"] or result["mood"] == "cinematic":
+    if not result["mood"]:
         result["mood"] = _mood_from_analysis(result.get("mode"), result["energy"])
 
     return result
