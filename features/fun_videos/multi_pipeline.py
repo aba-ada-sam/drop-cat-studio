@@ -303,14 +303,15 @@ def run_multi_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
-        finalized = _finalize_prompt(clip_prompt, model_name)
         clip_start_image = start_image_path if start_image_path else prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-        # Back off guidance for chain clips so start-image has dominant weight.
-        # At full guidance the text overrides the start frame and characters drift.
-        # At 0.45x the start frame anchors visual content while text guides motion.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(2.0, guidance * 0.7)
+        # Scene-lock prefix on chain clips: forces the text encoder to keep the
+        # same visual world instead of generating a fresh scene from the text alone.
+        # Without this, LTX-2 treats each clip independently and changes subject/setting.
+        prompt_to_use = ("Continue same scene and subject. " + clip_prompt) if (i > 0 and clip_start_image) else clip_prompt
+        finalized = _finalize_prompt(prompt_to_use, model_name)
+        effective_guidance = guidance
 
         try:
             clip_path = video_generator.generate_video(
