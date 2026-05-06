@@ -183,8 +183,13 @@ def generate_audio(
         "use_cot_caption": False,
         "use_cot_language": False,
     }
-    if bpm and bpm > 0:
-        payload["bpm"] = int(bpm)
+    if bpm is not None:
+        try:
+            bpm_int = int(bpm)
+            if bpm_int > 0:
+                payload["bpm"] = bpm_int
+        except (TypeError, ValueError):
+            pass
 
     resp = _post(f"{API_BASE}/release_task", payload, timeout=30)
     if resp is None:
