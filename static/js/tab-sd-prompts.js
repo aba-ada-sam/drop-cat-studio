@@ -710,7 +710,7 @@ export function init(panel) {
 
       } else {
         forgeDot.className   = 'dot not_configured';
-        forgeMsg.textContent = 'Forge not running — start it with --api flag';
+        forgeMsg.textContent = 'Forge not running -- click Services (header) to start it';
         genBtn.disabled      = true;
         modelSel.style.display = 'none';
         if (!_retryTimer) _retryTimer = setInterval(checkForge, 10000);
