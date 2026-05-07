@@ -71,14 +71,15 @@ function _videoThumbInner(videoUrl) {
   });
 }
 
-let _startImagePath = null;
-let _endImagePath   = null;
-let _activeJobId    = null;
-let _activePoller   = null;
-let _models         = {};
-let _applyStart     = null;
-let _applyVideoFn   = null;
-let _pendingHandoff = null; // queued before tab first visit; applied on init
+let _startImagePath  = null;
+let _endImagePath    = null;
+let _videoFramePath  = null; // first frame of start-video, used for LLM vision calls
+let _activeJobId     = null;
+let _activePoller    = null;
+let _models          = {};
+let _applyStart      = null;
+let _applyVideoFn    = null;
+let _pendingHandoff  = null; // queued before tab first visit; applied on init
 
 export function receiveHandoff(data) {
   if (!data.path) return;
@@ -283,6 +284,7 @@ export function init(panel) {
   previewClear.addEventListener('click', () => {
     _startImagePath = null;
     _startVideoPath = null;
+    _videoFramePath = null;
     previewCard.style.display = 'none';
     previewImg.style.display = 'none'; previewImg.src = '';
     previewVid.style.display = 'none'; previewVid.src = '';
@@ -309,7 +311,9 @@ export function init(panel) {
   function _applyVideo(path, url) {
     _startVideoPath = path;
     _startImagePath = null;
-    previewVid.src = url || pathToUrl(path);
+    _videoFramePath = null; // reset; extraction runs async below
+    const vUrl = url || pathToUrl(path);
+    previewVid.src = vUrl;
     previewVid.style.display = 'block';
     previewImg.style.display = 'none'; previewImg.src = '';
     previewCard.style.display = '';
@@ -318,6 +322,17 @@ export function init(panel) {
     videoCard.style.display = '';
     videoName.textContent = path.split(/[\\/]/).pop();
     videoClearBtn.style.display = '';
+    // Extract first frame client-side and upload it so Create Story can use LLM vision.
+    _videoThumb(vUrl).then(async (dataUrl) => {
+      if (!dataUrl || _startVideoPath !== path) return; // aborted or new video loaded
+      try {
+        const blob = await fetch(dataUrl).then(r => r.blob());
+        const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+        const data = await apiUpload('/api/fun/upload', [file]);
+        const f = data.files?.[0];
+        if (f && _startVideoPath === path) _videoFramePath = f.path;
+      } catch (_) {}
+    });
   }
   _applyVideoFn = _applyVideo;
 
@@ -497,8 +512,13 @@ export function init(panel) {
   };
 
   storyBtn.addEventListener('click', () => {
-    if (!_startImagePath) { toast('Load an image first', 'error'); return; }
-    _autoGeneratePrompt(_startImagePath, true);
+    const visionPath = _startImagePath || _videoFramePath;
+    if (!visionPath && !_startVideoPath) { toast('Select an image or video first', 'error'); return; }
+    if (!visionPath) {
+      toast('Frame still extracting from video -- try again in a moment', 'info');
+      return;
+    }
+    _autoGeneratePrompt(visionPath, true);
   });
 
   // ── Prompt refinement row ──────────────────────────────────────────────────
@@ -784,6 +804,52 @@ export function init(panel) {
     return wrap;
   }
 
+  // ── Multi-video story ──────────────────────────────────────────────────────
+  let _multiVideo  = false;
+  let _multiClips  = 4;
+
+  const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' });
+  root.appendChild(multiCard);
+
+  const multiChk = el('input', { type: 'checkbox', id: 'fv-multi-video', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
+  const multiToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer;' }, [
+    multiChk,
+    el('label', { for: 'fv-multi-video', style: 'font-size:.85rem; font-weight:600; cursor:pointer;', text: 'Multi-video story' }),
+  ]);
+  multiCard.appendChild(multiToggleRow);
+  multiCard.appendChild(el('div', {
+    style: 'font-size:.74rem; color:var(--text-3); margin-top:4px; padding-left:23px;',
+    text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Music spans the whole piece.',
+  }));
+
+  const multiSettings = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
+  multiCard.appendChild(multiSettings);
+
+  const clipsSlider = el('input', { type: 'range', min: '2', max: '8', step: '1', value: '4', style: 'flex:1; cursor:pointer;' });
+  const clipsLabel  = el('span', { style: 'min-width:1.8rem; text-align:right; font-size:.85rem; color:var(--accent);', text: '4' });
+  const totalLabel  = el('span', { style: 'font-size:.78rem; color:var(--text-3);', text: '' });
+
+  function _refreshMultiTotal() {
+    _multiClips = parseInt(clipsSlider.value);
+    clipsLabel.textContent = String(_multiClips);
+    const dur = parseFloat(durSlider.value) || 8;
+    totalLabel.textContent = `~${_multiClips * dur}s total`;
+  }
+  clipsSlider.addEventListener('input', _refreshMultiTotal);
+  durSlider.addEventListener('input', _refreshMultiTotal);
+
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+    el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Clips:' }),
+    clipsSlider, clipsLabel, totalLabel,
+  ]));
+
+  multiChk.addEventListener('change', () => {
+    _multiVideo = multiChk.checked;
+    multiSettings.style.display = _multiVideo ? 'flex' : 'none';
+    genBtn.textContent = _multiVideo ? 'Create Story' : 'Generate Video';
+    _refreshMultiTotal();
+  });
+
   // ── Generate ──────────────────────────────────────────────────────────────
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
@@ -792,9 +858,9 @@ export function init(panel) {
   });
   const fvQueueBtn = el('button', {
     class: 'btn',
-    text: '＋ Add to Queue',
+    text: '+ Add to Queue',
     style: 'display:none; width:100%; margin-top:6px; font-size:.9rem;',
-    title: 'Queue another generation with current settings — runs after the active job',
+    title: 'Queue another generation with current settings -- runs after the active job',
   });
   root.appendChild(genBtn);
   root.appendChild(fvQueueBtn);
@@ -894,9 +960,14 @@ export function init(panel) {
     resultTabBar.style.display = 'none';
 
     try {
-      const { job_id } = await api('/api/fun/make-it', {
+      const base = _buildFvPayload();
+      const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
+      const payload  = _multiVideo
+        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity, dramatic' }
+        : base;
+      const { job_id } = await api(endpoint, {
         method: 'POST',
-        body: JSON.stringify(_buildFvPayload()),
+        body: JSON.stringify(payload),
       });
       if (_activePoller) { _activePoller.stop(); _activePoller = null; }
       _activeJobId = job_id;

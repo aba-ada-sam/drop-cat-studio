@@ -855,12 +855,15 @@ export function init(panel) {
     composeBtn.textContent = 'Composing…';
     try {
       const fcOn = fcEnabled.checked;
+      // Smart wildcards need precise JSON following -- prefer cloud AI when available.
+      // 'auto' picks Anthropic/OpenAI if a key is configured, falls back to Ollama.
+      const enhanceProvider = wildcardToggle.checked ? 'auto' : 'local';
       const data = await api('/api/prompts/enhance', {
         method: 'POST',
         body: JSON.stringify({
           idea,
           suffix: suffixInput.value.trim(),
-          provider: 'local',
+          provider: enhanceProvider,
           smart_wildcards: wildcardToggle.checked,
           regional: fcOn,
           regions_n: fcOn ? parseInt(fcCountSel.value) : undefined,

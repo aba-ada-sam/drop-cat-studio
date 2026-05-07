@@ -54,12 +54,17 @@ _generation_token = 0
 # Hook called by the tqdm patch on each step update: (step: int, total: int) -> None
 _step_hook = None
 
+# Set by the /abort endpoint -- raises in the tqdm hook to interrupt generation.
+_abort_event = threading.Event()
+
 
 def _install_tqdm_hook():
     """Patch tqdm BEFORE importing WanGP so all sub-modules get the hooked class.
 
     WanGP's diffusion loop calls tqdm.update() once per inference step.
     We intercept those calls to update _job_status with real step progress.
+    The abort check fires BEFORE super().update() so it can raise before the
+    model computes the next step.
     """
     try:
         import tqdm as _tqdm_mod
@@ -67,9 +72,15 @@ def _install_tqdm_hook():
 
         class _HookedTqdm(_orig):
             def update(self, n=1):
+                # Abort check OUTSIDE try/except so KeyboardInterrupt propagates.
+                # WanGP diffusion loops don't catch KeyboardInterrupt (BaseException).
+                if _abort_event.is_set():
+                    raise KeyboardInterrupt("[DCS] Generation aborted by user")
                 super().update(n)
-                # Only track bars that look like inference step bars (total >= 5)
-                if _step_hook and self.total and self.total >= 2:
+                # Only track bars that are plausibly diffusion steps:
+                # - total >= 2 (not a 1-item dummy bar)
+                # - total <= 5000 (model-loading byte/token counters are billions)
+                if _step_hook and self.total and 2 <= self.total <= 5000:
                     try:
                         _step_hook(int(self.n), int(self.total))
                     except Exception:
@@ -348,6 +359,12 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
+        if self.path == "/abort":
+            # Signal the running generation to stop at the next tqdm step.
+            _abort_event.set()
+            self._send_json({"ok": True, "message": "abort signal sent"})
+            return
+
         if self.path == "/generate":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
@@ -364,6 +381,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 if _job_status["busy"]:
                     self._send_json({"error": "Worker is busy"}, 409)
                     return
+                _abort_event.clear()  # reset any lingering abort from last job
                 _generation_token += 1
                 my_token = _generation_token
                 _job_status.update(busy=True, progress="Starting...",

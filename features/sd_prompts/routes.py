@@ -487,16 +487,18 @@ async def enhance_prompt(request: Request):
             wildcard_catalog = None
 
     force: str | None = None
-    if provider == "cloud":
+    if provider in ("cloud", "auto"):
         from core.keys import get_key
         if get_key("anthropic"):
             force = "anthropic"
         elif get_key("openai"):
             force = "openai"
+        elif provider == "auto":
+            force = "ollama"  # auto falls back to local when no cloud key configured
         else:
             raise HTTPException(
                 400,
-                "Cloud provider requested but no Anthropic/OpenAI key configured — set one in Settings or switch to Local.",
+                "Cloud provider requested but no Anthropic/OpenAI key configured -- set one in Settings or switch to Local.",
             )
     elif provider == "local":
         force = "ollama"

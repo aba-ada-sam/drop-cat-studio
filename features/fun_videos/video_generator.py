@@ -224,6 +224,18 @@ def _generate_via_worker(
     deadline = _poll_start + 600
     while time.time() < deadline:
         if stop_check and stop_check():
+            # Tell the worker to abort the running generation so it doesn't
+            # keep consuming GPU for a job we no longer care about.
+            try:
+                abort_req = urllib.request.Request(
+                    f"http://127.0.0.1:{WANGP_WORKER_PORT}/abort",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(abort_req, timeout=3)
+            except Exception:
+                pass
             return None
         try:
             with urllib.request.urlopen(
