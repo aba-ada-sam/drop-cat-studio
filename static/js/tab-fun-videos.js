@@ -372,14 +372,16 @@ export function init(panel) {
       if (e?.name !== 'AbortError') toast(e.message || 'Story generation failed', 'error');
     } finally {
       clearTimeout(timeout);
-      if (!_timedOut) {
-        promptStatus.style.display = 'none';
-        promptSpinner.style.display = '';
-        promptStatusMsg.textContent = 'Generating motion prompt from image...';
+      if (_autoPromptAbort === myAbort) {
+        if (!_timedOut) {
+          promptStatus.style.display = 'none';
+          promptSpinner.style.display = '';
+          promptStatusMsg.textContent = 'Generating motion prompt from image...';
+        }
+        storyBtn.disabled = false;
+        storyBtn.textContent = '✦ Create Story';
+        _autoPromptAbort = null;
       }
-      storyBtn.disabled = false;
-      storyBtn.textContent = '✦ Create Story';
-      if (_autoPromptAbort === myAbort) _autoPromptAbort = null;
     }
   }
 
