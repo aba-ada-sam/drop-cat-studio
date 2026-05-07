@@ -69,48 +69,79 @@ def _generate_story_arc(
     initial_idea: str,
     n_clips: int,
     photo_path: str | None,
-) -> list[str]:
-    """Generate N sequential motion prompts that form a narrative arc."""
+    progress_fn=None,
+) -> tuple[list[str], str]:
+    """Generate N sequential motion prompts that form a narrative arc.
+
+    Returns (prompts, method) where method describes how they were generated
+    so the caller can show the user what happened.
+
+    Cascade:
+      1. Vision call to Ollama (sees the photo, handles NSFW -- never cloud vision)
+      2. Text-only call to any provider (uses sanitizer for cloud, user idea as context)
+      3. Built-in fallback phases prefixed with user idea (last resort, always works)
+    """
     idea_text = (initial_idea or "").strip() or "Create an exciting action-packed short film"
     user_msg = (
         f"Initial idea: {idea_text}\n"
         f"Number of clips: {n_clips}\n\n"
         f"Generate exactly {n_clips} sequential motion prompts as a story arc."
     )
-    try:
-        frames = []
-        if photo_path and os.path.isfile(photo_path):
-            b64 = encode_image_b64(photo_path)
-            if b64:
-                frames = [b64]
-        if frames:
+
+    def _parse_clips(text):
+        data = parse_json_response(text)
+        if not data:
+            return None
+        clips = data.get("clips", [])
+        if not isinstance(clips, list) or not clips:
+            return None
+        result = [str(c) for c in clips[:n_clips]]
+        src = len(result)
+        while len(result) < n_clips:
+            result.append(result[len(result) % src])
+        return result
+
+    # -- Step 1: vision (Ollama only -- never send user photos to cloud vision) --
+    frames = []
+    if photo_path and os.path.isfile(photo_path):
+        b64 = encode_image_b64(photo_path)
+        if b64:
+            frames = [b64]
+
+    if frames:
+        if progress_fn:
+            progress_fn("Planning story arc from photo...")
+        try:
             text = llm_router.route_vision(
                 user_msg, frames,
                 tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
-                force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
+                force_provider="ollama",
             )
-        else:
-            text = llm_router.route(
-                [{"role": "user", "content": user_msg}],
-                tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
-            )
-        data = parse_json_response(text)
-        if data is None:
-            raise ValueError("No JSON in LLM response")
-        clips = data.get("clips", [])
-        if isinstance(clips, list) and clips:
-            result = [str(c) for c in clips[:n_clips]]
-            # Pad if LLM returned fewer than requested -- cycle to avoid
-            # consecutive visually identical clips from repeating the last prompt
-            src = len(result)
-            while len(result) < n_clips:
-                result.append(result[len(result) % src])
-            return result
-    except Exception as e:
-        log.warning("[multi] Story arc LLM call failed: %s", e)
+            result = _parse_clips(text)
+            if result:
+                return result, "vision"
+            log.warning("[multi] Story arc vision returned unparseable response -- trying text-only")
+        except Exception as e:
+            log.warning("[multi] Story arc vision call failed (%s) -- trying text-only", e)
 
+    # -- Step 2: text-only (cloud OK, sanitizer handles NSFW text) --
+    if progress_fn:
+        progress_fn("Planning story arc (text-only)...")
+    try:
+        text = llm_router.route(
+            [{"role": "user", "content": user_msg}],
+            tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+        )
+        result = _parse_clips(text)
+        if result:
+            return result, "text"
+        log.warning("[multi] Story arc text-only returned unparseable response -- using fallback")
+    except Exception as e:
+        log.warning("[multi] Story arc text-only call failed (%s) -- using fallback", e)
+
+    # -- Step 3: built-in fallback (always works, preserves user idea) --
     base = (initial_idea.strip() + ", ") if initial_idea else ""
-    return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
+    return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)], "fallback"
 
 
 # ── ffmpeg clip concatenation ─────────────────────────────────────────────────
@@ -231,14 +262,19 @@ def run_multi_prep(job, photo_path, settings):
 
     # ── Story arc ─────────────────────────────────────────────────────────
     job.update(progress=3, message="Planning story arc...")
-    try:
-        arc = _generate_story_arc(llm_router, user_idea, n_clips, photo_path)
-        settings["_story_arc"] = arc
-        log.info("[multi] Story arc (%d clips): %s", n_clips, [a[:40] for a in arc])
-    except Exception as e:
-        log.warning("[multi] Story arc failed: %s", e)
-        base = (user_idea.strip() + ", ") if user_idea else ""
-        settings["_story_arc"] = [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
+    arc, arc_method = _generate_story_arc(
+        llm_router, user_idea, n_clips, photo_path,
+        progress_fn=lambda msg: job.update(message=msg),
+    )
+    settings["_story_arc"] = arc
+    if arc_method == "vision":
+        log.info("[multi] Story arc via vision (%d clips): %s", n_clips, [a[:40] for a in arc])
+    elif arc_method == "text":
+        log.info("[multi] Story arc via text-only (%d clips): %s", n_clips, [a[:40] for a in arc])
+        job.update(message="Story arc planned (photo analysis unavailable, used text)")
+    else:
+        log.warning("[multi] Story arc using built-in fallback: %s", [a[:40] for a in arc])
+        job.update(message="Story arc using default motion phases -- AI planning unavailable")
 
     if skip_audio:
         job.update(progress=10, message="Story arc ready, waiting for GPU...")
