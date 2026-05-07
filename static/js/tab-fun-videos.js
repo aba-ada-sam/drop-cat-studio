@@ -337,7 +337,8 @@ export function init(panel) {
     if (!force && _activeJobId) return;
     if (_autoPromptAbort) _autoPromptAbort.abort();
     _autoPromptAbort = new AbortController();
-    const { signal } = _autoPromptAbort;
+    const myAbort = _autoPromptAbort;
+    const { signal } = myAbort;
 
     promptSpinner.style.display = '';
     promptStatusMsg.textContent = 'Generating motion prompt from image...';
@@ -378,7 +379,7 @@ export function init(panel) {
       }
       storyBtn.disabled = false;
       storyBtn.textContent = '✦ Create Story';
-      _autoPromptAbort = null;
+      if (_autoPromptAbort === myAbort) _autoPromptAbort = null;
     }
   }
 
