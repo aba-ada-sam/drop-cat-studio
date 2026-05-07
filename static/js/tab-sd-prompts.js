@@ -12,8 +12,9 @@ import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';
 
 // ── Module state ─────────────────────────────────────────────────────────────
-let forgeStatus   = null;
-let _retryTimer   = null;
+let forgeStatus    = null;
+let _retryTimer    = null;
+let _forgeAutoStarted = false; // true once we've fired the auto-start request
 let generatedImages = [];
 let currentIdx    = -1;
 let _progressTimer = null;
@@ -709,17 +710,39 @@ export function init(panel) {
           hrUpscalerSel.appendChild(el('option', { value: u, text: u }));
 
       } else {
-        forgeDot.className   = 'dot not_configured';
-        forgeMsg.textContent = 'Forge not running -- click Services (header) to start it';
         genBtn.disabled      = true;
         modelSel.style.display = 'none';
-        if (!_retryTimer) _retryTimer = setInterval(checkForge, 10000);
+        if (!_forgeAutoStarted) {
+          // First detection: kick off auto-start immediately, no user action needed
+          _forgeAutoStarted = true;
+          forgeDot.className   = 'dot starting';
+          forgeMsg.textContent = 'Starting Forge automatically...';
+          api('/api/services/start/forge', { method: 'POST' }).catch(() => {});
+        } else {
+          // Already starting -- poll service status for live progress message
+          forgeDot.className = 'dot starting';
+          api('/api/services').then(st => {
+            const msg = st?.forge?.message || '';
+            forgeMsg.textContent = msg || 'Forge loading, please wait...';
+          }).catch(() => {
+            forgeMsg.textContent = 'Forge loading, please wait...';
+          });
+        }
+        if (!_retryTimer) _retryTimer = setInterval(checkForge, 5000);
       }
     } catch (_) {
-      forgeDot.className   = 'dot not_configured';
-      forgeMsg.textContent = 'Forge not detected';
       genBtn.disabled      = true;
-      if (!_retryTimer) _retryTimer = setInterval(checkForge, 10000);
+      modelSel.style.display = 'none';
+      if (!_forgeAutoStarted) {
+        _forgeAutoStarted = true;
+        forgeDot.className   = 'dot starting';
+        forgeMsg.textContent = 'Starting Forge automatically...';
+        api('/api/services/start/forge', { method: 'POST' }).catch(() => {});
+      } else {
+        forgeDot.className   = 'dot not_configured';
+        forgeMsg.textContent = 'Forge not detected -- check logs';
+      }
+      if (!_retryTimer) _retryTimer = setInterval(checkForge, 5000);
     }
   }
 
