@@ -371,9 +371,9 @@ export function init(panel) {
       clearTimeout(timeout);
       if (!_timedOut) {
         promptStatus.style.display = 'none';
+        promptSpinner.style.display = '';
+        promptStatusMsg.textContent = 'Generating motion prompt from image...';
       }
-      promptSpinner.style.display = '';
-      promptStatusMsg.textContent = 'Generating motion prompt from image...';
       storyBtn.disabled = false;
       storyBtn.textContent = '✦ Create Story';
       _autoPromptAbort = null;
