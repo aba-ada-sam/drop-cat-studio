@@ -82,7 +82,8 @@ dramatic, sweeping, majestic, epic, atmospheric, lush, soaring, pulsing.
 
 NEVER suggest these genres (they are boring and wrong for this audience): 90s rock, post-grunge,
 grunge, mainstream alternative, soft rock, light rock, adult contemporary, smooth jazz,
-generic pop, radio rock, Nickelback-style anything.
+generic pop, radio pop, K-pop, Korean pop, boy band, girl group, idol pop, EDM bro-drop,
+radio rock, Nickelback-style anything.
 
 Good examples of the RIGHT direction:
 - "high-energy gypsy punk, accordion stabs, frantic violin, pounding rhythm section"

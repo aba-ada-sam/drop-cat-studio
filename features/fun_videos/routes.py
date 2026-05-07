@@ -200,23 +200,43 @@ async def generate_prompts(request: Request):
         raise HTTPException(500, "Failed to encode image")
 
     config = cfg.load()
+    num_prompts = int(body.get("num_prompts", config.get("fun_num_prompts", 4)))
+    creativity   = float(body.get("creativity", config.get("fun_creativity", 8.0)))
+    user_dir     = body.get("user_direction", "")
+    max_tokens   = int(body.get("max_tokens", 400 if num_prompts == 1 else 2048))
+    force_prov   = body.get("provider") or None
+
     try:
-        num_prompts = int(body.get("num_prompts", config.get("fun_num_prompts", 4)))
         return await asyncio.to_thread(
             generate_video_prompts,
             llm_router,
             b64,
-            user_direction=body.get("user_direction", ""),
+            user_direction=user_dir,
             num_prompts=num_prompts,
-            creativity=float(body.get("creativity", config.get("fun_creativity", 8.0))),
-            max_tokens=int(body.get("max_tokens", 400 if num_prompts == 1 else 2048)),
-            force_provider=body.get("provider") or None,
+            creativity=creativity,
+            max_tokens=max_tokens,
+            force_provider=force_prov,
         )
     except RuntimeError as e:
         msg = str(e)
         if "unparseable" in msg.lower() or "not able to" in msg.lower() or "won't produce" in msg.lower():
             raise HTTPException(422, "AI declined to generate prompts for this image.")
         raise HTTPException(500, msg)
+    except Exception:
+        # Ollama vision timed out or failed -- fall back to text-only prompt generation
+        # so the user still gets a usable result without needing to restart.
+        from features.fun_videos.analyzer import generate_video_prompt_auto
+        log.warning("Vision prompt generation failed -- falling back to text-only auto-prompt")
+        try:
+            text = await asyncio.to_thread(
+                generate_video_prompt_auto, llm_router, user_dir,
+            )
+            if text:
+                prompt_obj = {"label": "Auto", "prompt": text, "mood": "dynamic", "style": "kinetic"}
+                return {"prompts": [prompt_obj] * num_prompts}
+        except Exception as fb_e:
+            log.warning("Text-only auto-prompt also failed: %s", fb_e)
+        raise HTTPException(503, "Motion prompt generation timed out. Type a prompt manually or try again.")
 
 
 @router.post("/refine-prompt")

@@ -57,12 +57,14 @@ def _add_style_guardrails(prompt: str) -> str:
     """Append authenticity qualifiers if the prompt has no genre-identity signals.
 
     Steers ACE-Step away from default generic pop/lite-FM production.
+    Use ONLY positive descriptors -- diffusion models ignore negation, so "not pop"
+    activates "pop" rather than suppressing it.
     """
     if not prompt:
         return prompt
     lower = prompt.lower()
     if not any(m in lower for m in _AUTHENTICITY_MARKERS):
-        return prompt.rstrip(", ") + ", distinct character, authentic energy, not generic pop"
+        return prompt.rstrip(", ") + ", distinct character, authentic energy, raw production"
     return prompt
 
 

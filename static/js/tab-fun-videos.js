@@ -309,11 +309,12 @@ export function init(panel) {
     placeholder: PROMPT_PLACEHOLDER });
   promptCard.appendChild(promptTA);
 
+  const promptSpinner = el('span', { style: 'display:inline-block; width:10px; height:10px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;' });
   const promptStatusMsg = el('span', { text: 'Generating motion prompt from image...' });
   const promptStatus = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:5px; align-items:center; gap:6px;',
   }, [
-    el('span', { style: 'display:inline-block; width:10px; height:10px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;' }),
+    promptSpinner,
     promptStatusMsg,
     el('span', { style: 'color:var(--text-3);', text: '— or just click Generate to skip' }),
   ]);
@@ -342,12 +343,16 @@ export function init(panel) {
     storyBtn.disabled = true;
     storyBtn.textContent = '…';
 
-    // Safety timeout — give up after 90s and let the user proceed
-    // (Ollama vision cold-start can take 60s+)
+    // Safety timeout — Ollama vision cold-start can take 60s+; after 90s show an
+    // inline message and re-enable the button so the user is not stuck.
     const timeout = setTimeout(() => {
       _autoPromptAbort?.abort();
-      promptStatus.style.display = 'none';
-      toast('Motion prompt timed out — type one manually or click Create Story to retry', 'warn');
+      // Show timeout message inline (not as a toast that covers buttons)
+      promptSpinner.style.display = 'none';
+      promptStatusMsg.textContent = 'Motion prompt timed out — type one manually or click Create Story to retry';
+      promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
+      storyBtn.disabled = false;
+      storyBtn.textContent = '✦ Create Story';
     }, 90000);
 
     try {
@@ -364,6 +369,8 @@ export function init(panel) {
     } finally {
       clearTimeout(timeout);
       promptStatus.style.display = 'none';
+      promptSpinner.style.display = '';
+      promptStatusMsg.textContent = 'Generating motion prompt from image...';
       storyBtn.disabled = false;
       storyBtn.textContent = '✦ Create Story';
       _autoPromptAbort = null;

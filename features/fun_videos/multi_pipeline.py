@@ -36,14 +36,21 @@ _FALLBACK_PHASES = [
 # ── Story arc generation ──────────────────────────────────────────────────────
 
 _STORY_ARC_SYSTEM = """\
-You are a visual storytelling director planning a multi-clip short film.
-Generate sequential motion prompts -- each describes 8-12 seconds of continuous physical action.
+You are a kinetic action director planning a multi-clip short film from a still photograph.
+Generate sequential motion prompts -- each describes 8-12 seconds of explosive physical action.
 Clips must connect visually: each prompt picks up from where the previous clip ended.
 
-Rules:
-- Each prompt: 30-50 words, begins with an explosive action verb
-- Describe subject motion only -- no camera moves as the primary event
-- Narrative arc: establish scene -> build tension -> climax or resolution
+CRITICAL for CLIP 1: It starts from a still photo. A still photo produces a boring zoom if the
+prompt is weak. CLIP 1 MUST describe the most physically violent, kinetic action possible -- the
+subject erupts INTO motion from the opening frame. No establishing shots. No reveals. No gentle
+openings. Start in medias res with maximum kinetic energy.
+
+Rules for ALL clips:
+- Each prompt: 30-50 words, begins with an explosive action verb (erupts, slams, tears, surges, launches, crashes)
+- Describe SUBJECT motion -- hair, limbs, fabric, environment all moving simultaneously
+- NO camera moves as the primary event (camera reacts to action, never leads it)
+- BANNED openers: "establishes", "reveals", "opens on", "we see", "the camera", "slowly", "gently", "begins"
+- Escalating arc: intense opening -> peak intensity -> dramatic resolution
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
