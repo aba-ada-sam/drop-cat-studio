@@ -339,7 +339,9 @@ export function init(panel) {
     _autoPromptAbort = new AbortController();
     const { signal } = _autoPromptAbort;
 
-    promptStatus.style.display = 'flex';
+    promptSpinner.style.display = '';
+    promptStatusMsg.textContent = 'Generating motion prompt from image...';
+    promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--accent); margin-top:5px; align-items:center; gap:6px;';
     storyBtn.disabled = true;
     storyBtn.textContent = '…';
 
