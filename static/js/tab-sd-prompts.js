@@ -760,8 +760,7 @@ export function init(panel) {
       else if (e.key === 'ArrowLeft'  && idx > 0)                          { overlay.remove(); openLightbox(idx - 1); }
     }
     document.addEventListener('keydown', onKey);
-    overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey));
-    // MutationObserver to clean up key listener when overlay is removed from DOM
+    // MutationObserver cleans up key listener when overlay is removed from DOM
     new MutationObserver((_, obs) => {
       if (!document.getElementById('sd-lightbox')) {
         document.removeEventListener('keydown', onKey);

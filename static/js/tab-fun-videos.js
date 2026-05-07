@@ -813,9 +813,9 @@ export function init(panel) {
     const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
     if (!promptTA.value.trim()) promptTA.value = prompt;
     if (!_startImagePath && !_startVideoPath) {
-      pickerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      pickerCard.style.outline = '2px solid var(--red)';
-      setTimeout(() => { pickerCard.style.outline = ''; }, 2000);
+      uploadCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      uploadCard.style.outline = '2px solid var(--red)';
+      setTimeout(() => { uploadCard.style.outline = ''; }, 2000);
       toast('Select an image or start video above first', 'error');
       return;
     }
