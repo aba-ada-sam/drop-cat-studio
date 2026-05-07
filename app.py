@@ -218,7 +218,7 @@ def get_job_manager():
 
 # ── Global routes ────────────────────────────────────────────────────────────
 
-_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate", "Pragma": "no-cache"}
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
 @app.get("/")
 async def index():
