@@ -345,9 +345,10 @@ export function init(panel) {
 
     // Safety timeout — Ollama vision cold-start can take 60s+; after 90s show an
     // inline message and re-enable the button so the user is not stuck.
+    let _timedOut = false;
     const timeout = setTimeout(() => {
+      _timedOut = true;
       _autoPromptAbort?.abort();
-      // Show timeout message inline (not as a toast that covers buttons)
       promptSpinner.style.display = 'none';
       promptStatusMsg.textContent = 'Motion prompt timed out — type one manually or click Create Story to retry';
       promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
@@ -368,7 +369,9 @@ export function init(panel) {
       if (e?.name !== 'AbortError') toast(e.message || 'Story generation failed', 'error');
     } finally {
       clearTimeout(timeout);
-      promptStatus.style.display = 'none';
+      if (!_timedOut) {
+        promptStatus.style.display = 'none';
+      }
       promptSpinner.style.display = '';
       promptStatusMsg.textContent = 'Generating motion prompt from image...';
       storyBtn.disabled = false;
