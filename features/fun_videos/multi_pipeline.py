@@ -45,8 +45,17 @@ prompt is weak. CLIP 1 MUST describe the most physically violent, kinetic action
 subject erupts INTO motion from the opening frame. No establishing shots. No reveals. No gentle
 openings. Start in medias res with maximum kinetic energy.
 
+CHARACTER CONTINUITY -- this is the most important rule:
+Look carefully at the subject in the photograph. Identify their specific visual markers:
+hair color and style, clothing color and type, skin tone, build, any distinctive features.
+EVERY prompt must include 2-3 of these specific visual details so the video model renders
+the SAME person throughout all clips. Without this the model generates a different character
+each time. Example: "red-haired woman in blue jacket erupts into sprint..." not just
+"the subject erupts into sprint..."
+
 Rules for ALL clips:
-- Each prompt: 30-50 words, begins with an explosive action verb (erupts, slams, tears, surges, launches, crashes)
+- Each prompt: 35-55 words, begins with an explosive action verb (erupts, slams, tears, surges, launches, crashes)
+- Name the subject with their specific appearance: hair, clothing, face as seen in the photo
 - Describe SUBJECT motion -- hair, limbs, fabric, environment all moving simultaneously
 - NO camera moves as the primary event (camera reacts to action, never leads it)
 - BANNED openers: "establishes", "reveals", "opens on", "we see", "the camera", "slowly", "gently", "begins"
@@ -78,6 +87,7 @@ def _generate_story_arc(
             text = llm_router.route_vision(
                 user_msg, frames,
                 tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+                force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
             )
         else:
             text = llm_router.route(
