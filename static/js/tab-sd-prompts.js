@@ -365,10 +365,10 @@ export function init(panel) {
   mainArea.appendChild(resultCard);
 
   const resultImg = el('img', {
-    style: 'max-width:100%; max-height:70vh; border-radius:var(--r-sm); display:none; cursor:pointer',
-    title: 'Click to open full size',
+    style: 'max-width:100%; max-height:70vh; border-radius:var(--r-sm); display:none; cursor:zoom-in',
+    title: 'Click to enlarge',
   });
-  resultImg.addEventListener('click', () => { if (resultImg.src) window.open(resultImg.src, '_blank'); });
+  resultImg.addEventListener('click', () => openLightbox(currentIdx));
   resultCard.appendChild(resultImg);
 
   const emptyMsg = el('div', { style: 'padding:40px 20px; color:var(--text-3); font-size:.9rem', text: 'Generated images appear here.' });
@@ -666,14 +666,108 @@ export function init(panel) {
   }
 
   function addThumb(entry) {
+    const idx = generatedImages.indexOf(entry);
     const thumb = el('img', {
       class: 'sd-thumb',
       src: entry.src,
-      style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:var(--r-sm); cursor:pointer',
-      title: `Seed: ${entry.seed}`,
-      onclick() { showImage(generatedImages.indexOf(entry)); },
+      style: 'width:100%; aspect-ratio:1; object-fit:cover; border-radius:var(--r-sm); cursor:zoom-in',
+      title: `Click to view -- Seed: ${entry.seed}`,
+      onclick() { openLightbox(generatedImages.indexOf(entry)); },
     });
     thumbGrid.appendChild(thumb);
+  }
+
+  // ── Lightbox ────────────────────────────────────────────────────────────
+  function openLightbox(idx) {
+    if (idx < 0 || idx >= generatedImages.length) return;
+    showImage(idx); // keep main card in sync
+
+    // Remove any existing lightbox
+    document.getElementById('sd-lightbox')?.remove();
+
+    const overlay = el('div', {
+      id: 'sd-lightbox',
+      style: [
+        'position:fixed; inset:0; z-index:9000',
+        'background:rgba(0,0,0,.92)',
+        'display:flex; flex-direction:column; align-items:center; justify-content:center',
+        'padding:16px',
+      ].join(';'),
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeLightbox(); });
+
+    // Big image
+    const entry = generatedImages[idx];
+    const bigImg = el('img', {
+      src: entry.src,
+      style: [
+        'max-width:90vw; max-height:78vh',
+        'object-fit:contain',
+        'border-radius:var(--r-md)',
+        'box-shadow:0 8px 48px rgba(0,0,0,.8)',
+        'cursor:default',
+      ].join(';'),
+    });
+    bigImg.addEventListener('click', e => e.stopPropagation());
+    overlay.appendChild(bigImg);
+
+    // Caption
+    const caption = el('div', {
+      style: 'color:var(--text-3); font-size:.8rem; margin-top:8px; text-align:center',
+      text: `Seed: ${entry.seed}  |  ${idx + 1} of ${generatedImages.length}`,
+    });
+    overlay.appendChild(caption);
+
+    // Action bar
+    const bar = el('div', {
+      style: 'display:flex; gap:10px; margin-top:12px; flex-wrap:wrap; justify-content:center',
+    });
+    bar.addEventListener('click', e => e.stopPropagation());
+
+    if (generatedImages.length > 1) {
+      const btnPrev = el('button', { class: 'btn btn-sm', text: '< Prev', onclick() {
+        overlay.remove(); openLightbox(idx - 1);
+      }});
+      const btnNext = el('button', { class: 'btn btn-sm', text: 'Next >', onclick() {
+        overlay.remove(); openLightbox(idx + 1);
+      }});
+      btnPrev.disabled = idx <= 0;
+      btnNext.disabled = idx >= generatedImages.length - 1;
+      bar.append(btnPrev, btnNext);
+    }
+
+    const btnVar = el('button', { class: 'btn btn-sm', text: 'Variation (+1)', onclick() {
+      seedInput.value = entry.seed + 1;
+      closeLightbox();
+      genBtn.click();
+    }});
+    const btnVideo = el('button', { class: 'btn btn-sm btn-primary', text: '-> Make Videos', onclick() {
+      if (!entry.path) { toast('No saved path -- generate with Forge to send to videos', 'error'); return; }
+      handoff('fun-videos', { type: 'image', path: entry.path });
+      document.querySelector('[data-tab="fun-videos"]')?.click();
+      closeLightbox();
+    }});
+    const btnClose = el('button', { class: 'btn btn-sm', text: 'Close  [Esc]', onclick() { closeLightbox(); } });
+    bar.append(btnVar, btnVideo, btnClose);
+    overlay.appendChild(bar);
+
+    document.body.appendChild(overlay);
+
+    function closeLightbox() { document.getElementById('sd-lightbox')?.remove(); }
+    function onKey(e) {
+      if (e.key === 'Escape') { closeLightbox(); }
+      else if (e.key === 'ArrowRight' && idx < generatedImages.length - 1) { overlay.remove(); openLightbox(idx + 1); }
+      else if (e.key === 'ArrowLeft'  && idx > 0)                          { overlay.remove(); openLightbox(idx - 1); }
+    }
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey));
+    // MutationObserver to clean up key listener when overlay is removed from DOM
+    new MutationObserver((_, obs) => {
+      if (!document.getElementById('sd-lightbox')) {
+        document.removeEventListener('keydown', onKey);
+        obs.disconnect();
+      }
+    }).observe(document.body, { childList: true });
   }
 
   async function checkForge() {
