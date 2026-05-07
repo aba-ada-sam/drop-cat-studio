@@ -10,7 +10,7 @@ import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobM
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260506c';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260503i';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260506d';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260506e';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
 import { consumeHandoff } from './handoff.js?v=20260422a';

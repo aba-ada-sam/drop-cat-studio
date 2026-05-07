@@ -42,10 +42,9 @@ REPLY: <one short sentence, ≤ 20 words, saying what you built>
 === TAG STYLE ===
 - Phrases not sentences: "gothic princess, black lace corset, candlelit throne room"
 - 1–4 words per tag; no articles ("a", "the"); no verbs in conjugated form
-- Include: masterpiece, best quality, intricate detail, cinematic lighting as appropriate
-- Wardrobe/body/pose/expression are always valid tags — describe, don't evaluate
+- Describe quality through specificity: "soft diffused rim light" beats "best quality"; "4K sharp detail" beats "highly detailed"
+- Wardrobe/body/pose/expression are always valid tags -- describe, don't evaluate
 - Wrap the single most important subject/feature tag in () parentheses for emphasis: (glossy black latex catsuit)
-- ALWAYS end the PROMPT line with (depth blur)
 - Use ONLY plain ASCII characters. NO unicode, NO em dashes, NO curly quotes, NO bullet symbols, NO asterisks (*), NO markdown.
 
 === COLUMNS (regional prompts) ===
@@ -72,7 +71,7 @@ USER: princess in a gimp suit having fun at her birthday party with depth blur
 REPLY: Birthday princess styled in glossy black latex with a carnival scene behind her.
 
 ## PROMPT
-masterpiece, best quality, intricate detail, cinematic lighting, regal young woman, (glossy black latex catsuit), jeweled crown, leather collar, birthday party, balloons, candlelit cake, playful smirk, dramatic rim light, (depth blur)
+regal young woman, glossy black latex catsuit, jeweled crown, leather collar, birthday party, balloons, candlelit cake, playful smirk, dramatic rim light, shallow depth of field
 
 ## COLUMNS
 velvet curtains, string lights
@@ -223,7 +222,7 @@ def _tagify(text: str, fallback_concept: str = "") -> str:
     the user's original concept so we always return SOMETHING.
     """
     if not text and not fallback_concept:
-        return "masterpiece, best quality, detailed"
+        return "detailed subject, sharp focus, natural lighting"
     s = text or ""
     # Throw away any line that is pure prose / tutorial / refusal
     keep: list[str] = []
@@ -241,8 +240,8 @@ def _tagify(text: str, fallback_concept: str = "") -> str:
     # Fall back to the raw user concept
     concept_tags = _clean_tag_line(fallback_concept)
     if concept_tags:
-        return f"masterpiece, best quality, intricate detail, cinematic lighting, {concept_tags}"
-    return "masterpiece, best quality, intricate detail, cinematic lighting"
+        return f"cinematic lighting, intricate detail, {concept_tags}"
+    return "cinematic lighting, intricate detail, dramatic composition"
 
 
 def _parse_sections(raw: str, concept: str = "") -> dict:
@@ -268,8 +267,6 @@ def _parse_sections(raw: str, concept: str = "") -> dict:
     )
     if prompt_match:
         result["base_prompt"] = _clean_tag_line(prompt_match.group(1))
-        if result["base_prompt"] and "(depth blur)" not in result["base_prompt"]:
-            result["base_prompt"] += ", (depth blur)"
 
     # Try to find ## COLUMNS (or **COLUMNS** or COLUMNS:)
     columns_match = re.search(
@@ -605,7 +602,7 @@ def enhance_idea(
     idea: str,
     regional: bool = False,
     regions_n: int = 3,
-    suffix: str = "(depth blur)",
+    suffix: str = "",
     force_provider: str | None = None,
     smart_wildcards: bool = False,
     wildcard_catalog: dict | None = None,
