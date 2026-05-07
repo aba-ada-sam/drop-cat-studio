@@ -210,99 +210,6 @@ export function init(panel) {
     imgInput.value = '';
   });
 
-  // ── Recent images strip ───────────────────────────────────────────────────
-  const recentWrap = el('div', { style: 'display:none;' });
-  const recentRow  = el('div', { style: 'display:flex; gap:6px; overflow-x:auto; padding:2px 0;' });
-  recentWrap.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:5px;', text: 'Recent images -- click to use' }));
-  recentWrap.appendChild(recentRow);
-  root.appendChild(recentWrap);
-
-  const _DISMISSED_KEY = 'express_dismissed_images';
-  function _getDismissed() {
-    try { return new Set(JSON.parse(localStorage.getItem(_DISMISSED_KEY) || '[]')); }
-    catch (_) { return new Set(); }
-  }
-  function _saveDismissed(set) {
-    try { localStorage.setItem(_DISMISSED_KEY, JSON.stringify([...set].slice(-200))); }
-    catch (_) {}
-  }
-
-  async function _loadRecent() {
-    try {
-      // Gather images from gallery + session images + source images from recent jobs
-      const [galleryData, sessionData, jobsData] = await Promise.allSettled([
-        apiFetch('/api/gallery', { context: 'express.recent' }),
-        apiFetch('/api/session/images', { context: 'express.recent.session' }),
-        apiFetch('/api/jobs', { context: 'express.recent.jobs' }),
-      ]);
-
-      const dismissed = _getDismissed();
-      const seen = new Set();
-      const items = []; // {url, path, title}
-
-      // Gallery images (exclude videos)
-      if (galleryData.status === 'fulfilled') {
-        for (const i of (galleryData.value.items || [])) {
-          if (/\.(mp4|webm|mov)/i.test(i.url)) continue;
-          const url  = pathToUrl(i.url) || i.url;
-          const path = i.metadata?.path || i.url;
-          if (!seen.has(url) && !dismissed.has(url)) { seen.add(url); items.push({ url, path, title: i.prompt || '' }); }
-        }
-      }
-
-      // Session images (may not yet be in gallery)
-      if (sessionData.status === 'fulfilled') {
-        for (const img of (sessionData.value.images || [])) {
-          const url  = pathToUrl(img.url || img.path || '') || img.url || img.path || '';
-          const path = img.path || img.url || '';
-          if (!url || seen.has(url) || dismissed.has(url)) continue;
-          seen.add(url);
-          items.push({ url, path, title: img.name || '' });
-        }
-      }
-
-      // Source images from recent completed video jobs
-      if (jobsData.status === 'fulfilled') {
-        for (const job of (jobsData.value.completed || [])) {
-          const src = job.meta?.source_image;
-          if (!src || seen.has(src) || dismissed.has(src)) continue;
-          seen.add(src);
-          items.push({ url: `/api/thumbnail?path=${encodeURIComponent(src)}&size=120`, path: src, title: job.label || 'Used in video' });
-        }
-      }
-
-      if (!items.length) return;
-      recentRow.innerHTML = '';
-      for (const item of items.slice(0, 16)) {
-        const thumb = el('img', {
-          src: item.url,
-          class: 'gallery-thumb',
-          title: item.title || 'Use this image',
-          style: 'width:72px;height:48px;object-fit:cover;border-radius:4px;cursor:pointer;',
-        });
-        thumb.onerror = () => { thumb.style.display = 'none'; };
-        const removeBtn = el('button', {
-          style: 'position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;',
-          title: 'Remove from list',
-          text: '×',
-        });
-        const thumbWrap = el('div', { style: 'position:relative;flex-shrink:0;' }, [thumb, removeBtn]);
-        thumb.addEventListener('click', () => _applyImage(item.path, item.url));
-        removeBtn.addEventListener('click', e => {
-          e.stopPropagation();
-          thumbWrap.remove();
-          if (!recentRow.children.length) recentWrap.style.display = 'none';
-          const d = _getDismissed();
-          d.add(item.path);
-          _saveDismissed(d);
-        });
-        recentRow.appendChild(thumbWrap);
-      }
-      recentWrap.style.display = '';
-    } catch (_) {}
-  }
-  _loadRecent();
-
   // ── Idea + Lyric direction ────────────────────────────────────────────────
   const ideaInput = el('textarea', {
     rows: '3',
@@ -723,7 +630,6 @@ export function init(panel) {
     resultWrap.style.display = 'none';
     resultVideo.src = '';
     createBtn.disabled = false;
-    _loadRecent();
   }
 
   // ── Core generation ───────────────────────────────────────────────────────

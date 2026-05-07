@@ -836,7 +836,8 @@ export function init(panel) {
     totalLabel.textContent = `~${_multiClips * dur}s total`;
   }
   clipsSlider.addEventListener('input', _refreshMultiTotal);
-  durSlider.addEventListener('input', _refreshMultiTotal);
+  // durSlider is a createSlider() wrapper — listen on the inner <input>
+  durSlider.el.querySelector('input').addEventListener('input', _refreshMultiTotal);
 
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
     el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Clips:' }),
