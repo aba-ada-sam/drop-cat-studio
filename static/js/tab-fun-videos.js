@@ -822,7 +822,12 @@ export function init(panel) {
   });
 
   genBtn.addEventListener('click', async () => {
-    if (_autoPromptAbort) { _autoPromptAbort.abort(); _autoPromptAbort = null; }
+    if (_autoPromptAbort) {
+      _autoPromptAbort.abort();
+      _autoPromptAbort = null;
+      storyBtn.disabled = false;
+      storyBtn.textContent = '✦ Create Story';
+    }
     promptStatus.style.display = 'none';
 
     const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
