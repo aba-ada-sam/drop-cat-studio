@@ -34,7 +34,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core import config as cfg
@@ -78,10 +78,11 @@ _g: dict = {
     "available_encoders": [],
 }
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR    = Path(__file__).resolve().parent
 UPLOADS_DIR = APP_DIR / "uploads"
-OUTPUT_DIR = APP_DIR / "output"
-STATIC_DIR = APP_DIR / "static"
+OUTPUT_DIR  = APP_DIR / "output"
+STATIC_DIR  = APP_DIR / "static"
+_BUILD_TS   = int(time.time())   # changes every restart; busts Chrome module-map cache
 
 # BUG-01: create directories at module level so StaticFiles mounts succeed on
 # fresh install (StaticFiles checks directory existence in __init__).
@@ -224,7 +225,11 @@ _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "
 async def index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path), headers=_NO_CACHE)
+        html = index_path.read_text(encoding="utf-8")
+        # Stamp app.js URL with server-start time so Chrome's ES module map
+        # sees a new URL on every restart and never serves stale JS.
+        html = html.replace('src="/static/js/app.js?', f'src="/static/js/app.js?b={_BUILD_TS}&')
+        return HTMLResponse(content=html, headers=_NO_CACHE)
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
 
 
