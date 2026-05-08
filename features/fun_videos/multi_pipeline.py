@@ -88,7 +88,9 @@ def _generate_story_arc(
     user_msg = (
         f"Initial idea: {idea_text}\n"
         f"Number of clips: {n_clips}\n\n"
-        f"Generate exactly {n_clips} sequential motion prompts as a story arc."
+        f"Generate exactly {n_clips} sequential motion prompts as a story arc.\n\n"
+        f"REQUIRED OUTPUT FORMAT -- respond with ONLY this JSON, no other text:\n"
+        f'{{"clips": ["prompt 1 here", "prompt 2 here"]}}'
     )
 
     def _parse_clips(text):
@@ -118,7 +120,7 @@ def _generate_story_arc(
             text = llm_router.route_vision(
                 user_msg, frames,
                 tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
-                force_provider="ollama",
+                force_provider="ollama", format_json=True,
             )
             result = _parse_clips(text)
             if result:

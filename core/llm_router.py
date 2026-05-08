@@ -82,6 +82,7 @@ class LLMRouter:
         est_tokens: int = 800,
         system: str = "",
         force_provider: str | None = None,
+        format_json: bool = False,
     ) -> str:
         provider = self._provider(force_provider)
         if provider == "anthropic":
@@ -89,7 +90,7 @@ class LLMRouter:
         if provider == "openai":
             return self._call_with_retry(lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system))
         return self._call_with_retry(
-            lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier, max_tokens=max_tokens, system=system)
+            lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier, max_tokens=max_tokens, system=system, format_json=format_json)
         )
 
     def stats(self) -> dict:

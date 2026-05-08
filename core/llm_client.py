@@ -183,6 +183,7 @@ class LLMClient:
         tier: str = TIER_BALANCED,
         max_tokens: int = 2048,
         system: str = "",
+        format_json: bool = False,
     ) -> str:
         """Send a vision request to Ollama. Always uses the vision model (qwen3-vl),
         not the text-tier models — text-only models silently ignore images."""
@@ -203,6 +204,8 @@ class LLMClient:
                       options={"num_predict": max_tokens})
         if "qwen3" in model.lower():
             kwargs["think"] = False
+        if format_json:
+            kwargs["format"] = "json"
         with _ollama_lock:
             resp = self._get_client().chat(**kwargs)
         elapsed = time.time() - t0
