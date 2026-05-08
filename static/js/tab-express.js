@@ -1,11 +1,10 @@
 ﻿/**
- * Drop Cat Go Studio — Express mode.
+ * Drop Cat Go Studio -- Express mode.
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 import { handoff } from './handoff.js?v=20260422a';
 
 // Module-level so receiveHandoff can call _applyImageFn even after init
@@ -57,8 +56,6 @@ export function init(panel) {
     'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 6 },
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 5 },
   };
-  const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
-
   let _model      = 'LTX-2 Dev19B Distilled';
   let _duration   = 8;
   let _allModels  = {};
@@ -73,7 +70,7 @@ export function init(panel) {
     if (rw === rh)      { w = h = qualityPx; }
     else if (rh > rw)   { w = qualityPx; h = Math.round(qualityPx * rh / rw); }
     else                 { h = qualityPx; w = Math.round(qualityPx * rw / rh); }
-    // Round to nearest multiple of 32 — LTX-Video VAE requires 32-pixel alignment.
+    // Round to nearest multiple of 32 -- LTX-Video VAE requires 32-pixel alignment.
     // Wan models also benefit; ensures no partial-stride artifacts.
     const r32 = n => Math.max(32, Math.round(n / 32) * 32);
     return [r32(w), r32(h)];
@@ -248,7 +245,7 @@ export function init(panel) {
   }
   document.addEventListener('paste', _pasteImage);
 
-  // ── Idea + Lyric direction ────────────────────────────────────────────────
+  // ── Creative brief inputs + brainstorm ───────────────────────────────────
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
@@ -260,7 +257,7 @@ export function init(panel) {
     placeholder: 'e.g. "gypsy folk, raw vocals" | "dark cabaret wit" | "dreamy indie, wistful"',
   });
 
-  // Shared brainstorm call — updates fields, returns {idea, lyric_direction, reply}
+  // Shared brainstorm call -- updates fields, returns {idea, lyric_direction, reply}
   let _chatHistory = [];
   async function _brainstorm(message, { ideaOnly = false, lyricOnly = false } = {}) {
     const body = {
@@ -317,7 +314,7 @@ export function init(panel) {
   const sparkBtn = el('button', {
     style: 'flex-shrink:0; font-size:.78rem; padding:4px 11px; border:1px solid var(--accent); border-radius:6px; background:transparent; color:var(--accent); cursor:pointer; white-space:nowrap; font-weight:600;',
     title: 'Auto-fill idea and music vibe from your photo using AI',
-    text: '✶ Spark from photo',
+    text: '✦ Spark from photo',
   });
 
   sparkBtn.addEventListener('click', async () => {
@@ -361,8 +358,9 @@ export function init(panel) {
   ]));
 
   // ── Output settings ───────────────────────────────────────────────────────
-  const CHIP_BASE = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
-  const CHIP_ON   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+  const CHIP_BASE     = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const CHIP_ON       = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+  const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
 
   function _makeChipGroup(items, activeVal, onPick) {
     const row = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
@@ -681,27 +679,10 @@ export function init(panel) {
   });
 
   let _jobId = null;
-  let _activePoller = null;  // stop() handle — ensures only one watcher runs at a time
-
-  function _reset() {
-    _stopLoop();
-    _jobId = null; _imagePath = null;
-    _loopCount = 0; _chatHistory = [];
-    preview.style.display = 'none'; preview.src = '';
-    dropHint.style.display = '';
-    clearImgBtn.style.display = 'none';
-    dropZone.classList.remove('drop-zone-loaded', 'drag-over');
-    ideaInput.value = '';
-    lyricInput.value = '';
-    talkReplyEl.style.display = 'none';
-    _hideProgress();
-    resultWrap.style.display = 'none';
-    resultVideo.src = '';
-    createBtn.disabled = false;
-  }
+  let _activePoller = null;  // stop() handle -- ensures only one watcher runs at a time
 
   // ── Core generation ───────────────────────────────────────────────────────
-  // Returns Promise<boolean> — true = queued/success, false = failure
+  // Returns Promise<boolean> -- true = queued/success, false = failure
   async function _generateOne(fromLoop = false) {
     // Optionally vary the prompt on loop iterations
     if (fromLoop && _varyPrompt && _loopCount > 1 && _imagePath) {
@@ -773,7 +754,7 @@ export function init(panel) {
       _jobId = job_id;
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
 
-      // Start watching in the background — does NOT block the caller.
+      // Start watching in the background -- does NOT block the caller.
       // The button re-enables immediately; user can queue more jobs while this runs.
       _watchJob(job_id);
       return true;
@@ -788,7 +769,7 @@ export function init(panel) {
   }
 
   // Watch a job and update the progress/result area.
-  // Returns a Promise so loop mode can await completion; single-run ignores the return value.
+  // Returns a Promise so loop mode can await completion; single-run mode ignores the return value.
   // Cancels any previously running watcher so only one job's progress shows at a time.
   function _watchJob(job_id) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
