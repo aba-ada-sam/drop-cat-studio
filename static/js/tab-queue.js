@@ -425,14 +425,17 @@ function _jobCard(job, active, idx, total) {
       });
       actions.appendChild(upBtn);
     }
-    // Cancel
+    // Cancel: remove the card on the spot and ask the backend to abort.
+    // GPU subprocess takes 2-4s to actually stop on its next tqdm step, but
+    // the user sees their click take effect immediately rather than a half-faded
+    // card that lingers while WanGP finishes the current denoising step.
     const cancelBtn = el('button', { class: 'btn btn-sm', text: '✕ Cancel', title: 'Cancel this job', style: 'font-size:.75rem; padding:3px 8px;' });
     cancelBtn.addEventListener('click', async e => {
       e.stopPropagation();
       cancelBtn.disabled = true;
+      card.remove();
+      toast(job.status === 'running' ? 'Cancelling… (GPU will free in a moment)' : 'Job cancelled', 'info');
       await api(`/api/jobs/${job.id}/stop`, { method: 'POST' }).catch(() => {});
-      toast('Job cancelled', 'info');
-      card.style.opacity = '.4';
     });
     actions.appendChild(cancelBtn);
   }

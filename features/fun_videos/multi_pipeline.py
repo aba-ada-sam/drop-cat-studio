@@ -429,8 +429,12 @@ def run_multi_pipeline(job, photo_path, settings):
             log.debug("ACE-Step pre-stop skipped: %s", _e)
 
     # ── Phase 1: Generate clips sequentially ──────────────────────────────
+    # Every clip is anchored to the ORIGINAL source photo, not the previous
+    # clip's last frame. Chaining last-frame -> next-start-frame compounded
+    # generation artifacts -- by clip 3 figures had melted anatomy and
+    # geometry was dissolving. AI bridges between clips morph the disparate
+    # endpoints back together so the final video still flows.
     clip_paths: list[str] = []
-    start_image_path: str | None = None   # None → clip 0 uses original photo
 
     # Pre-process the original photo to exact WanGP dimensions
     prepped_photo: str | None = None
@@ -454,7 +458,9 @@ def run_multi_pipeline(job, photo_path, settings):
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
-        clip_start_image = start_image_path if start_image_path else prepped_photo
+        # Anchor every clip to the source photo (no chain drift); bridges
+        # handle the visual transition between disparate clip endpoints.
+        clip_start_image = prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
         effective_guidance = guidance
@@ -508,15 +514,12 @@ def run_multi_pipeline(job, photo_path, settings):
             else:
                 log.debug("[multi] Clip %d tail-trim failed -- using full clip", i + 1)
 
-        # Extract last frame for the next clip's start_image
+        # Extract last frame -- consumed by the bridge generator as frame_a
+        # for morphing into the next clip's first frame (the source photo).
         if i < len(story_arc) - 1:
             frame_out = str(job_dir / f"frame_{i:02d}.jpg")
-            if extract_last_frame_to_file(clip_path, frame_out):
-                start_image_path = frame_out
-                log.debug("[multi] Frame %d extracted -> %s", i + 1, frame_out)
-            else:
-                log.warning("[multi] Frame extraction failed for clip %d -- next clip starts blind", i + 1)
-                start_image_path = None
+            if not extract_last_frame_to_file(clip_path, frame_out):
+                log.warning("[multi] Frame extraction failed for clip %d -- bridge will fallback to xfade", i + 1)
 
     if _stopped():
         if forge_unloaded:
