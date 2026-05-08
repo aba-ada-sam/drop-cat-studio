@@ -193,6 +193,250 @@ def _generate_story_arc(
     ], "fallback"
 
 
+_DIRECTOR_SYSTEM = """\
+You are a film director reviewing footage from a multi-clip AI-generated short film.
+You will be shown 2 frames per clip (early frame and late frame within each clip's segment).
+Your job: identify clips that failed so they can be re-shot.
+
+Rate each clip 1-5:
+  5 = excellent -- vivid motion, subject consistent with previous clip, story advances
+  4 = good -- minor issues but acceptable
+  3 = passable -- some problems but tolerable
+  2 = weak -- poor motion, subject drifted, or story stalls badly
+  1 = bad -- clearly broken, static, or wrong subject
+
+For clips rated <= 2: write an improved motion prompt (35-55 words, action verb first).
+Apply the same TYPE rules used for the original:
+  TYPE A (people): always name their visual markers (hair, clothing, skin tone)
+  TYPE B (landscape/objects): only animate elements already visible -- no invented subjects
+
+Be conservative: flag at most 2-3 clips per pass. Only flag truly broken clips.
+Clips rated >= 3 should be kept as-is.
+
+Return ONLY valid JSON, no other text:
+{"ratings": [5, 3, 2, 4], "regenerate": [{"clip_idx": 2, "new_prompt": "..."}], "notes": "one sentence what you changed and why"}
+"""
+
+
+def _extract_review_frames(assembled_path: str, clip_durations: list[float], job_dir: Path, pass_num: int) -> list[list]:
+    """Extract 2 b64-encoded jpg frames per clip from the assembled video.
+
+    Samples at 15% and 80% of each clip's time window to avoid fade-in/out artifacts.
+    Returns list of [b64_early, b64_late] per clip; entries may be empty on failure.
+    """
+    result: list[list] = []
+    cumulative = 0.0
+    for i, dur in enumerate(clip_durations):
+        t1 = cumulative + dur * 0.15
+        t2 = cumulative + dur * 0.80
+        cumulative += dur
+        frames: list[str] = []
+        for t, label in [(t1, "a"), (t2, "b")]:
+            frame_path = str(job_dir / f"rv_p{pass_num}_c{i:02d}{label}.jpg")
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", assembled_path,
+                 "-vframes", "1", "-q:v", "4", "-vf", "scale=512:-2", frame_path],
+                capture_output=True, timeout=30,
+            )
+            if r.returncode == 0 and Path(frame_path).exists():
+                b64 = encode_image_b64(frame_path)
+                if b64:
+                    frames.append(b64)
+            try:
+                Path(frame_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        result.append(frames)
+    return result
+
+
+def _director_analyze(llm_router, frames_per_clip: list[list], story_arc: list, user_idea: str, pass_num: int) -> dict:
+    """Send review frames to LLM vision; get per-clip ratings and re-shoot instructions.
+
+    Returns {"ratings": [...], "regenerate": [{"clip_idx": int, "new_prompt": str}], "notes": str}.
+    """
+    n = len(frames_per_clip)
+    clip_descs = []
+    for i, clip_data in enumerate(story_arc):
+        p = clip_data.get("prompt", "") if isinstance(clip_data, dict) else str(clip_data)
+        d = clip_data.get("duration", 5.0) if isinstance(clip_data, dict) else 5.0
+        clip_descs.append(f"Clip {i + 1} ({d:.0f}s): {p}")
+
+    user_msg = (
+        f"Director pass {pass_num}. Original idea: {user_idea or 'no specific direction'}\n\n"
+        f"Story arc ({n} clips):\n" + "\n".join(clip_descs) + "\n\n"
+        f"Review each clip. Flag those that need re-shooting (rated 1-2). "
+        f"Be conservative -- only flag genuinely broken clips.\n\n"
+        f"Required JSON:\n"
+        f'{{"ratings": [5,3,2,4], "regenerate": [{{"clip_idx": 2, "new_prompt": "..."}}], "notes": "..."}}'
+    )
+
+    all_frames: list[str] = []
+    for frames in frames_per_clip:
+        all_frames.extend(frames)
+
+    if not all_frames:
+        log.warning("[director] Pass %d: no frames extracted -- skipping analysis", pass_num)
+        return {"ratings": [], "regenerate": [], "notes": "no frames"}
+
+    try:
+        text = llm_router.route_vision(
+            user_msg, all_frames,
+            tier=TIER_BALANCED, system=_DIRECTOR_SYSTEM, max_tokens=800,
+        )
+        data = parse_json_response(text)
+        if not data:
+            log.warning("[director] Pass %d: unparseable LLM response -- no re-shoots", pass_num)
+            return {"ratings": [], "regenerate": [], "notes": "parse failed"}
+
+        regen_valid = []
+        for r in data.get("regenerate", []):
+            if isinstance(r, dict) and "clip_idx" in r and "new_prompt" in r:
+                idx = int(r["clip_idx"])
+                if 0 <= idx < n:
+                    regen_valid.append({"clip_idx": idx, "new_prompt": str(r["new_prompt"]).strip()})
+
+        notes = str(data.get("notes", ""))
+        log.info("[director] Pass %d ratings:%s re-shoot:%s -- %s",
+                 pass_num, data.get("ratings", []), [r["clip_idx"] for r in regen_valid], notes)
+        return {"ratings": data.get("ratings", []), "regenerate": regen_valid, "notes": notes}
+    except Exception as e:
+        log.warning("[director] Pass %d analysis error: %s", pass_num, e)
+        return {"ratings": [], "regenerate": [], "notes": str(e)}
+
+
+def _run_director_pass(
+    job, llm_router,
+    clip_paths: list[str], clip_durations: list[float], story_arc: list,
+    prepped_photo, assembled_path: str,
+    settings: dict, job_dir: Path,
+    pass_num: int, pct_start: int, pct_end: int,
+    _log, _stopped,
+    video_generator, model_name: str, resolution: str,
+    ow, oh, steps: int, guidance: float, seed: int,
+) -> tuple[list, list, list, str]:
+    """Analyze assembled video; re-generate weak clips; re-assemble.
+
+    Returns (clip_paths, clip_durations, story_arc, assembled_path).
+    Returns originals unchanged on failure or when no re-shoots are needed.
+    """
+    from features.fun_videos.pipeline import _finalize_prompt
+    n = len(clip_paths)
+    rng = pct_end - pct_start
+
+    job.update(progress=pct_start, message=f"Director reviewing pass {pass_num} footage...")
+    frames_per_clip = _extract_review_frames(assembled_path, clip_durations, job_dir, pass_num)
+
+    job.update(progress=pct_start + max(1, rng // 4), message=f"Director analyzing pass {pass_num} clips...")
+    user_idea = settings.get("video_prompt", "") or settings.get("user_direction", "")
+    analysis = _director_analyze(llm_router, frames_per_clip, story_arc, user_idea, pass_num)
+
+    regen_list = sorted(analysis.get("regenerate", []), key=lambda r: r["clip_idx"])
+    if not regen_list:
+        _log(f"[info] Director pass {pass_num}: {analysis.get('notes', 'all clips acceptable')} -- no re-shoots")
+        return clip_paths, clip_durations, story_arc, assembled_path
+
+    first_idx = regen_list[0]["clip_idx"]
+    new_prompts = {r["clip_idx"]: r["new_prompt"] for r in regen_list}
+    flagged = set(new_prompts)
+    n_chain = n - first_idx
+    _log(f"[info] Director pass {pass_num}: re-shooting clips {sorted(flagged)} -- {analysis.get('notes', '')}")
+
+    new_clip_paths = list(clip_paths[:first_idx])
+    new_clip_durs = list(clip_durations[:first_idx])
+    new_arc = list(story_arc)
+
+    if new_clip_paths:
+        chain_frame = str(job_dir / f"chain_p{pass_num}_{first_idx - 1:02d}.png")
+        prev_frame_path: str | None = chain_frame if extract_last_frame_to_file(new_clip_paths[-1], chain_frame) else None
+    else:
+        prev_frame_path = None
+
+    reshoot_pct_start = pct_start + max(1, rng // 3)
+
+    for i in range(first_idx, n):
+        if _stopped():
+            return clip_paths, clip_durations, story_arc, assembled_path
+
+        pct = reshoot_pct_start + int((pct_end - reshoot_pct_start) * (i - first_idx) / n_chain)
+        arc_entry = story_arc[i] if isinstance(story_arc[i], dict) else {"prompt": str(story_arc[i]), "duration": 5.0}
+        this_dur = arc_entry.get("duration", 5.0)
+
+        if i in flagged:
+            clip_prompt = new_prompts[i]
+            new_entry = dict(arc_entry)
+            new_entry["prompt"] = clip_prompt
+            new_arc[i] = new_entry
+            action = f"Director p{pass_num}: re-directing"
+        else:
+            clip_prompt = arc_entry.get("prompt", "")
+            action = f"Director p{pass_num}: re-chaining"
+
+        clip_out = str(job_dir / f"clip_{i:02d}_p{pass_num}_{job.id[:6]}.mp4")
+        start_img = prev_frame_path if prev_frame_path else prepped_photo
+
+        def _vprog(step, total, _p=pct, _ne=pct + max(1, (pct_end - reshoot_pct_start) // n_chain)):
+            pp = _p + int(step / total * (_ne - _p)) if total > 0 else _p
+            job.update(progress=pp, message=f"Director p{pass_num} clip {i + 1}: step {step}/{total}")
+
+        job.update(progress=pct, message=f"{action} clip {i + 1}/{n}...")
+        finalized = _finalize_prompt(clip_prompt, model_name)
+
+        try:
+            clip_path = video_generator.generate_video(
+                image_path=start_img,
+                prompt=finalized,
+                out_path=clip_out,
+                duration=this_dur,
+                model_name=model_name,
+                resolution=resolution,
+                override_width=int(ow) if ow else None,
+                override_height=int(oh) if oh else None,
+                steps=steps,
+                guidance=guidance,
+                seed=seed,
+                stop_check=_stopped,
+                log_fn=_log,
+                progress_fn=_vprog,
+            )
+        except Exception as e:
+            log.warning("[director] Pass %d clip %d failed: %s -- keeping original", pass_num, i + 1, e)
+            clip_path = clip_paths[i]
+
+        actual = clip_path or clip_paths[i]
+        actual_dur = probe_duration(actual) or this_dur
+
+        # Tail-trim to preserve in-motion chain frame
+        if i < n - 1 and clip_path and clip_path != clip_paths[i]:
+            trim_to = max(actual_dur - 0.2, actual_dur * 0.9)
+            tail_out = str(job_dir / f"clip_{i:02d}_p{pass_num}_fe.mp4")
+            tr = subprocess.run(
+                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
+                capture_output=True, timeout=60,
+            )
+            if tr.returncode == 0 and Path(tail_out).exists():
+                os.replace(tail_out, clip_path)
+                actual_dur = probe_duration(clip_path) or actual_dur
+
+        new_clip_paths.append(actual)
+        new_clip_durs.append(actual_dur)
+
+        if i < n - 1:
+            frame_out = str(job_dir / f"frame_p{pass_num}_{i:02d}.png")
+            prev_frame_path = frame_out if extract_last_frame_to_file(actual, frame_out) else None
+
+    if _stopped():
+        return clip_paths, clip_durations, story_arc, assembled_path
+
+    job.update(progress=pct_end - 1, message=f"Director pass {pass_num}: re-assembling...")
+    new_assembled = str(job_dir / f"concat_p{pass_num}_{job.id[:6]}.mp4")
+    if not _concat_with_xfade(new_clip_paths, new_assembled, fade_dur=1.0):
+        log.warning("[director] Pass %d re-assemble failed -- keeping previous result", pass_num)
+        return clip_paths, clip_durations, story_arc, assembled_path
+
+    return new_clip_paths, new_clip_durs, new_arc, new_assembled
+
+
 def _bridge_steps(video_steps: int, model_name: str) -> int:
     """Return an appropriate step count for 2-second bridge clips.
 
@@ -408,27 +652,28 @@ def run_multi_pipeline(job, photo_path, settings):
         return job.stop_event.is_set()
 
     # ── Settings ──────────────────────────────────────────────────────────
-    n_clips       = int(settings.get("num_clips", 4))
-    clip_dur      = float(settings.get("clip_duration", settings.get("video_duration", 8.0)))
-    model_name    = settings.get("model_name", "LTX-2 Dev19B Distilled")
-    resolution    = settings.get("resolution", "580p")
-    ow            = settings.get("override_width")
-    oh            = settings.get("override_height")
-    steps         = int(settings.get("video_steps", 30))
-    guidance      = float(settings.get("video_guidance", 7.5))
+    n_clips          = int(settings.get("num_clips", 4))
+    clip_dur         = float(settings.get("clip_duration", settings.get("video_duration", 8.0)))
+    model_name       = settings.get("model_name", "LTX-2 Dev19B Distilled")
+    resolution       = settings.get("resolution", "580p")
+    ow               = settings.get("override_width")
+    oh               = settings.get("override_height")
+    steps            = int(settings.get("video_steps", 30))
+    guidance         = float(settings.get("video_guidance", 7.5))
     # LTX-2 Distilled denoising schedule is compressed into 4-8 steps -- cap to
     # prevent overshooting the schedule (bad output + unnecessary slowness).
     if "ltx" in model_name.lower() and "distilled" in model_name.lower():
         steps    = min(steps, 8)
         guidance = min(guidance, 4.0)
-    seed          = int(settings.get("video_seed", -1))
-    skip_audio    = settings.get("skip_audio", False)
-    instrumental  = settings.get("instrumental", False)
-    lyric_dir     = settings.get("lyric_direction", "")
-    user_dir      = settings.get("user_direction", "")
-    music_prompt  = settings.get("music_prompt", "") or settings.pop("_prepped_music_prompt", "")
-    lyrics        = settings.pop("_prepped_lyrics", "")
-    story_arc     = settings.pop("_story_arc", [])
+    seed             = int(settings.get("video_seed", -1))
+    skip_audio       = settings.get("skip_audio", False)
+    instrumental     = settings.get("instrumental", False)
+    lyric_dir        = settings.get("lyric_direction", "")
+    user_dir         = settings.get("user_direction", "")
+    music_prompt     = settings.get("music_prompt", "") or settings.pop("_prepped_music_prompt", "")
+    lyrics           = settings.pop("_prepped_lyrics", "")
+    story_arc        = settings.pop("_story_arc", [])
+    director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
@@ -473,8 +718,14 @@ def run_multi_pipeline(job, photo_path, settings):
     # extract_last_frame_to_file already avoids the LTX fade-out blur.
     # If frame extraction fails for any clip, that clip resets to the
     # source photo rather than failing the entire job.
+
+    # Compress the clip-generation progress window when director passes will follow
+    # so there is room for review/re-shoot phases before the audio phase at 76%+.
+    _clip_pct_range = {0: 65, 1: 45, 2: 35}.get(director_passes, 35)
+
     clip_paths: list[str] = []
-    prev_frame_path: str | None = None  # PNG chain frame from previous clip
+    clip_durations: list[float] = []     # actual probed durations for director frame extraction
+    prev_frame_path: str | None = None   # PNG chain frame from previous clip
 
     # Pre-process the original photo to exact WanGP dimensions
     prepped_photo: str | None = None
@@ -496,8 +747,8 @@ def run_multi_pipeline(job, photo_path, settings):
             this_clip_dur = clip_dur
 
         clip_num = i + 1
-        pct_start = 10 + int((i / n_clips) * 65)
-        pct_end   = 10 + int(((i + 1) / n_clips) * 65)
+        pct_start = 10 + int((i / n_clips) * _clip_pct_range)
+        pct_end   = 10 + int(((i + 1) / n_clips) * _clip_pct_range)
 
         job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}...")
 
@@ -544,6 +795,7 @@ def run_multi_pipeline(job, photo_path, settings):
             break
 
         clip_paths.append(clip_path)
+        clip_durations.append(probe_duration(clip_path) or this_clip_dur)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
         # Trim LTX-2 fade-out tail so the chain frame is in-motion,
@@ -582,7 +834,8 @@ def run_multi_pipeline(job, photo_path, settings):
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Multi-video failed: {raw}")
 
-    job.update(progress=76, message=f"All {len(clip_paths)} clips done -- generating transitions...")
+    clips_end_pct = 10 + _clip_pct_range
+    job.update(progress=clips_end_pct, message=f"All {len(clip_paths)} clips done -- generating transitions...")
     job.meta["clips_generated"] = len(clip_paths)
     job.meta["clip_paths"] = clip_paths
 
@@ -593,7 +846,8 @@ def run_multi_pipeline(job, photo_path, settings):
     bridge_clips: list[str | None] = []
 
     # ── Phase 2b: Compile clips + bridges into one video ─────────────────
-    job.update(progress=85, message="Compiling clips with transitions...")
+    compile_pct = clips_end_pct + 1
+    job.update(progress=compile_pct, message="Compiling clips with transitions...")
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
 
     if bridge_clips and not _stopped():
@@ -615,6 +869,41 @@ def run_multi_pipeline(job, photo_path, settings):
         if not _concat_with_xfade(clip_paths, concat_path, fade_dur=1.0):
             log.warning("[multi] Concat failed -- using first clip only")
             concat_path = clip_paths[0]
+
+    # ── Director passes (optional) ────────────────────────────────────────
+    # Each pass analyzes the assembled video, re-generates weak clips, and
+    # re-assembles. Audio is only generated on the final cut.
+    if director_passes >= 1 and not _stopped():
+        _pass_ranges = {
+            1: [(compile_pct + 2, 74)],
+            2: [(compile_pct + 2, 60), (61, 74)],
+        }.get(director_passes, [(compile_pct + 2, 74)])
+
+        current_clips = clip_paths
+        current_durs = clip_durations
+        current_arc = story_arc
+        current_assembled = concat_path
+
+        for pass_idx, (p_start, p_end) in enumerate(_pass_ranges):
+            if _stopped():
+                break
+            current_clips, current_durs, current_arc, current_assembled = _run_director_pass(
+                job=job, llm_router=llm_router,
+                clip_paths=current_clips, clip_durations=current_durs, story_arc=current_arc,
+                prepped_photo=prepped_photo, assembled_path=current_assembled,
+                settings=settings, job_dir=job_dir,
+                pass_num=pass_idx + 1, pct_start=p_start, pct_end=p_end,
+                _log=_log, _stopped=_stopped,
+                video_generator=video_generator,
+                model_name=model_name, resolution=resolution,
+                ow=ow, oh=oh, steps=steps, guidance=guidance, seed=seed,
+            )
+
+        clip_paths = current_clips
+        clip_durations = current_durs
+        story_arc = current_arc
+        concat_path = current_assembled
+        job.meta["clip_paths"] = clip_paths
 
     job.meta["concat_path"] = concat_path
 

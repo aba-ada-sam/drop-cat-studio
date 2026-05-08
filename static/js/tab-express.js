@@ -502,12 +502,13 @@ export function init(panel) {
   // ── Multi-video story ─────────────────────────────────────────────────────
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
-  let _multiVideo    = true;
-  let _targetSecs    = 30;
-  let _numClips      = Math.max(2, Math.round(_targetSecs / _duration));
-  let _upscaleOn     = true;
-  let _upscaleMethod = 'ffmpeg';
-  let _upscaleScale  = 2.0;
+  let _multiVideo      = true;
+  let _targetSecs      = 30;
+  let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
+  let _upscaleOn       = true;
+  let _upscaleMethod   = 'ffmpeg';
+  let _upscaleScale    = 2.0;
+  let _directorPasses  = 0;
 
   const STORY_LENGTHS = [
     { label: '15s', secs: 15 },
@@ -592,6 +593,33 @@ export function init(panel) {
     el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
     methodChips,
     scaleChips,
+  ]));
+
+  // Director passes: AI reviews and re-shoots weak clips between passes
+  const DIRECTOR_OPTIONS = [
+    { label: 'Quick',    passes: 0, tip: 'Single pass, no review' },
+    { label: 'Reviewed', passes: 1, tip: 'AI reviews + re-shoots weak clips once' },
+    { label: 'Refined',  passes: 2, tip: 'Two rounds of AI review and re-direction' },
+  ];
+  const directorChips = el('div', { style: 'display:flex; gap:6px;' });
+  DIRECTOR_OPTIONS.forEach(({ label, passes, tip }) => {
+    const chip = el('button', {
+      class: passes === _directorPasses ? 'chip chip-active' : 'chip',
+      text: label,
+      style: 'cursor:pointer;',
+      title: tip,
+    });
+    chip.addEventListener('click', () => {
+      _directorPasses = passes;
+      directorChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
+      chip.classList.add('chip-active');
+    });
+    directorChips.appendChild(chip);
+  });
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Director' }),
+    directorChips,
+    el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: '- AI reviews and re-shoots weak clips' }),
   ]));
 
   const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
@@ -953,6 +981,7 @@ export function init(panel) {
           upscale:             _upscaleOn,
           upscale_scale:       _upscaleScale,
           upscale_method:      _upscaleMethod,
+          director_passes:     _directorPasses,
           steps:           _steps,
           guidance:        _guidance,
           seed:            -1,

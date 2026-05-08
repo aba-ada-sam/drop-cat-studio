@@ -50,6 +50,7 @@ DEFAULTS: dict = {
     # ── Fun Videos (fun_) ────────────────────────────────────────────────
     "fun_multi_num_clips": 2,          # default clip count for multi-video story
     "fun_multi_clip_duration": 5.0,    # default seconds per clip in multi-video mode
+    "fun_director_passes": 0,          # 0=off, 1=one review pass, 2=two review passes
     "fun_video_duration": 5.0,
     "fun_video_steps": 30,
     "fun_video_guidance": 7.5,
