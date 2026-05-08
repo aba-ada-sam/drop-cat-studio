@@ -461,9 +461,8 @@ async def brainstorm(request: Request):
       mode            – "video" (default) or "sd_prompt"
     Returns JSON with updated fields plus a short reply sentence.
     """
-    import json as _json, re as _re
     from app import get_llm_router
-    from core.llm_client import TIER_FAST as _TIER
+    from core.llm_client import TIER_FAST as _TIER, parse_json_response
     llm_router = get_llm_router()
 
     body = await request.json()
@@ -540,10 +539,8 @@ async def brainstorm(request: Request):
         raise HTTPException(502, f"AI error — {msg[:120]}")
 
     try:
-        # Strip markdown code fences if present, then grab outermost JSON object
-        cleaned = _re.sub(r'^```[a-z]*\n?|\n?```$', '', result.strip())
-        m = _re.search(r'\{.*\}', cleaned, _re.DOTALL)
-        data = _json.loads(m.group()) if m else {}
+        parsed = parse_json_response(result)
+        data = parsed if isinstance(parsed, dict) else {}
     except Exception:
         data = {}
 
