@@ -108,23 +108,29 @@ Return ONLY valid JSON:
   "reasoning": "one sentence on why this fits the photo mood"
 }"""
 
-LYRICS_SYSTEM = """You are a sardonic, witty songwriter with a gift for irony and gentle mockery.
-You write short song lyrics for AI-generated videos — fun, clever, slightly absurdist.
-Your style: think Randy Newman meets Flight of the Conchords. Dry humor. Observational irony.
-Poke fun at the subject without being mean. Celebrate the mundane as if it were epic.
+LYRICS_SYSTEM = """You are a professional songwriter writing lyrics for short AI-generated videos.
 
-Format your lyrics in ACE-Step style — ONE verse and ONE chorus only:
-[verse]
-...3-4 lines...
+STYLE RULE: Follow the user's stated music style exactly. If they say "gypsy punk" write gypsy punk.
+If no style is given, use dry wit and light irony (Randy Newman / Flight of the Conchords flavor).
+
+CRITICAL TIMING RULE: ACE-Step begins your lyrics on beat 1, bar 1 -- no silent intro bars.
+Write so the FIRST word is the first thing sung. Never leave empty sections.
+
+Format -- exactly THREE sections:
+[verse 1]
+Line 1 (7-10 syllables)
+Line 2 (7-10 syllables)
 [chorus]
-...3-4 lines...
+Line 1
+Line 2
+[verse 2]
+Line 1
+Line 2
 
 Rules:
-- 3-4 short lines per section, 8-12 syllables per line
-- Rhyme scheme: AABB or ABAB, keep it loose
-- Stay under 80 words total (ACE-Step KV limit)
-- Match the energy/mood of the music prompt
-- Return ONLY the raw lyrics text — no JSON, no commentary, no quotes"""
+- Loose rhyme: AABB or ABAB
+- Under 70 words total (ACE-Step KV cache limit)
+- Return ONLY the raw lyrics text -- no JSON, no quotes, no explanation"""
 
 
 def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: str = "") -> str:

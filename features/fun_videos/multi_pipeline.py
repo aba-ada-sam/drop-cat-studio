@@ -149,9 +149,21 @@ def _generate_story_arc(
     return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)], "fallback"
 
 
+def _bridge_steps(video_steps: int, model_name: str) -> int:
+    """Return an appropriate step count for 2-second bridge clips.
+
+    LTX-2 Distilled is trained for 4-8 steps; running 12+ steps overshoots its
+    compressed denoising schedule and produces degraded output.
+    Wan models need at least 12 steps to produce coherent short clips.
+    """
+    if "ltx" in model_name.lower():
+        return min(video_steps, 8)
+    return max(12, video_steps // 2)
+
+
 # ── ffmpeg clip concatenation ─────────────────────────────────────────────────
 
-def _concat_with_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 0.5) -> bool:
+def _concat_with_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 1.0) -> bool:
     """Concatenate clips with crossfade transitions via ffmpeg xfade filter.
 
     xfade offset for clip i = sum(dur[0..i-1]) - i * fade_dur.
@@ -528,15 +540,20 @@ def run_multi_pipeline(job, photo_path, settings):
                 continue
 
             bridge_out = str(job_dir / f"bridge_{i:02d}.mp4")
+            # Build a content-aware bridge prompt so the 2-second clip
+            # looks like part of the story rather than a generic filler.
+            words_a = " ".join(story_arc[i].split()[:7]) if i < len(story_arc) else ""
+            words_b = " ".join(story_arc[i + 1].split()[:7]) if i + 1 < len(story_arc) else ""
+            bridge_desc = f"{words_a} transitioning into {words_b}" if words_a and words_b else "fluid cinematic transition"
             bridge_path = generate_bridge(
                 frame_a_path=frame_a,
                 frame_b_path=frame_b,
-                prompt="smooth seamless transition, fluid cinematic motion, natural flow",
+                prompt=f"smooth seamless transition, {bridge_desc}, natural motion flow",
                 out_path=bridge_out,
                 duration=2.0,
                 model_name=model_name,
                 resolution=resolution,
-                steps=max(12, steps // 2),
+                steps=_bridge_steps(steps, model_name),
                 guidance=guidance,
                 seed=seed,
                 use_end_frame=True,
@@ -568,7 +585,7 @@ def run_multi_pipeline(job, photo_path, settings):
         compiled = None
 
     if not compiled:
-        if not _concat_with_xfade(clip_paths, concat_path):
+        if not _concat_with_xfade(clip_paths, concat_path, fade_dur=1.0):
             log.warning("[multi] Concat failed -- using first clip only")
             concat_path = clip_paths[0]
 
@@ -687,7 +704,7 @@ def run_multi_pipeline(job, photo_path, settings):
             idx  = norm.lower().find("/output/")
             url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
             gallery_push(
-                url, tab="fun-videos",
+                url, tab="create-videos",
                 prompt=story_arc[0][:120] if story_arc else "",
                 model=model_name,
                 metadata={

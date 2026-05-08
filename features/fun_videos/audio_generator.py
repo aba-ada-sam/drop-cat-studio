@@ -82,15 +82,15 @@ def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
         normalized = (normalized.rstrip(", ") + ", lead vocal") if normalized else "lead vocal"
         prompt_lower = normalized.lower()
 
-    # Always nudge vocals to open immediately -- never gate this on [intro] markup.
-    # _ensure_intro() is no longer called, but even if lyrics contain [intro] the user
-    # wrote it intentionally; the timing hint still helps ACE-Step start vocals promptly.
+    # Force ACE-Step to place vocals at t=0. Without this hint the model adds an
+    # instrumental intro that can eat half the track before any lyric is sung.
     pacing_keywords = (
         "from the opening", "from the start", "early vocal", "vocals enter early",
         "immediate vocal", "lead vocal up front", "straight to verse", "no intro",
+        "beat 1", "bar 1", "instant",
     )
     if not any(kw in prompt_lower for kw in pacing_keywords):
-        normalized = (normalized.rstrip(", ") + ", vocals from the opening, straight to verse") if normalized else "vocals from the opening, straight to verse"
+        normalized = (normalized.rstrip(", ") + ", no intro bars, voice on beat 1, immediate lyric entry") if normalized else "no intro bars, voice on beat 1, immediate lyric entry"
 
     return _add_style_guardrails(normalized)
 

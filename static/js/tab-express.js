@@ -443,6 +443,7 @@ export function init(panel) {
       const tierMax = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
       durSlider.max = String(tierMax);
       _applyModelDefaults(_model);
+      _refreshMultiTotal();
       _updateRatioAvailability();
       _announceModel();
     },

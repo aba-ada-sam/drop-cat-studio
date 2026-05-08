@@ -304,7 +304,7 @@ async def make_it(request: Request):
         "video_steps": body.get("steps", config.get("fun_video_steps", 30)),
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
-        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 8)),
+        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 20)),
         "audio_guidance": body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental": body.get("instrumental", config.get("fun_audio_instrumental", True)),
         "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
@@ -379,7 +379,7 @@ async def make_it_multi(request: Request):
         "video_steps":     body.get("steps",         config.get("fun_video_steps",    30)),
         "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
-        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    8)),
+        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    20)),
         "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
         "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
@@ -474,8 +474,9 @@ async def brainstorm(request: Request):
         system = (
             "You help users create AI video generation prompts and ACE-Step music directions.\n\n"
             "IDEA: 1-2 sentences describing vivid physical action in the video (what the subject DOES).\n"
-            "LYRIC DIRECTION: ≤15 words. Format: \"[tempo/mood] [genre], [lyric theme]\". "
-            "Examples: \"upbeat pop, lyrics about joy and freedom\" | \"melancholic folk, lyrics about loss\" | \"epic orchestral, instrumental\".\n\n"
+            "LYRIC DIRECTION: <=15 words. Format: \"[genre/energy], [lyric theme or voice]\". "
+            "Pick something with real character -- match the mood and subject of the image. "
+            "Examples: \"gypsy punk energy, sardonic lyrics about chaos\" | \"dark cabaret wit, ironic lyrics about vanity\" | \"dreamy lo-fi folk, wistful vocals\" | \"raw punk, confrontational\" | \"instrumental, no vocals\".\n\n"
             "Always return BOTH fields with concrete values — never null, never empty strings. "
             "If the user asks to change only one field, keep the other consistent with the current context. "
             "Return ONLY valid JSON (no preamble, no explanation outside the JSON): "
