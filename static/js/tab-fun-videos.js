@@ -180,6 +180,23 @@ export function init(panel) {
     // Un-check video toggle if switching from video to image
     videoChk.checked = false;
     videoCard.style.display = 'none';
+    // Auto-select the ratio that best matches the uploaded image dimensions
+    previewImg.onload = () => {
+      const w = previewImg.naturalWidth, h = previewImg.naturalHeight;
+      if (!w || !h) return;
+      const supported = FV_MODEL_RATIOS[modelSel.value] || ['16:9'];
+      let best = '16:9', bestDiff = Infinity;
+      for (const r of FV_RATIOS) {
+        if (!supported.includes(r.value)) continue;
+        const diff = Math.abs(w / h - r.rw / r.rh);
+        if (diff < bestDiff) { bestDiff = diff; best = r.value; }
+      }
+      if (best !== _fvRatio) {
+        _fvRatio = best;
+        _updateFvRatioAvailability();
+        _computeFvDims();
+      }
+    };
   };
 
   function _applyVideo(path, url) {
@@ -504,7 +521,80 @@ export function init(panel) {
 
   const durSlider = createSlider(settingsCard, { label: 'Duration (seconds)', min: 2, max: 20, step: 1, value: 8 });
 
-  const slidersGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' });
+  // ── Aspect ratio + resolution ─────────────────────────────────────────────
+  const FV_RATIOS = [
+    { label: '16:9', value: '16:9', rw: 16, rh: 9  },
+    { label: '9:16', value: '9:16', rw: 9,  rh: 16 },
+    { label: '1:1',  value: '1:1',  rw: 1,  rh: 1  },
+    { label: '4:3',  value: '4:3',  rw: 4,  rh: 3  },
+    { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
+  ];
+  // Models not listed here are assumed 16:9 only (Wan-based)
+  const FV_MODEL_RATIOS = {
+    'LTX-2 Dev19B Distilled': ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    'LTX-2 Dev13B':           ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  };
+  const FV_CHIP_BASE     = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const FV_CHIP_ON       = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+  const FV_CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
+
+  let _fvRatio  = '16:9';
+  let _fvQualPx = 480;
+  let _fvOutW   = 864;
+  let _fvOutH   = 480;
+  let _fvDimsLabel = null;
+  const _fvRatioChips = {};
+
+  function _computeFvDims() {
+    const [rw, rh] = _fvRatio.split(':').map(Number);
+    let w, h;
+    const px = _fvQualPx;
+    if (rw === rh)     { w = h = px; }
+    else if (rh > rw)  { w = px; h = Math.round(px * rh / rw); }
+    else               { h = px; w = Math.round(px * rw / rh); }
+    const r32 = n => Math.max(32, Math.round(n / 32) * 32);
+    _fvOutW = r32(w); _fvOutH = r32(h);
+    if (_fvDimsLabel) _fvDimsLabel.textContent = `${_fvOutW} x ${_fvOutH}`;
+  }
+
+  function _updateFvRatioAvailability() {
+    const supported = FV_MODEL_RATIOS[modelSel.value] || ['16:9'];
+    for (const [val, btn] of Object.entries(_fvRatioChips)) {
+      const ok       = supported.includes(val);
+      const isActive = val === _fvRatio;
+      btn.setAttribute('style', FV_CHIP_BASE + (isActive && ok ? FV_CHIP_ON : '') + (!ok ? FV_CHIP_DISABLED : ''));
+      if (!ok && isActive) {
+        _fvRatio = '16:9';
+        _fvRatioChips['16:9']?.setAttribute('style', FV_CHIP_BASE + FV_CHIP_ON);
+        _computeFvDims();
+      }
+    }
+  }
+
+  const fvRatioRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  for (const r of FV_RATIOS) {
+    const btn = el('button', { style: FV_CHIP_BASE + (r.value === _fvRatio ? FV_CHIP_ON : ''), text: r.label });
+    btn.addEventListener('click', () => {
+      _fvRatio = r.value;
+      _updateFvRatioAvailability();
+      _computeFvDims();
+    });
+    _fvRatioChips[r.value] = btn;
+    fvRatioRow.appendChild(btn);
+  }
+
+  _fvDimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '864 x 480' });
+
+  settingsCard.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap;' }, [
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); min-width:80px; flex-shrink:0;', text: 'Aspect ratio' }),
+    fvRatioRow,
+  ]));
+  settingsCard.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; padding-top:4px;' }, [
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Output:' }),
+    _fvDimsLabel,
+  ]));
+
+  const slidersGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;' });
   settingsCard.appendChild(slidersGrid);
   const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 8   });
   const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 8.5 });
@@ -512,8 +602,11 @@ export function init(panel) {
   modelSel.addEventListener('change', () => {
     const m = _models[modelSel.value];
     if (!m) return;
+    if (m.res && m.res[1]) _fvQualPx = m.res[1];
     durSlider.value = Math.min(parseFloat(durSlider.value) || 8, m.max_sec);
-    modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'×'+m.res[1] : ''}  •  ${m.fps}fps`;
+    modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'x'+m.res[1] : ''}  •  ${m.fps}fps`;
+    _updateFvRatioAvailability();
+    _computeFvDims();
   });
 
   api('/api/fun/models').then(data => {
@@ -811,6 +904,8 @@ export function init(panel) {
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
       end_photo_path:   _endImagePath || null,
       start_video_path: _startVideoPath || null,
+      output_width:     _fvOutW,
+      output_height:    _fvOutH,
     };
   }
 

@@ -31,9 +31,9 @@ export function init(panel) {
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
   const QUALITIES = [
-    { label: 'Fast',    px: 480, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~1-2 min per clip, any aspect ratio' },
-    { label: 'Quality', px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- richer motion, ~5-15 min per clip' },
-    { label: 'HD',      px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- highest quality, ~10-20 min per clip' },
+    { id: 'fast',    label: 'Fast',    px: 480, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~1-2 min per clip, any aspect ratio' },
+    { id: 'quality', label: 'Quality', px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- richer motion, ~5-15 min per clip' },
+    { id: 'hd',      label: 'HD',      px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- highest quality, ~10-20 min per clip' },
   ];
 
   // Which ratios each model natively supports well.
@@ -60,6 +60,7 @@ export function init(panel) {
   let _duration   = 5;
   let _allModels  = {};
   let _ratio      = '16:9';
+  let _qualityId  = 'fast';
   let _qualityPx  = 480;
   let _outW       = 864;
   let _outH       = 480;
@@ -76,8 +77,8 @@ export function init(panel) {
     return [r32(w), r32(h)];
   }
 
-  function _preferredModel(qualityPx) {
-    const pref = QUALITIES.find(q => q.px === qualityPx)?.model;
+  function _preferredModel() {
+    const pref = QUALITIES.find(q => q.id === _qualityId)?.model;
     return (pref && _allModels[pref]) ? pref : _model;
   }
 
@@ -123,7 +124,7 @@ export function init(panel) {
     _allModels = data.models || {};
     const models = Object.entries(_allModels);
     if (models.length) {
-      const pref = _preferredModel(_qualityPx);
+      const pref = _preferredModel();
       _model = pref || models[0][0];
       _applyModelDefaults(_model);
     }
@@ -396,7 +397,7 @@ export function init(panel) {
   _ratioChips = _rChips;
 
   // Duration slider — declared here so quality chip handler can update it
-  const tierMax0  = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
+  const tierMax0  = QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20;
   const durSlider = el('input', { type: 'range', min: '1', max: String(tierMax0), value: String(_duration), step: '1', style: 'flex:1; accent-color:var(--accent);' });
   const durLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: `${_duration}s` });
   durSlider.addEventListener('input', () => {
@@ -425,7 +426,7 @@ export function init(panel) {
   function _applyModelDefaults(modelName) {
     const d = MODEL_DEFAULTS[modelName];
     if (!d) return;
-    const tierMax = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
+    const tierMax = QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20;
     _guidance = d.guidance;
     guidSlider.value = String(_guidance);
     guidLabel.textContent = String(_guidance);
@@ -438,12 +439,14 @@ export function init(panel) {
   }
 
   const { row: qualRow } = _makeChipGroup(
-    QUALITIES.map(q => ({ label: q.label, value: String(q.px), title: q.hint || '' })),
-    String(_qualityPx),
+    QUALITIES.map(q => ({ label: q.label, value: q.id, title: q.hint || '' })),
+    _qualityId,
     item => {
-      _qualityPx = Number(item.value);
-      _model     = _preferredModel(_qualityPx);
-      const tierMax = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 20;
+      const q  = QUALITIES.find(q2 => q2.id === item.value);
+      _qualityId = q.id;
+      _qualityPx = q.px;
+      _model     = _preferredModel();
+      const tierMax = q.maxSec || 20;
       durSlider.max = String(tierMax);
       _applyModelDefaults(_model);
       _refreshMultiTotal();
