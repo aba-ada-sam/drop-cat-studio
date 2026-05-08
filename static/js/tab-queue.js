@@ -519,6 +519,21 @@ function _formatEta(sec) {
   return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
 }
 
+// Same formatting as _formatEta but tolerates fractional/integer seconds
+// from server-side timestamps. Exposed for the gallery detail view too.
+export function formatDuration(sec) {
+  if (sec == null || sec < 0) return '';
+  const total = Math.round(sec);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m < 60) return `${m}m ${String(s).padStart(2, '0')}s`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${h}h ${String(mm).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+}
+const _formatDuration = formatDuration;
+
 function _showModal(job) {
   _stopModalTimers();
   document.getElementById('queue-job-modal')?.remove();
@@ -560,8 +575,9 @@ function _showModal(job) {
   });
   const stageLabel  = el('span', { style: 'font-weight:600; color:var(--text-1);', text: '' });
   const stepBadge   = el('span', { style: 'font-size:.72rem; padding:2px 7px; border-radius:4px; background:var(--surface-3); color:var(--text-2);', text: '' });
+  const elapsedBadge = el('span', { style: 'font-size:.72rem; padding:2px 7px; border-radius:4px; background:var(--surface-3); color:var(--text-2); font-variant-numeric:tabular-nums;', text: '' });
   const etaBadge    = el('span', { style: 'margin-left:auto; font-variant-numeric:tabular-nums; color:var(--accent); font-weight:600;', text: '' });
-  stageRow.appendChild(heartbeat); stageRow.appendChild(stageLabel); stageRow.appendChild(stepBadge); stageRow.appendChild(etaBadge);
+  stageRow.appendChild(heartbeat); stageRow.appendChild(stageLabel); stageRow.appendChild(stepBadge); stageRow.appendChild(elapsedBadge); stageRow.appendChild(etaBadge);
 
   const barWrap = el('div', { style: 'height:8px; background:var(--surface-3); border-radius:4px; overflow:hidden;' });
   const barFill = el('div', { style: 'height:100%; background:var(--accent); width:0%; border-radius:4px; transition:width .5s;' });
@@ -619,10 +635,10 @@ function _showModal(job) {
 
   // -- Initial render + start the live refresh loop --
   _modalState = { jobId: job.id, lastEta: null, lastEtaAt: 0 };
-  _renderModal(job, { stageLabel, stepBadge, etaBadge, barFill, messageEl,
-    srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
-  _startModalRefresh({ stageLabel, stepBadge, etaBadge, barFill, messageEl,
-    srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat });
+  const _els = { stageLabel, stepBadge, elapsedBadge, etaBadge, barFill, messageEl,
+    srcImg, promptCol, errorEl, videoSlot, chipSlot, feedbackBlock, heartbeat };
+  _renderModal(job, _els);
+  _startModalRefresh(_els);
 }
 
 function _renderModal(job, els) {
@@ -653,6 +669,23 @@ function _renderModal(job, els) {
     els.stepBadge.style.display = '';
   } else {
     els.stepBadge.style.display = 'none';
+  }
+
+  // Elapsed time badge -- counts up while running, locks in when done.
+  // Uses server-side started_at so it survives modal re-opens correctly.
+  if (els.elapsedBadge) {
+    const e = job.elapsed_seconds;
+    if (e != null && e >= 1) {
+      els.elapsedBadge.textContent = (isDone || isFailed)
+        ? `total ${_formatDuration(e)}`
+        : _formatDuration(e);
+      els.elapsedBadge.style.display = '';
+      // Cache the started_at so the local tick-up timer can update between polls
+      _modalState.startedAt = job.started_at;
+      _modalState.terminal  = (isDone || isFailed);
+    } else {
+      els.elapsedBadge.style.display = 'none';
+    }
   }
 
   // ETA: track in modalState so the tick-down timer can update between polls
@@ -736,7 +769,19 @@ function _startModalRefresh(els) {
 
   // Tick the ETA down every second between polls so the number visibly counts
   _modalState.etaTimer = setInterval(() => {
-    if (!_modalState || _modalState.lastEta == null) return;
+    if (!_modalState) return;
+
+    // Live elapsed counter while the job is running -- tick up between polls.
+    if (els.elapsedBadge && _modalState.startedAt && !_modalState.terminal) {
+      const e = (Date.now() / 1000) - _modalState.startedAt;
+      if (e >= 1) {
+        els.elapsedBadge.textContent = _formatDuration(e);
+        els.elapsedBadge.style.display = '';
+      }
+    }
+
+    // ETA tick-down (server gave us an ETA estimate, count remaining)
+    if (_modalState.lastEta == null) return;
     const elapsed = (Date.now() - _modalState.lastEtaAt) / 1000;
     const remaining = Math.max(0, _modalState.lastEta - elapsed);
     els.etaBadge.textContent = remaining > 0 ? `${_formatEta(remaining)} left` : '';

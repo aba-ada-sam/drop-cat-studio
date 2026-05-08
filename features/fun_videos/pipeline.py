@@ -199,10 +199,12 @@ def run_pipeline(job, photo_path, settings):
             "source_image": photo_path or "",
         }
         replay_settings = {k: v for k, v in replay_settings.items() if v is not None}
-        meta = {"path": str(path), "job_id": job.id, "settings": replay_settings, **job.meta}
+        elapsed = (time.time() - job.started_at) if job.started_at else None
+        meta = {"path": str(path), "job_id": job.id, "settings": replay_settings,
+                "elapsed_seconds": elapsed, **job.meta}
         if extra_meta:
             meta.update(extra_meta)
-        gallery_push(url, tab="fun-videos",
+        gallery_push(url, tab="create-videos",
                      prompt=job.meta.get("prompt", ""),
                      model=job.meta.get("model", ""),
                      metadata=meta)

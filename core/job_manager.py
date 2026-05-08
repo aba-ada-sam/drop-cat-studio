@@ -45,6 +45,8 @@ class Job:
         self.meta: dict = {}        # feature-specific metadata
         self.error: str | None = None
         self.created_at = time.time()
+        self.started_at: float | None = None   # set when status -> running
+        self.finished_at: float | None = None  # set when terminal (done/error/stopped/cancelled)
         self.stop_event = threading.Event()
         self.timeout_seconds: int | None = timeout_seconds  # overrides gpu_job_timeout_seconds
         self._worker_fn: Callable | None = None
@@ -58,6 +60,11 @@ class Job:
 
     def to_dict(self) -> dict:
         """Serialize for API response (excludes internal fields)."""
+        # Compute live elapsed: started → finished if done, else started → now
+        elapsed = None
+        if self.started_at is not None:
+            end = self.finished_at if self.finished_at is not None else time.time()
+            elapsed = max(0.0, end - self.started_at)
         return {
             "id": self.id,
             "type": self.type,
@@ -69,6 +76,9 @@ class Job:
             "meta": self.meta,
             "error": self.error,
             "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "elapsed_seconds": elapsed,
         }
 
 
@@ -137,6 +147,7 @@ class JobManager:
         else:
             # Non-GPU: run immediately in a thread
             job.status = "running"
+            job.started_at = time.time()
             t = threading.Thread(
                 target=self._run_job, args=(job,), daemon=True,
             )
@@ -158,6 +169,7 @@ class JobManager:
         if job.status == "queued":
             job.status = "cancelled"
             job.message = "Cancelled by user"
+            job.finished_at = time.time()
             # Remove from GPU queue
             try:
                 self._gpu_queue.remove(job_id)
@@ -200,11 +212,13 @@ class JobManager:
         """Cancel every waiting (not yet running) GPU job. Returns count cancelled."""
         with self._lock:
             count = 0
+            now = time.time()
             for jid in list(self._gpu_queue):
                 job = self._jobs.get(jid)
                 if job and job.status == "queued":
                     job.status = "cancelled"
                     job.message = "Cancelled by user"
+                    job.finished_at = now
                     job.stop_event.set()
                     count += 1
             self._gpu_queue.clear()
@@ -255,6 +269,7 @@ class JobManager:
 
         def _run_prep():
             job.status = "preparing"
+            job.started_at = time.time()
             try:
                 prep_fn(job, *args, **kwargs)
             except Exception as e:
@@ -262,11 +277,13 @@ class JobManager:
                 job.status = "error"
                 job.error = str(e)
                 job.message = f"Prep failed: {e}"
+                job.finished_at = time.time()
                 return
 
             if job.stop_event.is_set():
                 job.status = "stopped"
                 job.message = "Stopped"
+                job.finished_at = time.time()
                 return
 
             # Prep done — hand off to GPU queue
@@ -491,6 +508,9 @@ class JobManager:
 
                     job.status = "running"
                     job.message = "Starting..."
+                    # Set started_at if prep didn't already (direct GPU submit)
+                    if job.started_at is None:
+                        job.started_at = time.time()
                     log.info("GPU job %s (%s) starting", job.id, job.type)
 
                     timeout = job.timeout_seconds or cfg.get("gpu_job_timeout_seconds") or 1800
@@ -504,6 +524,7 @@ class JobManager:
                         job.status = "error"
                         job.error = f"Job timed out after {timeout} seconds"
                         job.message = f"Timed out after {timeout}s"
+                        job.finished_at = time.time()
                         log.error("Job %s timed out after %ds", job.id, timeout)
                         # Wait for the thread to actually exit before starting the next
                         # GPU job. Without this wait, the old thread can still be blocking
@@ -578,3 +599,8 @@ class JobManager:
                 job.status = "error"
                 job.error = str(e)
                 job.message = f"Error: {e}"
+        finally:
+            # Single source of truth for terminal timestamp -- runs whether the
+            # worker returned, raised, or hit the stop event.
+            if job.finished_at is None:
+                job.finished_at = time.time()

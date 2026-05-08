@@ -730,6 +730,7 @@ def run_multi_pipeline(job, photo_path, settings):
             norm = merged.replace("\\", "/")
             idx  = norm.lower().find("/output/")
             url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
+            elapsed = (time.time() - job.started_at) if job.started_at else None
             gallery_push(
                 url, tab="create-videos",
                 prompt=story_arc[0][:120] if story_arc else "",
@@ -739,6 +740,9 @@ def run_multi_pipeline(job, photo_path, settings):
                     "job_id": job.id,
                     "clips": len(clip_paths),
                     "story_arc": story_arc,
+                    "elapsed_seconds": elapsed,
+                    "model": model_name,
+                    "duration_sec": clip_dur * len(clip_paths),
                 },
             )
         except Exception as e:

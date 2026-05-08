@@ -313,6 +313,9 @@ function _openDetail(item) {
         </div>
         ${meta.model ? `<div class="gallery-meta-block"><strong>Model</strong><span>${_esc(meta.model)}</span></div>` : ''}
         ${meta.seed  ? `<div class="gallery-meta-block"><strong>Seed</strong><span>${meta.seed}</span></div>` : ''}
+        ${meta.clips ? `<div class="gallery-meta-block"><strong>Clips</strong><span>${meta.clips}</span></div>` : ''}
+        ${meta.duration_sec ? `<div class="gallery-meta-block"><strong>Output length</strong><span>${Math.round(meta.duration_sec)}s</span></div>` : ''}
+        ${meta.elapsed_seconds ? `<div class="gallery-meta-block"><strong>Compute time</strong><span>${_formatGalleryDuration(meta.elapsed_seconds)}</span></div>` : ''}
         ${item.created_at ? `<div class="gallery-meta-block"><strong>Created</strong><span>${new Date(item.created_at).toLocaleString()}</span></div>` : ''}
         ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
@@ -388,6 +391,18 @@ function _esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+function _formatGalleryDuration(sec) {
+  if (sec == null || sec < 0) return '';
+  const total = Math.round(sec);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m < 60) return `${m}m ${String(s).padStart(2, '0')}s`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${h}h ${String(mm).padStart(2, '0')}m`;
 }
 
 export function refresh() { _load(); }
