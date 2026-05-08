@@ -514,8 +514,8 @@ export function init(panel) {
     modelSel.innerHTML = '';
     for (const [name] of Object.entries(_models))
       modelSel.appendChild(el('option', { value: name, text: name }));
-    const ltx = Object.keys(_models).find(k => k.includes('LTX'));
-    if (ltx) modelSel.value = ltx;
+    const preferred = data.default || Object.keys(_models).find(k => k.includes('LTX'));
+    if (preferred && _models[preferred]) modelSel.value = preferred;
     modelSel.dispatchEvent(new Event('change'));
   }).catch(() => toast('Could not load video models — using defaults', 'error'));
 

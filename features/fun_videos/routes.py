@@ -422,7 +422,16 @@ async def make_it_multi(request: Request):
 
 @router.get("/models")
 async def list_models():
-    return {"models": {name: info for name, info in MODELS.items()}}
+    config = cfg.load()
+    configured = config.get("wan_model", "")
+    # Find the matching model key (config stores the short name used in MODELS)
+    default_key = configured if configured in MODELS else next(
+        (k for k in MODELS if configured and configured.lower() in k.lower()), None
+    )
+    return {
+        "models": {name: info for name, info in MODELS.items()},
+        "default": default_key,
+    }
 
 
 @router.post("/brainstorm")
