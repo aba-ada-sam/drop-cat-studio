@@ -429,12 +429,15 @@ def run_multi_pipeline(job, photo_path, settings):
             log.debug("ACE-Step pre-stop skipped: %s", _e)
 
     # ── Phase 1: Generate clips sequentially ──────────────────────────────
-    # Every clip is anchored to the ORIGINAL source photo, not the previous
-    # clip's last frame. Chaining last-frame -> next-start-frame compounded
-    # generation artifacts -- by clip 3 figures had melted anatomy and
-    # geometry was dissolving. AI bridges between clips morph the disparate
-    # endpoints back together so the final video still flows.
+    # Clips chain: clip_1 starts from the source photo; clips 2+ start from
+    # the last frame of the previous clip extracted as PNG (lossless).
+    # PNG eliminates the JPEG compression artifacts that caused "melted
+    # anatomy" in earlier chain experiments. The 85% seek position in
+    # extract_last_frame_to_file already avoids the LTX fade-out blur.
+    # If frame extraction fails for any clip, that clip resets to the
+    # source photo rather than failing the entire job.
     clip_paths: list[str] = []
+    prev_frame_path: str | None = None  # PNG chain frame from previous clip
 
     # Pre-process the original photo to exact WanGP dimensions
     prepped_photo: str | None = None
@@ -458,9 +461,8 @@ def run_multi_pipeline(job, photo_path, settings):
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
         finalized = _finalize_prompt(clip_prompt, model_name)
-        # Anchor every clip to the source photo (no chain drift); bridges
-        # handle the visual transition between disparate clip endpoints.
-        clip_start_image = prepped_photo
+        # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
+        clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
         effective_guidance = guidance
@@ -499,8 +501,8 @@ def run_multi_pipeline(job, photo_path, settings):
         clip_paths.append(clip_path)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
-        # Trim LTX-2 fade-out tail before chain frame extraction so the shared
-        # boundary frame is in-motion, not a near-static fade-out frame.
+        # Trim LTX-2 fade-out tail so the chain frame is in-motion,
+        # not a near-static or motion-blurred fade-out frame.
         if i < len(story_arc) - 1:
             clip_real_dur = probe_duration(clip_path) or clip_dur
             trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
@@ -514,12 +516,15 @@ def run_multi_pipeline(job, photo_path, settings):
             else:
                 log.debug("[multi] Clip %d tail-trim failed -- using full clip", i + 1)
 
-        # Extract last frame -- consumed by the bridge generator as frame_a
-        # for morphing into the next clip's first frame (the source photo).
+        # Extract last frame as PNG (lossless) -- becomes clip_{i+1}'s start image.
+        # PNG prevents JPEG compression artifacts from compounding across the chain.
         if i < len(story_arc) - 1:
-            frame_out = str(job_dir / f"frame_{i:02d}.jpg")
-            if not extract_last_frame_to_file(clip_path, frame_out):
-                log.warning("[multi] Frame extraction failed for clip %d -- bridge will fallback to xfade", i + 1)
+            frame_out = str(job_dir / f"frame_{i:02d}.png")
+            if extract_last_frame_to_file(clip_path, frame_out):
+                prev_frame_path = frame_out
+            else:
+                log.warning("[multi] Frame extraction failed for clip %d -- next clip resets to source", i + 1)
+                prev_frame_path = None
 
     if _stopped():
         if forge_unloaded:
@@ -536,61 +541,11 @@ def run_multi_pipeline(job, photo_path, settings):
     job.meta["clips_generated"] = len(clip_paths)
     job.meta["clip_paths"] = clip_paths
 
-    # ── Phase 2a: Generate AI bridge clips between adjacent story clips ────
-    # Each bridge is a short WanGP clip with start=last_frame_i and
-    # end=first_frame_{i+1}, constraining both ends so the transition is
-    # visually locked rather than a hard cut or a blind xfade.
+    # ── Phase 2a: Bridge clips ─────────────────────────────────────────────
+    # Clips are now chained (each starts from the previous clip's last frame),
+    # so adjacent clip boundaries share the same frame. A bridge from frame_X
+    # to frame_X is a no-op that wastes a full GPU pass. Use crossfade instead.
     bridge_clips: list[str | None] = []
-    if len(clip_paths) > 1 and not _stopped():
-        from features.video_bridges.bridge_generator import generate_bridge
-        n_bridges = len(clip_paths) - 1
-        for i in range(n_bridges):
-            if _stopped():
-                bridge_clips.append(None)
-                continue
-
-            pct = 76 + int((i / n_bridges) * 8)  # 76..84%
-            job.update(progress=pct,
-                       message=f"Transition {i + 1}/{n_bridges}: morphing clip {i + 1} -> {i + 2}...")
-
-            frame_a = str(job_dir / f"frame_{i:02d}.jpg")          # last frame of clip_i
-            frame_b = str(job_dir / f"bfirst_{i + 1:02d}.jpg")     # first frame of clip_{i+1}
-
-            # Extract first frame of the next clip
-            got_b = (
-                os.path.isfile(frame_a) and
-                extract_first_frame_to_file(clip_paths[i + 1], frame_b)
-            )
-            if not got_b:
-                log.warning("[multi] Could not extract boundary frames for bridge %d -- skipping", i)
-                bridge_clips.append(None)
-                continue
-
-            bridge_out = str(job_dir / f"bridge_{i:02d}.mp4")
-            # Build a content-aware bridge prompt so the 2-second clip
-            # looks like part of the story rather than a generic filler.
-            words_a = " ".join(story_arc[i].split()[:7]) if i < len(story_arc) else ""
-            words_b = " ".join(story_arc[i + 1].split()[:7]) if i + 1 < len(story_arc) else ""
-            bridge_desc = f"{words_a} transitioning into {words_b}" if words_a and words_b else "fluid cinematic transition"
-            bridge_path = generate_bridge(
-                frame_a_path=frame_a,
-                frame_b_path=frame_b,
-                prompt=f"smooth seamless transition, {bridge_desc}, natural motion flow",
-                out_path=bridge_out,
-                duration=2.0,
-                model_name=model_name,
-                resolution=resolution,
-                steps=_bridge_steps(steps, model_name),
-                guidance=guidance,
-                seed=seed,
-                use_end_frame=True,
-                allow_fallback=True,
-                stop_check=_stopped,
-                log_fn=_log,
-            )
-            bridge_clips.append(bridge_path if bridge_path and os.path.isfile(bridge_path) else None)
-            log.info("[multi] Bridge %d/%d: %s", i + 1, n_bridges,
-                     "ok" if bridge_clips[-1] else "fallback/skipped")
 
     # ── Phase 2b: Compile clips + bridges into one video ─────────────────
     job.update(progress=85, message="Compiling clips with transitions...")
