@@ -173,11 +173,8 @@ export function init(panel) {
   }
 
   function _resetPromptsForNewImage() {
-    // Wipe AI-generated text so the next "Create Story" reads the new image
-    // instead of recycling prompts from the previous one.
     if (typeof ideaInput !== 'undefined' && ideaInput) ideaInput.value = '';
     if (typeof lyricInput !== 'undefined' && lyricInput) lyricInput.value = '';
-    if (typeof talkInput !== 'undefined' && talkInput) talkInput.value = '';
     if (typeof talkReplyEl !== 'undefined' && talkReplyEl) {
       talkReplyEl.textContent = '';
       talkReplyEl.style.display = 'none';
@@ -255,12 +252,12 @@ export function init(panel) {
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
-    placeholder: 'Describe your idea, mood, or style — or leave blank.',
+    placeholder: 'What should happen? Mood, action, style -- or click Spark to generate from your photo.',
   });
   const lyricInput = el('input', {
     type: 'text',
     style: 'width:100%; font-size:.82rem;',
-    placeholder: 'e.g. "upbeat pop, lyrics about joy" | "epic orchestral, instrumental"',
+    placeholder: 'e.g. "gypsy folk, raw vocals" | "dark cabaret wit" | "dreamy indie, wistful"',
   });
 
   // Shared brainstorm call — updates fields, returns {idea, lyric_direction, reply}
@@ -292,8 +289,7 @@ export function init(panel) {
     });
   }
 
-  const ideaGenBtn  = _genBtn('Generate idea from image using AI');
-  const lyricGenBtn = _genBtn('Generate lyric direction from image using AI');
+  const lyricGenBtn = _genBtn('Regenerate music vibe from image using AI');
 
   // Returns a stop() fn -- call it when the async work is done.
   function _btnThinking(btn) {
@@ -313,54 +309,55 @@ export function init(panel) {
     catch (e) { toast(e.message, 'error'); }
     finally { stop(); if (targetEl) targetEl.classList.remove('ai-generating'); }
   }
-  ideaGenBtn.addEventListener('click',  () => _runGen(ideaGenBtn,  'Generate a video motion prompt based on this image', ideaInput));
   lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image', lyricInput));
 
-  // ── Talk to me ────────────────────────────────────────────────────────────
-  const talkInput = el('textarea', {
-    rows: '2',
-    style: 'width:100%; resize:vertical; font-size:.85rem;',
-    placeholder: 'Describe what you\'re imagining — mood, story, vibe, references, anything. AI updates the fields below.',
-  });
-  const talkSendBtn  = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
-  const talkReplyEl  = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); margin-top:6px; line-height:1.5; font-style:italic;' });
+  // ── Creative brief ────────────────────────────────────────────────────────
+  const talkReplyEl = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); line-height:1.5; font-style:italic;' });
 
-  async function _sendTalk() {
-    const msg = talkInput.value.trim();
-    if (!msg) return;
-    const stop = _btnThinking(talkSendBtn);
+  const sparkBtn = el('button', {
+    style: 'flex-shrink:0; font-size:.78rem; padding:4px 11px; border:1px solid var(--accent); border-radius:6px; background:transparent; color:var(--accent); cursor:pointer; white-space:nowrap; font-weight:600;',
+    title: 'Auto-fill idea and music vibe from your photo using AI',
+    text: '✶ Spark from photo',
+  });
+
+  sparkBtn.addEventListener('click', async () => {
+    const existingIdea = ideaInput.value.trim();
+    const stop = _btnThinking(sparkBtn);
     talkReplyEl.style.display = 'none';
-    [talkInput, ideaInput, lyricInput].forEach(f => f.classList.add('ai-generating'));
+    [ideaInput, lyricInput].forEach(f => f.classList.add('ai-generating'));
     try {
+      const msg = existingIdea
+        ? existingIdea
+        : 'Create a fun, high-energy video: describe dramatic physical movement or a wild transformation happening to the subject. ' +
+          'Also write a lyric direction for a song with real character and personality -- pick a style that actually fits the image: ' +
+          'could be gypsy punk energy, dark cabaret wit, dreamy folk, raw punk, world music, or anything with a distinctive voice. ' +
+          'Avoid generic upbeat pop. Real sung lyrics with something to say, never instrumental.';
       const data = await _brainstorm(msg);
       if (data.reply) {
         talkReplyEl.textContent = `AI: ${data.reply}`;
         talkReplyEl.style.display = '';
       }
-      talkInput.value = '';
     } catch (e) { toast(e.message, 'error'); }
     finally {
       stop();
-      [talkInput, ideaInput, lyricInput].forEach(f => f.classList.remove('ai-generating'));
+      [ideaInput, lyricInput].forEach(f => f.classList.remove('ai-generating'));
     }
-  }
-  talkSendBtn.addEventListener('click', _sendTalk);
-  talkInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sendTalk(); } });
+  });
 
-  const talkCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
-    el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em;', text: 'Talk to me' }),
-    talkInput,
-    el('div', { style: 'display:flex; justify-content:flex-end; margin-top:6px;' }, [talkSendBtn]),
-    talkReplyEl,
-  ]);
-
-  root.appendChild(talkCard);
-  root.appendChild(el('div', { class: 'card', style: 'padding:14px;' }, [
-    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;' }, [
-      el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Your idea (optional)' }),
-      ideaGenBtn,
+  root.appendChild(el('div', { class: 'card', style: 'padding:14px; display:flex; flex-direction:column; gap:10px;' }, [
+    el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
+      el('div', { style: 'font-size:.75rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em;', text: 'Creative brief' }),
+      sparkBtn,
     ]),
     ideaInput,
+    el('div', { style: 'display:flex; flex-direction:column; gap:4px;' }, [
+      el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
+        el('div', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Music vibe' }),
+        lyricGenBtn,
+      ]),
+      lyricInput,
+    ]),
+    talkReplyEl,
   ]));
 
   // ── Output settings ───────────────────────────────────────────────────────
@@ -484,11 +481,6 @@ export function init(panel) {
       dimsLabel,
     ]),
     warnEl,
-    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-top:4px; margin-bottom:4px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3);', text: 'Lyric direction (optional)' }),
-      lyricGenBtn,
-    ]),
-    lyricInput,
   ]);
   root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
@@ -701,7 +693,6 @@ export function init(panel) {
     dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     ideaInput.value = '';
     lyricInput.value = '';
-    talkInput.value = '';
     talkReplyEl.style.display = 'none';
     _hideProgress();
     resultWrap.style.display = 'none';
@@ -729,7 +720,9 @@ export function init(panel) {
       try {
         await _brainstorm(
           'Create a fun, high-energy video: describe dramatic physical movement or a wild transformation happening to the subject. ' +
-          'Also write a lyric direction for a catchy, upbeat song with real sung lyrics (never instrumental).'
+          'Also write a lyric direction for a song with real character and personality -- pick a style that actually fits the image: ' +
+          'could be gypsy punk energy, dark cabaret wit, dreamy folk, raw punk, world music, or anything with a distinctive voice. ' +
+          'Avoid generic upbeat pop. Real sung lyrics with something to say, never instrumental.'
         );
         motionPrompt = ideaInput.value.trim();
       } catch (_) {}
@@ -757,8 +750,9 @@ export function init(panel) {
         _showProgress(8, 'AI is picking your music vibe...');
         try {
           await _brainstorm(
-            'Write a lyric direction for a catchy, energetic song with real sung lyrics (not instrumental) ' +
-            'that matches this video idea: ' + motionPrompt,
+            'Write a lyric direction for a song with real character and personality that matches this video: ' + motionPrompt + '. ' +
+            'Pick a style that actually fits -- gypsy punk, dark cabaret, dreamy indie, raw punk, folk, world music, ' +
+            'or whatever has a distinctive voice. Avoid generic pop. Real sung lyrics with something to say, never instrumental.',
             { lyricOnly: true }
           );
         } catch (_) {}
@@ -770,7 +764,7 @@ export function init(panel) {
         method: 'POST',
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
-          lyric_direction: lyricInput.value.trim(), user_direction: 'fun, energetic, entertaining',
+          lyric_direction: lyricInput.value.trim(), user_direction: 'character-driven, specific energy, not generic',
           model: _model, duration: _duration,
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
