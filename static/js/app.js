@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508a';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508b';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260506a';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260507a';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';
@@ -265,6 +265,16 @@ const state = {
   galleryOpen:  false,
 };
 
+// Video pill: config default (from settings) vs tab override (what will actually run)
+let _configVideoModel = '';
+let _tabVideoModel    = null;   // set by active tab; null = show config default
+
+// Tabs broadcast their active model here; app.js updates the pill immediately.
+document.addEventListener('dcs:video-model', e => {
+  _tabVideoModel = e.detail?.model ?? null;
+  _applyVideoPillState(_tabVideoModel || _configVideoModel);
+});
+
 // ── Tab routing ─────────────────────────────────────────────────────────────
 function switchTab(tabId) {
   state.activeTab = tabId;
@@ -306,6 +316,14 @@ function switchTab(tabId) {
 
   // Pause/resume queue polling based on visibility
   if (tabId === 'queue') resumeQueue(); else pauseQueue();
+
+  // Video pill: let the incoming tab announce its model; clear override for non-video tabs
+  const VIDEO_TABS = new Set(['express', 'fun-videos', 'song-video']);
+  if (!VIDEO_TABS.has(tabId)) {
+    _tabVideoModel = null;
+    _applyVideoPillState(_configVideoModel);
+  }
+  document.dispatchEvent(new CustomEvent('dcs:tab-activated', { detail: { tab: tabId } }));
 
   // Dispatch handoff
   const handoffData = consumeHandoff(tabId);
@@ -511,7 +529,8 @@ async function loadConfig() {
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
     _applyLLMState(llm);
     _applyImagePillState(state.config.image_provider || 'forge', !!llm.openai_key_set);
-    _applyVideoPillState(state.config.wan_model || '');
+    _configVideoModel = state.config.wan_model || '';
+    _applyVideoPillState(_tabVideoModel || _configVideoModel);
     _applySoundPillState(state.config.audio_provider || 'acestep');
   } catch (_) {}
 }
@@ -964,7 +983,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ]).then(([cfg, llm]) => {
       _applyLLMState(llm);
       _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
-      _applyVideoPillState(cfg.wan_model || '');
+      _configVideoModel = cfg.wan_model || '';
+      _applyVideoPillState(_tabVideoModel || _configVideoModel);
       _applySoundPillState(cfg.audio_provider || 'acestep');
     }).catch(() => {});
   }, { once: true });

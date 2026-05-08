@@ -116,6 +116,13 @@ export function init(panel) {
     _refreshOutput();
   }
 
+  function _announceModel() {
+    document.dispatchEvent(new CustomEvent('dcs:video-model', { detail: { model: _model } }));
+  }
+
+  // Re-announce whenever this tab becomes active again
+  document.addEventListener('dcs:tab-activated', e => { if (e.detail?.tab === 'express') _announceModel(); });
+
   api('/api/fun/models').then(data => {
     _allModels = data.models || {};
     const models = Object.entries(_allModels);
@@ -125,7 +132,8 @@ export function init(panel) {
       _applyModelDefaults(_model);
     }
     _updateRatioAvailability();
-  }).catch(() => toast('Could not load video models — using defaults', 'error'));
+    _announceModel();
+  }).catch(() => toast('Could not load video models -- using defaults', 'error'));
 
   // ── Heading ───────────────────────────────────────────────────────────────
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
@@ -428,6 +436,7 @@ export function init(panel) {
       durSlider.max = String(tierMax);
       _applyModelDefaults(_model);
       _updateRatioAvailability();
+      _announceModel();
     },
   );
 
