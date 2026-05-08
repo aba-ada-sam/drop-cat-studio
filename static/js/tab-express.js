@@ -655,8 +655,8 @@ export function init(panel) {
   });
   sendBtn.addEventListener('click', () => {
     const src = resultVideo.src ? resultVideo.src.replace(location.origin, '') : null;
-    if (src) handoff('fun-videos', { type: 'video', path: src, url: src });
-    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+    if (src) handoff('create-videos', { type: 'video', path: src, url: src });
+    document.querySelector('.rail-tab[data-tab="create-videos"]')?.click();
   });
 
   // Subtle escape hatch to the full Create Videos tab
@@ -668,8 +668,8 @@ export function init(panel) {
   advLink.appendChild(advBtn);
   root.appendChild(advLink);
   advBtn.addEventListener('click', () => {
-    if (_imagePath) handoff('fun-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
-    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
+    if (_imagePath) handoff('create-videos', { type: 'image', path: _imagePath, url: pathToUrl(_imagePath) });
+    document.querySelector('.rail-tab[data-tab="create-videos"]')?.click();
   });
 
   let _jobId = null;

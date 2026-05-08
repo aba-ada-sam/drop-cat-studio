@@ -9,11 +9,11 @@
  *   import { handoff, consumeHandoff } from './handoff.js';
  *
  *   // sender:
- *   handoff('fun-videos', { type: 'image', path: '/output/...' });
- *   document.querySelector('[data-tab="fun-videos"]').click();
+ *   handoff('create-videos', { type: 'image', path: '/output/...' });
+ *   document.querySelector('[data-tab="create-videos"]').click();
  *
  *   // receiver (called by app.js switchTab after tab activates):
- *   const data = consumeHandoff('fun-videos');
+ *   const data = consumeHandoff('create-videos');
  *   if (data) applyHandoff(data);
  */
 

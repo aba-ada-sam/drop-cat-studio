@@ -83,7 +83,7 @@ function _render() {
           <option value="">All tabs</option>
           <option value="sd-prompts">SD Prompts</option>
           <option value="image-gen">Image Gen</option>
-          <option value="fun-videos">Videos</option>
+          <option value="create-videos">Videos</option>
           <option value="bridges">Bridges</option>
         </select>
       </div>
@@ -188,7 +188,7 @@ function _makeCard(item) {
   card.setAttribute('aria-label', `Open ${item.tab} generation from ${item.created_at || ''}`);
 
   const TAB_LABELS = {
-    'sd-prompts': 'SD', 'image-gen': 'IMG', 'fun-videos': 'VID', 'bridges': 'BRG',
+    'sd-prompts': 'SD', 'image-gen': 'IMG', 'create-videos': 'VID', 'bridges': 'BRG',
   };
   const badge = TAB_LABELS[item.tab] || item.tab?.toUpperCase() || '?';
 

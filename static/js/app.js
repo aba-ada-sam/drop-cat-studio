@@ -5,17 +5,17 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508c';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260506a';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260507a';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508d';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260508a';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260508a';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260503i';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260506h';
-import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260508a';
+import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
-import { consumeHandoff } from './handoff.js?v=20260422a';
+import { consumeHandoff } from './handoff.js?v=20260508a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260503a';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260505h';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260508a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260503h';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
@@ -25,7 +25,7 @@ import { init as initPresets, promptAndSave as savePreset } from './shell/preset
 const TAB_INIT = {
   'express':           initExpress,
   'pipeline':          initPipeline,
-  'fun-videos':        initFunVideos,
+  'create-videos':     initFunVideos,
   'song-video':        initSongVideo,
   'bridges':           initBridges,
   'sd-prompts':        initSdPrompts,
@@ -35,7 +35,7 @@ const TAB_INIT = {
 };
 const TAB_HANDOFF = {
   'express':           expressHandoff,
-  'fun-videos':        funHandoff,
+  'create-videos':     funHandoff,
   'song-video':        songVideoHandoff,
   'bridges':           bridgesHandoff,
   'sd-prompts':        sdPromptsHandoff,
@@ -49,7 +49,7 @@ const _tabInitialized = new Set();
 // Audio lives inside Create Videos; Batch Processing is its own standalone tool.
 const PIPELINE_STEPS = [
   { id: 'sd-prompts', num: '01', label: 'Generate Images' },
-  { id: 'fun-videos', num: '02', label: 'Create Videos'   },
+  { id: 'create-videos', num: '02', label: 'Create Videos'   },
 ];
 
 function _buildPipelineBar(activeTabId) {
@@ -318,7 +318,7 @@ function switchTab(tabId) {
   if (tabId === 'queue') resumeQueue(); else pauseQueue();
 
   // Video pill: let the incoming tab announce its model; clear override for non-video tabs
-  const VIDEO_TABS = new Set(['express', 'fun-videos', 'song-video']);
+  const VIDEO_TABS = new Set(['express', 'create-videos', 'song-video']);
   if (!VIDEO_TABS.has(tabId)) {
     _tabVideoModel = null;
     _applyVideoPillState(_configVideoModel);
@@ -904,7 +904,7 @@ function initShortcuts() {
     }, description: 'Close / cancel' },
     { key: '0', action: () => switchTab('pipeline'),          description: 'Studio Home' },
     { key: '1', action: () => switchTab('sd-prompts'),         description: 'Generate Images' },
-    { key: '2', action: () => switchTab('fun-videos'),         description: 'Create Videos' },
+    { key: '2', action: () => switchTab('create-videos'),      description: 'Create Videos' },
     { key: '4', action: () => switchTab('video-tools-batch'),  description: 'Batch Processing' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
@@ -932,7 +932,7 @@ function initPaletteItems() {
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
     { label: 'Quick Video',      group: 'Tabs',   hint: 'Q', action: () => switchTab('express') },
     { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
-    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('fun-videos') },
+    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('create-videos') },
     { label: 'Batch Processing', group: 'Tabs',   hint: '4', action: () => switchTab('video-tools-batch') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },

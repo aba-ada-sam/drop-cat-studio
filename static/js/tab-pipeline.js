@@ -27,7 +27,7 @@ const STEPS = [
   {
     num: '02', icon: '', label: 'Create Videos',
     hint: 'Animate images with AI motion. Add AI-generated music with a single prompt.',
-    tab: 'fun-videos', svc: 'wangp',
+    tab: 'create-videos', svc: 'wangp',
     svcLabels: {
       running:        'WanGP ready',
       ready:          'WanGP configured',

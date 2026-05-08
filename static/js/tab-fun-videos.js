@@ -1218,7 +1218,7 @@ export function init(panel) {
 
   // ── Palette AI intent ─────────────────────────────────────────────────────
   import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
-    registerTabAI('fun-videos', {
+    registerTabAI('create-videos', {
       getContext: () => ({
         prompt:       promptTA.value,
         steps:        Number(stepsSlider.value)    || 0,

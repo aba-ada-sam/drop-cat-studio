@@ -749,7 +749,7 @@ async function _doContinuation(job, closeFn) {
 
   const _feat = job.meta?.feature || '';
   const tabId = _feat === 'song_video' ? 'song-video'
-              : (_feat === 'fun_video' || _feat === 'fun_videos' || _feat === 'fun_multi_video') ? 'fun-videos'
+              : (_feat === 'fun_video' || _feat === 'fun_videos' || _feat === 'fun_multi_video') ? 'create-videos'
               : _feat.replace(/_/g, '-');
   const settings = job.meta?.settings || {};
   if (!tabId || !Object.keys(settings).length) {
@@ -795,7 +795,7 @@ async function _doContinuation(job, closeFn) {
 async function _doBranch(job, feedback, closeFn) {
   const _feat2  = job.meta?.feature || '';
   const tabId   = _feat2 === 'song_video' ? 'song-video'
-              : (_feat2 === 'fun_video' || _feat2 === 'fun_videos' || _feat2 === 'fun_multi_video') ? 'fun-videos'
+              : (_feat2 === 'fun_video' || _feat2 === 'fun_videos' || _feat2 === 'fun_multi_video') ? 'create-videos'
               : _feat2.replace(/_/g, '-');
   const settings = job.meta?.settings || {};
   if (!tabId || !Object.keys(settings).length) {

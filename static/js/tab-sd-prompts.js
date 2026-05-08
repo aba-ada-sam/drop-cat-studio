@@ -391,8 +391,8 @@ export function init(panel) {
   const btnSendVideos = el('button', { class: 'btn btn-sm', text: '→ Make Videos', onclick() {
     const img = generatedImages[currentIdx];
     if (!img?.path) { toast('Generate an image first', 'error'); return; }
-    handoff('fun-videos', { type: 'image', path: img.path });
-    document.querySelector('[data-tab="fun-videos"]')?.click();
+    handoff('create-videos', { type: 'image', path: img.path });
+    document.querySelector('[data-tab="create-videos"]')?.click();
     toast('Image sent to Create Videos', 'info');
   }});
   actionRow.append(btnReuse, btnVariation, btnSendVideos);
@@ -743,8 +743,8 @@ export function init(panel) {
     }});
     const btnVideo = el('button', { class: 'btn btn-sm btn-primary', text: '-> Make Videos', onclick() {
       if (!entry.path) { toast('No saved path -- generate with Forge to send to videos', 'error'); return; }
-      handoff('fun-videos', { type: 'image', path: entry.path });
-      document.querySelector('[data-tab="fun-videos"]')?.click();
+      handoff('create-videos', { type: 'image', path: entry.path });
+      document.querySelector('[data-tab="create-videos"]')?.click();
       closeLightbox();
     }});
     const btnClose = el('button', { class: 'btn btn-sm', text: 'Close  [Esc]', onclick() { closeLightbox(); } });

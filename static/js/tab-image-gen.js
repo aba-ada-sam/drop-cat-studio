@@ -203,8 +203,8 @@ export function init(panel) {
   }});
   const btnSendFun = el('button', { class: 'btn btn-sm', text: '-> Make Videos', onclick() {
     if (!generatedImages[currentIdx]?.path) return;
-    import('./handoff.js').then(h => h.handoff('fun-videos', { type: 'image', path: generatedImages[currentIdx].path }));
-    document.querySelector('[data-tab="fun-videos"]')?.click();
+    import('./handoff.js').then(h => h.handoff('create-videos', { type: 'image', path: generatedImages[currentIdx].path }));
+    document.querySelector('[data-tab="create-videos"]')?.click();
     toast('Image sent to Make Videos', 'info');
   }});
   const btnSendSD = el('button', { class: 'btn btn-sm', text: '-> SD Prompts', onclick() {
