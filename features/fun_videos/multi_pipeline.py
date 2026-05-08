@@ -218,23 +218,23 @@ Return ONLY valid JSON, no other text:
 """
 
 
-def _extract_review_frames(assembled_path: str, clip_durations: list[float], job_dir: Path, pass_num: int) -> list[list]:
-    """Extract 2 b64-encoded jpg frames per clip from the assembled video.
+def _extract_review_frames(clip_paths: list[str], clip_durations: list[float], job_dir: Path, pass_num: int) -> list[list]:
+    """Extract 2 b64-encoded jpg frames per clip, sampled directly from each clip file.
 
-    Samples at 15% and 80% of each clip's time window to avoid fade-in/out artifacts.
+    Samples at 15% and 80% of each clip's own duration. Sampling from individual
+    clip files avoids the xfade-overlap problem where assembled-video timestamps
+    drift by fade_dur per clip and can land mid-crossfade.
     Returns list of [b64_early, b64_late] per clip; entries may be empty on failure.
     """
     result: list[list] = []
-    cumulative = 0.0
-    for i, dur in enumerate(clip_durations):
-        t1 = cumulative + dur * 0.15
-        t2 = cumulative + dur * 0.80
-        cumulative += dur
+    for i, (path, dur) in enumerate(zip(clip_paths, clip_durations)):
+        t1 = max(0.0, dur * 0.15)
+        t2 = max(0.0, dur * 0.80)
         frames: list[str] = []
         for t, label in [(t1, "a"), (t2, "b")]:
             frame_path = str(job_dir / f"rv_p{pass_num}_c{i:02d}{label}.jpg")
             r = subprocess.run(
-                ["ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", assembled_path,
+                ["ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", path,
                  "-vframes", "1", "-q:v", "4", "-vf", "scale=512:-2", frame_path],
                 capture_output=True, timeout=30,
             )
@@ -325,7 +325,7 @@ def _run_director_pass(
     rng = pct_end - pct_start
 
     job.update(progress=pct_start, message=f"Director reviewing pass {pass_num} footage...")
-    frames_per_clip = _extract_review_frames(assembled_path, clip_durations, job_dir, pass_num)
+    frames_per_clip = _extract_review_frames(clip_paths, clip_durations, job_dir, pass_num)
 
     job.update(progress=pct_start + max(1, rng // 4), message=f"Director analyzing pass {pass_num} clips...")
     user_idea = settings.get("video_prompt", "") or settings.get("user_direction", "")
