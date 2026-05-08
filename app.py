@@ -145,6 +145,12 @@ async def lifespan(app: FastAPI):
         hw = [e[1] for e in _g["available_encoders"] if e[2]]
         log.info("Encoders: %s", ", ".join(hw) if hw else "CPU only")
 
+    # Synchronous: evict any orphan WanGP / ACE-Step workers from a prior DCS
+    # session BEFORE we accept user requests. Without this, clicking Create on
+    # the new app would queue work behind the dying old worker, making restarts
+    # feel like the program never closed.
+    svc.kill_orphans_at_startup()
+
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 

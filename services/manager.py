@@ -540,8 +540,11 @@ def quick_detect():
 
 
 def startup_all():
-    """Detect and start services concurrently on app startup."""
-    _kill_stale_gpu_processes()  # evict orphan GPU workers before starting fresh ones
+    """Detect and start services concurrently on app startup.
+
+    Orphan eviction has already run synchronously via kill_orphans_at_startup()
+    in the FastAPI lifespan, so we don't repeat the WMIC scan here.
+    """
     quick_detect()
     log.info("Checking services...")
     threads = []
@@ -625,10 +628,17 @@ def _kill_proc(proc: subprocess.Popen | None, label: str) -> bool:
     return True
 
 
-def _kill_by_port(port: int, label: str):
-    """Kill any process occupying a port (for frozen processes we didn't spawn)."""
+def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
+    """Kill any process occupying a port (for frozen processes we didn't spawn).
+
+    Uses /F /T so child processes (CUDA workers, etc.) are killed too. When
+    wait_release is True, polls the port for up to 4s to confirm it's free
+    before returning -- needed at startup so the new worker can bind cleanly.
+    Returns True if a kill was attempted.
+    """
     if sys.platform != "win32":
-        return
+        return False
+    killed_any = False
     try:
         result = subprocess.run(
             ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
@@ -639,10 +649,48 @@ def _kill_by_port(port: int, label: str):
                 pid = int(parts[-1])
                 if pid > 0:
                     log.info("Killing frozen %s on port %d (pid %d)", label, port, pid)
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
                                    capture_output=True, timeout=5)
+                    killed_any = True
     except Exception as e:
         log.warning("Failed to kill process on port %d: %s", port, e)
+
+    if killed_any and wait_release:
+        # Poll until the port no longer appears as LISTENING -- max 4s.
+        deadline = time.time() + 4.0
+        while time.time() < deadline:
+            try:
+                result = subprocess.run(
+                    ["netstat", "-ano"], capture_output=True, text=True, timeout=2,
+                )
+                still_listening = any(
+                    f":{port}" in ln and "LISTENING" in ln
+                    for ln in result.stdout.splitlines()
+                )
+                if not still_listening:
+                    log.info("Port %d released after kill", port)
+                    return True
+            except Exception:
+                break
+            time.sleep(0.3)
+        log.warning("Port %d still LISTENING after 4s -- new %s may fail to bind", port, label)
+    return killed_any
+
+
+def kill_orphans_at_startup() -> None:
+    """Synchronously evict orphan WanGP / ACE-Step workers on app startup.
+
+    Runs BEFORE FastAPI starts accepting requests so a previous DCS session's
+    GPU subprocesses (which the OS has not yet finished tearing down) can't
+    keep VRAM hostage and force the user to wait for the old job to complete.
+
+    Fast path: netstat + taskkill /F /T on ports 7899 and 8019 (~1s).
+    Backstop: WMIC command-line scan for orphans on different ports (~10s).
+    """
+    log.info("Evicting any orphan GPU workers from prior session...")
+    _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
+    _kill_by_port(ACESTEP_PORT, "ACE-Step", wait_release=True)
+    _kill_stale_gpu_processes()
 
 
 def stop_service(name: str) -> tuple[bool, str | None]:
