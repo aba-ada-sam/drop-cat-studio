@@ -90,7 +90,7 @@ def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
         "beat 1", "bar 1", "instant",
     )
     if not any(kw in prompt_lower for kw in pacing_keywords):
-        normalized = (normalized.rstrip(", ") + ", no intro bars, voice on beat 1, immediate lyric entry") if normalized else "no intro bars, voice on beat 1, immediate lyric entry"
+        normalized = (normalized.rstrip(", ") + ", cold open, no intro bars, voice on beat 1, immediate lyric entry") if normalized else "cold open, no intro bars, voice on beat 1, immediate lyric entry"
 
     return _add_style_guardrails(normalized)
 
@@ -166,6 +166,17 @@ def generate_audio(
     # Pass lyrics as-is -- do NOT inject [intro] markup; it causes ACE-Step to
     # produce a long blank intro that eats 2/3 of the track before vocals enter.
     effective_lyrics = lyrics.strip() if has_vocals else ""
+
+    # ACE-Step uses section markers to control vocal onset. If the lyrics have no
+    # section marker at all, or open with [intro], replace/prepend [verse] so the
+    # model starts singing immediately rather than inserting an instrumental intro.
+    if has_vocals and effective_lyrics:
+        import re as _re
+        if not _re.match(r'^\s*\[', effective_lyrics):
+            effective_lyrics = '[verse]\n' + effective_lyrics
+        elif _re.match(r'^\s*\[intro\]', effective_lyrics, _re.IGNORECASE):
+            effective_lyrics = _re.sub(r'^\s*\[intro\]', '[verse]', effective_lyrics, count=1, flags=_re.IGNORECASE)
+
     effective_prompt = _normalize_prompt(prompt, instrumental, lyrics)
     effective_prompt = effective_prompt or "atmospheric music, organic texture, instrumental, distinct character"
 

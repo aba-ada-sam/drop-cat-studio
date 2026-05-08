@@ -31,7 +31,7 @@ export function init(panel) {
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
   const QUALITIES = [
-    { label: 'Fast',    px: 580, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~30-60s per clip, any aspect ratio' },
+    { label: 'Fast',    px: 480, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~1-2 min per clip, any aspect ratio' },
     { label: 'Quality', px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- richer motion, ~5-15 min per clip' },
     { label: 'HD',      px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- highest quality, ~10-20 min per clip' },
   ];
@@ -49,20 +49,20 @@ export function init(panel) {
   // schedule and degrades quality. CFG 3 matches its low-guidance training regime.
   // Wan2.1 models are standard diffusion — they need 25 steps and higher CFG.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 8,  guidance: 3.0, duration: 8 },
-    'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 8 },
-    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 5.5, duration: 6 },
+    'LTX-2 Dev19B Distilled': { steps: 8,  guidance: 3.0, duration: 5 },
+    'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 5 },
+    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 5.5, duration: 5 },
     'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 5.5, duration: 5 },
-    'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 6 },
+    'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 5 },
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 5 },
   };
   let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 8;
+  let _duration   = 5;
   let _allModels  = {};
   let _ratio      = '16:9';
-  let _qualityPx  = 580;
-  let _outW       = 1032;
-  let _outH       = 580;
+  let _qualityPx  = 480;
+  let _outW       = 864;
+  let _outH       = 480;
 
   function _computeDims(ratioStr, qualityPx) {
     const [rw, rh] = ratioStr.split(':').map(Number);
@@ -500,13 +500,13 @@ export function init(panel) {
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
   let _multiVideo = true;
-  let _numClips   = 4;
+  let _numClips   = 2;
 
   const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', checked: 'checked', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
 
-  const clipsSlider = el('input', { type: 'range', min: '2', max: '8', value: '4', step: '1', style: 'flex:1; accent-color:var(--accent);' });
-  const clipsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:20px; text-align:right;', text: '4' });
-  const totalLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '~32s' });
+  const clipsSlider = el('input', { type: 'range', min: '2', max: '8', value: '2', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const clipsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:20px; text-align:right;', text: '2' });
+  const totalLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '~10s' });
 
   function _refreshMultiTotal() {
     totalLabel.textContent = `~${_numClips * _duration}s`;

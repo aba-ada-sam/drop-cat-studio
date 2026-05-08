@@ -21,7 +21,7 @@ DEFAULTS: dict = {
     "wan2gp_root": "",
     "wan2gp_python": "",            # auto-detected if blank
     "wan_model": "LTX-2 Dev19B Distilled",
-    "resolution": "580p",
+    "resolution": "480p",
     "acestep_root": "",
 
     # ── LLM Provider ─────────────────────────────────────────────────────
@@ -48,9 +48,9 @@ DEFAULTS: dict = {
     "i2v_fps": 30,
 
     # ── Fun Videos (fun_) ────────────────────────────────────────────────
-    "fun_multi_num_clips": 4,          # default clip count for multi-video story
-    "fun_multi_clip_duration": 8.0,    # default seconds per clip in multi-video mode
-    "fun_video_duration": 6.0,
+    "fun_multi_num_clips": 2,          # default clip count for multi-video story
+    "fun_multi_clip_duration": 5.0,    # default seconds per clip in multi-video mode
+    "fun_video_duration": 5.0,
     "fun_video_steps": 30,
     "fun_video_guidance": 7.5,
     "fun_video_seed": -1,
