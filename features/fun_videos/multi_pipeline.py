@@ -363,6 +363,11 @@ def run_multi_pipeline(job, photo_path, settings):
     oh            = settings.get("override_height")
     steps         = int(settings.get("video_steps", 30))
     guidance      = float(settings.get("video_guidance", 7.5))
+    # LTX-2 Distilled denoising schedule is compressed into 4-8 steps -- cap to
+    # prevent overshooting the schedule (bad output + unnecessary slowness).
+    if "ltx" in model_name.lower() and "distilled" in model_name.lower():
+        steps    = min(steps, 8)
+        guidance = min(guidance, 4.0)
     seed          = int(settings.get("video_seed", -1))
     skip_audio    = settings.get("skip_audio", False)
     instrumental  = settings.get("instrumental", False)

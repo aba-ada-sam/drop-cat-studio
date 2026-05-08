@@ -561,6 +561,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 
 .ap-caret { font-size: .6rem; opacity: .6; }
 .ap-label { display: none; }
+@media (min-width: 800px) { .ap-label { display: inline; font-size: .76rem; } }
 
 .ap-menu {
   position: absolute;

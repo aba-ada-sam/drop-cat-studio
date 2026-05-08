@@ -54,7 +54,7 @@ DEFAULTS: dict = {
     "fun_video_steps": 30,
     "fun_video_guidance": 7.5,
     "fun_video_seed": -1,
-    "fun_audio_steps": 8,
+    "fun_audio_steps": 20,
     "fun_audio_guidance": 7.0,
     "fun_audio_format": "mp3",
     "fun_audio_instrumental": False,
