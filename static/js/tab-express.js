@@ -449,7 +449,7 @@ export function init(panel) {
       const tierMax = q.maxSec || 20;
       durSlider.max = String(tierMax);
       _applyModelDefaults(_model);
-      _refreshMultiTotal();
+      _refreshClipInfo();
       _updateRatioAvailability();
       _announceModel();
     },
@@ -502,41 +502,97 @@ export function init(panel) {
   // ── Multi-video story ─────────────────────────────────────────────────────
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
-  let _multiVideo = true;
-  let _numClips   = 2;
+  let _multiVideo    = true;
+  let _targetSecs    = 30;
+  let _numClips      = Math.max(2, Math.round(_targetSecs / _duration));
+  let _upscaleOn     = true;
+  let _upscaleMethod = 'ffmpeg';
+  let _upscaleScale  = 2.0;
+
+  const STORY_LENGTHS = [
+    { label: '15s', secs: 15 },
+    { label: '30s', secs: 30 },
+    { label: '45s', secs: 45 },
+    { label: '60s', secs: 60 },
+  ];
 
   const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', checked: 'checked', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
 
-  const clipsSlider = el('input', { type: 'range', min: '2', max: '8', value: '2', step: '1', style: 'flex:1; accent-color:var(--accent);' });
-  const clipsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:20px; text-align:right;', text: '2' });
-  const totalLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '~10s' });
-
-  function _refreshMultiTotal() {
-    totalLabel.textContent = `~${_numClips * _duration}s`;
-  }
-  clipsSlider.addEventListener('input', () => {
-    _numClips = parseInt(clipsSlider.value);
-    clipsLabel.textContent = String(_numClips);
-    _refreshMultiTotal();
+  const storyLenChips = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  STORY_LENGTHS.forEach(({ label, secs }) => {
+    const chip = el('button', {
+      class: secs === _targetSecs ? 'chip chip-active' : 'chip',
+      text: label,
+      style: 'cursor:pointer;',
+    });
+    chip.addEventListener('click', () => {
+      _targetSecs = secs;
+      _numClips = Math.max(2, Math.round(_targetSecs / _duration));
+      storyLenChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
+      chip.classList.add('chip-active');
+      _refreshClipInfo();
+    });
+    storyLenChips.appendChild(chip);
   });
-  // Keep total in sync when clip-length slider changes
-  durSlider.addEventListener('input', _refreshMultiTotal);
+
+  const clipInfoLabel = el('span', {
+    style: 'font-size:.75rem; color:var(--text-3);',
+    text: `~${_numClips} clips at ${_duration}s each - AI adjusts pacing`,
+  });
+
+  function _refreshClipInfo() {
+    _numClips = Math.max(2, Math.round(_targetSecs / _duration));
+    clipInfoLabel.textContent = `~${_numClips} clips at ${_duration}s each - AI adjusts pacing`;
+  }
+  durSlider.addEventListener('input', _refreshClipInfo);
+
+  const upscaleChk = el('input', { type: 'checkbox', id: 'express-upscale', checked: 'checked', style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;' });
+  upscaleChk.addEventListener('change', () => { _upscaleOn = upscaleChk.checked; });
+
+  const methodChips = el('div', { style: 'display:flex; gap:4px;' });
+  [{ label: 'Fast', value: 'ffmpeg' }, { label: 'AI', value: 'ai' }].forEach(({ label, value }) => {
+    const chip = el('button', {
+      class: value === _upscaleMethod ? 'chip chip-active' : 'chip',
+      text: label, style: 'cursor:pointer; font-size:.7rem; padding:2px 8px;',
+    });
+    chip.addEventListener('click', () => {
+      _upscaleMethod = value;
+      methodChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
+      chip.classList.add('chip-active');
+    });
+    methodChips.appendChild(chip);
+  });
+
+  const scaleChips = el('div', { style: 'display:flex; gap:4px;' });
+  [{ label: '1.5x', value: 1.5 }, { label: '2x', value: 2.0 }, { label: '4x', value: 4.0 }].forEach(({ label, value }) => {
+    const chip = el('button', {
+      class: value === _upscaleScale ? 'chip chip-active' : 'chip',
+      text: label, style: 'cursor:pointer; font-size:.7rem; padding:2px 8px;',
+    });
+    chip.addEventListener('click', () => {
+      _upscaleScale = value;
+      scaleChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
+      chip.classList.add('chip-active');
+    });
+    scaleChips.appendChild(chip);
+  });
 
   const multiSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
-  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
-    el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Clips' }),
-    clipsSlider,
-    clipsLabel,
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Story length' }),
+    storyLenChips,
   ]));
-  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
-    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Total story length:' }),
-    totalLabel,
-    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: '(clip length × clips)' }),
-  ]));
+  multiSettings.appendChild(el('div', { style: 'padding-left:90px;' }, [clipInfoLabel]));
   multiSettings.appendChild(el('div', {
     style: 'font-size:.73rem; color:var(--text-3); line-height:1.5; padding:4px 0;',
-    text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Audio is generated once over the whole piece.',
+    text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Audio spans the whole piece.',
   }));
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+    upscaleChk,
+    el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
+    methodChips,
+    scaleChips,
+  ]));
 
   const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
@@ -546,7 +602,7 @@ export function init(panel) {
         style: 'font-size:.88rem; font-weight:600; cursor:pointer; user-select:none; color:var(--text);',
         text: 'Multi-video story',
       }),
-      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '— chain clips into a narrative' }),
+      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- chain clips into a narrative' }),
     ]),
     multiSettings,
   ]);
@@ -557,9 +613,9 @@ export function init(panel) {
     multiSettings.style.display = _multiVideo ? 'flex' : 'none';
     loopBtn.style.display = _multiVideo ? 'none' : '';
     if (!_looping) {
-      createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '＋ Add to Queue' : 'Create');
+      createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
     }
-    _refreshMultiTotal();
+    _refreshClipInfo();
   });
 
   // ── Loop state ────────────────────────────────────────────────────────────
@@ -574,7 +630,7 @@ export function init(panel) {
     if (_multiVideo) {
       createBtn.textContent = 'Create Story';
     } else {
-      createBtn.textContent = _pendingCount > 0 ? '＋ Add to Queue' : 'Create';
+      createBtn.textContent = _pendingCount > 0 ? '+ Add to Queue' : 'Create';
     }
   }
   function _trackDone(job_id) {
@@ -891,8 +947,12 @@ export function init(panel) {
           lyric_direction: lyricInput.value.trim(),
           user_direction:  'cinematic narrative, story continuity, dramatic',
           model:           _model,
-          clip_duration:   _duration,
-          num_clips:       _numClips,
+          clip_duration:       _duration,
+          num_clips:           _numClips,
+          target_story_length: _targetSecs,
+          upscale:             _upscaleOn,
+          upscale_scale:       _upscaleScale,
+          upscale_method:      _upscaleMethod,
           steps:           _steps,
           guidance:        _guidance,
           seed:            -1,

@@ -506,6 +506,28 @@ def run_pipeline(job, photo_path, settings):
 
     from core.session import get_current as get_session
     if merged:
+        # ── Phase 5: Upscale (optional) ───────────────────────────────────────
+        upscale_on     = settings.get("upscale", True)
+        upscale_scale  = float(settings.get("upscale_scale", 2.0))
+        upscale_method = settings.get("upscale_method", "ffmpeg")
+        if upscale_on and not _stopped():
+            job.update(progress=93, message="Upscaling video...")
+            try:
+                from core.upscaler import upscale_video
+                up_path = str(job_dir / f"fun_{model_tag}_{time.strftime('%H%M%S')}_up.mp4")
+                up_out, up_err = upscale_video(merged, up_path,
+                                               scale=upscale_scale, method=upscale_method)
+                if up_out:
+                    # Remove unscaled merged intermediate
+                    if merged != video_path:
+                        try: os.remove(merged)
+                        except Exception: pass
+                    merged = up_out
+                else:
+                    log.warning("[pipeline] Upscale failed: %s -- using original", up_err)
+            except Exception as _ue:
+                log.warning("[pipeline] Upscale error: %s -- using original", _ue)
+
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta["final_path"] = merged
@@ -515,7 +537,7 @@ def run_pipeline(job, photo_path, settings):
             get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
         except Exception as e:
             log.warning("session.add_file failed: %s", e)
-        # Delete the raw WanGP intermediate — only the merged file is needed
+        # Delete the raw WanGP intermediate -- only the merged file is needed
         if video_path and video_path != merged:
             try:
                 os.remove(video_path)

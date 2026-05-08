@@ -66,7 +66,10 @@ Rules for ALL clips regardless of type:
   "gently", "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
 - BANNED: inventing subjects not in the photo (no new animals, people, or objects)
 - Arc: intense opening -> escalation -> dramatic peak
-- Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
+- Return ONLY valid JSON: {"clips": [{"prompt": "prompt1", "duration": 5}, {"prompt": "prompt2", "duration": 8}]}
+- duration is seconds per clip (integer 4-15). Vary durations for pacing:
+  action/impact = 4-6s, sustained drama = 7-10s, final reveal = 6-12s.
+- Total durations should sum close to the target_total_seconds given in the prompt.\
 """
 
 
@@ -76,11 +79,13 @@ def _generate_story_arc(
     n_clips: int,
     photo_path: str | None,
     progress_fn=None,
-) -> tuple[list[str], str]:
-    """Generate N sequential motion prompts that form a narrative arc.
+    target_total_secs: float | None = None,
+    default_clip_dur: float = 5.0,
+) -> tuple[list[dict], str]:
+    """Generate N sequential motion prompts with per-clip durations.
 
-    Returns (prompts, method) where method describes how they were generated
-    so the caller can show the user what happened.
+    Returns (clips, method) where clips is list[{"prompt": str, "duration": float}]
+    and method is one of "vision", "text", "fallback".
 
     Cascade:
       1. Vision call to Ollama (sees the photo, handles NSFW -- never cloud vision)
@@ -88,25 +93,42 @@ def _generate_story_arc(
       3. Built-in fallback phases prefixed with user idea (last resort, always works)
     """
     idea_text = (initial_idea or "").strip() or "Create an exciting action-packed short film"
+    total_secs = target_total_secs or (n_clips * default_clip_dur)
     user_msg = (
         f"Initial idea: {idea_text}\n"
-        f"Number of clips: {n_clips}\n\n"
+        f"Number of clips: {n_clips}\n"
+        f"Target total story length: {int(total_secs)}s\n\n"
         f"Generate exactly {n_clips} sequential motion prompts as a story arc.\n\n"
         f"REQUIRED OUTPUT FORMAT -- respond with ONLY this JSON, no other text:\n"
-        f'{{"clips": ["prompt 1 here", "prompt 2 here"]}}'
+        f'{{"clips": [{{"prompt": "prompt 1", "duration": 5}}, {{"prompt": "prompt 2", "duration": 8}}]}}'
     )
 
-    def _parse_clips(text):
+    def _parse_clips(text) -> list[dict] | None:
         data = parse_json_response(text)
         if not data:
             return None
-        clips = data.get("clips", [])
-        if not isinstance(clips, list) or not clips:
+        raw = data.get("clips", [])
+        if not isinstance(raw, list) or not raw:
             return None
-        result = [str(c) for c in clips[:n_clips]]
+        # Normalise: accept both dict form and legacy plain string form
+        result: list[dict] = []
+        for item in raw[:n_clips]:
+            if isinstance(item, dict):
+                prompt = str(item.get("prompt", "")).strip()
+                try:
+                    dur = max(4.0, min(15.0, float(item.get("duration", default_clip_dur))))
+                except (TypeError, ValueError):
+                    dur = default_clip_dur
+            else:
+                prompt = str(item).strip()
+                dur = default_clip_dur
+            if prompt:
+                result.append({"prompt": prompt, "duration": dur})
+        if not result:
+            return None
         src = len(result)
         while len(result) < n_clips:
-            result.append(result[len(result) % src])
+            result.append(dict(result[len(result) % src]))
         return result
 
     # -- Step 1a: Ollama vision (local -- photo stays on-device) --
@@ -165,7 +187,10 @@ def _generate_story_arc(
 
     # -- Step 3: built-in fallback (always works, preserves user idea) --
     base = (initial_idea.strip() + ", ") if initial_idea else ""
-    return [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)], "fallback"
+    return [
+        {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": default_clip_dur}
+        for i in range(n_clips)
+    ], "fallback"
 
 
 def _bridge_steps(video_steps: int, model_name: str) -> int:
@@ -290,26 +315,33 @@ def run_multi_prep(job, photo_path, settings):
     from features.fun_videos import analyzer
     llm_router = get_llm_router()
 
-    n_clips         = int(settings.get("num_clips", 4))
-    user_idea       = settings.get("video_prompt", "") or settings.get("user_direction", "")
-    skip_audio      = settings.get("skip_audio", False)
-    instrumental    = settings.get("instrumental", False)
-    lyric_direction = settings.get("lyric_direction", "")
+    n_clips          = int(settings.get("num_clips", 4))
+    clip_dur         = float(settings.get("clip_duration", settings.get("video_duration", 5.0)))
+    target_total     = settings.get("target_story_length")
+    if target_total:
+        target_total = float(target_total)
+    user_idea        = settings.get("video_prompt", "") or settings.get("user_direction", "")
+    skip_audio       = settings.get("skip_audio", False)
+    instrumental     = settings.get("instrumental", False)
+    lyric_direction  = settings.get("lyric_direction", "")
 
     # ── Story arc ─────────────────────────────────────────────────────────
     job.update(progress=3, message="Planning story arc...")
     arc, arc_method = _generate_story_arc(
         llm_router, user_idea, n_clips, photo_path,
         progress_fn=lambda msg: job.update(message=msg),
+        target_total_secs=target_total,
+        default_clip_dur=clip_dur,
     )
     settings["_story_arc"] = arc
+    arc_prompts = [a.get("prompt", "")[:40] if isinstance(a, dict) else str(a)[:40] for a in arc]
     if arc_method == "vision":
-        log.info("[multi] Story arc via vision (%d clips): %s", n_clips, [a[:40] for a in arc])
+        log.info("[multi] Story arc via vision (%d clips): %s", n_clips, arc_prompts)
     elif arc_method == "text":
-        log.info("[multi] Story arc via text-only (%d clips): %s", n_clips, [a[:40] for a in arc])
+        log.info("[multi] Story arc via text-only (%d clips): %s", n_clips, arc_prompts)
         job.update(message="Story arc planned (photo analysis unavailable, used text)")
     else:
-        log.warning("[multi] Story arc using built-in fallback: %s", [a[:40] for a in arc])
+        log.warning("[multi] Story arc using built-in fallback: %s", arc_prompts)
         job.update(message="Story arc using default motion phases -- AI planning unavailable")
 
     if skip_audio:
@@ -328,7 +360,9 @@ def run_multi_prep(job, photo_path, settings):
             else:
                 frames = []
             arc = settings.get("_story_arc", [])
-            video_context = " ".join(arc[:2]) if arc else user_idea
+            video_context = " ".join(
+                a.get("prompt", "") if isinstance(a, dict) else str(a) for a in arc[:2]
+            ) if arc else user_idea
             result = analyzer.generate_music_prompt(
                 llm_router, frames, user_idea, video_prompt=video_context
             )
@@ -398,7 +432,10 @@ def run_multi_pipeline(job, photo_path, settings):
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
-        story_arc = [(base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)]) for i in range(n_clips)]
+        story_arc = [
+            {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": clip_dur}
+            for i in range(n_clips)
+        ]
 
     ts      = time.strftime("%Y-%m-%d")
     slug    = Path(photo_path).stem[:16].replace(" ", "_") if photo_path else "multivid"
@@ -446,9 +483,17 @@ def run_multi_pipeline(job, photo_path, settings):
 
     _last_error: list[str | None] = [None]
 
-    for i, clip_prompt in enumerate(story_arc):
+    for i, clip_data in enumerate(story_arc):
         if _stopped():
             break
+
+        # story_arc entries are dicts {"prompt": str, "duration": float}
+        if isinstance(clip_data, dict):
+            clip_prompt  = clip_data.get("prompt", "")
+            this_clip_dur = max(4.0, min(15.0, float(clip_data.get("duration", clip_dur))))
+        else:
+            clip_prompt   = str(clip_data)
+            this_clip_dur = clip_dur
 
         clip_num = i + 1
         pct_start = 10 + int((i / n_clips) * 65)
@@ -472,7 +517,7 @@ def run_multi_pipeline(job, photo_path, settings):
                 image_path=clip_start_image,
                 prompt=finalized,
                 out_path=clip_out,
-                duration=clip_dur,
+                duration=this_clip_dur,
                 model_name=model_name,
                 resolution=resolution,
                 override_width=int(ow) if ow else None,
@@ -629,7 +674,10 @@ def run_multi_pipeline(job, photo_path, settings):
     forge_was_unloaded = forge_unloaded or unload_checkpoint()
 
     total_dur = probe_duration(concat_path)
-    audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(n_clips * clip_dur + 2.0)
+    audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
+        d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
+        for d in story_arc
+    ) + 2.0)
 
     def _audio_progress(elapsed_s):
         job.update(
@@ -675,6 +723,24 @@ def run_multi_pipeline(job, photo_path, settings):
     merged = video_generator.merge_video_audio(concat_path, audio_path, final_path, log_fn=_log)
 
     if merged:
+        # ── Phase 5: Upscale (optional) ───────────────────────────────────────
+        upscale_on     = settings.get("upscale", True)
+        upscale_scale  = float(settings.get("upscale_scale", 2.0))
+        upscale_method = settings.get("upscale_method", "ffmpeg")
+        if upscale_on and not _stopped():
+            job.update(progress=95, message="Upscaling video...")
+            try:
+                from core.upscaler import upscale_video
+                up_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}_up.mp4")
+                up_out, up_err = upscale_video(merged, up_path,
+                                               scale=upscale_scale, method=upscale_method)
+                if up_out:
+                    merged = up_out
+                else:
+                    log.warning("[multi] Upscale failed: %s -- using original", up_err)
+            except Exception as _ue:
+                log.warning("[multi] Upscale error: %s -- using original", _ue)
+
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "music_prompt": music_prompt})
@@ -697,7 +763,7 @@ def run_multi_pipeline(job, photo_path, settings):
                     "story_arc": story_arc,
                     "elapsed_seconds": elapsed,
                     "model": model_name,
-                    "duration_sec": clip_dur * len(clip_paths),
+                    "duration_sec": total_dur or clip_dur * len(clip_paths),
                 },
             )
         except Exception as e:

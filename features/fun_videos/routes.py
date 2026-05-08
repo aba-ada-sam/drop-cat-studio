@@ -313,7 +313,10 @@ async def make_it(request: Request):
         "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
         "end_photo_path": body.get("end_photo_path"),
         "start_video_path": _resolve_path(body.get("start_video_path", "")),
-        "loras": body.get("loras", []),
+        "loras":          body.get("loras", []),
+        "upscale":        body.get("upscale", True),
+        "upscale_scale":  float(body.get("upscale_scale", 2.0)),
+        "upscale_method": body.get("upscale_method", "ffmpeg"),
     }
 
     if photo_path:
@@ -362,8 +365,14 @@ async def make_it_multi(request: Request):
         raise HTTPException(400, "Provide either a photo or a video prompt")
 
     config = cfg.load()
-    n_clips  = max(2, min(10, int(body.get("num_clips",   config.get("fun_multi_num_clips",   4)))))
-    clip_dur = max(4.0, min(20.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 8.0)))))
+    clip_dur = max(4.0, min(20.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 5.0)))))
+    # If target_story_length is given, derive n_clips from it; otherwise use num_clips directly
+    target_secs = body.get("target_story_length")
+    if target_secs is not None:
+        target_secs = float(target_secs)
+        n_clips = max(2, min(10, round(target_secs / clip_dur)))
+    else:
+        n_clips = max(2, min(10, int(body.get("num_clips", config.get("fun_multi_num_clips", 2)))))
 
     settings = {
         "video_prompt":    body.get("video_prompt", ""),
@@ -383,8 +392,12 @@ async def make_it_multi(request: Request):
         "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
         "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
-        "skip_audio":      body.get("skip_audio", False),
-        "bpm":             body.get("bpm"),
+        "skip_audio":           body.get("skip_audio", False),
+        "bpm":                  body.get("bpm"),
+        "target_story_length":  target_secs,
+        "upscale":              body.get("upscale", True),
+        "upscale_scale":        float(body.get("upscale_scale", 2.0)),
+        "upscale_method":       body.get("upscale_method", "ffmpeg"),
     }
 
     if photo_path:
