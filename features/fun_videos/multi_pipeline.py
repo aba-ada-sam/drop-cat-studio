@@ -59,9 +59,12 @@ STEP 1 -- READ THE PHOTO CAREFULLY. Decide which scene type it is:
 
 Rules for ALL clips regardless of type:
 - Each prompt: 35-55 words, begins with an explosive action verb
-- Describe motion that is ALREADY IN THE SCENE -- do not hallucinate new subjects
+- Describe only what is PHYSICALLY VISIBLE: bodies, surfaces, weather, objects in motion
+- Every action must be a real physical thing a camera could capture -- no abstract concepts
 - NO camera moves as the primary event (camera reacts, never leads)
-- BANNED: "establishes", "reveals", "opens on", "we see", "the camera", "slowly", "gently"
+- BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera", "slowly",
+  "gently", "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
+- BANNED: inventing subjects not in the photo (no new animals, people, or objects)
 - Arc: intense opening -> escalation -> dramatic peak
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
@@ -106,7 +109,7 @@ def _generate_story_arc(
             result.append(result[len(result) % src])
         return result
 
-    # -- Step 1: vision (Ollama only -- never send user photos to cloud vision) --
+    # -- Step 1a: Ollama vision (local -- photo stays on-device) --
     frames = []
     if photo_path and os.path.isfile(photo_path):
         b64 = encode_image_b64(photo_path)
@@ -125,11 +128,27 @@ def _generate_story_arc(
             result = _parse_clips(text)
             if result:
                 return result, "vision"
-            log.warning("[multi] Story arc vision returned unparseable response -- trying text-only")
+            log.warning("[multi] Story arc Ollama vision returned unparseable response -- trying cloud vision")
         except Exception as e:
-            log.warning("[multi] Story arc vision call failed (%s) -- trying text-only", e)
+            log.warning("[multi] Story arc Ollama vision failed (%s) -- trying cloud vision", e)
 
-    # -- Step 2: text-only (cloud OK, sanitizer handles NSFW text) --
+        # -- Step 1b: Cloud vision fallback (Anthropic/OpenAI) --
+        # Ollama's qwen3-vl often outputs thinking blocks instead of JSON; when that
+        # happens the story arc must still be grounded in the actual photo content or
+        # the video model ignores the source image and hallucinates unrelated scenes.
+        try:
+            text = llm_router.route_vision(
+                user_msg, frames,
+                tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+            )
+            result = _parse_clips(text)
+            if result:
+                return result, "vision"
+            log.warning("[multi] Story arc cloud vision returned unparseable response -- trying text-only")
+        except Exception as e:
+            log.warning("[multi] Story arc cloud vision failed (%s) -- trying text-only", e)
+
+    # -- Step 2: text-only (last resort -- story arc not anchored to photo) --
     if progress_fn:
         progress_fn("Planning story arc (text-only)...")
     try:
