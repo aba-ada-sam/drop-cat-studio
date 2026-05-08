@@ -125,7 +125,7 @@ export function init(panel) {
 
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
-  const dropHint = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image here or click to browse' });
+  const dropHint = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image, paste from clipboard (Ctrl+V), or click to browse' });
   const clearImgBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
     title: 'Clear image', text: '×',
@@ -209,6 +209,23 @@ export function init(panel) {
     } catch (err) { toast(err.message, 'error'); }
     imgInput.value = '';
   });
+
+  async function _pasteImage(e) {
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgItem = items.find(it => it.type.startsWith('image/'));
+    if (!imgItem) return;
+    e.preventDefault();
+    const file = imgItem.getAsFile();
+    if (!file) return;
+    try {
+      const data = await apiUpload('/api/fun/upload', [file]);
+      const f = data.files?.[0];
+      if (f) _applyImage(f.path, f.url || pathToUrl(f.path));
+    } catch (err) { toast(err.message, 'error'); }
+  }
+  document.addEventListener('paste', _pasteImage);
 
   // ── Idea + Lyric direction ────────────────────────────────────────────────
   const ideaInput = el('textarea', {
