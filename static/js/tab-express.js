@@ -32,9 +32,9 @@ export function init(panel) {
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
   const QUALITIES = [
-    { label: '480P',     px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16 },
-    { label: '720P',     px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12 },
-    { label: 'LTX Fast', px: 580, model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
+    { label: 'Fast',    px: 580, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~30-60s per clip, any aspect ratio' },
+    { label: 'Quality', px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- richer motion, ~5-15 min per clip' },
+    { label: 'HD',      px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- highest quality, ~10-20 min per clip' },
   ];
 
   // Which ratios each model natively supports well.
@@ -59,13 +59,13 @@ export function init(panel) {
   };
   const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
 
-  let _model      = 'Wan2.1-I2V-14B-480P';
-  let _duration   = 6;
+  let _model      = 'LTX-2 Dev19B Distilled';
+  let _duration   = 8;
   let _allModels  = {};
   let _ratio      = '16:9';
-  let _qualityPx  = 480;
-  let _outW       = 864;
-  let _outH       = 480;
+  let _qualityPx  = 580;
+  let _outW       = 1032;
+  let _outH       = 580;
 
   function _computeDims(ratioStr, qualityPx) {
     const [rw, rh] = ratioStr.split(':').map(Number);
@@ -355,7 +355,7 @@ export function init(panel) {
     const row = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
     const chips = {};
     for (const item of items) {
-      const btn = el('button', { style: CHIP_BASE + (item.value === activeVal ? CHIP_ON : ''), text: item.label });
+      const btn = el('button', { style: CHIP_BASE + (item.value === activeVal ? CHIP_ON : ''), text: item.label, title: item.title || '' });
       btn.addEventListener('click', () => {
         Object.entries(chips).forEach(([v, b]) => b.setAttribute('style', CHIP_BASE + (v === item.value ? CHIP_ON : '')));
         onPick(item);
@@ -370,7 +370,7 @@ export function init(panel) {
   _dimsLabel = dimsLabel;
   const warnEl = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.1); border:1px solid rgba(232,160,0,.3); border-radius:6px; padding:6px 10px;',
-    text: '⚠ 1080P is demanding — expect slower generation and higher VRAM use. Make sure your GPU has at least 16 GB VRAM.',
+    text: 'HD quality requires a lot of VRAM and takes 10-20 min per clip. Consider Fast or Quality for a quicker result.',
   });
   _warnEl = warnEl;
 
@@ -424,7 +424,7 @@ export function init(panel) {
   }
 
   const { row: qualRow } = _makeChipGroup(
-    QUALITIES.map(q => ({ label: q.label, value: String(q.px) })),
+    QUALITIES.map(q => ({ label: q.label, value: String(q.px), title: q.hint || '' })),
     String(_qualityPx),
     item => {
       _qualityPx = Number(item.value);
