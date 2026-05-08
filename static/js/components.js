@@ -8,8 +8,11 @@
 export function pathToUrl(p) {
   if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
   const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
+  const iOut = norm.toLowerCase().indexOf('/output/');
+  if (iOut !== -1) return norm.substring(iOut);
+  const iUp  = norm.toLowerCase().indexOf('/uploads/');
+  if (iUp  !== -1) return norm.substring(iUp);
+  return `/output/${norm.split('/').pop()}`;
 }
 
 export function escHtml(s) {

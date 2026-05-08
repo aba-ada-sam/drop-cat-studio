@@ -3,7 +3,7 @@
  * Pick session videos → arrange sequence → AI generates bridge clips between each pair.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
-import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260429b';
+import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260507a';
 import { toast } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';

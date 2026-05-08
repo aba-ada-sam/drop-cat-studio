@@ -3,7 +3,7 @@
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
-import { el, pathToUrl } from './components.js?v=20260429b';
+import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 import { handoff } from './handoff.js?v=20260422a';

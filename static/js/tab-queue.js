@@ -4,7 +4,7 @@
  */
 import { api } from './api.js?v=20260505e';
 import { toast } from './shell/toast.js?v=20260503a';
-import { el, pathToUrl } from './components.js?v=20260429b';
+import { el, pathToUrl } from './components.js?v=20260507a';
 
 let _root        = null;
 let _pollTimer   = null;

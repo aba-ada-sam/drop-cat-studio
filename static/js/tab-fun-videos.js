@@ -3,7 +3,7 @@
  * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
-import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260429b';
+import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
@@ -140,6 +140,13 @@ export function init(panel) {
   previewCard.appendChild(previewImg);
   previewCard.appendChild(previewVid);
   previewCard.appendChild(previewClear);
+
+  previewImg.addEventListener('error', () => {
+    previewImg.style.display = 'none';
+    previewImg.src = '';
+    _startImagePath = null;
+    previewCard.style.display = 'none';
+  });
 
   // Wipe the motion prompt when the source image changes so the auto-gen
   // refills it from the NEW image instead of recycling text written for the
