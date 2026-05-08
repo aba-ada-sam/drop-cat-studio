@@ -185,11 +185,14 @@ def extract_frame_b64(
 def extract_last_frame_to_file(video_path: str | Path, out_path: str | Path) -> bool:
     """Extract a frame near the end of a video and save it as a JPEG file.
 
-    Uses 97% of duration to avoid potential black frames at the very end.
+    Uses 85% of duration -- LTX-2 clips fade/blur in the final ~10-15%, and the
+    multi-pipeline tail-trim only removes ~0.2s, so 97% can still land in a nearly-
+    black or heavily motion-blurred frame that causes the next clip to go off the rails.
+    85% reliably lands in the clear, in-motion portion of the clip.
     Returns True on success, False on failure.
     """
     dur = probe_duration(video_path)
-    seek = dur * 0.97 if dur > 0 else 0
+    seek = dur * 0.85 if dur > 0 else 0
     try:
         r = subprocess.run(
             [
