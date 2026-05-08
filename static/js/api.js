@@ -39,7 +39,7 @@ export async function apiUpload(path, files) {
  * @param {number} interval - Poll interval in ms (default 1500)
  * @returns {{ stop: () => void }} - Call stop() to cancel polling
  */
-export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 400) {
+export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 2400) {
   let timer = null;
   let stopped = false;
   let polls = 0;

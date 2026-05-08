@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed — import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508h';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260508i';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260508a';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260508a';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';
@@ -769,7 +769,8 @@ function initAIPills() {
     let models = {}, configData = {};
     try { models = (await apiFetch('/api/fun/models', { context: 'pill.video' })).models || {}; } catch (_) {}
     try { configData = await apiFetch('/api/config', { context: 'pill.video.cfg' }); } catch (_) {}
-    const currentModel = configData.wan_model || 'LTX-2 Dev19B Distilled';
+    // Match the pill: tab-announced model (Express quality chip) wins over saved config.
+    const currentModel = _tabVideoModel || configData.wan_model || 'LTX-2 Dev19B Distilled';
     const svc = _svcState.wangp || {};
 
     menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(svc.state||'—')}</span></div>

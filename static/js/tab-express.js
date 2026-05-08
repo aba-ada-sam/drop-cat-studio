@@ -208,23 +208,30 @@ export function init(panel) {
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', () => dropZone.classList.remove('drag-over'));
+  // Instant preview: show local blob URL immediately, upload in background.
+  // The file is already on disk; waiting for a server round-trip + a second
+  // HTTP fetch of /uploads/... before showing anything looks like dial-up.
+  async function _handleFile(file) {
+    const blobUrl = URL.createObjectURL(file);
+    _applyImage(blobUrl, blobUrl);  // path placeholder; replaced after upload
+    try {
+      const data = await apiUpload('/api/fun/upload', [file]);
+      const f = data.files?.[0];
+      if (f) _imagePath = f.path;  // swap placeholder for real server path
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
   dropZone.addEventListener('drop', async e => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
     if (!files.length) return;
-    try {
-      const data = await apiUpload('/api/fun/upload', files);
-      const f = data.files?.[0];
-      if (f) _applyImage(f.path, f.url || pathToUrl(f.path));
-    } catch (err) { toast(err.message, 'error'); }
+    await _handleFile(files[0]);
   });
   imgInput.addEventListener('change', async () => {
     if (!imgInput.files?.length) return;
-    try {
-      const data = await apiUpload('/api/fun/upload', Array.from(imgInput.files));
-      const f = data.files?.[0];
-      if (f) _applyImage(f.path, f.url || pathToUrl(f.path));
-    } catch (err) { toast(err.message, 'error'); }
+    await _handleFile(imgInput.files[0]);
     imgInput.value = '';
   });
 
@@ -237,11 +244,7 @@ export function init(panel) {
     e.preventDefault();
     const file = imgItem.getAsFile();
     if (!file) return;
-    try {
-      const data = await apiUpload('/api/fun/upload', [file]);
-      const f = data.files?.[0];
-      if (f) _applyImage(f.path, f.url || pathToUrl(f.path));
-    } catch (err) { toast(err.message, 'error'); }
+    await _handleFile(file);
   }
   document.addEventListener('paste', _pasteImage);
 
@@ -494,10 +497,12 @@ export function init(panel) {
   ]));
 
   // ── Multi-video story ─────────────────────────────────────────────────────
-  let _multiVideo = false;
+  // Default ON: multi-clip stories with a coherent arc are the headline output of
+  // the Express tab. Single-clip mode is still available by unchecking.
+  let _multiVideo = true;
   let _numClips   = 4;
 
-  const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
+  const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', checked: 'checked', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
 
   const clipsSlider = el('input', { type: 'range', min: '2', max: '8', value: '4', step: '1', style: 'flex:1; accent-color:var(--accent);' });
   const clipsLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:20px; text-align:right;', text: '4' });
@@ -514,7 +519,7 @@ export function init(panel) {
   // Keep total in sync when clip-length slider changes
   durSlider.addEventListener('input', _refreshMultiTotal);
 
-  const multiSettings = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
+  const multiSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
     el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Clips' }),
     clipsSlider,
@@ -577,14 +582,14 @@ export function init(panel) {
   // ── Create + Loop button row ──────────────────────────────────────────────
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
-    text: 'Create',
+    text: 'Create Story',
     style: 'flex:1; font-size:1.1rem; padding:14px; font-weight:700; letter-spacing:.04em;',
   });
   const loopBtn = el('button', {
     class: 'btn',
     text: '∞  Loop',
     title: 'Generate continuously until stopped',
-    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
+    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap; display:none;',
   });
   root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn]));
 
