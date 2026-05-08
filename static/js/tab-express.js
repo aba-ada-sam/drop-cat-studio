@@ -32,10 +32,9 @@ export function init(panel) {
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
   const QUALITIES = [
-    { label: '480P',  px: 480,  model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
-    { label: '580P',  px: 580,  model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
-    { label: '720P',  px: 720,  model: 'LTX-2 Dev19B Distilled', maxSec: 16 },
-    { label: '1080P', px: 1080, model: 'LTX-2 Dev19B Distilled', maxSec: 8  },
+    { label: '480P',     px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16 },
+    { label: '720P',     px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12 },
+    { label: 'LTX Fast', px: 580, model: 'LTX-2 Dev19B Distilled', maxSec: 20 },
   ];
 
   // Which ratios each model natively supports well.
@@ -60,13 +59,13 @@ export function init(panel) {
   };
   const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
 
-  let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 8;
+  let _model      = 'Wan2.1-I2V-14B-480P';
+  let _duration   = 6;
   let _allModels  = {};
   let _ratio      = '16:9';
-  let _qualityPx  = 580;
-  let _outW       = 1032;
-  let _outH       = 580;
+  let _qualityPx  = 480;
+  let _outW       = 864;
+  let _outH       = 480;
 
   function _computeDims(ratioStr, qualityPx) {
     const [rw, rh] = ratioStr.split(':').map(Number);
@@ -104,7 +103,7 @@ export function init(panel) {
       const ok = supported.includes(val);
       const isActive = val === _ratio;
       btn.setAttribute('style', CHIP_BASE + (isActive && ok ? CHIP_ON : '') + (ok ? '' : CHIP_DISABLED));
-      btn.title = ok ? '' : 'Switch to LTX-2 (580P) for portrait, square & alternative ratios';
+      btn.title = ok ? '' : 'Switch to LTX Fast quality for portrait, square & alternative ratios';
       if (!ok && isActive) {
         _ratio = '16:9';
         _ratioChips['16:9']?.setAttribute('style', CHIP_BASE + CHIP_ON);
@@ -147,12 +146,15 @@ export function init(panel) {
 
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
-  const dropHint = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop an image, paste from clipboard (Ctrl+V), or click to browse' });
+  const dropHint = el('div', { style: 'display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none;' }, [
+    el('div', { style: 'font-size:1rem; font-weight:600; color:var(--text-2);', text: 'Drop a photo here' }),
+    el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'or paste from clipboard (Ctrl+V) or click to browse' }),
+  ]);
   const clearImgBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
     title: 'Clear image', text: '×',
   });
-  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative;' }, [preview, dropHint, clearImgBtn]);
+  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:160px; display:flex; align-items:center; justify-content:center;' }, [preview, dropHint, clearImgBtn]);
   root.appendChild(dropZone);
 
   function _autoSelectRatio(imgW, imgH) {
@@ -343,11 +345,6 @@ export function init(panel) {
       ideaGenBtn,
     ]),
     ideaInput,
-    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-top:10px; margin-bottom:4px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3);', text: 'Lyric direction (optional)' }),
-      lyricGenBtn,
-    ]),
-    lyricInput,
   ]));
 
   // ── Output settings ───────────────────────────────────────────────────────
@@ -442,25 +439,20 @@ export function init(panel) {
 
   const ratioHintEl = el('div', {
     style: 'display:none; font-size:.72rem; color:var(--text-3); padding-top:2px;',
-    text: 'Portrait, square & 4:3 ratios only available with LTX-2 (580P)',
+    text: 'Portrait, square & 4:3 ratios only available with LTX Fast quality',
   });
   _ratioHint = ratioHintEl;
 
-  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
+  const advancedInner = el('div', { style: 'display:flex; flex-direction:column; gap:10px; padding-top:10px; border-top:1px solid var(--border-2); margin-top:4px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
+      qualRow,
+    ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Aspect ratio' }),
       ratioRow,
     ]),
     ratioHintEl,
-    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
-      qualRow,
-    ]),
-    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Duration' }),
-      durSlider,
-      durLabel,
-    ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Guidance' }),
       guidSlider,
@@ -476,6 +468,22 @@ export function init(panel) {
       dimsLabel,
     ]),
     warnEl,
+    el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-top:4px; margin-bottom:4px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3);', text: 'Lyric direction (optional)' }),
+      lyricGenBtn,
+    ]),
+    lyricInput,
+  ]);
+  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Duration' }),
+      durSlider,
+      durLabel,
+    ]),
+    el('details', {}, [
+      el('summary', { style: 'cursor:pointer; font-size:.75rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none;', text: 'Advanced settings' }),
+      advancedInner,
+    ]),
   ]));
 
   // ── Multi-video story ─────────────────────────────────────────────────────

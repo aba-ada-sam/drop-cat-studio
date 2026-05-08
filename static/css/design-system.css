@@ -560,6 +560,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .ai-pill.open .ai-pill-btn { border-color: var(--accent); color: var(--accent); }
 
 .ap-caret { font-size: .6rem; opacity: .6; }
+.ap-label { display: none; }
 
 .ap-menu {
   position: absolute;
