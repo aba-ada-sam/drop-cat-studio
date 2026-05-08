@@ -36,7 +36,9 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 # Quality suffixes appended to every video prompt before sending to WanGP.
 # These are model-family specific tags the models were trained on.
 _PROMPT_SUFFIXES = {
-    "ltx":  "high quality, photorealistic, cinematic, sharp focus",
+    # LTX-2 image conditioning is very strong and produces near-static output without
+    # explicit motion language. Force movement with every prompt.
+    "ltx":  "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
     "wan":  "smooth animation, photorealistic, high quality, detailed",
 }
 

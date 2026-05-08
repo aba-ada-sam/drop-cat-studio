@@ -391,6 +391,22 @@ async def restart_service_route(name: str):
     return {"ok": True, "message": f"Restarting {name}..."}
 
 
+@app.post("/api/app/restart")
+async def restart_app():
+    """Gracefully exit app.py so the manager watchdog restarts it with fresh code.
+
+    Useful after deploying Python code changes without touching the manager process.
+    Returns immediately -- the server will be unreachable for ~10 seconds then come back.
+    """
+    import signal, os
+    log.info("App restart requested via /api/app/restart -- exiting for watchdog respawn")
+    def _do_exit():
+        import time; time.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_do_exit, daemon=True).start()
+    return {"ok": True, "message": "Restarting -- reconnect in ~10 seconds"}
+
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/logs")

@@ -68,40 +68,44 @@ For landscapes: wind, weather, water, fire all moving together.
 
 Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
 
-MUSIC_PROMPT_SYSTEM = """You are a music director for an eclectic video production studio.
+MUSIC_PROMPT_SYSTEM = """You are a music director choosing a score for a short video.
 
-The audience has broad taste: French chanson, gypsy/Balkan punk, post-punk and new wave,
-garage blues, indie folk, sea shanties, electro swing, anarcho-punk, delta blues, Americana,
-psychedelic indie, klezmer, cumbia, polka, novelty and character songs.
+CRITICAL: Match the music to the MOOD AND SUBJECT of the original photo/video -- not to the
+action described in the clip prompts. If the clip prompts say "armies charge" but the photo
+shows a cute animal, choose music that fits the cute animal, not a war march.
 
-Pick a real, specific genre that fits the video. Use producer vocabulary: instruments, tempo
-feel, production texture, energy. One sentence max for music_prompt.
+Pick a genre that ACE-Step (an AI music model) can actually produce well. ACE-Step handles
+these genres reliably: indie folk, blues, Americana, country rock, post-punk, new wave,
+electro-swing, jazz, bossa nova, French chanson, reggae, psychedelic rock, surf rock, soul,
+R&B, singer-songwriter, Celtic folk, garage rock, lo-fi hip-hop.
 
-BANNED WORDS -- lazy descriptors that produce generic output: cinematic, ethereal, haunting,
-dramatic, sweeping, majestic, epic, atmospheric, lush, soaring, pulsing.
+Use producer vocabulary: specific instruments, tempo feel, production texture. One sentence.
 
-NEVER suggest these genres (they are boring and wrong for this audience): 90s rock, post-grunge,
-grunge, mainstream alternative, soft rock, light rock, adult contemporary, smooth jazz,
-generic pop, radio pop, K-pop, Korean pop, boy band, girl group, idol pop, EDM bro-drop,
-radio rock, Nickelback-style anything.
+BANNED WORDS -- vague lazy output: cinematic, ethereal, haunting, dramatic, sweeping, majestic,
+epic, atmospheric, lush, soaring, pulsing, intense, powerful, energetic.
 
-Good examples of the RIGHT direction:
-- "high-energy gypsy punk, accordion stabs, frantic violin, pounding rhythm section"
-- "early 80s post-punk, angular guitar, trebly bass, cold mechanical drums"
-- "delta blues, slide guitar, single-mic room sound, lazy swing feel"
-- "French chanson, accordion, upright bass, dry brushed snare, smoky bistro feel"
-- "anarcho-folk, fingerpicked acoustic, tuneful group vocals, raw honest energy"
-- "electro swing, muted trumpet, vintage brass, punchy syncopated kick, speakeasy feel"
-- "high-energy cumbia, brass stabs, accordion hook, driving congas"
+NEVER suggest: 90s rock, post-grunge, grunge, mainstream alternative, soft rock, K-pop, Korean
+pop, J-pop, idol pop, boy band, girl group, EDM, bro-drop, anarcho-punk, war march, battle
+hymn, Nickelback-style, generic pop, radio pop, smooth jazz, adult contemporary.
+
+Good examples of RIGHT direction:
+- "jangly indie folk, fingerpicked acoustic guitar, upright bass, brushed snare, warm tape hiss"
+- "early 80s post-punk, angular guitar, trebly bass, cold mechanical drums, no reverb"
+- "Delta blues, slide guitar, single-mic room sound, lazy triplet swing, humming overtones"
+- "French chanson, accordion, upright bass, dry brushed snare, smoky bistro atmosphere"
+- "electro swing, muted trumpet, vintage brass section, punchy syncopated kick, speakeasy energy"
+- "high-energy cumbia, brass stabs, accordion hook, driving congas, live room feel"
 - "sea shanty, unison male voices, fiddle, bodhran, no reverb, working-class stomp"
-- "garage blues rock, overdriven Strat, loose drums, live room bleed, raw take"
+- "garage blues rock, overdriven Strat, loose drums, live room bleed, raw one-take feel"
+- "upbeat Celtic folk, tin whistle, bouzouki, bodhrán, bright reel energy"
+- "lo-fi bossa nova, nylon string guitar, light brushed kit, warm vinyl crackle"
 
 Return ONLY valid JSON:
 {
   "music_prompt": "genre + instrumentation + production texture",
   "bpm": 120,
   "key_suggestion": "optional key/scale",
-  "reasoning": "one sentence on why this fits"
+  "reasoning": "one sentence on why this fits the photo mood"
 }"""
 
 LYRICS_SYSTEM = """You are a sardonic, witty songwriter with a gift for irony and gentle mockery.

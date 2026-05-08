@@ -1063,6 +1063,28 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
+  document.getElementById('btn-restart-app')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-restart-app');
+    btn.disabled = true;
+    btn.textContent = 'Restarting...';
+    try {
+      await apiFetch('/api/app/restart', { method: 'POST' });
+      btn.textContent = 'Reconnecting...';
+      // Poll until the server comes back
+      const poll = setInterval(async () => {
+        try {
+          await fetch('/api/services');
+          clearInterval(poll);
+          btn.textContent = 'Restart Server';
+          btn.disabled = false;
+          toast('Server restarted -- all code changes are now live', 'success');
+        } catch (_) { /* still down */ }
+      }, 1500);
+    } catch (_) {
+      btn.textContent = 'Restart Server';
+      btn.disabled = false;
+    }
+  });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
