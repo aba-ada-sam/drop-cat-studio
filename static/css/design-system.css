@@ -682,6 +682,16 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   50% { opacity: .4; }
 }
 
+/* Applied while AI is generating -- glowing border breathe */
+@keyframes dcs-border-breathe {
+  0%,100% { border-color: var(--border-2); box-shadow: none; }
+  50%      { border-color: var(--accent);  box-shadow: 0 0 0 2px rgba(212,160,23,.18); }
+}
+.ai-generating {
+  animation: dcs-border-breathe 1.2s ease-in-out infinite !important;
+  outline: none !important;
+}
+
 /* ── Icon buttons ─────────────────────────────────────────────────────────── */
 
 .btn-icon {

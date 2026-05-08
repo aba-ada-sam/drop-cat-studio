@@ -295,14 +295,26 @@ export function init(panel) {
   const ideaGenBtn  = _genBtn('Generate idea from image using AI');
   const lyricGenBtn = _genBtn('Generate lyric direction from image using AI');
 
-  async function _runGen(btn, action) {
-    btn.disabled = true; btn.textContent = '…';
+  // Returns a stop() fn -- call it when the async work is done.
+  function _btnThinking(btn) {
+    const orig = btn.textContent;
+    btn.disabled = true;
+    const frames = ['Thinking', 'Thinking.', 'Thinking..', 'Thinking...'];
+    let i = 0;
+    btn.textContent = frames[0];
+    const t = setInterval(() => { btn.textContent = frames[i = (i + 1) % frames.length]; }, 380);
+    return () => { clearInterval(t); btn.disabled = false; btn.textContent = orig; };
+  }
+
+  async function _runGen(btn, action, targetEl) {
+    const stop = _btnThinking(btn);
+    if (targetEl) targetEl.classList.add('ai-generating');
     try { await _brainstorm(action, { ideaOnly: action.includes('idea'), lyricOnly: action.includes('lyric') }); }
     catch (e) { toast(e.message, 'error'); }
-    finally { btn.disabled = false; btn.textContent = '✦ Generate'; }
+    finally { stop(); if (targetEl) targetEl.classList.remove('ai-generating'); }
   }
-  ideaGenBtn.addEventListener('click',  () => _runGen(ideaGenBtn,  'Generate a video motion prompt based on this image'));
-  lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image'));
+  ideaGenBtn.addEventListener('click',  () => _runGen(ideaGenBtn,  'Generate a video motion prompt based on this image', ideaInput));
+  lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image', lyricInput));
 
   // ── Talk to me ────────────────────────────────────────────────────────────
   const talkInput = el('textarea', {
@@ -316,8 +328,9 @@ export function init(panel) {
   async function _sendTalk() {
     const msg = talkInput.value.trim();
     if (!msg) return;
-    talkSendBtn.disabled = true; talkSendBtn.textContent = '…';
+    const stop = _btnThinking(talkSendBtn);
     talkReplyEl.style.display = 'none';
+    [talkInput, ideaInput, lyricInput].forEach(f => f.classList.add('ai-generating'));
     try {
       const data = await _brainstorm(msg);
       if (data.reply) {
@@ -326,7 +339,10 @@ export function init(panel) {
       }
       talkInput.value = '';
     } catch (e) { toast(e.message, 'error'); }
-    finally { talkSendBtn.disabled = false; talkSendBtn.textContent = '→ Send'; }
+    finally {
+      stop();
+      [talkInput, ideaInput, lyricInput].forEach(f => f.classList.remove('ai-generating'));
+    }
   }
   talkSendBtn.addEventListener('click', _sendTalk);
   talkInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sendTalk(); } });
@@ -709,6 +725,7 @@ export function init(panel) {
 
     if (needIdea && needLyric && _imagePath) {
       // Both blank + image — one brainstorm call fills both with energy
+      _showProgress(3, 'AI is reading your photo...');
       try {
         await _brainstorm(
           'Create a fun, high-energy video: describe dramatic physical movement or a wild transformation happening to the subject. ' +
@@ -718,6 +735,7 @@ export function init(panel) {
       } catch (_) {}
     } else {
       if (needIdea) {
+        _showProgress(3, 'AI is writing your video idea...');
         try {
           const data = await api('/api/fun/generate-prompts', {
             method: 'POST',
@@ -736,6 +754,7 @@ export function init(panel) {
       }
       // Always generate a lyric direction when missing — bare ideas produce flat music
       if (needLyric) {
+        _showProgress(8, 'AI is picking your music vibe...');
         try {
           await _brainstorm(
             'Write a lyric direction for a catchy, energetic song with real sung lyrics (not instrumental) ' +
@@ -922,6 +941,7 @@ export function init(panel) {
       return;
     }
     _loopCount = 0;
+    _showProgress(1, 'Getting started...');
     const submitted = _multiVideo ? await _generateMulti() : await _generateOne(false);
     if (submitted && _jobId) {
       _pendingCount++;
