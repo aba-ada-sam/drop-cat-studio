@@ -23,7 +23,7 @@ from pathlib import Path
 from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
-from features.fun_videos.multi_pipeline import _concat_with_xfade
+from features.fun_videos.multi_pipeline import _concat_clips
 from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
@@ -582,7 +582,7 @@ def run_song_pipeline(job, photo_path, settings):
 
     # -- Phase 2: Concat with crossfade ---------------------------------------
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_with_xfade(clip_paths, concat_path):
+    if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]
 
     # -- Phase 3: Merge with user's audio (loop clips to fill song if needed) -
