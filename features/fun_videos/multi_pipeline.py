@@ -800,11 +800,13 @@ def run_multi_pipeline(job, photo_path, settings):
     # frame that already has LTX softness artifacts. By clip 5+ these compound
     # into visible quality loss and subject drift. Resetting to the source photo
     # every 3 clips keeps identity stable at the cost of a slight visual cut --
-    # which is less bad than the subject morphing into a different character.
-    # For Wan models (25 steps, much sharper outputs) chaining works well; keep
-    # default 0 (off). Users can override either direction via settings.
+    # For LTX: every clip starts from the clean source photo (reanchor_every=1).
+    # Chaining LTX clips compounds softness artifacts -- by clip 3 the input frame
+    # is already degraded enough to trigger hallucination and subject replacement.
+    # Visual continuity comes from consistent prompt anchoring, not frame chaining.
+    # Wan at 25 steps produces sharp enough frames that chaining is safe (default 0).
     _is_ltx = "ltx" in model_name.lower()
-    reanchor_every   = int(settings.get("reanchor_every", 3 if _is_ltx else 0))
+    reanchor_every   = int(settings.get("reanchor_every", 1 if _is_ltx else 0))
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""

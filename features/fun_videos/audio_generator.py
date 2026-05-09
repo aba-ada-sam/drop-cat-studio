@@ -187,12 +187,16 @@ def generate_audio(
             effective_lyrics,
         )
         if not _re.match(r'^\s*\[', effective_lyrics):
-            effective_lyrics = '[verse]\n' + effective_lyrics
+            effective_lyrics = '[chorus]\n' + effective_lyrics
         elif _re.match(r'^\s*\[intro\]', effective_lyrics, _re.IGNORECASE):
-            effective_lyrics = _re.sub(r'^\s*\[intro\]', '[verse]', effective_lyrics, count=1, flags=_re.IGNORECASE)
+            effective_lyrics = _re.sub(r'^\s*\[intro\]', '[chorus]', effective_lyrics, count=1, flags=_re.IGNORECASE)
         # Strip any [outro] -- short tracks have no room and ACE-Step often pads
         # silence to "fit" it.
         effective_lyrics = _re.sub(r'(?im)^\s*\[outro\]\s*$', '', effective_lyrics).strip()
+        # ACE-Step treats [verse] as requiring an instrumental intro before vocals enter,
+        # delaying the first lyric by 1/3 to 1/2 of the track. [chorus] signals
+        # immediate vocal entry -- replace the opening section if it is still [verse].
+        effective_lyrics = _re.sub(r'^\s*\[verse\]', '[chorus]', effective_lyrics, count=1, flags=_re.IGNORECASE)
 
     effective_prompt = _normalize_prompt(prompt, instrumental, lyrics)
     effective_prompt = effective_prompt or "atmospheric music, organic texture, instrumental, distinct character"
