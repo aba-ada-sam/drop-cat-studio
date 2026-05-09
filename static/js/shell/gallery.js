@@ -9,6 +9,9 @@ import { handoff } from '../handoff.js?v=20260422a';
 import { pathToUrl } from '../components.js?v=20260507a';
 
 let _items = [];
+let _totalItems = 0;
+let _loadedOffset = 0;
+const _PAGE_SIZE = 100;
 let _filters = { tab: '', search: '' };
 let _containerEl = null;
 let _detailItem = null;
@@ -65,10 +68,30 @@ export function pushFromTab(tab, savedPath, prompt, seed, settings) {
   });
 }
 
+function _apiUrl(offset) {
+  const p = new URLSearchParams({ limit: _PAGE_SIZE, offset });
+  if (_filters.tab)    p.set('tab', _filters.tab);
+  if (_filters.search) p.set('search', _filters.search);
+  return `/api/gallery?${p}`;
+}
+
 async function _load() {
   try {
-    const data = await apiFetch('/api/gallery', { context: 'gallery.load' });
+    const data = await apiFetch(_apiUrl(0), { context: 'gallery.load' });
     _items = data.items || [];
+    _totalItems = data.total ?? _items.length;
+    _loadedOffset = _items.length;
+    _renderGrid();
+  } catch (_) {}
+}
+
+async function _loadMore() {
+  try {
+    const data = await apiFetch(_apiUrl(_loadedOffset), { context: 'gallery.load-more' });
+    const more = data.items || [];
+    _items = _items.concat(more);
+    _totalItems = data.total ?? _items.length;
+    _loadedOffset = _items.length;
     _renderGrid();
   } catch (_) {}
 }
@@ -92,11 +115,13 @@ function _render() {
 
   _containerEl.querySelector('#gallery-search')?.addEventListener('input', e => {
     _filters.search = e.target.value;
-    _renderGrid();
+    _items = []; _loadedOffset = 0; _totalItems = 0;
+    _load();
   });
   _containerEl.querySelector('#gallery-tab-filter')?.addEventListener('change', e => {
     _filters.tab = e.target.value;
-    _renderGrid();
+    _items = []; _loadedOffset = 0; _totalItems = 0;
+    _load();
   });
 }
 
@@ -153,7 +178,7 @@ function _filtered() {
 function _renderGrid() {
   const grid = _containerEl?.querySelector('#gallery-grid');
   if (!grid) return;
-  const items = _filtered();
+  const items = _items;
 
   if (!items.length) {
     if (_preview) {
@@ -177,6 +202,15 @@ function _renderGrid() {
   grid.innerHTML = '';
   for (const item of items) {
     grid.appendChild(_makeCard(item));
+  }
+  // "Load more" row when there are more items in the DB than we've fetched
+  if (_loadedOffset < _totalItems) {
+    const remaining = _totalItems - _loadedOffset;
+    const btn = document.createElement('div');
+    btn.style.cssText = 'grid-column:1/-1;padding:12px;text-align:center';
+    btn.innerHTML = `<button class="btn btn-sm" id="gallery-load-more">Load ${Math.min(remaining, _PAGE_SIZE)} more (${remaining} remaining)</button>`;
+    btn.querySelector('button').addEventListener('click', _loadMore);
+    grid.appendChild(btn);
   }
 }
 

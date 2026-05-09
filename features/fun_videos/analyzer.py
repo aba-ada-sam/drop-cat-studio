@@ -161,20 +161,35 @@ def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: s
         return ""
 
 
+_ANALYSIS_FALLBACK = {
+    "title": "Unknown scene",
+    "scene_description": "A photograph submitted for video generation.",
+    "mood": "neutral",
+    "setting": "unknown",
+    "subjects": ["subject"],
+    "dominant_colors": ["unknown"],
+    "visual_style": "photographic",
+    "energy": "moderate",
+}
+
 def analyze_photo(router, image_b64: str) -> dict:
-    """Analyze a photo and return scene understanding. Raises on failure."""
-    text = router.route_vision(
-        "Analyze this photograph for a creative video project.",
-        [image_b64],
-        tier=TIER_BALANCED,
-        system=ANALYSIS_SYSTEM,
-        force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
-        format_json=True,
-    )
-    result = parse_json_response(text)
-    if not result:
-        raise RuntimeError("AI returned unparseable response for photo analysis")
-    return result
+    """Analyze a photo and return scene understanding. Returns fallback on failure."""
+    try:
+        text = router.route_vision(
+            "Analyze this photograph for a creative video project.",
+            [image_b64],
+            tier=TIER_BALANCED,
+            system=ANALYSIS_SYSTEM,
+            force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
+            format_json=True,
+        )
+        result = parse_json_response(text)
+        if result and isinstance(result, dict):
+            return result
+    except Exception as e:
+        log.warning("analyze_photo failed: %s", e)
+    log.warning("analyze_photo: returning fallback scene description")
+    return dict(_ANALYSIS_FALLBACK)
 
 
 def generate_video_prompts(
@@ -220,11 +235,14 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
     last_text = ""
     for attempt in range(2):
         tier = TIER_FAST if num_prompts == 1 else TIER_BALANCED
+        # format_json=True forces JSON-only token sampling from qwen3-vl,
+        # so responses are compact; 512 tokens is ample for 4 structured prompts.
+        actual_max_tokens = min(max_tokens, 512)
         last_text = router.route_vision(
             "\n\n".join(prompt_parts),
             [image_b64],
             tier=tier,
-            max_tokens=max_tokens,
+            max_tokens=actual_max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
             force_provider=force_provider or "ollama",  # user images may be NSFW
             format_json=True,

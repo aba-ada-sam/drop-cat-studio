@@ -421,7 +421,10 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             return False, msg
 
         # Kill any lingering worker processes before starting a new one so we
-        # don't leak orphan GPU processes across restarts.
+        # don't leak orphan GPU processes across restarts. Use both strategies:
+        # port kill catches anything holding 7899 (including Pinokio-spawned
+        # miniconda workers that survive the wmic process-name scan).
+        _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
         _kill_stale_gpu_processes()
 
         _set_status("wangp", state="starting",

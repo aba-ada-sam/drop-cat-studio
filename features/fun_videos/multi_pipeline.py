@@ -917,35 +917,49 @@ def run_multi_pipeline(job, photo_path, settings):
 
         effective_guidance = guidance
 
-        try:
-            clip_path = video_generator.generate_video(
-                image_path=clip_start_image,
-                prompt=finalized,
-                out_path=clip_out,
-                duration=this_clip_dur,
-                model_name=model_name,
-                resolution=resolution,
-                override_width=int(ow) if ow else None,
-                override_height=int(oh) if oh else None,
-                steps=steps,
-                guidance=effective_guidance,
-                seed=seed,
-                stop_check=_stopped,
-                log_fn=_log,
-                progress_fn=_video_progress,
-            )
-        except Exception as e:
-            err = str(e)
-            _log(f"[error] Clip {clip_num} failed: {err}")
-            _last_error[0] = err
-            # Check for VRAM OOM — restart WanGP and abort
-            if "out of memory" in err.lower() or "cuda error" in err.lower():
-                from services import manager as _svc
-                threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
+        clip_path = None
+        for _attempt in range(2):
+            if _stopped():
+                break
+            if _attempt > 0:
+                # WanGP worker may have restarted (token mismatch, watchdog, etc.).
+                # Give it a few seconds to settle before retrying the clip.
+                _log(f"[info] Clip {clip_num}: retrying after worker restart...")
+                time.sleep(4)
+            try:
+                clip_path = video_generator.generate_video(
+                    image_path=clip_start_image,
+                    prompt=finalized,
+                    out_path=clip_out,
+                    duration=this_clip_dur,
+                    model_name=model_name,
+                    resolution=resolution,
+                    override_width=int(ow) if ow else None,
+                    override_height=int(oh) if oh else None,
+                    steps=steps,
+                    guidance=effective_guidance,
+                    seed=seed,
+                    stop_check=_stopped,
+                    log_fn=_log,
+                    progress_fn=_video_progress,
+                )
+            except Exception as e:
+                err = str(e)
+                _log(f"[error] Clip {clip_num} failed (attempt {_attempt + 1}): {err}")
+                _last_error[0] = err
+                if "out of memory" in err.lower() or "cuda error" in err.lower():
+                    from services import manager as _svc
+                    threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
+                    break  # OOM: don't retry, abort loop
+                continue  # other exception: retry once
+            if clip_path:
+                break  # success
+
+        if _stopped():
             break
 
         if not clip_path:
-            _log(f"[error] Clip {clip_num} produced no output — stopping early")
+            _log(f"[error] Clip {clip_num} produced no output after retries -- stopping early")
             break
 
         clip_paths.append(clip_path)

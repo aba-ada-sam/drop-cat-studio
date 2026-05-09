@@ -1207,7 +1207,9 @@ def _row_to_dict(row) -> dict:
 
 
 @app.get("/api/gallery")
-async def gallery_list(tab: str = "", search: str = "", favorite: bool = False):
+async def gallery_list(tab: str = "", search: str = "", favorite: bool = False,
+                       limit: int = 100, offset: int = 0):
+    limit = max(1, min(limit, 500))
     def _query():
         conn = _gallery_db()
         try:
@@ -1219,12 +1221,16 @@ async def gallery_list(tab: str = "", search: str = "", favorite: bool = False):
             if favorite:
                 clauses.append("favorite = 1")
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-            rows = conn.execute(f"SELECT * FROM gallery {where} ORDER BY created_at DESC LIMIT 500", params).fetchall()
-            return [_row_to_dict(r) for r in rows]
+            total = conn.execute(f"SELECT COUNT(*) FROM gallery {where}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM gallery {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows], total
         finally:
             conn.close()
-    items = await asyncio.to_thread(_query)
-    return {"items": items}
+    items, total = await asyncio.to_thread(_query)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @app.post("/api/gallery")
