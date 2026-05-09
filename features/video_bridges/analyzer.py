@@ -76,6 +76,7 @@ def analyze_media(router, media_path: str, frames_b64: list[str] | None = None) 
             tier=TIER_BALANCED,
             system=ANALYSIS_SYSTEM,
             force_provider="ollama",  # video frames may be NSFW
+            format_json=True,
         )
     result = parse_json_response(text)
     if not result:

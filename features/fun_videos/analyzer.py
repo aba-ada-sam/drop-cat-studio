@@ -328,6 +328,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
                 prompt, video_frames_b64,
                 tier=TIER_BALANCED, system=MUSIC_PROMPT_SYSTEM,
                 force_provider="ollama",
+                format_json=True,
             )
             result = parse_json_response(text)
             return result or {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80}
