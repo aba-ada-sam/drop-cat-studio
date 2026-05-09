@@ -35,10 +35,11 @@ _FALLBACK_PHASES = [
 
 # ── Story arc generation ──────────────────────────────────────────────────────
 
-# Two system prompts -- LTX models are intolerant of aggressive verbs (the
-# distilled schedule has so few denoising steps that "explosive" prompts get
-# read as "replace the scene with stock fire/lightning/anime imagery"), so
-# they get a gentle scene-preserving variant. Wan I2V keeps the kinetic one.
+# Three system prompts:
+#   CALM    -- environment-only motion, zero subject movement, stabilizer phrase appended.
+#              Default for LTX (compressed schedule + low step count = ghost-risk on faces).
+#   GENTLE  -- micro-motion on props/fabric/hands, subject face stays still. LTX dynamic mode.
+#   KINETIC -- aggressive action verbs, Wan I2V only (25 steps handles it).
 
 _STORY_ARC_BASE = """\
 You are planning a multi-clip short film from a still photograph.
@@ -142,9 +143,49 @@ ARC: each clip = same scene, one different micro-detail. Vary which prop,
 which fabric element, which background feature moves. No crescendo.\
 """
 
+_STORY_ARC_CALM = _STORY_ARC_BASE + """
 
-def _system_prompt_for_model(model_name: str) -> str:
-    return _STORY_ARC_GENTLE if "ltx" in (model_name or "").lower() else _STORY_ARC_KINETIC
+ENERGY: scene-hold mode. The subject does not move. Motion comes ONLY from the
+environment already visible in the photo.
+
+ALLOWED MOTION (environment only -- choose one per clip):
+  - Light: a shadow shifts slightly across a surface, window light brightens or dims
+  - Atmosphere: steam rises from a cup, smoke drifts from a fire, breath mist dissipates
+  - Background: a distant leaf stirs, a curtain shifts from unseen air, water surface ripples
+  - Gravity settle: fabric creases settle by weight, a prop shifts a millimetre by gravity
+  - Weather: clouds pass overhead casting a shadow change, rain visible in background only
+
+BANNED -- any motion involving the subject at all:
+  - No head, face, eyes, mouth, brows, ears, trunk, snout, beak
+  - No hands, arms, fingers, shoulders, torso breathing
+  - No stepping, shifting weight, turning, reaching, swaying
+  WHY: At 8-12 inference steps the denoiser cannot maintain facial/body detail while
+  computing motion. Even a 1-degree head tilt causes temporal ghosting across the entire
+  subject by frame 4. Environment-only motion keeps the subject pixel-stable.
+
+PROMPT SHAPE (use this exact structure, every clip):
+  1. SUBJECT (10-15 words): exact visual markers from photo -- clothing colour, species,
+     material, hair colour. Describe the subject as completely still.
+  2. ENVIRONMENT MOTION (12-18 words): ONE environmental change from the ALLOWED list.
+     Must be physically present in or plausible from the original scene.
+  3. SCENE ANCHOR (8-12 words): setting + visual style, restated every clip.
+  4. STABILIZER (fixed, always last): "180-degree shutter, natural motion blur, static frame."
+
+ARC: same scene, one different environmental detail per clip.
+Clips feel like a breathing photograph, not an action sequence.
+No crescendo. No escalation. Pure scene preservation.\
+"""
+
+
+def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -> str:
+    is_ltx = "ltx" in (model_name or "").lower()
+    # Resolve default per model family when not explicitly chosen
+    resolved = motion_style or ("calm" if is_ltx else "dynamic")
+    if resolved == "calm":
+        return _STORY_ARC_CALM
+    if is_ltx:
+        return _STORY_ARC_GENTLE
+    return _STORY_ARC_KINETIC
 
 
 def _generate_story_arc(
@@ -156,6 +197,7 @@ def _generate_story_arc(
     target_total_secs: float | None = None,
     default_clip_dur: float = 5.0,
     model_name: str = "",
+    motion_style: str | None = None,
 ) -> tuple[list[dict], str]:
     """Generate N sequential motion prompts with per-clip durations.
 
@@ -168,16 +210,21 @@ def _generate_story_arc(
       3. Built-in fallback phases prefixed with user idea (last resort, always works)
     """
     is_ltx = "ltx" in (model_name or "").lower()
-    default_idea = (
-        "Create a calm observational short film, subtle continuous motion, scene preserved"
-        if is_ltx
-        else "Create an exciting action-packed short film"
-    )
+    resolved_style = motion_style or ("calm" if is_ltx else "dynamic")
+    if resolved_style == "calm":
+        default_idea = "Create a calm breathing-photograph short film, environment-only motion, subject completely still"
+    elif is_ltx:
+        default_idea = "Create a calm observational short film, subtle continuous motion, scene preserved"
+    else:
+        default_idea = "Create an exciting action-packed short film"
     idea_text = (initial_idea or "").strip() or default_idea
     total_secs = target_total_secs or (n_clips * default_clip_dur)
+    style_hint = {"calm": "CALM -- environment-only motion, subject completely still"}.get(
+        resolved_style, "LTX -- use gentle motion only" if is_ltx else "Wan I2V -- kinetic action OK"
+    )
     user_msg = (
-        f"Target video model: {model_name or 'unknown'} "
-        f"({'LTX -- use gentle motion only' if is_ltx else 'Wan I2V -- kinetic action OK'})\n"
+        f"Target video model: {model_name or 'unknown'} ({style_hint})\n"
+        f"Motion style: {resolved_style}\n"
         f"Initial idea: {idea_text}\n"
         f"Number of clips: {n_clips}\n"
         f"Target total story length: {int(total_secs)}s\n\n"
@@ -185,7 +232,7 @@ def _generate_story_arc(
         f"REQUIRED OUTPUT FORMAT -- respond with ONLY this JSON, no other text:\n"
         f'{{"clips": [{{"prompt": "prompt 1", "duration": 5}}, {{"prompt": "prompt 2", "duration": 8}}]}}'
     )
-    system_prompt = _system_prompt_for_model(model_name)
+    system_prompt = _system_prompt_for_model(model_name, motion_style)
 
     def _parse_clips(text) -> list[dict] | None:
         data = parse_json_response(text)
@@ -668,6 +715,7 @@ def run_multi_prep(job, photo_path, settings):
     instrumental     = settings.get("instrumental", False)
     lyric_direction  = settings.get("lyric_direction", "")
     model_name       = settings.get("model_name", "")
+    motion_style     = settings.get("motion_style") or None  # None -> auto-resolve per model
 
     # ── Reject T2V models ─────────────────────────────────────────────────
     # Multi-video chains clip i's last frame as clip i+1's start image. T2V
@@ -697,6 +745,7 @@ def run_multi_prep(job, photo_path, settings):
         target_total_secs=plan_total,
         default_clip_dur=plan_clip_dur,
         model_name=model_name,
+        motion_style=motion_style,
     )
     settings["_story_arc"] = arc
     arc_prompts = [a.get("prompt", "")[:40] if isinstance(a, dict) else str(a)[:40] for a in arc]

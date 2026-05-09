@@ -412,6 +412,7 @@ async def make_it_multi(request: Request):
         "upscale_scale":        float(body.get("upscale_scale", 2.0)),
         "upscale_method":       body.get("upscale_method", "ffmpeg"),
         "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
+        "motion_style":         body.get("motion_style") or None,
     }
 
     if photo_path:

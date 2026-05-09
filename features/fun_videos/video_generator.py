@@ -25,13 +25,14 @@ _NEG_LTX = (
     "worst quality, inconsistent motion, blurry, jittery, distorted, camera shake, "
     "shaky, wobble, warping edges, flicker, stutter, erratic motion, temporal artifacts, "
     "ghosting, morphing, smear, judder, particle noise, ash floating, dust in air, "
-    "floating debris, watermark, text, logo"
+    "floating debris, handheld instability, rolling shutter wobble, watermark, text, logo"
 )
 _NEG_WAN = (
     "low quality, blurry, distorted faces, unnatural movement, text, watermark, "
-    "shaky camera, rolling shutter wobble, motion smear, heavy motion blur, ghost trails, "
-    "micro-jitter, warping edges, wobble, flicker, jitter, stutter, erratic motion, "
-    "temporal artifacts, ash floating, dust in air, floating debris, particles in air"
+    "shaky camera, rolling shutter wobble, handheld instability, motion smear, "
+    "heavy motion blur, ghost trails, micro-jitter, warping edges, wobble, flicker, "
+    "jitter, stutter, erratic motion, temporal artifacts, ash floating, dust in air, "
+    "floating debris, particles in air"
 )
 
 def negative_prompt_for(model_name: str) -> str:
@@ -45,8 +46,8 @@ MODELS = {
     # LTX-2 Distilled tolerates 4-12 steps; 12 gives better temporal consistency
     # for complex subjects (faces, fur, clothing) without overshooting the schedule.
     # CFG >4 over-saturates the distilled schedule. Wan2.1 needs 25 steps and CFG ~5.5.
-    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 5.5},
-    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 5.5},
+    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5},
+    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5},
     "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 12, "guidance": 3.0},
     "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 25, "guidance": 3.5},
     "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5},

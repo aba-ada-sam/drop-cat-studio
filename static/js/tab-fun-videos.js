@@ -629,6 +629,12 @@ export function init(panel) {
     modelInfo.textContent = `Max ${maxSec}s  --  ${m.res ? m.res[0]+'x'+m.res[1] : ''}  --  ${m.fps || '?'}fps`;
     _updateFvRatioAvailability();
     _computeFvDims();
+    // Auto-set motion style: LTX defaults to Calm (low step count = ghost risk on faces),
+    // Wan defaults to Dynamic (25 steps handles kinetic motion without smearing).
+    const name = modelSel.value || '';
+    if (typeof _setMotionStyle === 'function') {
+      _setMotionStyle(name.toLowerCase().includes('ltx') ? 'calm' : 'dynamic');
+    }
   }
 
   modelSel.addEventListener('change', () => {
@@ -815,6 +821,7 @@ export function init(panel) {
   // ── Multi-video story ──────────────────────────────────────────────────────
   let _multiVideo  = false;
   let _multiClips  = 4;
+  let _motionStyle = 'calm';
 
   const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' });
   root.appendChild(multiCard);
@@ -850,6 +857,23 @@ export function init(panel) {
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
     el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Clips:' }),
     clipsSlider, clipsLabel, totalLabel,
+  ]));
+
+  // Motion style toggle
+  const _msBtnBase = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 12px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const _msBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+  const msBtnCalm  = el('button', { style: _msBtnBase + _msBtnOn, text: 'Calm', title: 'Environment-only motion -- subject stays still (best for LTX)' });
+  const msBtnDyn   = el('button', { style: _msBtnBase, text: 'Dynamic', title: 'Subject action -- kinetic motion (Wan I2V)' });
+  function _setMotionStyle(style) {
+    _motionStyle = style;
+    msBtnCalm.setAttribute('style', _msBtnBase + (style === 'calm' ? _msBtnOn : ''));
+    msBtnDyn.setAttribute('style',  _msBtnBase + (style === 'dynamic' ? _msBtnOn : ''));
+  }
+  msBtnCalm.addEventListener('click', () => _setMotionStyle('calm'));
+  msBtnDyn.addEventListener('click',  () => _setMotionStyle('dynamic'));
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+    el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Motion:' }),
+    msBtnCalm, msBtnDyn,
   ]));
 
   multiChk.addEventListener('change', () => {
@@ -979,7 +1003,7 @@ export function init(panel) {
       const base = _buildFvPayload();
       const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
       const payload  = _multiVideo
-        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity, dramatic' }
+        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity, dramatic', motion_style: _motionStyle }
         : base;
       const { job_id } = await api(endpoint, {
         method: 'POST',
