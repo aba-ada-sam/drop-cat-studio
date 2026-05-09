@@ -99,58 +99,47 @@ aggressive prompts. action/impact = 4-6s, sustained drama = 7-10s, final reveal 
 
 _STORY_ARC_GENTLE = _STORY_ARC_BASE + """
 
-ENERGY: micro-motion only. LTX-2 Distilled runs 8 denoising steps, so
-prompts must be SHORT and SPECIFIC. Long prompts blur the model's focus.
-Any broad action verb triggers scale drift by clip 3 -- the model replaces
-the subject with fire/lightning/anime defaults. Use only tiny physical gestures
-and environmental motion.
+ENERGY: micro-motion only. LTX-2 Distilled has a compressed denoising
+schedule -- prompts must be SHORT (35-50 words) and describe only ONE small
+change per clip. Long prompts, vague prompts, or prompts with multiple actions
+cause scale drift and subject replacement by clip 3.
 
-PROMPT SHAPE (mandatory). Each prompt 35-50 words total:
-  1. SUBJECT + MICRO-MOTION (20-28 words): Name the subject by their exact
-     visual markers (hair, clothing, species, material) and one small
-     physical change. Lead with the subject -- NOT with camera instructions.
-     Example: "The grey elephant anchor in the navy suit tilts its trunk
-     slightly downward, one ear flicks back."
-  2. SCENE ANCHOR (10-15 words): Restate setting and visual style.
-     Example: "Same bright TV studio set, photorealistic render."
-  3. CAMERA NOTE (4-6 words, end only): "Static frame, no zoom."
+PROMPT SHAPE (mandatory for every clip):
+  1. SUBJECT (10-15 words): Name the subject using their EXACT visual markers
+     from the photo -- clothing colour, species, material, hair colour, etc.
+     This anchors the model to the source image. Never omit this.
+  2. ONE MICRO-MOTION (15-20 words): ONE small physical change happening in
+     the scene. See motion hierarchy below.
+  3. SCENE ANCHOR (8-12 words): Setting + visual style, restated every clip.
+  4. CAMERA NOTE (4-5 words, LAST): "Static frame, no zoom."
 
-THE CAMERA NOTE MUST BE LAST -- never first. If "camera" or "locked" appear
-in the first half of the prompt, the model treats it as the dominant
-instruction and produces a motionless zoom. Subject action comes first.
+MOTION HIERARCHY -- choose the SAFEST option available for the scene:
+  BEST (least risk of face blur):
+    - Props/objects on a surface shift, slide, or settle
+    - Background element stirs: leaf trembles, curtain moves, light shifts,
+      shadow changes, screen flickers, steam rises, water ripples
+    - Clothing/fabric: lapel stirs, sleeve shifts, collar moves, fabric settles
+  GOOD (moderate risk):
+    - Hand/arm: finger curls, hand shifts by a centimetre, wrist rotates slightly,
+      pen taps once, paper lifts at edge
+    - Shoulder/torso: chest rises with one breath, shoulders settle, weight shifts
+  RISKY -- avoid unless the subject has no face (landscape, object, text):
+    - Any head motion: head tilts, nods, turns
+    - Any facial feature: eyes move, mouth opens, brows shift
+    - Any species-specific face part: trunk sways, beak opens, ears flick,
+      whiskers twitch, muzzle moves
+  WHY: the face/head region has the highest spatial frequency. At low step
+  counts the denoiser cannot maintain facial detail while also animating it --
+  the result is temporal ghosting and blur. This applies to ALL subject types:
+  people, animals, creatures, robots, characters. Keep the face still.
 
-PREFERRED MICRO-MOTIONS -- HANDS/BODY ONLY, NOT THE FACE OR HEAD:
-  Hands/arms: fingers curl slightly on desk, hand shifts a centimetre, pen
-    taps once, paper edge lifts, sleeve shifts, jacket lapel stirs.
-  Shoulders/torso: shoulders settle slightly, chest rises with breath once,
-    weight shifts in chair, collar moves as breath fills chest.
-  Environment: studio light brightens a fraction, shadow shifts on desk,
-    background screen flickers, steam rises from cup, fabric ripples once.
-AVOID head/face motions -- trunk sways, head tilts, ear flicks, eyes blink.
-  The face is the most complex region and causes blurring when animated at
-  low step counts. Keep the face and head completely still. Move everything else.
-
-BANNED (cause LTX to swap the scene): walks, steps, runs, jumps, kneels,
-rises, turns around, exits, enters, climbs, reaches across, pivots.
+BANNED (cause LTX to replace the scene): walks, steps, runs, jumps, kneels,
+rises, turns, exits, enters, climbs, pivots, reaches across.
 BANNED: erupts, slams, explodes, thrashes, surges, screams, blasts, roars.
-BANNED: "camera locked", "locked off", "locked frame" -- use "static frame" at the END only.
-BANNED: any face, head, or trunk motion -- keep the face locked still.
+BANNED: "camera locked", "locked off", "locked frame" -- use "static frame" LAST only.
 
-ARC: each clip shows the SAME scene with ONE different micro-detail.
-Vary: which hand/body element moves, which environment element stirs.
-Never escalate intensity -- variety across clips, not crescendo.
-
-GOOD example for "grey elephant news anchor in red suit at TV desk":
-  clip 1: "The grey elephant anchor in the red suit and patterned tie
-    rests both hands on the glass desk. The right index finger curls
-    slightly inward once. Same bright TV studio, photorealistic. Static frame."
-  clip 2: "The grey elephant anchor in the red suit and patterned tie
-    sits upright at the desk. Jacket lapel stirs once as the anchor
-    breathes. Same bright TV studio, photorealistic. Static frame, no zoom."
-  clip 3: "The grey elephant anchor in the red suit and patterned tie
-    at the desk. A paper on the desk shifts a centimetre to the right.
-    Studio light brightens a fraction on the desk surface. Photorealistic. Static frame."
-Each clip: subject in full + one hand/body/environment detail + scene anchor + static frame.\
+ARC: each clip = same scene, one different micro-detail. Vary which prop,
+which fabric element, which background feature moves. No crescendo.\
 """
 
 
@@ -792,10 +781,9 @@ def run_multi_pipeline(job, photo_path, settings):
     oh               = settings.get("override_height")
     steps            = int(settings.get("video_steps", 30))
     guidance         = float(settings.get("video_guidance", 7.5))
-    # LTX-2 Distilled: distilled schedule tolerates 4-12 steps. Cap at 12 rather
-    # than 8 -- extra steps improve temporal consistency for complex subjects
-    # (detailed faces, fur, clothing) without overshooting the schedule.
-    # Guidance capped at 4.0; higher values over-saturate the distilled schedule.
+    # LTX-2 Distilled: cap steps at 12, guidance at 4.0.
+    # The distilled schedule tolerates up to ~12 steps before quality regresses.
+    # Guidance above 4.0 over-saturates the compressed schedule.
     if "ltx" in model_name.lower() and "distilled" in model_name.lower():
         steps    = min(steps, 12)
         guidance = min(guidance, 4.0)
