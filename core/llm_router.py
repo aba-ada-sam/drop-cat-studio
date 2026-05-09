@@ -66,11 +66,12 @@ class LLMRouter:
     ) -> str:
         provider = self._provider(force_provider)
         if provider == "anthropic":
-            return self._call_with_retry(lambda: self._anthropic_chat(messages, tier, max_tokens, system))
+            return self._call_with_retry(lambda: self._anthropic_chat(messages, tier, max_tokens, system), provider=provider)
         if provider == "openai":
-            return self._call_with_retry(lambda: self._openai_chat(messages, tier, max_tokens, system))
+            return self._call_with_retry(lambda: self._openai_chat(messages, tier, max_tokens, system), provider=provider)
         return self._call_with_retry(
-            lambda: self._client.chat("ollama", messages, tier=tier, max_tokens=max_tokens, system=system)
+            lambda: self._client.chat("ollama", messages, tier=tier, max_tokens=max_tokens, system=system),
+            provider=provider,
         )
 
     def route_vision(
@@ -86,11 +87,12 @@ class LLMRouter:
     ) -> str:
         provider = self._provider(force_provider)
         if provider == "anthropic":
-            return self._call_with_retry(lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system))
+            return self._call_with_retry(lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system), provider=provider)
         if provider == "openai":
-            return self._call_with_retry(lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system))
+            return self._call_with_retry(lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system), provider=provider)
         return self._call_with_retry(
-            lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier, max_tokens=max_tokens, system=system, format_json=format_json)
+            lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier, max_tokens=max_tokens, system=system, format_json=format_json),
+            provider=provider,
         )
 
     def stats(self) -> dict:
@@ -195,7 +197,7 @@ class LLMRouter:
 
     # ── Retry ─────────────────────────────────────────────────────────────────
 
-    def _call_with_retry(self, fn, max_attempts: int = 3) -> str:
+    def _call_with_retry(self, fn, max_attempts: int = 3, provider: str | None = None) -> str:
         last_exc = None
         for attempt in range(max_attempts):
             try:
@@ -212,13 +214,17 @@ class LLMRouter:
                                                "PermissionDeniedError", "InvalidRequestError")):
                     log.error("LLM permanent error (will not retry): %s", exc)
                     raise
-                # Never retry timeouts for Ollama — the model is already running; a
+                # Never retry timeouts for Ollama -- the model is already running; a
                 # second queued call just adds to the backlog and makes things worse.
                 # (Cloud providers are different: they can accept parallel requests.)
+                # Use the *actual* provider for this call (force_provider-aware) rather
+                # than self._provider(), which only sees the auto-resolved value and
+                # wrongly let force_provider="ollama" calls retry through 3x backoff.
                 is_timeout = ("timeout" in exc_str or "timed out" in exc_str
                               or "ReadTimeout" in exc_type or "ConnectTimeout" in exc_type)
-                if is_timeout and self._provider() == "ollama":
-                    log.warning("Ollama timeout (no retry — Ollama is busy): %s", exc)
+                actual_provider = provider or self._provider()
+                if is_timeout and actual_provider == "ollama":
+                    log.warning("Ollama timeout (no retry -- Ollama is busy): %s", exc)
                     raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1

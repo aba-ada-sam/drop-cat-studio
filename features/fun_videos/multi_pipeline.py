@@ -99,28 +99,46 @@ aggressive prompts. action/impact = 4-6s, sustained drama = 7-10s, final reveal 
 
 _STORY_ARC_GENTLE = _STORY_ARC_BASE + """
 
-ENERGY: subtle, continuous motion. LTX models drift the scene aggressively when
-given "explosive" verbs -- they replace the source photo with fire/lightning/
-anime imagery instead of animating it. Use calm, observational prompts.
+ENERGY: deliberate, cinematic motion. Each clip is a distinct beat of action,
+not a static scene with a tiny twitch. LTX models drift the scene aggressively
+when given "explosive" verbs (they replace the source photo with stock fire/
+lightning/anime imagery), so avoid those -- but the motion still needs to be
+clearly visible and clearly DIFFERENT from clip to clip.
 
-Each prompt 45-65 words. Open with the SUBJECT and SETTING re-stated, then
-describe SMALL CONTINUOUS motion -- not events. Examples:
-  - "The skeleton-punk character at the wood desk turns its skull slowly to
-    the right, mechanical bone fingers tapping the laptop keys, the mushroom
-    forest behind the window swaying gently, photorealistic cinematic look."
-  - "The lighthouse stands on the clifftop, the red flag above flutters in
-    a steady ocean breeze, white waves roll in below, a thin band of cloud
-    drifts across the sky, photographic style preserved."
+PROMPT SHAPE (mandatory). Each prompt 45-65 words, three parts in order:
+  1. ACTION (35-45 words). Open with a moderate verb describing what the
+     subject DOES this clip. Be specific about which body parts move and in
+     which direction. Each clip MUST depict a different action beat -- if
+     clip 1 had the figure walking forward, clip 2 should be turning,
+     reaching, or interacting with something else. NEVER repeat the same
+     action across clips.
+  2. SCENE ANCHOR (10-15 words). End with a brief tag locking the setting
+     and visual style: "...same misty mountain valley, photorealistic
+     cinematic look." Keep this short -- it is an anchor, not the headline.
 
-PREFERRED VERBS: turns, leans, breathes, drifts, sways, ripples, glints,
-shifts, traces, holds, settles, flickers, brushes, tilts.
-BANNED VERBS for LTX: erupts, slams, explodes, detonates, thrashes, convulses,
-surges, rips, shatters, bursts, screams, roars, blasts -- they cause LTX to
-swap the scene for stock action imagery.
+PREFERRED VERBS (use these): walks, steps, turns, leans, reaches, lifts,
+gestures, sweeps, pulls, twists, glances, kneels, rises, looks, tilts,
+strides, draws, spreads, raises, lowers. Use them precisely.
+BANNED VERBS (replace the scene with stock imagery): erupts, slams,
+explodes, detonates, thrashes, convulses, surges, rips, shatters, bursts,
+screams, roars, blasts.
 
-Arc is gentle progression, not crescendo: clip 1 establishes motion baseline,
-later clips show the same scene from slightly different motion phases. Avoid
-"intensifies / accelerates / peaks" framing entirely.\
+ARC: clip 1 sets the motion baseline; each subsequent clip is a NEW action
+beat -- not an intensification of the previous, not a re-statement of the
+same gesture. Vary which figure moves, which direction, what they interact
+with. The scene stays the same; the action evolves.
+
+GOOD example progression for "three mushroom-headed figures in a misty valley":
+  clip 1: "The central figure walks two steps forward, lifting its left
+    hand. The two side figures hold the rope between them. Mist drifts
+    around their feet. Same misty mountain valley, photorealistic cinematic look."
+  clip 2: "The central figure turns its head to the right, glancing at the
+    figure on its left. The figure on the right pulls the rope taut. A
+    breeze moves through the grass. Same misty mountain valley, photographic style."
+  clip 3: "The figure on the left kneels down, brushing the moss with one
+    hand. The central figure raises both arms slightly. Mist thickens behind
+    them. Same misty mountain valley, photorealistic cinematic look."
+Each clip = different action, same scene, same style.\
 """
 
 
@@ -775,15 +793,13 @@ def run_multi_pipeline(job, photo_path, settings):
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
-    # LTX-2 Distilled at 8 steps drifts the scene aggressively within each clip
-    # (the desk/window/setting can dissolve into pure subject by frame ~80%).
-    # Tighter re-anchor (every 2 clips) caps the compounding drift to a single
-    # chain hop. Wan2.1 preserves identity better and tolerates longer chains.
-    if "ltx" in model_name.lower():
-        default_reanchor = 2
-    else:
-        default_reanchor = _REANCHOR_EVERY_DEFAULT
-    reanchor_every   = int(settings.get("reanchor_every", default_reanchor))
+    # Re-anchor was supposed to break compounding drift on LTX-2, but the cut
+    # back to the source photo is itself visible as a hard jump in the final
+    # video -- exactly what users complain about as "the clips don't connect."
+    # Default OFF; rely on scene-anchored prompts to bound drift instead.
+    # User can opt in via settings["reanchor_every"] for very long stories
+    # where compounding outweighs the cut.
+    reanchor_every   = int(settings.get("reanchor_every", 0))
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
