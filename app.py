@@ -813,6 +813,35 @@ async def queue_status():
     return _g["job_manager"].queue_status()
 
 
+# ── Telegram ─────────────────────────────────────────────────────────────────
+
+@app.post("/api/telegram/test")
+async def telegram_test(request: Request):
+    from core.telegram_notifier import send_message
+    body = await request.json()
+    token   = body.get("token")   or cfg.get("telegram_bot_token") or ""
+    chat_id = body.get("chat_id") or cfg.get("telegram_chat_id")   or ""
+    if not token or not chat_id:
+        return JSONResponse({"ok": False, "error": "token and chat_id required"}, 400)
+    ok = await asyncio.to_thread(send_message, token, chat_id, "[DCS] Test notification - bot is connected!")
+    if ok:
+        return {"ok": True}
+    return JSONResponse({"ok": False, "error": "Telegram returned an error -- check token and chat_id"}, 400)
+
+
+@app.post("/api/telegram/fetch-chat-id")
+async def telegram_fetch_chat_id(request: Request):
+    from core.telegram_notifier import fetch_chat_id
+    body  = await request.json()
+    token = body.get("token") or cfg.get("telegram_bot_token") or ""
+    if not token:
+        return JSONResponse({"ok": False, "error": "token required"}, 400)
+    chat_id = await asyncio.to_thread(fetch_chat_id, token)
+    if chat_id:
+        return {"ok": True, "chat_id": chat_id}
+    return JSONResponse({"ok": False, "error": "No messages found -- send any message to your bot first"}, 404)
+
+
 # ── Wildcards ────────────────────────────────────────────────────────────────
 
 @app.get("/api/wildcards")

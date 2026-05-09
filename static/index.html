@@ -327,6 +327,22 @@
             </div>
           </div>
         </div>
+        <div class="settings-section">
+          <h4 class="settings-section-label">Telegram Notifications</h4>
+          <div class="form-group">
+            <label for="cfg-telegram_bot_token">Bot Token <span class="hint-text">-- from @BotFather on Telegram</span></label>
+            <input type="text" id="cfg-telegram_bot_token" class="masked-key" placeholder="123456789:AAF..." autocomplete="off" data-1p-ignore data-lpignore="true">
+          </div>
+          <div class="form-group">
+            <label for="cfg-telegram_chat_id">Your Chat ID <span class="hint-text">-- message your bot, then click Fetch</span></label>
+            <div style="display:flex;gap:6px">
+              <input type="text" id="cfg-telegram_chat_id" placeholder="e.g. 123456789" style="flex:1" autocomplete="off">
+              <button class="btn btn-sm" id="btn-fetch-chat-id" type="button">Fetch</button>
+            </div>
+            <span class="validation-msg" id="val-telegram"></span>
+          </div>
+          <button class="btn btn-sm" id="btn-telegram-test" type="button" style="margin-top:4px">Send Test Message</button>
+        </div>
         <button class="btn btn-primary" id="btn-save-settings" type="button" style="margin-top:8px">Save Settings</button>
         <button class="btn btn-sm" id="btn-restart-app" type="button" style="margin-top:6px;opacity:.7" title="Reload server code without touching the manager process">Restart Server</button>
       </form>
@@ -371,6 +387,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260506h"></script>
+  <script type="module" src="/static/js/app.js?v=20260509d"></script>
 </body>
 </html>
