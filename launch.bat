@@ -95,7 +95,18 @@ if not "!_RUNNING_PORT!"=="0" (
         )
     ) else (
         echo Server running on port !_RUNNING_PORT! -- opening app.
-        start chrome --app=http://127.0.0.1:!_RUNNING_PORT!/
+        :: Same left-third positioning as open_browser.bat.
+        set "SCREEN_W=1920"
+        set "SCREEN_H=1080"
+        for /f "usebackq tokens=1,2 delims=," %%a in (`powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($b.Width),$($b.Height)\""`) do (
+            set "SCREEN_W=%%a"
+            set "SCREEN_H=%%b"
+        )
+        set /a WIN_W=!SCREEN_W! / 3
+        set /a WIN_H=!SCREEN_H!
+        if !WIN_W! LSS 480 set WIN_W=640
+        if !WIN_H! LSS 480 set WIN_H=720
+        start "" chrome --app=http://127.0.0.1:!_RUNNING_PORT!/ --window-position=0,0 --window-size=!WIN_W!,!WIN_H!
         exit /b 0
     )
 )

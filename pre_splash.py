@@ -44,8 +44,25 @@ def main() -> None:
     root = tk.Tk()
     root.overrideredirect(True)
     root.configure(bg=BG)
+    # Pop above everything on initial paint so the user sees the splash even when
+    # other apps are foregrounded, but drop the topmost flag the moment focus
+    # moves to another window. Without this drop, the splash sits on top of
+    # video players and other apps for the entire 30-90s startup.
     root.attributes("-topmost", True)
     root.attributes("-alpha", 0.97)
+
+    def _drop_topmost(_evt=None) -> None:
+        try:
+            root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+
+    # FocusOut fires when the user clicks any other window.
+    root.bind("<FocusOut>", _drop_topmost)
+    # Belt-and-braces: also drop after 4s so the splash stops being topmost even
+    # when the user never clicks anything (overrideredirect windows don't always
+    # get a clean FocusOut on Windows).
+    root.after(4000, _drop_topmost)
 
     # Center on primary monitor
     root.update_idletasks()

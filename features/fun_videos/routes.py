@@ -290,6 +290,19 @@ async def make_it(request: Request):
         raise HTTPException(400, "Provide either a photo or a video prompt")
 
     config = cfg.load()
+    requested_model = body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled"
+    # Reject T2V + photo upfront -- WanGP would otherwise silently log
+    # "This model doesn't accept a Start Image" and the job fails with the
+    # opaque "WanGP did not create any tasks" error.
+    from features.fun_videos.video_generator import MODELS as _VG_MODELS
+    _model_def = _VG_MODELS.get(requested_model)
+    if photo_path and _model_def is not None and not _model_def.get("i2v", True):
+        raise HTTPException(
+            400,
+            f"{requested_model} is text-to-video and cannot accept a start image. "
+            f"Pick an I2V model (Wan2.1-I2V-* or LTX-2 *), or remove the photo to run text-only.",
+        )
+
     settings = {
         "video_prompt": body.get("video_prompt", ""),
         "music_prompt": body.get("music_prompt", ""),
@@ -297,7 +310,7 @@ async def make_it(request: Request):
         "user_direction": body.get("user_direction", ""),
         "use_wildcards": body.get("use_wildcards", False),
         "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
-        "model_name": body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled",
+        "model_name": requested_model,
         "resolution": body.get("resolution", config.get("resolution", "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),

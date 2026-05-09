@@ -370,18 +370,23 @@ export function init(panel) {
     storyBtn.disabled = true;
     storyBtn.textContent = '…';
 
-    // Safety timeout — Ollama vision cold-start can take 60s+; after 90s show an
-    // inline message and re-enable the button so the user is not stuck.
+    // Safety timeout -- Ollama vision cold-start can take 30s+; after 45s give up,
+    // populate the textarea with the default prompt so the user has something
+    // usable and Generate doesn't fail silently with an empty prompt.
     let _timedOut = false;
+    const _fallback = () => {
+      if (!promptTA.value.trim()) promptTA.value = PROMPT_DEFAULT;
+    };
     const timeout = setTimeout(() => {
       _timedOut = true;
       _autoPromptAbort?.abort();
+      _fallback();
       promptSpinner.style.display = 'none';
-      promptStatusMsg.textContent = 'Motion prompt timed out — type one manually or click Create Story to retry';
+      promptStatusMsg.textContent = 'AI prompt timed out -- using default. Edit it or click Create Story to retry.';
       promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
       storyBtn.disabled = false;
       storyBtn.textContent = '✦ Create Story';
-    }, 90000);
+    }, 45000);
 
     try {
       const data = await apiFetch('/api/fun/generate-prompts', {
@@ -391,9 +396,22 @@ export function init(panel) {
       });
       const prompts = data.prompts || [];
       const text = typeof prompts[0] === 'string' ? prompts[0] : prompts[0]?.prompt;
-      if (text) promptTA.value = text;
+      if (text) {
+        promptTA.value = text;
+      } else {
+        // API returned but no usable prompt (e.g. qwen3-vl thinking-block junk). Fall back.
+        _fallback();
+        if (!_timedOut) {
+          promptStatusMsg.textContent = 'AI returned no prompt -- using default. Edit it or click Create Story to retry.';
+          promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
+          _timedOut = true;  // re-use the post-fallback message path
+        }
+      }
     } catch (e) {
-      if (e?.name !== 'AbortError') toast(e.message || 'Story generation failed', 'error');
+      if (e?.name !== 'AbortError') {
+        _fallback();
+        toast(e.message || 'Story generation failed -- using default prompt', 'warn');
+      }
     } finally {
       clearTimeout(timeout);
       if (_autoPromptAbort === myAbort) {
@@ -1321,6 +1339,30 @@ export function init(panel) {
         duration_sec: Number(durSlider.value)      || 0,
       }),
       applySettings: (s) => {
+        // Restore model first -- the rest of the panel reacts to model changes
+        // (max duration, supported ratios). Without this, Create continuation
+        // inherited a tab-stale T2V model and WanGP rejected the start image
+        // ("This model doesn't accept a Start Image -> WanGP did not create any tasks").
+        if (typeof s.model === 'string' && s.model.trim()) {
+          const want = s.model.trim();
+          const _setModel = () => {
+            if (_models[want]) {
+              modelSel.value = want;
+              modelSel.dispatchEvent(new Event('change'));
+              return true;
+            }
+            return false;
+          };
+          if (!_setModel()) {
+            // Models load async from /api/fun/models; if not in yet, retry briefly.
+            let tries = 0;
+            const retry = () => {
+              if (_setModel() || ++tries > 25) return;
+              setTimeout(retry, 200);
+            };
+            setTimeout(retry, 200);
+          }
+        }
         if (typeof s.steps        === 'number') stepsSlider.value    = Math.max(4, Math.min(50, s.steps));
         if (typeof s.guidance     === 'number') guidanceSlider.value = Math.max(1, Math.min(20, s.guidance));
         if (typeof s.duration_sec === 'number') durSlider.value      = Math.max(2, Math.min(20, s.duration_sec));
