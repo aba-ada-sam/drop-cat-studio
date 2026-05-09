@@ -40,9 +40,16 @@ You are a kinetic action director planning a multi-clip short film from a still 
 Generate sequential motion prompts -- each describes 8-12 seconds of explosive physical action.
 Each clip starts from the last frame of the previous, so prompts must chain visually.
 
-STEP 1 -- READ THE PHOTO CAREFULLY. Decide which scene type it is:
+STEP 1 -- READ THE PHOTO CAREFULLY. Note every visible element:
+- Subject markers (face, hair, clothing, skin tone, mech parts, fur, etc.)
+- Setting / location (room, landscape, weather, time of day)
+- Background and props (furniture, architecture, foliage, vehicles, objects)
+- Visual style cues (photorealistic, painted, anime, cinematic film stock, etc.)
 
-  TYPE A -- PEOPLE are the main subject (portrait, figure, face, person, group of people):
+Decide which scene type it is:
+
+  TYPE A -- PEOPLE / CHARACTERS are the main subject (portrait, figure, face,
+    person, character, mech, creature):
     - Identify their specific visual markers: hair color/style, clothing color/type, skin tone
     - EVERY prompt must name these features: "red-haired woman in blue jacket erupts..."
     - Without this the video model generates a different person each clip
@@ -57,14 +64,28 @@ STEP 1 -- READ THE PHOTO CAREFULLY. Decide which scene type it is:
       waves erupt against the rocks below, spray exploding upward, the red flag above
       tears violently in hurricane-force wind, dark clouds race overhead"
 
+CRITICAL: SCENE PRESERVATION ACROSS CLIPS. Each clip is a separate generation
+that hallucinates aggressively if you only describe motion. Every prompt MUST
+re-state the FULL VISUAL CONTEXT so the model holds the scene:
+  - Restate the subject + their visual markers
+  - Restate the setting / location (e.g. "in the same wood-panel room with
+    mushroom forest visible through the window, laptop on the desk")
+  - Restate the visual style (e.g. "photorealistic", "cinematic 35mm",
+    "painted illustration") so the look does not drift into generic
+    "fire / electric / anime" defaults
+This anchoring is mandatory for clips 2 onward; without it the model
+progressively replaces the original scene with motion-themed hallucinations.
+
 Rules for ALL clips regardless of type:
-- Each prompt: 35-55 words, begins with an explosive action verb
+- Each prompt: 45-65 words. Open with an explosive action verb. Then immediately
+  re-state subject + setting + style anchors before describing the motion.
 - Describe only what is PHYSICALLY VISIBLE: bodies, surfaces, weather, objects in motion
 - Every action must be a real physical thing a camera could capture -- no abstract concepts
 - NO camera moves as the primary event (camera reacts, never leads)
 - BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera", "slowly",
   "gently", "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
 - BANNED: inventing subjects not in the photo (no new animals, people, or objects)
+- BANNED: dropping the setting / props / background after the first clip
 - Arc: intense opening -> escalation -> dramatic peak
 - Return ONLY valid JSON: {"clips": [{"prompt": "prompt1", "duration": 5}, {"prompt": "prompt2", "duration": 8}]}
 - duration is seconds per clip (integer 4-15). Vary durations for pacing:
@@ -694,7 +715,15 @@ def run_multi_pipeline(job, photo_path, settings):
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
-    reanchor_every   = int(settings.get("reanchor_every", _REANCHOR_EVERY_DEFAULT))
+    # LTX-2 Distilled at 8 steps drifts the scene aggressively within each clip
+    # (the desk/window/setting can dissolve into pure subject by frame ~80%).
+    # Tighter re-anchor (every 2 clips) caps the compounding drift to a single
+    # chain hop. Wan2.1 preserves identity better and tolerates longer chains.
+    if "ltx" in model_name.lower():
+        default_reanchor = 2
+    else:
+        default_reanchor = _REANCHOR_EVERY_DEFAULT
+    reanchor_every   = int(settings.get("reanchor_every", default_reanchor))
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""

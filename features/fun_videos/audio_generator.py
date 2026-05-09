@@ -167,15 +167,27 @@ def generate_audio(
     # produce a long blank intro that eats 2/3 of the track before vocals enter.
     effective_lyrics = lyrics.strip() if has_vocals else ""
 
-    # ACE-Step uses section markers to control vocal onset. If the lyrics have no
-    # section marker at all, or open with [intro], replace/prepend [verse] so the
-    # model starts singing immediately rather than inserting an instrumental intro.
+    # ACE-Step uses section markers to control vocal onset. The model treats
+    # numbered markers like [verse 1] / [chorus 2] / [verse 3] as a multi-section
+    # song -- it then allocates an instrumental intro before "verse 1" so the
+    # first lyric only enters ~1/3 to 1/2 of the way in. Stripping the numbers
+    # collapses those into plain section tags and forces vocals on beat 1.
+    # If the lyrics open with [intro] or have no marker at all, also prepend
+    # [verse] so there is no silent leader.
     if has_vocals and effective_lyrics:
         import re as _re
+        effective_lyrics = _re.sub(
+            r'(?im)^\s*\[\s*(verse|chorus|bridge|hook|pre[- ]?chorus|outro)\s*[0-9ivxIVX]*\s*\]\s*$',
+            r'[\1]',
+            effective_lyrics,
+        )
         if not _re.match(r'^\s*\[', effective_lyrics):
             effective_lyrics = '[verse]\n' + effective_lyrics
         elif _re.match(r'^\s*\[intro\]', effective_lyrics, _re.IGNORECASE):
             effective_lyrics = _re.sub(r'^\s*\[intro\]', '[verse]', effective_lyrics, count=1, flags=_re.IGNORECASE)
+        # Strip any [outro] -- short tracks have no room and ACE-Step often pads
+        # silence to "fit" it.
+        effective_lyrics = _re.sub(r'(?im)^\s*\[outro\]\s*$', '', effective_lyrics).strip()
 
     effective_prompt = _normalize_prompt(prompt, instrumental, lyrics)
     effective_prompt = effective_prompt or "atmospheric music, organic texture, instrumental, distinct character"
