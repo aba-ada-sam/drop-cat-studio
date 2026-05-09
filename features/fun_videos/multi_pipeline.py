@@ -35,9 +35,13 @@ _FALLBACK_PHASES = [
 
 # ── Story arc generation ──────────────────────────────────────────────────────
 
-_STORY_ARC_SYSTEM = """\
-You are a kinetic action director planning a multi-clip short film from a still photograph.
-Generate sequential motion prompts -- each describes 8-12 seconds of explosive physical action.
+# Two system prompts -- LTX models are intolerant of aggressive verbs (the
+# distilled schedule has so few denoising steps that "explosive" prompts get
+# read as "replace the scene with stock fire/lightning/anime imagery"), so
+# they get a gentle scene-preserving variant. Wan I2V keeps the kinetic one.
+
+_STORY_ARC_BASE = """\
+You are planning a multi-clip short film from a still photograph.
 Each clip starts from the last frame of the previous, so prompts must chain visually.
 
 STEP 1 -- READ THE PHOTO CAREFULLY. Note every visible element:
@@ -51,18 +55,14 @@ Decide which scene type it is:
   TYPE A -- PEOPLE / CHARACTERS are the main subject (portrait, figure, face,
     person, character, mech, creature):
     - Identify their specific visual markers: hair color/style, clothing color/type, skin tone
-    - EVERY prompt must name these features: "red-haired woman in blue jacket erupts..."
+    - EVERY prompt must name these features: "red-haired woman in blue jacket..."
     - Without this the video model generates a different person each clip
-    - Animate: face, hair, limbs, clothing, hands -- all moving simultaneously
 
   TYPE B -- LANDSCAPE / ARCHITECTURE / NO PEOPLE (buildings, nature, seascape, cityscape):
     - DO NOT invent characters, soldiers, people, or figures that are not in the photo
     - Animate what is ALREADY IN THE SCENE: sea waves, clouds, flags, fire, smoke, wind,
       light raking across surfaces, weather rolling in, water surging, trees thrashing
     - The camera can react to these forces but does not invent new subjects
-    - Example for a coastal tower: "Storm front slams into the clifftop tower, massive
-      waves erupt against the rocks below, spray exploding upward, the red flag above
-      tears violently in hurricane-force wind, dark clouds race overhead"
 
 CRITICAL: SCENE PRESERVATION ACROSS CLIPS. Each clip is a separate generation
 that hallucinates aggressively if you only describe motion. Every prompt MUST
@@ -76,22 +76,56 @@ re-state the FULL VISUAL CONTEXT so the model holds the scene:
 This anchoring is mandatory for clips 2 onward; without it the model
 progressively replaces the original scene with motion-themed hallucinations.
 
-Rules for ALL clips regardless of type:
-- Each prompt: 45-65 words. Open with an explosive action verb. Then immediately
-  re-state subject + setting + style anchors before describing the motion.
+Common rules:
 - Describe only what is PHYSICALLY VISIBLE: bodies, surfaces, weather, objects in motion
 - Every action must be a real physical thing a camera could capture -- no abstract concepts
 - NO camera moves as the primary event (camera reacts, never leads)
-- BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera", "slowly",
-  "gently", "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
+- BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera",
+  "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
 - BANNED: inventing subjects not in the photo (no new animals, people, or objects)
 - BANNED: dropping the setting / props / background after the first clip
-- Arc: intense opening -> escalation -> dramatic peak
 - Return ONLY valid JSON: {"clips": [{"prompt": "prompt1", "duration": 5}, {"prompt": "prompt2", "duration": 8}]}
-- duration is seconds per clip (integer 4-15). Vary durations for pacing:
-  action/impact = 4-6s, sustained drama = 7-10s, final reveal = 6-12s.
+- duration is seconds per clip (integer 4-15). Vary durations for pacing.
 - Total durations should sum close to the target_total_seconds given in the prompt.\
 """
+
+_STORY_ARC_KINETIC = _STORY_ARC_BASE + """
+
+ENERGY: kinetic action. Each prompt 45-65 words, opens with a strong action verb
+(erupts, slams, surges, thrashes). Arc: intense opening -> escalation -> peak.
+Use this style only with Wan I2V models, which preserve identity through
+aggressive prompts. action/impact = 4-6s, sustained drama = 7-10s, final reveal = 6-12s.\
+"""
+
+_STORY_ARC_GENTLE = _STORY_ARC_BASE + """
+
+ENERGY: subtle, continuous motion. LTX models drift the scene aggressively when
+given "explosive" verbs -- they replace the source photo with fire/lightning/
+anime imagery instead of animating it. Use calm, observational prompts.
+
+Each prompt 45-65 words. Open with the SUBJECT and SETTING re-stated, then
+describe SMALL CONTINUOUS motion -- not events. Examples:
+  - "The skeleton-punk character at the wood desk turns its skull slowly to
+    the right, mechanical bone fingers tapping the laptop keys, the mushroom
+    forest behind the window swaying gently, photorealistic cinematic look."
+  - "The lighthouse stands on the clifftop, the red flag above flutters in
+    a steady ocean breeze, white waves roll in below, a thin band of cloud
+    drifts across the sky, photographic style preserved."
+
+PREFERRED VERBS: turns, leans, breathes, drifts, sways, ripples, glints,
+shifts, traces, holds, settles, flickers, brushes, tilts.
+BANNED VERBS for LTX: erupts, slams, explodes, detonates, thrashes, convulses,
+surges, rips, shatters, bursts, screams, roars, blasts -- they cause LTX to
+swap the scene for stock action imagery.
+
+Arc is gentle progression, not crescendo: clip 1 establishes motion baseline,
+later clips show the same scene from slightly different motion phases. Avoid
+"intensifies / accelerates / peaks" framing entirely.\
+"""
+
+
+def _system_prompt_for_model(model_name: str) -> str:
+    return _STORY_ARC_GENTLE if "ltx" in (model_name or "").lower() else _STORY_ARC_KINETIC
 
 
 def _generate_story_arc(
@@ -102,6 +136,7 @@ def _generate_story_arc(
     progress_fn=None,
     target_total_secs: float | None = None,
     default_clip_dur: float = 5.0,
+    model_name: str = "",
 ) -> tuple[list[dict], str]:
     """Generate N sequential motion prompts with per-clip durations.
 
@@ -113,9 +148,17 @@ def _generate_story_arc(
       2. Text-only call to any provider (uses sanitizer for cloud, user idea as context)
       3. Built-in fallback phases prefixed with user idea (last resort, always works)
     """
-    idea_text = (initial_idea or "").strip() or "Create an exciting action-packed short film"
+    is_ltx = "ltx" in (model_name or "").lower()
+    default_idea = (
+        "Create a calm observational short film, subtle continuous motion, scene preserved"
+        if is_ltx
+        else "Create an exciting action-packed short film"
+    )
+    idea_text = (initial_idea or "").strip() or default_idea
     total_secs = target_total_secs or (n_clips * default_clip_dur)
     user_msg = (
+        f"Target video model: {model_name or 'unknown'} "
+        f"({'LTX -- use gentle motion only' if is_ltx else 'Wan I2V -- kinetic action OK'})\n"
         f"Initial idea: {idea_text}\n"
         f"Number of clips: {n_clips}\n"
         f"Target total story length: {int(total_secs)}s\n\n"
@@ -123,6 +166,7 @@ def _generate_story_arc(
         f"REQUIRED OUTPUT FORMAT -- respond with ONLY this JSON, no other text:\n"
         f'{{"clips": [{{"prompt": "prompt 1", "duration": 5}}, {{"prompt": "prompt 2", "duration": 8}}]}}'
     )
+    system_prompt = _system_prompt_for_model(model_name)
 
     def _parse_clips(text) -> list[dict] | None:
         data = parse_json_response(text)
@@ -165,7 +209,7 @@ def _generate_story_arc(
         try:
             text = llm_router.route_vision(
                 user_msg, frames,
-                tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+                tier=TIER_BALANCED, system=system_prompt, max_tokens=1200,
                 force_provider="ollama", format_json=True,
             )
             result = _parse_clips(text)
@@ -182,7 +226,7 @@ def _generate_story_arc(
         try:
             text = llm_router.route_vision(
                 user_msg, frames,
-                tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+                tier=TIER_BALANCED, system=system_prompt, max_tokens=1200,
             )
             result = _parse_clips(text)
             if result:
@@ -197,7 +241,7 @@ def _generate_story_arc(
     try:
         text = llm_router.route(
             [{"role": "user", "content": user_msg}],
-            tier=TIER_BALANCED, system=_STORY_ARC_SYSTEM, max_tokens=1200,
+            tier=TIER_BALANCED, system=system_prompt, max_tokens=1200,
         )
         result = _parse_clips(text)
         if result:
@@ -603,6 +647,21 @@ def run_multi_prep(job, photo_path, settings):
     skip_audio       = settings.get("skip_audio", False)
     instrumental     = settings.get("instrumental", False)
     lyric_direction  = settings.get("lyric_direction", "")
+    model_name       = settings.get("model_name", "")
+
+    # ── Reject T2V models ─────────────────────────────────────────────────
+    # Multi-video chains clip i's last frame as clip i+1's start image. T2V
+    # models do not accept image inputs -- WanGP silently drops them and
+    # every clip is generated from prompt text only, so there is no visual
+    # continuity at all. Fail loud rather than producing 6 disconnected clips.
+    from features.fun_videos.video_generator import MODELS as _VG_MODELS
+    _model_def = _VG_MODELS.get(model_name) if model_name else None
+    if _model_def is not None and not _model_def.get("i2v", True):
+        raise RuntimeError(
+            f"Multi-video story requires an image-to-video model. {model_name} is "
+            f"text-to-video and cannot chain clips. Pick an I2V model "
+            f"(Wan2.1-I2V-* or LTX-2 *)."
+        )
 
     # ── Story arc ─────────────────────────────────────────────────────────
     # Each generated clip is later trimmed to _CHAIN_TRIM_RATIO of its
@@ -617,6 +676,7 @@ def run_multi_prep(job, photo_path, settings):
         progress_fn=lambda msg: job.update(message=msg),
         target_total_secs=plan_total,
         default_clip_dur=plan_clip_dur,
+        model_name=model_name,
     )
     settings["_story_arc"] = arc
     arc_prompts = [a.get("prompt", "")[:40] if isinstance(a, dict) else str(a)[:40] for a in arc]
