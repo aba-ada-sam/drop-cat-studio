@@ -49,7 +49,7 @@ export function init(panel) {
   // schedule and degrades quality. CFG 3 matches its low-guidance training regime.
   // Wan2.1 models are standard diffusion — they need 25 steps and higher CFG.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 8,  guidance: 3.0, duration: 5 },
+    'LTX-2 Dev19B Distilled': { steps: 12, guidance: 3.0, duration: 5 },
     'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 5 },
     'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 5.5, duration: 5 },
     'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 5.5, duration: 5 },

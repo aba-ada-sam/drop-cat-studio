@@ -119,32 +119,38 @@ THE CAMERA NOTE MUST BE LAST -- never first. If "camera" or "locked" appear
 in the first half of the prompt, the model treats it as the dominant
 instruction and produces a motionless zoom. Subject action comes first.
 
-PREFERRED MICRO-MOTIONS (subject): trunk sways slightly, ear twitches,
-head inclines a few degrees, fingers shift on desk, eyelids lower, lips
-part, weight shifts, shoulders settle, hand lifts a centimetre.
-PREFERRED ENVIRONMENT: light brightens a fraction, shadow shifts, fabric
-stirs, steam wisps, leaves tremble, water surface ripples, dust mote drifts.
+PREFERRED MICRO-MOTIONS -- HANDS/BODY ONLY, NOT THE FACE OR HEAD:
+  Hands/arms: fingers curl slightly on desk, hand shifts a centimetre, pen
+    taps once, paper edge lifts, sleeve shifts, jacket lapel stirs.
+  Shoulders/torso: shoulders settle slightly, chest rises with breath once,
+    weight shifts in chair, collar moves as breath fills chest.
+  Environment: studio light brightens a fraction, shadow shifts on desk,
+    background screen flickers, steam rises from cup, fabric ripples once.
+AVOID head/face motions -- trunk sways, head tilts, ear flicks, eyes blink.
+  The face is the most complex region and causes blurring when animated at
+  low step counts. Keep the face and head completely still. Move everything else.
 
 BANNED (cause LTX to swap the scene): walks, steps, runs, jumps, kneels,
 rises, turns around, exits, enters, climbs, reaches across, pivots.
 BANNED: erupts, slams, explodes, thrashes, surges, screams, blasts, roars.
 BANNED: "camera locked", "locked off", "locked frame" -- use "static frame" at the END only.
+BANNED: any face, head, or trunk motion -- keep the face locked still.
 
 ARC: each clip shows the SAME scene with ONE different micro-detail.
-Vary: which body part moves, which environment element stirs, light quality.
+Vary: which hand/body element moves, which environment element stirs.
 Never escalate intensity -- variety across clips, not crescendo.
 
-GOOD example for "grey elephant news anchor in navy suit at TV desk":
-  clip 1: "The grey elephant anchor in the navy suit tilts its trunk a
-    few degrees to the left, ear flicking back once. Same bright TV
-    studio, teleprompter on screen, photorealistic. Static frame."
-  clip 2: "The grey elephant anchor in the navy suit blinks slowly, thick
-    eyelids lowering and rising. Studio light brightens slightly on its
-    forehead. Same TV studio set, photorealistic. Static frame, no zoom."
-  clip 3: "The grey elephant anchor in the navy suit shifts its right hand
-    on the desk surface by a centimetre. Jacket lapel stirs once. Same
-    bright studio, photorealistic render. Static frame."
-Each clip: subject name + visual markers + one micro-detail + scene anchor + static frame note.\
+GOOD example for "grey elephant news anchor in red suit at TV desk":
+  clip 1: "The grey elephant anchor in the red suit and patterned tie
+    rests both hands on the glass desk. The right index finger curls
+    slightly inward once. Same bright TV studio, photorealistic. Static frame."
+  clip 2: "The grey elephant anchor in the red suit and patterned tie
+    sits upright at the desk. Jacket lapel stirs once as the anchor
+    breathes. Same bright TV studio, photorealistic. Static frame, no zoom."
+  clip 3: "The grey elephant anchor in the red suit and patterned tie
+    at the desk. A paper on the desk shifts a centimetre to the right.
+    Studio light brightens a fraction on the desk surface. Photorealistic. Static frame."
+Each clip: subject in full + one hand/body/environment detail + scene anchor + static frame.\
 """
 
 
@@ -786,10 +792,12 @@ def run_multi_pipeline(job, photo_path, settings):
     oh               = settings.get("override_height")
     steps            = int(settings.get("video_steps", 30))
     guidance         = float(settings.get("video_guidance", 7.5))
-    # LTX-2 Distilled denoising schedule is compressed into 4-8 steps -- cap to
-    # prevent overshooting the schedule (bad output + unnecessary slowness).
+    # LTX-2 Distilled: distilled schedule tolerates 4-12 steps. Cap at 12 rather
+    # than 8 -- extra steps improve temporal consistency for complex subjects
+    # (detailed faces, fur, clothing) without overshooting the schedule.
+    # Guidance capped at 4.0; higher values over-saturate the distilled schedule.
     if "ltx" in model_name.lower() and "distilled" in model_name.lower():
-        steps    = min(steps, 8)
+        steps    = min(steps, 12)
         guidance = min(guidance, 4.0)
     seed             = int(settings.get("video_seed", -1))
     skip_audio       = settings.get("skip_audio", False)

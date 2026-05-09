@@ -42,11 +42,12 @@ def negative_prompt_for(model_name: str) -> str:
 
 MODELS = {
     # steps/guidance are optimal defaults for the model's denoising schedule.
-    # LTX-2 Distilled is a distilled model -- compressed schedule; >8 steps overshoots and
-    # degrades quality; CFG >4 causes over-saturation. Wan2.1 needs 25 steps and CFG ~5.5.
+    # LTX-2 Distilled tolerates 4-12 steps; 12 gives better temporal consistency
+    # for complex subjects (faces, fur, clothing) without overshooting the schedule.
+    # CFG >4 over-saturates the distilled schedule. Wan2.1 needs 25 steps and CFG ~5.5.
     "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 5.5},
     "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 5.5},
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0},
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 12, "guidance": 3.0},
     "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 25, "guidance": 3.5},
     "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5},
     "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0},
