@@ -615,24 +615,16 @@ export function init(panel) {
   const slidersGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;' });
   settingsCard.appendChild(slidersGrid);
   const stepsSlider    = createSlider(slidersGrid, { label: 'Steps',    min: 4,  max: 50,  step: 1,   value: 8   });
-  const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 3.0 });
-
-  function _applyFvModelDefaults(m) {
-    if (!m) return;
-    if (m.res && m.res[1]) _fvQualPx = m.res[1];
-    const maxSec = m.max_sec || 20;
-    const durInput = durSlider.el.querySelector('input');
-    if (durInput) { durInput.max = String(maxSec); }
-    durSlider.value = Math.min(durSlider.value || 8, maxSec);
-    if (m.steps    != null) stepsSlider.value    = m.steps;
-    if (m.guidance != null) guidanceSlider.value = m.guidance;
-    modelInfo.textContent = `Max ${maxSec}s  --  ${m.res ? m.res[0]+'x'+m.res[1] : ''}  --  ${m.fps || '?'}fps`;
-    _updateFvRatioAvailability();
-    _computeFvDims();
-  }
+  const guidanceSlider = createSlider(slidersGrid, { label: 'Guidance', min: 1,  max: 20,  step: 0.5, value: 8.5 });
 
   modelSel.addEventListener('change', () => {
-    _applyFvModelDefaults(_models[modelSel.value]);
+    const m = _models[modelSel.value];
+    if (!m) return;
+    if (m.res && m.res[1]) _fvQualPx = m.res[1];
+    durSlider.value = Math.min(parseFloat(durSlider.value) || 8, m.max_sec);
+    modelInfo.textContent = `Max ${m.max_sec}s  •  ${m.res ? m.res[0]+'x'+m.res[1] : ''}  •  ${m.fps}fps`;
+    _updateFvRatioAvailability();
+    _computeFvDims();
   });
 
   api('/api/fun/models').then(data => {
