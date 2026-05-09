@@ -99,46 +99,69 @@ aggressive prompts. action/impact = 4-6s, sustained drama = 7-10s, final reveal 
 
 _STORY_ARC_GENTLE = _STORY_ARC_BASE + """
 
-ENERGY: deliberate, cinematic motion. Each clip is a distinct beat of action,
-not a static scene with a tiny twitch. LTX models drift the scene aggressively
-when given "explosive" verbs (they replace the source photo with stock fire/
-lightning/anime imagery), so avoid those -- but the motion still needs to be
-clearly visible and clearly DIFFERENT from clip to clip.
+ENERGY: ambient and micro-motion only. Each clip is the SAME framed shot
+with small environmental and gestural movement -- never a new camera angle,
+never the subject locomoting across the frame, never a close-up push-in.
+LTX-2 Distilled at 8 steps amplifies any explicit action verb into a
+camera move plus scale drift: "walks" becomes a tracking shot, "kneels"
+becomes a close-up reframe, by clip 4 the model has invented a different
+character. The only safe defaults are tiny gestures and environmental
+motion (wind, light, leaves, smoke, water).
 
-PROMPT SHAPE (mandatory). Each prompt 45-65 words, three parts in order:
-  1. ACTION (35-45 words). Open with a moderate verb describing what the
-     subject DOES this clip. Be specific about which body parts move and in
-     which direction. Each clip MUST depict a different action beat -- if
-     clip 1 had the figure walking forward, clip 2 should be turning,
-     reaching, or interacting with something else. NEVER repeat the same
-     action across clips.
-  2. SCENE ANCHOR (10-15 words). End with a brief tag locking the setting
-     and visual style: "...same misty mountain valley, photorealistic
-     cinematic look." Keep this short -- it is an anchor, not the headline.
+CAMERA LOCK (mandatory in EVERY prompt):
+- Camera is locked off, completely still, exact same framing, same focal
+  length, same distance to subject as the source photo.
+- No push-in, no pull-out, no pan, no tilt, no dolly, no zoom.
+- The subject DOES NOT walk across the frame -- they stay in the same
+  position they occupy in the source photo.
 
-PREFERRED VERBS (use these): walks, steps, turns, leans, reaches, lifts,
-gestures, sweeps, pulls, twists, glances, kneels, rises, looks, tilts,
-strides, draws, spreads, raises, lowers. Use them precisely.
-BANNED VERBS (replace the scene with stock imagery): erupts, slams,
-explodes, detonates, thrashes, convulses, surges, rips, shatters, bursts,
-screams, roars, blasts.
+PROMPT SHAPE (mandatory). Each prompt 50-75 words:
+  1. CAMERA LOCK CLAUSE (~10 words): "Camera locked off, exact same wide
+     framing as the source photo, no movement of the lens."
+  2. PRIMARY MOTION (~25-35 words): one or two SMALL motions happening in
+     the locked frame. Prefer environmental motion (wind through trees,
+     mist drifting, light shifting, smoke rising, water rippling) and
+     micro-gestures (head tilt, hand twitch, gentle breath, slow blink,
+     fingers shifting on a strap). NEVER include subject locomotion,
+     never include another person/object entering the frame.
+  3. SCENE ANCHOR (~15-25 words): restate the subject's exact position +
+     full setting + visual style: "The miniature figure stays mid-stride
+     on the centre yellow road line, same toy-village street, photorealistic
+     tilt-shift miniature look."
 
-ARC: clip 1 sets the motion baseline; each subsequent clip is a NEW action
-beat -- not an intensification of the previous, not a re-statement of the
-same gesture. Vary which figure moves, which direction, what they interact
-with. The scene stays the same; the action evolves.
+PREFERRED VERBS (subject): tilts head, blinks slowly, shifts grip, breathes,
+stays still, holds the same pose, glances slightly, fingers brush, weight
+settles. PREFERRED ENVIRONMENT: drifts, sways, ripples, glints, dims,
+brightens, flickers, flutters, settles, eddies, scatters.
+BANNED (cause LTX to dramatize): walks, steps, strides, runs, jumps,
+turns around, kneels, rises, sweeps, lifts arm, reaches across, exits,
+enters, climbs, dives, pivots. Also banned: erupts, slams, explodes,
+thrashes, surges, screams, blasts, roars.
 
-GOOD example progression for "three mushroom-headed figures in a misty valley":
-  clip 1: "The central figure walks two steps forward, lifting its left
-    hand. The two side figures hold the rope between them. Mist drifts
-    around their feet. Same misty mountain valley, photorealistic cinematic look."
-  clip 2: "The central figure turns its head to the right, glancing at the
-    figure on its left. The figure on the right pulls the rope taut. A
-    breeze moves through the grass. Same misty mountain valley, photographic style."
-  clip 3: "The figure on the left kneels down, brushing the moss with one
-    hand. The central figure raises both arms slightly. Mist thickens behind
-    them. Same misty mountain valley, photorealistic cinematic look."
-Each clip = different action, same scene, same style.\
+ARC: clip 1 establishes the locked frame with one ambient motion. Each
+later clip is the SAME locked frame with a DIFFERENT ambient motion or
+DIFFERENT micro-gesture (not a different action). Wind direction can
+change, leaves can fall vs. swirl, light can dim or brighten, the figure
+can blink vs. breathe vs. shift weight. Never escalate -- variety, not
+crescendo.
+
+GOOD example progression for "miniature figure with suitcase in toy
+village street":
+  clip 1: "Camera locked off, exact same wide framing as the source photo,
+    no movement of the lens. A gentle breeze moves through the small trees
+    lining the street, leaves shift slightly. The miniature figure stays
+    mid-stride on the centre yellow road line, suitcase held at the side,
+    same toy-village street, photorealistic tilt-shift miniature look."
+  clip 2: "Camera locked off, no movement, identical wide composition. The
+    small flag on the corner balcony flutters once, then settles. The light
+    dims by a hair as a cloud passes overhead. The miniature figure holds
+    the same pose, suitcase at side, same toy-village street, photorealistic
+    tilt-shift miniature look."
+  clip 3: "Camera locked off, identical framing, no lens movement. A few
+    leaves fall from the corner tree and drift across the road. The
+    figure tilts its head a fraction toward the red building. Same
+    miniature toy-village street, photorealistic tilt-shift miniature look."
+Each clip = locked frame, different ambient/micro detail, same composition.\
 """
 
 

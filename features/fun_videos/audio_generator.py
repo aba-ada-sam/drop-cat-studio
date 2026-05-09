@@ -74,11 +74,16 @@ def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
         return _add_style_guardrails(normalized)
 
     prompt_lower = normalized.lower()
+    # Word-boundary match -- substring match falsely triggered on "vib[rap]hone"
+    # for "rap", which made ACE-Step skip the "lead vocal" hint and render the
+    # track instrumental despite the lyrics block being non-empty.
+    import re as _re_v
     vocal_keywords = (
         "vocal", "vocals", "singer", "singing", "sung", "female vocal",
         "male vocal", "choir", "duet", "rap", "spoken word",
     )
-    if not any(kw in prompt_lower for kw in vocal_keywords):
+    has_vocal_kw = any(_re_v.search(rf"\b{_re_v.escape(kw)}\b", prompt_lower) for kw in vocal_keywords)
+    if not has_vocal_kw:
         normalized = (normalized.rstrip(", ") + ", lead vocal") if normalized else "lead vocal"
         prompt_lower = normalized.lower()
 
