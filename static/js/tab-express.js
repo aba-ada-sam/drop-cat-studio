@@ -505,35 +505,27 @@ export function init(panel) {
   let _multiVideo      = true;
   let _targetSecs      = 30;
   let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
-  let _upscaleOn       = true;
+  let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
   let _upscaleScale    = 2.0;
   let _directorPasses  = 0;
 
-  const STORY_LENGTHS = [
-    { label: '15s', secs: 15 },
-    { label: '30s', secs: 30 },
-    { label: '45s', secs: 45 },
-    { label: '60s', secs: 60 },
-  ];
-
   const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', checked: 'checked', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
 
-  const storyLenChips = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
-  STORY_LENGTHS.forEach(({ label, secs }) => {
-    const chip = el('button', {
-      class: secs === _targetSecs ? 'chip chip-active' : 'chip',
-      text: label,
-      style: 'cursor:pointer;',
-    });
-    chip.addEventListener('click', () => {
-      _targetSecs = secs;
-      _numClips = Math.max(2, Math.round(_targetSecs / _duration));
-      storyLenChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
-      chip.classList.add('chip-active');
-      _refreshClipInfo();
-    });
-    storyLenChips.appendChild(chip);
+  // Story length: free slider, 10-120s in 5s steps
+  const lenSlider = el('input', {
+    type: 'range', min: '10', max: '120', step: '5',
+    value: String(_targetSecs),
+    style: 'flex:1; max-width:240px; cursor:pointer;',
+  });
+  const lenLabel = el('span', {
+    style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:40px; text-align:right;',
+    text: `${_targetSecs}s`,
+  });
+  lenSlider.addEventListener('input', () => {
+    _targetSecs = Number(lenSlider.value);
+    lenLabel.textContent = `${_targetSecs}s`;
+    _refreshClipInfo();
   });
 
   const clipInfoLabel = el('span', {
@@ -547,41 +539,32 @@ export function init(panel) {
   }
   durSlider.addEventListener('input', _refreshClipInfo);
 
-  const upscaleChk = el('input', { type: 'checkbox', id: 'express-upscale', checked: 'checked', style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;' });
-  upscaleChk.addEventListener('change', () => { _upscaleOn = upscaleChk.checked; });
+  const upscaleChk = el('input', { type: 'checkbox', id: 'express-upscale', style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;' });
 
-  const methodChips = el('div', { style: 'display:flex; gap:4px;' });
-  [{ label: 'Fast', value: 'ffmpeg' }, { label: 'AI', value: 'ai' }].forEach(({ label, value }) => {
-    const chip = el('button', {
-      class: value === _upscaleMethod ? 'chip chip-active' : 'chip',
-      text: label, style: 'cursor:pointer; font-size:.7rem; padding:2px 8px;',
-    });
-    chip.addEventListener('click', () => {
-      _upscaleMethod = value;
-      methodChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
-      chip.classList.add('chip-active');
-    });
-    methodChips.appendChild(chip);
-  });
+  const { row: methodRow } = _makeChipGroup(
+    [{ label: 'Fast', value: 'ffmpeg' }, { label: 'AI', value: 'ai' }],
+    _upscaleMethod,
+    item => { _upscaleMethod = item.value; },
+  );
+  const { row: scaleRow } = _makeChipGroup(
+    [{ label: '1.5x', value: '1.5' }, { label: '2x', value: '2' }, { label: '4x', value: '4' }],
+    String(_upscaleScale === 2.0 ? 2 : _upscaleScale),
+    item => { _upscaleScale = Number(item.value); },
+  );
 
-  const scaleChips = el('div', { style: 'display:flex; gap:4px;' });
-  [{ label: '1.5x', value: 1.5 }, { label: '2x', value: 2.0 }, { label: '4x', value: 4.0 }].forEach(({ label, value }) => {
-    const chip = el('button', {
-      class: value === _upscaleScale ? 'chip chip-active' : 'chip',
-      text: label, style: 'cursor:pointer; font-size:.7rem; padding:2px 8px;',
-    });
-    chip.addEventListener('click', () => {
-      _upscaleScale = value;
-      scaleChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
-      chip.classList.add('chip-active');
-    });
-    scaleChips.appendChild(chip);
+  const upscaleControls = el('div', { style: 'display:none; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+    methodRow, scaleRow,
+  ]);
+  upscaleChk.addEventListener('change', () => {
+    _upscaleOn = upscaleChk.checked;
+    upscaleControls.style.display = _upscaleOn ? 'flex' : 'none';
   });
 
   const multiSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-2);' });
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
     el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Story length' }),
-    storyLenChips,
+    lenSlider,
+    lenLabel,
   ]));
   multiSettings.appendChild(el('div', { style: 'padding-left:90px;' }, [clipInfoLabel]));
   multiSettings.appendChild(el('div', {
@@ -591,34 +574,23 @@ export function init(panel) {
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     upscaleChk,
     el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
-    methodChips,
-    scaleChips,
+    upscaleControls,
   ]));
 
   // Director passes: AI reviews and re-shoots weak clips between passes
   const DIRECTOR_OPTIONS = [
-    { label: 'Quick',    passes: 0, tip: 'Single pass, no review' },
-    { label: 'Reviewed', passes: 1, tip: 'AI reviews + re-shoots weak clips once' },
-    { label: 'Refined',  passes: 2, tip: 'Two rounds of AI review and re-direction' },
+    { label: 'Quick',    value: '0', tip: 'Single pass, no review' },
+    { label: 'Reviewed', value: '1', tip: 'AI reviews + re-shoots weak clips once' },
+    { label: 'Refined',  value: '2', tip: 'Two rounds of AI review and re-direction' },
   ];
-  const directorChips = el('div', { style: 'display:flex; gap:6px;' });
-  DIRECTOR_OPTIONS.forEach(({ label, passes, tip }) => {
-    const chip = el('button', {
-      class: passes === _directorPasses ? 'chip chip-active' : 'chip',
-      text: label,
-      style: 'cursor:pointer;',
-      title: tip,
-    });
-    chip.addEventListener('click', () => {
-      _directorPasses = passes;
-      directorChips.querySelectorAll('.chip').forEach(c => c.classList.remove('chip-active'));
-      chip.classList.add('chip-active');
-    });
-    directorChips.appendChild(chip);
-  });
+  const { row: directorRow } = _makeChipGroup(
+    DIRECTOR_OPTIONS.map(d => ({ label: d.label, value: d.value, title: d.tip })),
+    String(_directorPasses),
+    item => { _directorPasses = Number(item.value); },
+  );
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
     el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Director' }),
-    directorChips,
+    directorRow,
     el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: '- AI reviews and re-shoots weak clips' }),
   ]));
 
