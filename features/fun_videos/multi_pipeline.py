@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from core.ffmpeg_utils import probe_duration, extract_last_frame_to_file, extract_first_frame_to_file
+from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt, _sample_music_frames
 
@@ -346,11 +346,12 @@ def _run_director_pass(
     new_clip_durs = list(clip_durations[:first_idx])
     new_arc = list(story_arc)
 
-    if new_clip_paths:
-        chain_frame = str(job_dir / f"chain_p{pass_num}_{first_idx - 1:02d}.png")
-        prev_frame_path: str | None = chain_frame if extract_last_frame_to_file(new_clip_paths[-1], chain_frame) else None
-    else:
-        prev_frame_path = None
+    # The clip at first_idx-1 was already trimmed + anchored in the main loop
+    # (or by a previous director pass). Reuse the cached anchor PNG so the
+    # re-shoot picks up exactly where the kept clip ends.
+    prev_frame_path: str | None = (
+        _find_anchor(job_dir, first_idx - 1, pass_num) if new_clip_paths else None
+    )
 
     reshoot_pct_start = pct_start + max(1, rng // 3)
 
@@ -406,35 +407,97 @@ def _run_director_pass(
         actual = clip_path or clip_paths[i]
         actual_dur = probe_duration(actual) or this_dur
 
-        # Tail-trim to preserve in-motion chain frame
-        if i < n - 1 and clip_path and clip_path != clip_paths[i]:
-            trim_to = max(actual_dur - 0.2, actual_dur * 0.9)
-            tail_out = str(job_dir / f"clip_{i:02d}_p{pass_num}_fe.mp4")
-            tr = subprocess.run(
-                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
-                capture_output=True, timeout=60,
-            )
-            if tr.returncode == 0 and Path(tail_out).exists():
-                os.replace(tail_out, clip_path)
-                actual_dur = probe_duration(clip_path) or actual_dur
-
         new_clip_paths.append(actual)
-        new_clip_durs.append(actual_dur)
 
+        # Re-shot clips need the same chain-anchor treatment so junctions
+        # remain frame-exact after re-assembly. Originals carried over
+        # from the previous pass were already anchored.
         if i < n - 1:
-            frame_out = str(job_dir / f"frame_p{pass_num}_{i:02d}.png")
-            prev_frame_path = frame_out if extract_last_frame_to_file(actual, frame_out) else None
+            if clip_path and clip_path != clip_paths[i]:
+                frame_out = str(job_dir / f"frame_p{pass_num}_{i:02d}.png")
+                ok, anchored_dur = _chain_anchor(actual, frame_out)
+                actual_dur = anchored_dur
+                prev_frame_path = frame_out if ok else None
+            else:
+                prev_frame_path = _find_anchor(job_dir, i, pass_num + 1)
+
+        new_clip_durs.append(actual_dur)
 
     if _stopped():
         return clip_paths, clip_durations, story_arc, assembled_path
 
     job.update(progress=pct_end - 1, message=f"Director pass {pass_num}: re-assembling...")
     new_assembled = str(job_dir / f"concat_p{pass_num}_{job.id[:6]}.mp4")
-    if not _concat_with_xfade(new_clip_paths, new_assembled, fade_dur=1.0):
+    if not _concat_clips(new_clip_paths, new_assembled):
         log.warning("[director] Pass %d re-assemble failed -- keeping previous result", pass_num)
         return clip_paths, clip_durations, story_arc, assembled_path
 
     return new_clip_paths, new_clip_durs, new_arc, new_assembled
+
+
+_CHAIN_TRIM_RATIO = 0.88
+_REANCHOR_EVERY_DEFAULT = 4
+
+
+def _find_anchor(job_dir: Path, i: int, current_pass: int) -> str | None:
+    """Find the most recent anchor PNG for clip index i.
+
+    Anchors are written as frame_{i:02d}.png by the main loop and as
+    frame_p{N}_{i:02d}.png by director pass N. Walks back from
+    current_pass-1 to 0 to find the freshest cache.
+    """
+    for pn in range(max(0, current_pass - 1), 0, -1):
+        p = job_dir / f"frame_p{pn}_{i:02d}.png"
+        if p.exists():
+            return str(p)
+    p = job_dir / f"frame_{i:02d}.png"
+    return str(p) if p.exists() else None
+
+
+def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RATIO) -> tuple[bool, float]:
+    """Trim clip to ratio*duration via re-encode and write last frame as PNG.
+
+    The trim and the anchor frame share the same timestamp, so concatenating
+    clips via hard cut produces a frame-exact junction (clip i ends on the
+    same frame clip i+1 starts from). ratio=0.88 stays clear of LTX-2's
+    final fade-out blur while keeping most of each clip.
+
+    Returns (ok, new_duration). On failure, leaves clip_path untouched and
+    returns (False, original_duration).
+    """
+    dur = probe_duration(clip_path) or 0.0
+    if dur <= 1.0:
+        return False, dur
+    cut_to = dur * ratio
+
+    # Re-encode trim so the new EOF lands exactly at cut_to (concat -c copy
+    # would snap to the nearest keyframe, leaving the chain misaligned).
+    trimmed = clip_path + ".trim.mp4"
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-i", clip_path,
+         "-t", f"{cut_to:.4f}",
+         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+         "-pix_fmt", "yuv420p", "-an",
+         trimmed],
+        capture_output=True, timeout=120,
+    )
+    if r.returncode != 0 or not Path(trimmed).exists():
+        log.warning("[chain] trim failed for %s: %s", clip_path, r.stderr.decode(errors='replace')[-400:])
+        return False, dur
+    os.replace(trimmed, clip_path)
+
+    new_dur = probe_duration(clip_path) or cut_to
+    # Pull the actual last frame of the trimmed clip (sseof reads from EOF).
+    fr = subprocess.run(
+        ["ffmpeg", "-y",
+         "-sseof", "-0.10", "-i", clip_path,
+         "-frames:v", "1", anchor_png],
+        capture_output=True, timeout=30,
+    )
+    if fr.returncode != 0 or not Path(anchor_png).exists():
+        log.warning("[chain] anchor extract failed for %s", clip_path)
+        return False, new_dur
+    return True, new_dur
 
 
 def _bridge_steps(video_steps: int, model_name: str) -> int:
@@ -451,64 +514,14 @@ def _bridge_steps(video_steps: int, model_name: str) -> int:
 
 # ── ffmpeg clip concatenation ─────────────────────────────────────────────────
 
-def _concat_with_xfade(clip_paths: list[str], out_path: str, fade_dur: float = 1.0) -> bool:
-    """Concatenate clips with crossfade transitions via ffmpeg xfade filter.
-
-    xfade offset for clip i = sum(dur[0..i-1]) - i * fade_dur.
-    Falls back to hard-cut concat if probing or encoding fails.
-    """
-    if not clip_paths:
-        return False
-    if len(clip_paths) == 1:
-        shutil.copy2(clip_paths[0], out_path)
-        return Path(out_path).exists()
-
-    durations = []
-    for p in clip_paths:
-        d = probe_duration(p)
-        if not d or d <= fade_dur:
-            log.warning("[multi] Cannot probe duration for %s -- hard cut fallback", p)
-            return _concat_clips(clip_paths, out_path)
-        durations.append(d)
-
-    # Build a chained xfade filter: each pair (prev_out, clip_i) fades at the
-    # cumulative timeline offset where clip i should start bleeding in.
-    filter_parts = []
-    cumulative = 0.0
-    prev_label = "[0:v]"
-    for i in range(1, len(clip_paths)):
-        cumulative += durations[i - 1]
-        offset = max(0.1, cumulative - i * fade_dur)
-        next_label = f"[{i}:v]"
-        out_label = "[v]" if i == len(clip_paths) - 1 else f"[xf{i}]"
-        filter_parts.append(
-            f"{prev_label}{next_label}"
-            f"xfade=transition=fade:duration={fade_dur:.3f}:offset={offset:.4f}"
-            f"{out_label}"
-        )
-        prev_label = out_label
-
-    cmd = ["ffmpeg", "-y"]
-    for p in clip_paths:
-        cmd += ["-i", p]
-    cmd += [
-        "-filter_complex", ";".join(filter_parts),
-        "-map", "[v]", "-an",
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-        out_path,
-    ]
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=600)
-        if r.returncode == 0 and Path(out_path).exists():
-            return True
-        log.error("[multi] xfade failed:\n%s", r.stderr.decode(errors="replace")[-1500:])
-    except Exception as e:
-        log.error("[multi] xfade exception: %s", e)
-    return _concat_clips(clip_paths, out_path)
-
-
 def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
-    """Losslessly concatenate video clips using ffmpeg concat demuxer."""
+    """Concatenate clips via ffmpeg concat demuxer, re-encoding to libx264.
+
+    Re-encoding (rather than -c copy) sidesteps codec/profile mismatches
+    between WanGP's raw output and the trimmed clips that came back through
+    _chain_anchor's libx264 pass. CRF 18 fast preset keeps the quality hit
+    minimal while guaranteeing the concat succeeds.
+    """
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
     ) as f:
@@ -527,11 +540,12 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0",
                 "-i", list_path,
-                "-c:v", "copy",
+                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                "-pix_fmt", "yuv420p",
                 "-an",      # drop any audio from raw WanGP clips
                 out_path,
             ],
-            capture_output=True, timeout=300,
+            capture_output=True, timeout=600,
         )
         success = r.returncode == 0 and Path(out_path).exists()
         if not success:
@@ -570,12 +584,18 @@ def run_multi_prep(job, photo_path, settings):
     lyric_direction  = settings.get("lyric_direction", "")
 
     # ── Story arc ─────────────────────────────────────────────────────────
+    # Each generated clip is later trimmed to _CHAIN_TRIM_RATIO of its
+    # generated length so junctions are frame-exact. Plan ~12% longer so
+    # the final played output lands close to the user's requested target.
+    plan_total = (target_total / _CHAIN_TRIM_RATIO) if target_total else None
+    plan_clip_dur = clip_dur / _CHAIN_TRIM_RATIO
+
     job.update(progress=3, message="Planning story arc...")
     arc, arc_method = _generate_story_arc(
         llm_router, user_idea, n_clips, photo_path,
         progress_fn=lambda msg: job.update(message=msg),
-        target_total_secs=target_total,
-        default_clip_dur=clip_dur,
+        target_total_secs=plan_total,
+        default_clip_dur=plan_clip_dur,
     )
     settings["_story_arc"] = arc
     arc_prompts = [a.get("prompt", "")[:40] if isinstance(a, dict) else str(a)[:40] for a in arc]
@@ -674,11 +694,14 @@ def run_multi_pipeline(job, photo_path, settings):
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
+    reanchor_every   = int(settings.get("reanchor_every", _REANCHOR_EVERY_DEFAULT))
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
+        # Same trim compensation applied in run_multi_prep.
+        fb_dur = clip_dur / _CHAIN_TRIM_RATIO
         story_arc = [
-            {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": clip_dur}
+            {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": fb_dur}
             for i in range(n_clips)
         ]
 
@@ -713,11 +736,14 @@ def run_multi_pipeline(job, photo_path, settings):
     # ── Phase 1: Generate clips sequentially ──────────────────────────────
     # Clips chain: clip_1 starts from the source photo; clips 2+ start from
     # the last frame of the previous clip extracted as PNG (lossless).
-    # PNG eliminates the JPEG compression artifacts that caused "melted
-    # anatomy" in earlier chain experiments. The 85% seek position in
-    # extract_last_frame_to_file already avoids the LTX fade-out blur.
-    # If frame extraction fails for any clip, that clip resets to the
-    # source photo rather than failing the entire job.
+    # _chain_anchor trims each clip to _CHAIN_TRIM_RATIO of its generated
+    # length and pulls the actual last frame of the trimmed clip, so
+    # clip i ends on the same frame clip i+1 starts from. That makes
+    # hard-cut concat seamless and removes the visible fade.
+    # If anchoring fails for any clip, that clip resets to the source
+    # photo rather than failing the entire job. Every reanchor_every
+    # clips, we deliberately reset back to the source to break compounding
+    # quality drift on long stories.
 
     # Compress the clip-generation progress window when director passes will follow
     # so there is room for review/re-shoot phases before the audio phase at 76%+.
@@ -795,33 +821,32 @@ def run_multi_pipeline(job, photo_path, settings):
             break
 
         clip_paths.append(clip_path)
-        clip_durations.append(probe_duration(clip_path) or this_clip_dur)
         _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
-        # Trim LTX-2 fade-out tail so the chain frame is in-motion,
-        # not a near-static or motion-blurred fade-out frame.
-        if i < len(story_arc) - 1:
-            clip_real_dur = probe_duration(clip_path) or clip_dur
-            trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
-            tail_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
-            tr = subprocess.run(
-                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
-                capture_output=True, timeout=60,
-            )
-            if tr.returncode == 0 and Path(tail_out).exists():
-                os.replace(tail_out, clip_path)
-            else:
-                log.debug("[multi] Clip %d tail-trim failed -- using full clip", i + 1)
-
-        # Extract last frame as PNG (lossless) -- becomes clip_{i+1}'s start image.
-        # PNG prevents JPEG compression artifacts from compounding across the chain.
+        # Trim each clip and extract the chain anchor at the SAME timestamp
+        # so the next clip starts exactly where this one ends -- frame-exact
+        # hard-cut concat with no visible jump.
         if i < len(story_arc) - 1:
             frame_out = str(job_dir / f"frame_{i:02d}.png")
-            if extract_last_frame_to_file(clip_path, frame_out):
-                prev_frame_path = frame_out
-            else:
-                log.warning("[multi] Frame extraction failed for clip %d -- next clip resets to source", i + 1)
+            ok, new_dur = _chain_anchor(clip_path, frame_out)
+            clip_durations.append(new_dur)
+            if not ok:
+                log.warning("[multi] Chain anchor failed for clip %d -- next clip resets to source", i + 1)
                 prev_frame_path = None
+            elif reanchor_every > 0 and (i + 1) % reanchor_every == 0:
+                # Periodic re-anchor: clip (i+2) restarts from the source photo
+                # to break the compounding quality drift on long stories.
+                # Requires n_clips > reanchor_every to be worth doing.
+                if n_clips > reanchor_every:
+                    log.info("[multi] Re-anchoring clip %d back to source photo (every %d)",
+                             i + 2, reanchor_every)
+                    prev_frame_path = None
+                else:
+                    prev_frame_path = frame_out
+            else:
+                prev_frame_path = frame_out
+        else:
+            clip_durations.append(probe_duration(clip_path) or this_clip_dur)
 
     if _stopped():
         if forge_unloaded:
@@ -866,7 +891,10 @@ def run_multi_pipeline(job, photo_path, settings):
         compiled = None
 
     if not compiled:
-        if not _concat_with_xfade(clip_paths, concat_path, fade_dur=1.0):
+        # Hard-cut concat: chain_anchor aligned each clip's end with the
+        # next clip's start image, so cuts are frame-exact and a crossfade
+        # would only introduce visible cross-dissolve sludge.
+        if not _concat_clips(clip_paths, concat_path):
             log.warning("[multi] Concat failed -- using first clip only")
             concat_path = clip_paths[0]
 
