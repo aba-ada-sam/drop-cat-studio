@@ -169,6 +169,7 @@ def analyze_photo(router, image_b64: str) -> dict:
         tier=TIER_BALANCED,
         system=ANALYSIS_SYSTEM,
         force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
+        format_json=True,
     )
     result = parse_json_response(text)
     if not result:
@@ -226,6 +227,7 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
             max_tokens=max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
             force_provider=force_provider or "ollama",  # user images may be NSFW
+            format_json=True,
         )
         result = parse_json_response(last_text)
         if result and isinstance(result, dict) and result.get("prompts"):
