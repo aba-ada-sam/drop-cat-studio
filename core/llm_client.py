@@ -80,8 +80,13 @@ def _extract_content(resp) -> str:
             if rest:
                 return rest
 
-    # 4. Return stripped thinking text (caller's salvage logic may still recover it)
-    return re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
+    # 4. Return stripped thinking text (caller's salvage logic may still recover it).
+    # Also handle unclosed <think> (truncated by max_tokens): strip the opening tag
+    # so the caller sees the inner reasoning text rather than a literal "<think>".
+    result = re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
+    if result.startswith("<think>"):
+        result = result[len("<think>"):].strip()
+    return result
 
 
 class LLMClient:

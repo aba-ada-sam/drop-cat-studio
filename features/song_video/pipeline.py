@@ -610,7 +610,7 @@ def run_song_pipeline(job, photo_path, settings):
             url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
             gallery_push(
                 url, tab="song-video",
-                prompt=story_arc[0][:120] if story_arc else "",
+                prompt=(story_arc[0].get("prompt", "") if isinstance(story_arc[0], dict) else str(story_arc[0]))[:120] if story_arc else "",
                 model=model_name,
                 metadata={
                     "path": merged,
