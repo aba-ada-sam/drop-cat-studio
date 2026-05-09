@@ -329,12 +329,13 @@ def run_pipeline(job, photo_path, settings):
 
     _video_succeeded = False
     try:
+        _mn = settings.get("model_name", "LTX-2 Dev19B Distilled")
         video_path = video_generator.generate_video(
             image_path=photo_path,
             prompt=video_prompt,
             out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
             duration=float(settings.get("video_duration", 14.0)),
-            model_name=settings.get("model_name", "LTX-2 Dev19B Distilled"),
+            model_name=_mn,
             resolution=settings.get("resolution", "580p"),
             override_width=int(ow) if ow else None,
             override_height=int(oh) if oh else None,
@@ -345,6 +346,7 @@ def run_pipeline(job, photo_path, settings):
             end_image_path=settings.get("end_photo_path"),
             start_video_path=settings.get("start_video_path"),
             loras=settings.get("loras", []),
+            negative_prompt=video_generator.negative_prompt_for(_mn),
             stop_check=_stopped,
             log_fn=_log,
             progress_fn=_video_progress,

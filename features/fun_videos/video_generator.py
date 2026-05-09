@@ -18,6 +18,28 @@ log = logging.getLogger(__name__)
 
 WANGP_WORKER_PORT = 7899
 
+# Negative prompts tuned per model family.
+# LTX-2 and Wan2.1 both accept negative_prompt; models that don't (HunyuanVideo etc.)
+# pop it internally via their no_negative_prompt flag, so it's safe to always send.
+_NEG_LTX = (
+    "worst quality, inconsistent motion, blurry, jittery, distorted, camera shake, "
+    "shaky, wobble, warping edges, flicker, stutter, erratic motion, temporal artifacts, "
+    "ghosting, morphing, smear, judder, particle noise, ash floating, dust in air, "
+    "floating debris, watermark, text, logo"
+)
+_NEG_WAN = (
+    "low quality, blurry, distorted faces, unnatural movement, text, watermark, "
+    "shaky camera, rolling shutter wobble, motion smear, heavy motion blur, ghost trails, "
+    "micro-jitter, warping edges, wobble, flicker, jitter, stutter, erratic motion, "
+    "temporal artifacts, ash floating, dust in air, floating debris, particles in air"
+)
+
+def negative_prompt_for(model_name: str) -> str:
+    """Return the appropriate negative prompt for the given WanGP model."""
+    if "ltx" in model_name.lower():
+        return _NEG_LTX
+    return _NEG_WAN
+
 MODELS = {
     "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True},
     "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True},
@@ -60,6 +82,7 @@ def generate_video(
     start_video_path: str | None = None,
     loras: list | None = None,
     audio_source: str | None = None,
+    negative_prompt: str = "",
     stop_check=None,
     log_fn=None,
     progress_fn=None,
@@ -114,6 +137,7 @@ def generate_video(
             steps, guidance, seed, model_name, end_image_path,
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
             mmaudio=mmaudio, audio_source=audio_source,
+            negative_prompt=negative_prompt,
         )
 
     # Only fall back to subprocess if the worker process is not running at all
@@ -135,10 +159,12 @@ def _generate_via_worker(
     start_video_path, loras, stop_check, log_fn, progress_fn=None,
     mmaudio: bool = False,
     audio_source: str | None = None,
+    negative_prompt: str = "",
 ) -> str | None:
     """Generate via persistent worker on port 7899."""
     payload = {
         "prompt": prompt,
+        "negative_prompt": negative_prompt,
         "model_name": model_name,
         "output_path": os.path.abspath(out_path),
         "num_frames": num_frames,

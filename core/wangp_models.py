@@ -110,4 +110,5 @@ SAFE_DEFAULTS: dict = {
     "modules": [],
     "settings_version": 0,
     "type": "",
+    "negative_prompt": "",
 }

@@ -129,6 +129,7 @@ def _do_generate(params: dict) -> dict:
     start_image = params.get("start_image")
     end_image = params.get("end_image")
     start_video = params.get("start_video")      # video-to-video source
+    negative_prompt = params.get("negative_prompt", "")
     activated_loras = params.get("activated_loras", [])
     loras_multipliers = params.get("loras_multipliers", "")
 
@@ -154,6 +155,7 @@ def _do_generate(params: dict) -> dict:
     defaults = wgp.get_default_settings(model_type).copy()
     defaults.update({
         "prompt": prompt,
+        "negative_prompt": negative_prompt,
         "resolution": f"{width}x{height}",
         "video_length": num_frames,
         "num_inference_steps": steps,

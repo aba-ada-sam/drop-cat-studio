@@ -450,6 +450,7 @@ def run_song_pipeline(job, photo_path, settings):
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
+                negative_prompt=video_generator.negative_prompt_for(model_name),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
