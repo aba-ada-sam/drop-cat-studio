@@ -119,24 +119,26 @@ LYRICS_SYSTEM = """You are a professional songwriter writing lyrics for short AI
 STYLE RULE: Follow the user's stated music style exactly. If they say "gypsy punk" write gypsy punk.
 If no style is given, use dry wit and light irony (Randy Newman / Flight of the Conchords flavor).
 
-CRITICAL TIMING RULE: ACE-Step begins your lyrics on beat 1, bar 1 -- no silent intro bars.
-Write so the FIRST word is the first thing sung. Never leave empty sections.
+CRITICAL TIMING RULE: ACE-Step begins your lyrics on beat 1, bar 1.
+The FIRST word must be the FIRST thing sung -- no empty sections, no instrumental intros.
 
-Format -- exactly THREE sections:
-[verse 1]
-Line 1 (7-10 syllables)
-Line 2 (7-10 syllables)
+Format -- exactly THREE sections, EXACTLY TWO LINES EACH (no more, no less):
+[verse]
+Line 1 (7-9 syllables)
+Line 2 (7-9 syllables)
 [chorus]
-Line 1
-Line 2
-[verse 2]
-Line 1
-Line 2
+Line 1 (6-9 syllables)
+Line 2 (6-9 syllables)
+[verse]
+Line 1 (7-9 syllables)
+Line 2 (7-9 syllables)
 
-Rules:
+STRICT RULES:
+- Exactly 3 sections, exactly 2 lines per section = 6 lines total
+- NEVER write 3 or 4 lines in a section -- 2 lines only
 - Loose rhyme: AABB or ABAB
-- Under 70 words total (ACE-Step KV cache limit)
-- Return ONLY the raw lyrics text -- no JSON, no quotes, no explanation"""
+- Under 50 words total -- ACE-Step needs room to breathe between sections
+- Return ONLY the raw lyrics text -- no JSON, no quotes, no explanation, no section numbering"""
 
 
 def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: str = "") -> str:
