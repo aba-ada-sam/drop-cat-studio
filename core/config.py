@@ -95,10 +95,6 @@ DEFAULTS: dict = {
     "sd_step1_default_suffix":   "",
     "sd_step1_default_provider": "local",    # "local" (Ollama) | "cloud" (Anthropic/OpenAI)
 
-    # ── Telegram notifications ────────────────────────────────────────────
-    "telegram_bot_token": "",   # BotFather token (Bot:xxxx:yyyy)
-    "telegram_chat_id":   "",   # your personal chat ID
-
     # ── Video Tools (tools_) ─────────────────────────────────────────────
     "tools_crf": 18,
     "tools_out_format": "mp4",

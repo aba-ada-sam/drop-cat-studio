@@ -584,7 +584,7 @@ function _applyLLMState(llm) {
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model','telegram_bot_token','telegram_chat_id'];
+    const fields = ['wan2gp_root','acestep_root','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
@@ -1084,51 +1084,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
-
-  // Telegram: fetch chat ID from bot updates
-  document.getElementById('btn-fetch-chat-id')?.addEventListener('click', async () => {
-    const btn = document.getElementById('btn-fetch-chat-id');
-    const msg = document.getElementById('val-telegram');
-    const token = document.getElementById('cfg-telegram_bot_token')?.value?.trim();
-    if (!token) { if (msg) msg.textContent = 'Enter bot token first'; return; }
-    btn.disabled = true;
-    btn.textContent = 'Fetching...';
-    if (msg) msg.textContent = '';
-    try {
-      const data = await apiFetch('/api/telegram/fetch-chat-id', { method: 'POST', body: JSON.stringify({ token }), context: 'fetchChatId' });
-      if (data.chat_id) {
-        const el = document.getElementById('cfg-telegram_chat_id');
-        if (el) el.value = data.chat_id;
-        if (msg) { msg.textContent = 'Chat ID found: ' + data.chat_id; msg.style.color = 'var(--clr-success, #4caf50)'; }
-      }
-    } catch (_) {
-      if (msg) { msg.textContent = 'Not found -- send any message to your bot first'; msg.style.color = 'var(--clr-error, #e55)'; }
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Fetch';
-    }
-  });
-
-  // Telegram: send a test ping
-  document.getElementById('btn-telegram-test')?.addEventListener('click', async () => {
-    const btn = document.getElementById('btn-telegram-test');
-    const msg = document.getElementById('val-telegram');
-    const token   = document.getElementById('cfg-telegram_bot_token')?.value?.trim();
-    const chat_id = document.getElementById('cfg-telegram_chat_id')?.value?.trim();
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-    if (msg) msg.textContent = '';
-    try {
-      await apiFetch('/api/telegram/test', { method: 'POST', body: JSON.stringify({ token, chat_id }), context: 'telegramTest' });
-      if (msg) { msg.textContent = 'Message sent! Check Telegram.'; msg.style.color = 'var(--clr-success, #4caf50)'; }
-      toast('Telegram test sent', 'success');
-    } catch (_) {
-      if (msg) { msg.textContent = 'Failed -- check token and chat ID'; msg.style.color = 'var(--clr-error, #e55)'; }
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Send Test Message';
-    }
-  });
   document.getElementById('btn-restart-app')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-restart-app');
     btn.disabled = true;

@@ -604,10 +604,3 @@ class JobManager:
             # worker returned, raised, or hit the stop event.
             if job.finished_at is None:
                 job.finished_at = time.time()
-            # Telegram push notification for GPU jobs only
-            if job.type in GPU_JOB_TYPES:
-                try:
-                    from core.telegram_notifier import notify_job
-                    notify_job(job)
-                except Exception:
-                    pass
