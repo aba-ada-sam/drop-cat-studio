@@ -645,7 +645,6 @@ export function init(panel) {
   multiChk.addEventListener('change', () => {
     _multiVideo = multiChk.checked;
     multiSettings.style.display = _multiVideo ? 'flex' : 'none';
-    loopBtn.style.display = _multiVideo ? 'none' : '';
     if (!_looping) {
       createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
     }
@@ -682,7 +681,7 @@ export function init(panel) {
     class: 'btn',
     text: '∞  Loop',
     title: 'Generate continuously until stopped',
-    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap; display:none;',
+    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
   root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn]));
 
@@ -919,8 +918,13 @@ export function init(panel) {
   async function _runLoop() {
     while (_looping) {
       _loopCount++;
-      // _generateOne returns as soon as the job is submitted; await the watch promise for completion
-      const submitted = await _generateOne(true);
+      // Dispatch to whichever generator matches the current mode so Loop works
+      // for both single-clip and multi-clip story generation.
+      // _generateOne / _generateMulti return as soon as the job is submitted;
+      // await the watch promise for completion.
+      const submitted = _multiVideo
+        ? await _generateMulti()
+        : await _generateOne(true);
       if (!submitted) { _stopLoop(); toast('Loop stopped -- failed to submit job', 'error'); break; }
       const ok = await _watchJob(_jobId);
       if (!ok) { _stopLoop(); toast('Loop stopped -- generation failed', 'error'); break; }
