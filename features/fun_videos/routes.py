@@ -334,32 +334,38 @@ _AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea
 
 You have four choices. Pick the ONE that fits the idea best.
 
-  calm
-    LTX-2 Distilled. Best for: portraits, still subjects, breathing-photograph
-    scenes, observational moments, atmosphere, environment-only motion (light
-    shifting, steam rising, curtains stirring, water rippling). Subject does
-    NOT move. Fastest model.
-
   action
-    Wan2.1 I2V 480P. Best for: kinetic motion, action verbs (running, jumping,
-    erupting, dancing, fighting, surging), facial expressions changing,
-    dramatic body motion, scenes where the subject is actively doing something.
+    Wan2.1 I2V 480P. Best for: any subject that should ACT, MOVE, GESTURE, or
+    DO something -- people talking, animals moving, anchors anchoring, dancers
+    dancing, kinetic motion of any kind. Facial expressions changing, body
+    moving, props in use. This is the right pick whenever the photo shows a
+    subject who would plausibly be doing something rather than posing.
 
   action_hd
-    Wan2.1 I2V 720P. Same character as 'action' but higher resolution. Pick
-    ONLY if the user explicitly asks for high quality / HD / delivery / sharp /
-    professional output AND the idea is kinetic.
+    Wan2.1 I2V 720P. Same as 'action' but 720p. Pick ONLY when the user
+    explicitly asks for HD / high-quality / delivery / sharp / professional
+    output AND the idea is kinetic.
+
+  calm
+    LTX-2 Distilled. The subject does NOT move at all. Only environment moves
+    (light shifting, steam rising, curtains stirring, water rippling). Pick
+    this ONLY for clearly atmospheric or still-life ideas: a misty landscape,
+    a sunset, a quiet object on a table, a "breathing photograph" mood the
+    user has explicitly asked for. Do NOT pick this just because the photo is
+    a portrait -- portraits of people / characters / animals almost always
+    want the subject to move.
 
   long_story
-    LTX-2 Dev13B. Pick ONLY for multi-clip stories of 4+ clips where the scene
-    must be preserved (subject still, environment-only motion) across the
-    entire story. Slower than 'calm' but holds identity longer.
+    LTX-2 Dev13B. Pick ONLY for explicit still-life multi-clip stories of 4+
+    clips where the scene must be preserved across the whole story. Same
+    no-subject-motion rule as 'calm'. Almost never the right pick.
 
-Default to 'calm' for ambiguous cases (portraits, scenes, atmosphere).
-Default to 'action' for clearly kinetic ideas.
+When in doubt, pick 'action'. A user generating a video almost always wants
+motion. Stationary clips are the worst possible failure mode -- if the user
+wanted a still image they would not be generating a video.
 
 Return ONLY this JSON, no other text:
-{"pick": "calm" | "action" | "action_hd" | "long_story", "reason": "one short sentence"}
+{"pick": "action" | "action_hd" | "calm" | "long_story", "reason": "one short sentence"}
 """
 
 
@@ -372,46 +378,77 @@ def _auto_pick_model(
 ) -> tuple[str, str, str]:
     """Classify the user's idea and return (model_name, motion_style, reason).
 
-    Falls back to ('LTX-2 Dev19B Distilled', 'calm', 'default') on any error
-    so a flaky LLM call can never block a job from running.
+    Fallback default is the 'action' bucket (Wan I2V 480P + dynamic motion),
+    NOT calm. When the classifier fails, ship motion -- stationary output is
+    the worst possible failure mode for a video tool. If the user actually
+    wanted a still-life mood, they can toggle Auto-pick off and choose Photo
+    Mood manually.
     """
     from core.llm_client import TIER_FAST, parse_json_response
 
     idea_clean = (idea or "").strip()
-    if not idea_clean:
-        return ("LTX-2 Dev19B Distilled", "calm", "no idea -- using calm default")
+    if not idea_clean and not photo_b64:
+        # No idea, no photo -- can't classify. Ship motion-by-default.
+        return ("Wan2.1-I2V-14B-480P", "dynamic", "no idea -- action default")
 
     user_msg = (
-        f"User idea: {idea_clean}\n"
+        f"User idea: {idea_clean or '(no explicit idea given)'}\n"
         f"Number of clips planned: {n_clips}\n"
         f"User asked for HD/high-quality output: {'yes' if user_requested_hd else 'no'}\n\n"
         f"Pick the best model."
     )
 
-    try:
-        if photo_b64:
+    def _try_parse(text: str) -> tuple[str, str] | None:
+        """Return (pick, reason) on success, None on failure."""
+        data = parse_json_response(text)
+        pick = (data or {}).get("pick", "").strip().lower() if isinstance(data, dict) else ""
+        reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
+        if pick in _PICK_TO_MODEL:
+            return (pick, reason or pick)
+        return None
+
+    # Step 1: vision call via Ollama (NSFW-safe, photo stays on-device).
+    if photo_b64:
+        try:
             text = llm_router.route_vision(
                 user_msg, [photo_b64],
                 tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
                 force_provider="ollama", format_json=True,
             )
-        else:
-            text = llm_router.route(
-                [{"role": "user", "content": user_msg}],
-                tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
-            )
-        data = parse_json_response(text)
-        pick = (data or {}).get("pick", "").strip().lower() if isinstance(data, dict) else ""
-        reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
-        if pick in _PICK_TO_MODEL:
-            model, motion = _PICK_TO_MODEL[pick]
-            log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason or pick)
-            return (model, motion, reason or pick)
-        log.warning("[auto-pick] LLM returned unrecognised pick %r -- falling back to calm", pick)
-    except Exception as e:
-        log.warning("[auto-pick] failed (%s) -- falling back to calm", e)
+            log.info("[auto-pick] ollama vision returned %d chars: %r", len(text or ""), (text or "")[:200])
+            parsed = _try_parse(text or "")
+            if parsed:
+                pick, reason = parsed
+                model, motion = _PICK_TO_MODEL[pick]
+                log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason)
+                return (model, motion, reason)
+            log.warning("[auto-pick] ollama vision returned no usable pick -- trying text-only cloud")
+        except Exception as e:
+            log.warning("[auto-pick] ollama vision failed (%s) -- trying text-only cloud", e)
 
-    return ("LTX-2 Dev19B Distilled", "calm", "fallback")
+    # Step 2: text-only fallback. Safe to use cloud (Anthropic/OpenAI) since we
+    # never send the photo on this path -- only the user's idea text. If the
+    # primary provider chain runs cloud-first the request goes to Sonnet/GPT;
+    # otherwise it hits Ollama text again, which is more reliable than vision.
+    try:
+        text = llm_router.route(
+            [{"role": "user", "content": user_msg}],
+            tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
+        )
+        log.info("[auto-pick] text fallback returned %d chars: %r", len(text or ""), (text or "")[:200])
+        parsed = _try_parse(text or "")
+        if parsed:
+            pick, reason = parsed
+            model, motion = _PICK_TO_MODEL[pick]
+            log.info("[auto-pick] '%s' -> %s (%s) -- %s [text fallback]", idea_clean[:60], model, motion, reason)
+            return (model, motion, reason)
+        log.warning("[auto-pick] text fallback returned no usable pick -- defaulting to action")
+    except Exception as e:
+        log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
+
+    # Step 3: hard fallback -- ship motion. 'action' = Wan I2V 480P + dynamic.
+    # Anything that produces movement beats a ken-burns slideshow.
+    return ("Wan2.1-I2V-14B-480P", "dynamic", "fallback-action")
 
 
 @router.post("/make-it")
