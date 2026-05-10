@@ -583,26 +583,25 @@ def _kill_procs_on_port(port: int, label: str) -> None:
 
 
 def _kill_by_cmdline(script: str, label: str) -> None:
-    """Kill all processes whose command line contains script name (wmic backstop).
+    """Kill all processes whose command line contains script name.
 
+    Uses PowerShell Get-WmiObject (works on Windows 11 where wmic is removed).
     Catches non-LISTENING orphans that survive the port-based kill.
     """
     own = os.getpid()
     try:
+        ps_cmd = (
+            "Get-WmiObject Win32_Process | "
+            f"Where-Object {{ $_.CommandLine -like '*{script}*' }} | "
+            "Select-Object ProcessId | "
+            "ForEach-Object { $_.ProcessId }"
+        )
         r = subprocess.run(
-            ["wmic", "process", "where",
-             f"commandline like '%{script}%'",
-             "get", "processid,commandline", "/format:csv"],
-            capture_output=True, text=True, timeout=10,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15,
         )
         for line in r.stdout.splitlines():
-            line = line.strip()
-            if not line or line.startswith("Node,"):
-                continue
-            parts = line.split(",")
-            if len(parts) < 2:
-                continue
-            pid_s = parts[-1].strip()
+            pid_s = line.strip()
             if not pid_s.isdigit():
                 continue
             pid = int(pid_s)
