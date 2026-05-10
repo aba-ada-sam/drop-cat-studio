@@ -606,22 +606,21 @@ def main() -> None:
         except ImportError:
             pass
 
-        port, _ = read_port_file()
-        server_alive = port and server_responds(port)
+        existing_alive = find_running_server()
 
-        if server_alive:
-            log.info("Already running on port %d — re-opening window", port)
+        if existing_alive and not other_pid:
+            # Mutex held by an undetectable process and server is alive -- just open.
+            log.info("Server on port %d alive, no trackable manager — opening window", existing_alive)
             _show_opening_splash()
             sys.exit(0)
         else:
-            # Stale manager holding mutex but server is dead — kill it and take over.
+            # Kill any stuck manager so WE take over Chrome tracking and shutdown.
             if other_pid:
-                log.info("Stale manager PID %d (server dead) — taking over", other_pid)
+                log.info("Replacing stuck manager PID %d — taking over Chrome tracking", other_pid)
                 kill_pid(other_pid)
                 time.sleep(0.5)
-            else:
-                log.info("Mutex held but no manager found and server dead — taking over")
-            clear_port_file()
+            if not existing_alive:
+                clear_port_file()
             # Release and re-acquire the mutex under our PID
             _k32.ReleaseMutex(_MUTEX_HANDLE)
             _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
