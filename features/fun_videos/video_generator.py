@@ -423,6 +423,9 @@ def merge_video_audio(video_path: str, audio_path: str, out_path: str, log_fn=No
         "-i", audio_path,
         "-map", "0:v", "-map", "1:a",
         "-c:v", "copy",
+        # loudnorm brings the whole track to -14 LUFS so quiet intros
+        # play at the same perceived level as the main musical section.
+        "-af", "loudnorm=I=-14:TP=-2:LRA=11",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest",
         "-movflags", "+faststart",

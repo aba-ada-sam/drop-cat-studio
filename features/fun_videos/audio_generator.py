@@ -5,7 +5,9 @@ Based on the battle-tested DropCatGo-Fun-Videos_w_Audio/audio_generator.py.
 """
 import json
 import logging
+import re as _re_sil
 import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -204,7 +206,7 @@ def generate_audio(
     payload = {
         "prompt": effective_prompt,
         "lyrics": effective_lyrics,
-        "chunk_mask_mode": "auto",
+        "chunk_mask_mode": "none",
         "thinking": False,
         "audio_duration": duration,
         "audio_format": audio_format,
@@ -268,6 +270,60 @@ def generate_audio(
 
     if dest.exists() and dest.stat().st_size > 0:
         log.info("Audio saved: %s", dest)
+        _trim_silence_tail(str(dest))
         return str(dest), None
 
     return None, "Downloaded audio file is empty"
+
+
+def _trim_silence_tail(audio_path: str, threshold_db: float = -45.0) -> None:
+    """In-place trim of trailing silence, with 0.8s fade-out.
+
+    ACE-Step frequently pads generated audio with 3-6 seconds of silence at
+    the end. Trimming it prevents a silent tail in the final merged video.
+    """
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-of", "default",
+             "-show_entries", "format=duration", audio_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        total_dur = None
+        for line in probe.stdout.splitlines():
+            if line.startswith("duration="):
+                try:
+                    total_dur = float(line.split("=", 1)[1])
+                except ValueError:
+                    pass
+        if not total_dur or total_dur < 4.0:
+            return
+
+        r = subprocess.run(
+            ["ffmpeg", "-i", audio_path,
+             "-af", f"silencedetect=n={threshold_db}dB:d=0.4",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        starts = [float(m) for m in _re_sil.findall(r"silence_start: ([0-9.]+)", r.stderr)]
+        if not starts:
+            return
+        last_start = starts[-1]
+        # Only trim if trailing silence is more than 1.5 seconds
+        if total_dur - last_start < 1.5:
+            return
+        trim_end = min(last_start + 0.3, total_dur)
+        fade_start = max(0.0, trim_end - 0.8)
+        tmp = audio_path + ".strim"
+        r2 = subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path,
+             "-t", f"{trim_end:.3f}",
+             "-af", f"afade=t=out:st={fade_start:.3f}:d=0.8",
+             tmp],
+            capture_output=True, timeout=60,
+        )
+        if r2.returncode == 0 and Path(tmp).exists():
+            import os as _os
+            _os.replace(tmp, audio_path)
+            log.info("[audio] Trimmed trailing silence %.1fs->%.1fs", total_dur, trim_end)
+    except Exception as e:
+        log.warning("[audio] Silence trim failed: %s", e)
