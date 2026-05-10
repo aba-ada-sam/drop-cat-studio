@@ -180,7 +180,7 @@ PROMPT SHAPE (use this exact structure, every clip):
   2. ENVIRONMENT MOTION (12-18 words): ONE environmental change from the ALLOWED list.
      Must be physically present in or plausible from the original scene.
   3. SCENE ANCHOR (8-12 words): setting + visual style, restated every clip.
-  4. STABILIZER (fixed, always last): "180-degree shutter, natural motion blur, static frame."
+  4. CAMERA LOCK (fixed, always last): "no zoom, no pan, no camera movement."
 
 ARC: same scene, one different environmental detail per clip.
 Clips feel like a breathing photograph, not an action sequence.
@@ -384,7 +384,7 @@ Rate each clip 1-5:
 For clips rated <= 2: write a corrected calm prompt (35-55 words, environment-only motion).
   - Subject described as completely still
   - ONE environmental change only (light shift, steam, shadow, fabric settle, curtain stir)
-  - Add stabilizer phrase at end: "180-degree shutter, natural motion blur, static frame."
+  - Add camera lock phrase at end: "no zoom, no pan, no camera movement."
 Apply TYPE rules:
   TYPE A (people/characters): name their visual markers (hair, clothing, skin) -- no body motion
   TYPE B (landscape/objects): describe background element change only

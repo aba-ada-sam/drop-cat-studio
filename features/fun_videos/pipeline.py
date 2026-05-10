@@ -41,7 +41,7 @@ _PROMPT_SUFFIXES = {
     "ltx":      "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
     # Calm mode: environment-only motion. Subject-motion keywords directly contradict
     # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
-    "ltx_calm": "natural atmospheric motion, smooth temporal consistency, photorealistic, high quality",
+    "ltx_calm": "gentle atmospheric motion, environment moves, subject frozen still, no zoom, no pan, no camera movement, photorealistic, high quality",
     "wan":      "smooth animation, photorealistic, high quality, detailed",
 }
 
