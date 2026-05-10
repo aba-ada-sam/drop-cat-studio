@@ -1,4 +1,4 @@
-"""LLM router — dispatches AI calls to Ollama, Anthropic, or OpenAI.
+"""LLM router -- dispatches AI calls to Ollama, Anthropic, or OpenAI.
 
 Provider is read from config at call time so it can be hot-switched in Settings.
 Default is Ollama (local, no API key needed).
@@ -37,7 +37,7 @@ class LLMRouter:
     """
 
     def __init__(self, client):
-        """client: LLMClient instance (Ollama) — used when provider=ollama."""
+        """client: LLMClient instance (Ollama) -- used when provider=ollama."""
         self._client = client
         self._stats = {"ok": 0, "errors": 0, "retries": 0}
 
@@ -98,7 +98,7 @@ class LLMRouter:
     def stats(self) -> dict:
         return dict(self._stats)
 
-    # ── Anthropic ─────────────────────────────────────────────────────────────
+    # -- Anthropic -------------------------------------------------------------
 
     def _anthropic_chat(self, messages, tier, max_tokens, system):
         import anthropic
@@ -115,7 +115,7 @@ class LLMRouter:
             kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
         if not resp.content:
-            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) — possible content policy refusal")
+            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) -- possible content policy refusal")
         return desanitize(resp.content[0].text)
 
     def _anthropic_vision(self, prompt, images_b64, tier, max_tokens, system):
@@ -140,10 +140,10 @@ class LLMRouter:
             kwargs["system"] = sanitize(system)
         resp = client.messages.create(**kwargs)
         if not resp.content:
-            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) — possible content policy refusal")
+            raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) -- possible content policy refusal")
         return desanitize(resp.content[0].text)
 
-    # ── OpenAI ────────────────────────────────────────────────────────────────
+    # -- OpenAI ----------------------------------------------------------------
 
     def _openai_chat(self, messages, tier, max_tokens, system):
         from openai import OpenAI
@@ -166,7 +166,7 @@ class LLMRouter:
         )
         if not resp.choices or resp.choices[0].message.content is None:
             reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
-            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) — possible content policy refusal")
+            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) -- possible content policy refusal")
         return desanitize(resp.choices[0].message.content)
 
     def _openai_vision(self, prompt, images_b64, tier, max_tokens, system):
@@ -192,10 +192,10 @@ class LLMRouter:
         )
         if not resp.choices or resp.choices[0].message.content is None:
             reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
-            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) — possible content policy refusal")
+            raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) -- possible content policy refusal")
         return desanitize(resp.choices[0].message.content)
 
-    # ── Retry ─────────────────────────────────────────────────────────────────
+    # -- Retry -----------------------------------------------------------------
 
     def _call_with_retry(self, fn, max_attempts: int = 3, provider: str | None = None) -> str:
         last_exc = None

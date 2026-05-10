@@ -1,4 +1,4 @@
-"""LLM client backed by local Ollama — no API keys required.
+"""LLM client backed by local Ollama -- no API keys required.
 
 Replaces the Anthropic/OpenAI client. All AI calls route through the local
 Ollama daemon (http://localhost:11434 by default). Models are selected by
@@ -20,7 +20,7 @@ _ollama_lock = threading.Lock()
 
 log = logging.getLogger(__name__)
 
-# AI model tiers — tasks mapped to speed/quality
+# AI model tiers -- tasks mapped to speed/quality
 TIER_FAST     = "fast"      # quick responses, lighter model
 TIER_BALANCED = "balanced"  # all-round quality
 TIER_POWER    = "power"     # deep analysis, best model
@@ -49,7 +49,7 @@ def _extract_content(resp) -> str:
     if content.strip():
         return content
 
-    # Content empty — fall back to thinking field (Ollama 0.9+ with thinking models).
+    # Content empty -- fall back to thinking field (Ollama 0.9+ with thinking models).
     # qwen3-vl sometimes puts the entire answer inside the thinking chain even when
     # think=False is requested. The actual JSON is usually the last code-fenced block
     # or the last balanced JSON object in the reasoning text.
@@ -191,7 +191,7 @@ class LLMClient:
         format_json: bool = False,
     ) -> str:
         """Send a vision request to Ollama. Always uses the vision model (qwen3-vl),
-        not the text-tier models — text-only models silently ignore images."""
+        not the text-tier models -- text-only models silently ignore images."""
         import time
         model = self._vision_model
         log.info("Ollama vision call: model=%s images=%d max_tokens=%d", model, len(images_b64), max_tokens)
@@ -234,7 +234,7 @@ class LLMClient:
             return False
 
 
-# ── Response parsing helpers ─────────────────────────────────────────────────
+# -- Response parsing helpers -------------------------------------------------
 
 def parse_json_response(text: str) -> dict | list | None:
     """Extract JSON from an LLM response that may contain markdown fences.
