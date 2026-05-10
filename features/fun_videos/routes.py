@@ -480,13 +480,37 @@ async def brainstorm(request: Request):
     llm_router = get_llm_router()
 
     body = await request.json()
-    image_path = _resolve_path(body.get("image_path", ""))
+    raw_image_path = body.get("image_path", "")
+    image_path = _resolve_path(raw_image_path)
     message    = body.get("message", "").strip()
     history    = body.get("history", [])
     mode       = body.get("mode", "video")
 
     if not message:
         raise HTTPException(400, "message required")
+
+    # Loud failure beats silent hallucination: if the client sent an
+    # image_path that doesn't resolve to a real file (e.g. a blob: URL leak,
+    # a deleted upload, a bad path), and the user's message clearly expects
+    # a photo to be present, refuse rather than fall through to text-only
+    # mode -- which is what produced "elephant in a sharp red suit" from a
+    # photo of Big Buck Bunny.
+    photo_expected = any(s in message.lower() for s in (
+        "look at the photo", "the photo", "from the image", "from your photo",
+        "the image", "from photo", "this picture",
+    ))
+    if raw_image_path and not (image_path and os.path.isfile(image_path)):
+        log.warning(
+            "brainstorm: image_path=%r did not resolve to a real file (resolved=%r) -- "
+            "the client likely sent a blob: URL or stale path",
+            raw_image_path, image_path,
+        )
+        if photo_expected:
+            raise HTTPException(
+                400,
+                "Image upload not finished -- wait a moment and click again. "
+                "(image_path did not resolve to a real file on disk)",
+            )
 
     if mode == "sd_prompt":
         system = (
