@@ -317,7 +317,7 @@ async def make_it(request: Request):
         "video_steps": body.get("steps", config.get("fun_video_steps", 30)),
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
-        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 20)),
+        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 8)),
         "audio_guidance": body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental": body.get("instrumental", config.get("fun_audio_instrumental", True)),
         "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),

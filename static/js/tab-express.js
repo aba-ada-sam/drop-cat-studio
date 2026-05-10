@@ -51,8 +51,8 @@ export function init(panel) {
   const MODEL_DEFAULTS = {
     'LTX-2 Dev19B Distilled': { steps: 12, guidance: 3.0, duration: 5 },
     'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 5 },
-    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 5.5, duration: 5 },
-    'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 5.5, duration: 5 },
+    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 5 },
+    'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 5 },
     'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 5 },
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 5 },
   };

@@ -233,10 +233,18 @@ def _generate_story_arc(
     style_hint = {"calm": "CALM -- environment-only motion, subject completely still"}.get(
         resolved_style, "LTX -- use gentle motion only" if is_ltx else "Wan I2V -- kinetic action OK"
     )
+    # In calm mode, prefix the idea with a hard reminder so the LLM overrides any
+    # kinetic words the user (or a JS default) may have included in the prompt.
+    # The system prompt already bans "erupts, slams" etc., but a repeated prompt-level
+    # note prevents the LLM from treating the user idea as higher-priority than the rules.
+    if resolved_style == "calm":
+        idea_display = f"[CALM MODE -- translate this idea into environment-only, subject-still motion]\n{idea_text}"
+    else:
+        idea_display = idea_text
     user_msg = (
         f"Target video model: {model_name or 'unknown'} ({style_hint})\n"
         f"Motion style: {resolved_style}\n"
-        f"Initial idea: {idea_text}\n"
+        f"Initial idea: {idea_display}\n"
         f"Number of clips: {n_clips}\n"
         f"Target total story length: {int(total_secs)}s\n\n"
         f"Generate exactly {n_clips} sequential motion prompts as a story arc.\n\n"

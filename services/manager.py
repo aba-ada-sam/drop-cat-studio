@@ -135,21 +135,18 @@ def _kill_stale_gpu_processes() -> None:
     ]
     for pattern, label in patterns:
         try:
+            ps_cmd = (
+                "Get-WmiObject Win32_Process | "
+                f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+                "Select-Object ProcessId | "
+                "ForEach-Object { $_.ProcessId }"
+            )
             result = subprocess.run(
-                ["wmic", "process", "where",
-                 f"commandline like '%{pattern}%'",
-                 "get", "processid,commandline", "/format:csv"],
-                capture_output=True, text=True, timeout=10,
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=15,
             )
             for line in result.stdout.splitlines():
-                line = line.strip()
-                if not line or line.startswith("Node,"):
-                    continue
-                parts = line.split(",")
-                # CSV format: Node,CommandLine,ProcessId
-                if len(parts) < 2:
-                    continue
-                pid_str = parts[-1].strip()
+                pid_str = line.strip()
                 if not pid_str.isdigit():
                     continue
                 pid = int(pid_str)
