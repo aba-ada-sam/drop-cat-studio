@@ -526,9 +526,35 @@ export function init(panel) {
 
   const modelSel  = el('select', { style: 'width:100%;' });
   const modelInfo = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:3px;' });
+  // Auto-pick toggle. Default OFF here -- advanced users have a model dropdown
+  // because they want to choose. When toggled on, server classifies the idea
+  // and overrides the model; the dropdown greys out so the source of truth is
+  // visually clear.
+  let _autoPick = false;
+  const autoPickChk = el('input', {
+    type: 'checkbox', id: 'fv-auto-pick',
+    style: 'cursor:pointer; width:14px; height:14px; flex-shrink:0;',
+  });
+  const autoPickRow = el('label', {
+    for: 'fv-auto-pick',
+    style: 'display:flex; align-items:center; gap:6px; cursor:pointer; font-size:.72rem; color:var(--text-2); margin-top:4px;',
+    title: 'Let AI pick the best model for your idea. Off by default so your selection wins.',
+  }, [
+    autoPickChk,
+    el('span', { text: 'Auto-pick model from idea' }),
+  ]);
+  function _applyFvAutoPickState() {
+    modelSel.disabled = _autoPick;
+    modelSel.style.opacity = _autoPick ? '0.4' : '1';
+    modelSel.title = _autoPick ? 'Turn off Auto-pick to choose manually' : '';
+  }
+  autoPickChk.addEventListener('change', () => {
+    _autoPick = autoPickChk.checked;
+    _applyFvAutoPickState();
+  });
   topGrid.appendChild(el('div', {}, [
     el('label', { text: 'Model', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
-    modelSel, modelInfo,
+    modelSel, modelInfo, autoPickRow,
   ]));
 
   const seedIn = el('input', { type: 'number', value: '-1', style: 'width:100%;' });
@@ -958,6 +984,7 @@ export function init(panel) {
       start_video_path: _startVideoPath || null,
       output_width:     _fvOutW,
       output_height:    _fvOutH,
+      auto_pick_model:  _autoPick,
     };
   }
 

@@ -30,10 +30,16 @@ export function init(panel) {
     { label: '4:3',  value: '4:3',  rw: 4,  rh: 3  },
     { label: '3:4',  value: '3:4',  rw: 3,  rh: 4  },
   ];
+  // Renamed from Fast/Quality/HD because those labels implied a monotonic
+  // spectrum (higher = better) and novices picked Quality expecting strict
+  // improvement. In reality each model has a different motion character:
+  //   Photo Mood -- LTX Distilled, best for calm/still subjects, ~1-2 min
+  //   Action     -- Wan I2V 480P, best for kinetic motion, ~5-15 min
+  //   Action HD  -- Wan I2V 720P, same as Action but 720p, ~10-20 min
   const QUALITIES = [
-    { id: 'fast',    label: 'Fast',    px: 480, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- ~1-2 min per clip, any aspect ratio' },
-    { id: 'quality', label: 'Quality', px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- richer motion, ~5-15 min per clip' },
-    { id: 'hd',      label: 'HD',      px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- highest quality, ~10-20 min per clip' },
+    { id: 'fast',    label: 'Photo Mood', px: 480, model: 'LTX-2 Dev19B Distilled', maxSec: 20, hint: 'LTX-2 -- calm/still subjects, breathing-photograph style, ~1-2 min per clip, any aspect ratio' },
+    { id: 'quality', label: 'Action',     px: 480, model: 'Wan2.1-I2V-14B-480P',    maxSec: 16, hint: 'Wan2.1 480P -- kinetic motion, action shots, dramatic verbs, ~5-15 min per clip' },
+    { id: 'hd',      label: 'Action HD',  px: 720, model: 'Wan2.1-I2V-14B-720P',    maxSec: 12, hint: 'Wan2.1 720P -- same as Action but 720p delivery quality, ~10-20 min per clip' },
   ];
 
   // Which ratios each model natively supports well.
@@ -66,6 +72,10 @@ export function init(panel) {
   let _qualityPx  = 480;
   let _outW       = 864;
   let _outH       = 480;
+  // Auto-pick: when on (default for Express), the server classifies the idea
+  // and picks the best model behind the scenes. Manual chip selection is
+  // disabled visually so users see what's happening. Toggle off to manual.
+  let _autoPick   = true;
 
   function _computeDims(ratioStr, qualityPx) {
     const [rw, rh] = ratioStr.split(':').map(Number);
@@ -495,7 +505,37 @@ export function init(panel) {
   });
   _ratioHint = ratioHintEl;
 
+  // Auto-pick toggle. When on, the server classifies the user's idea + photo
+  // and picks the model+motion silently. Greys out the Quality chips so it's
+  // visually clear they're not driving anything.
+  const autoPickChk = el('input', {
+    type: 'checkbox', id: 'express-auto-pick',
+    style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;',
+  });
+  autoPickChk.checked = _autoPick;
+  const autoPickRow = el('label', {
+    for: 'express-auto-pick',
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:.78rem; color:var(--text-2);',
+    title: 'Let AI pick the best model based on your idea. Turn off to choose manually below.',
+  }, [
+    autoPickChk,
+    el('span', { text: 'Auto-pick best model for my idea' }),
+  ]);
+
+  function _applyAutoPickState() {
+    qualRow.style.opacity = _autoPick ? '0.4' : '1';
+    qualRow.style.pointerEvents = _autoPick ? 'none' : 'auto';
+    qualRow.title = _autoPick ? 'Turn off Auto-pick to choose manually' : '';
+  }
+  autoPickChk.addEventListener('change', () => {
+    _autoPick = autoPickChk.checked;
+    _applyAutoPickState();
+  });
+  // Set initial greyed state (Auto-pick defaults ON for Express)
+  _applyAutoPickState();
+
   const advancedInner = el('div', { style: 'display:flex; flex-direction:column; gap:10px; padding-top:10px; border-top:1px solid var(--border-2); margin-top:4px;' }, [
+    autoPickRow,
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
       qualRow,
@@ -858,6 +898,7 @@ export function init(panel) {
           model: _model, duration: _duration,
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
+          auto_pick_model: _autoPick,
         }),
       });
       _jobId = job_id;
@@ -1019,6 +1060,7 @@ export function init(panel) {
           instrumental:    false,
           output_width:    _outW,
           output_height:   _outH,
+          auto_pick_model: _autoPick,
         }),
       });
       _jobId = job_id;

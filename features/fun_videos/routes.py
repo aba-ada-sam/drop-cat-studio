@@ -304,6 +304,116 @@ async def refine_prompt(request: Request):
         raise HTTPException(500, str(e))
 
 
+# -- Auto-pick model -----------------------------------------------------------
+
+# Maps the LLM's classification verdict to a (model_name, motion_style) pair.
+# These are the same six models advertised in MODELS / wangp_models.py.
+#
+#   calm        -> LTX-2 Distilled (calm). Fast, holds the source photo, ideal
+#                  for breathing-photograph / observational scenes.
+#   action      -> Wan2.1-I2V-14B-480P (dynamic). Strong subject anchoring
+#                  through kinetic motion. The model that survives action verbs.
+#   action_hd   -> Wan2.1-I2V-14B-720P (dynamic). Same character as action but
+#                  720p output. Picked only when the LLM thinks delivery quality
+#                  matters more than speed.
+#   long_story  -> LTX-2 Dev13B (calm). Full denoising, better identity across
+#                  4+ chained clips. Picked when the idea reads as a longer arc
+#                  AND scene preservation matters more than action.
+#
+# T2V models are intentionally NOT in the auto-pick set: every Express/Fun-Videos
+# job has a photo, so I2V is always the right family. T2V stays manual-only.
+
+_PICK_TO_MODEL = {
+    "calm":       ("LTX-2 Dev19B Distilled", "calm"),
+    "action":     ("Wan2.1-I2V-14B-480P",    "dynamic"),
+    "action_hd":  ("Wan2.1-I2V-14B-720P",    "dynamic"),
+    "long_story": ("LTX-2 Dev13B",           "calm"),
+}
+
+_AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea.
+
+You have four choices. Pick the ONE that fits the idea best.
+
+  calm
+    LTX-2 Distilled. Best for: portraits, still subjects, breathing-photograph
+    scenes, observational moments, atmosphere, environment-only motion (light
+    shifting, steam rising, curtains stirring, water rippling). Subject does
+    NOT move. Fastest model.
+
+  action
+    Wan2.1 I2V 480P. Best for: kinetic motion, action verbs (running, jumping,
+    erupting, dancing, fighting, surging), facial expressions changing,
+    dramatic body motion, scenes where the subject is actively doing something.
+
+  action_hd
+    Wan2.1 I2V 720P. Same character as 'action' but higher resolution. Pick
+    ONLY if the user explicitly asks for high quality / HD / delivery / sharp /
+    professional output AND the idea is kinetic.
+
+  long_story
+    LTX-2 Dev13B. Pick ONLY for multi-clip stories of 4+ clips where the scene
+    must be preserved (subject still, environment-only motion) across the
+    entire story. Slower than 'calm' but holds identity longer.
+
+Default to 'calm' for ambiguous cases (portraits, scenes, atmosphere).
+Default to 'action' for clearly kinetic ideas.
+
+Return ONLY this JSON, no other text:
+{"pick": "calm" | "action" | "action_hd" | "long_story", "reason": "one short sentence"}
+"""
+
+
+def _auto_pick_model(
+    llm_router,
+    idea: str,
+    photo_b64: str | None = None,
+    n_clips: int = 1,
+    user_requested_hd: bool = False,
+) -> tuple[str, str, str]:
+    """Classify the user's idea and return (model_name, motion_style, reason).
+
+    Falls back to ('LTX-2 Dev19B Distilled', 'calm', 'default') on any error
+    so a flaky LLM call can never block a job from running.
+    """
+    from core.llm_client import TIER_FAST, parse_json_response
+
+    idea_clean = (idea or "").strip()
+    if not idea_clean:
+        return ("LTX-2 Dev19B Distilled", "calm", "no idea -- using calm default")
+
+    user_msg = (
+        f"User idea: {idea_clean}\n"
+        f"Number of clips planned: {n_clips}\n"
+        f"User asked for HD/high-quality output: {'yes' if user_requested_hd else 'no'}\n\n"
+        f"Pick the best model."
+    )
+
+    try:
+        if photo_b64:
+            text = llm_router.route_vision(
+                user_msg, [photo_b64],
+                tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
+                force_provider="ollama", format_json=True,
+            )
+        else:
+            text = llm_router.route(
+                [{"role": "user", "content": user_msg}],
+                tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
+            )
+        data = parse_json_response(text)
+        pick = (data or {}).get("pick", "").strip().lower() if isinstance(data, dict) else ""
+        reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
+        if pick in _PICK_TO_MODEL:
+            model, motion = _PICK_TO_MODEL[pick]
+            log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason or pick)
+            return (model, motion, reason or pick)
+        log.warning("[auto-pick] LLM returned unrecognised pick %r -- falling back to calm", pick)
+    except Exception as e:
+        log.warning("[auto-pick] failed (%s) -- falling back to calm", e)
+
+    return ("LTX-2 Dev19B Distilled", "calm", "fallback")
+
+
 @router.post("/make-it")
 async def make_it(request: Request):
     from app import get_job_manager; job_manager = get_job_manager()
@@ -318,6 +428,32 @@ async def make_it(request: Request):
 
     config = cfg.load()
     requested_model = body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled"
+
+    # -- Auto-pick model (off by default for Fun Videos -- advanced users) ------
+    # When the caller sets auto_pick_model=True, classify the user's idea via a
+    # fast LLM call and override the model + motion style with the best match.
+    # Falls back silently to the requested model on any LLM error.
+    auto_picked_motion = None
+    if body.get("auto_pick_model"):
+        from app import get_llm_router
+        photo_b64 = None
+        if photo_path and os.path.isfile(photo_path):
+            try:
+                photo_b64 = encode_image_b64(photo_path)
+            except Exception:
+                photo_b64 = None
+        picked_model, picked_motion, pick_reason = await asyncio.to_thread(
+            _auto_pick_model,
+            get_llm_router(),
+            body.get("video_prompt", ""),
+            photo_b64,
+            1,  # single-clip
+            False,  # HD-intent inferred from idea text only for now
+        )
+        requested_model = picked_model
+        auto_picked_motion = picked_motion
+        log.info("[make-it] auto-pick chose %s (%s) -- %s", picked_model, picked_motion, pick_reason)
+
     # Reject T2V + photo upfront -- WanGP would otherwise silently log
     # "This model doesn't accept a Start Image" and the job fails with the
     # opaque "WanGP did not create any tasks" error.
@@ -414,6 +550,33 @@ async def make_it_multi(request: Request):
     else:
         n_clips = max(2, min(10, int(body.get("num_clips", config.get("fun_multi_num_clips", 2)))))
 
+    # -- Auto-pick model (default ON for Express, OFF for Fun Videos) -----------
+    # When auto_pick_model=True, classify the user's idea via a fast LLM call
+    # and override the model + motion style with the best match. Falls back
+    # silently to the requested model on any LLM error.
+    requested_model = body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled"
+    requested_motion = body.get("motion_style") or None
+    if body.get("auto_pick_model"):
+        from app import get_llm_router
+        photo_b64 = None
+        if photo_path and os.path.isfile(photo_path):
+            try:
+                photo_b64 = encode_image_b64(photo_path)
+            except Exception:
+                photo_b64 = None
+        picked_model, picked_motion, pick_reason = await asyncio.to_thread(
+            _auto_pick_model,
+            get_llm_router(),
+            body.get("video_prompt", ""),
+            photo_b64,
+            n_clips,
+            False,
+        )
+        requested_model = picked_model
+        requested_motion = picked_motion
+        log.info("[make-it-multi] auto-pick chose %s (%s, %d clips) -- %s",
+                 picked_model, picked_motion, n_clips, pick_reason)
+
     settings = {
         "video_prompt":    body.get("video_prompt", ""),
         "music_prompt":    body.get("music_prompt", ""),
@@ -421,7 +584,7 @@ async def make_it_multi(request: Request):
         "user_direction":  body.get("user_direction", ""),
         "num_clips":       n_clips,
         "clip_duration":   clip_dur,
-        "model_name":      body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled",
+        "model_name":      requested_model,
         "resolution":      body.get("resolution", config.get("resolution",       "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),
@@ -439,7 +602,7 @@ async def make_it_multi(request: Request):
         "upscale_scale":        float(body.get("upscale_scale", 2.0)),
         "upscale_method":       body.get("upscale_method", "ffmpeg"),
         "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
-        "motion_style":         body.get("motion_style") or None,
+        "motion_style":         requested_motion,
     }
 
     if photo_path:
