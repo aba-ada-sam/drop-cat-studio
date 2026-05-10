@@ -550,18 +550,86 @@ def show_splash(srv: ServerManager) -> None:
         srv._port = _skip_port[0]
 
 
+def _kill_procs_on_port(port: int, label: str) -> None:
+    """Kill all processes listening on port (including non-LISTENING ones via wmic)."""
+    try:
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                pid_s = parts[-1].strip()
+                if pid_s.isdigit() and int(pid_s) > 0:
+                    log.info("Killing %s on port %d (PID %s)", label, port, pid_s)
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", pid_s],
+                                   capture_output=True, timeout=5)
+    except Exception as e:
+        log.warning("Port kill %d failed: %s", port, e)
+
+
+def _kill_by_cmdline(script: str, label: str) -> None:
+    """Kill all processes whose command line contains script name (wmic backstop).
+
+    Catches non-LISTENING orphans that survive the port-based kill.
+    """
+    own = os.getpid()
+    try:
+        r = subprocess.run(
+            ["wmic", "process", "where",
+             f"commandline like '%{script}%'",
+             "get", "processid,commandline", "/format:csv"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("Node,"):
+                continue
+            parts = line.split(",")
+            if len(parts) < 2:
+                continue
+            pid_s = parts[-1].strip()
+            if not pid_s.isdigit():
+                continue
+            pid = int(pid_s)
+            if pid <= 0 or pid == own:
+                continue
+            log.info("Killing stale %s (PID %d) by cmdline scan", label, pid)
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=5)
+    except Exception as e:
+        log.warning("Cmdline kill for %s failed: %s", label, e)
+
+
 def _shutdown(srv: "ServerManager") -> None:
-    """Stop the server and GPU subprocesses, then exit the process."""
+    """Kill all DCS-related processes, then exit."""
     log.info("Shutting down")
+
+    # 1. Kill GPU workers by port (fast -- catches LISTENING processes)
+    _kill_procs_on_port(7899, "WanGP")
+    _kill_procs_on_port(8019, "ACE-Step")
+
+    # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
+    #    orphans that port kill misses, e.g. second worker that lost the port race)
+    _kill_by_cmdline("wangp_worker.py", "WanGP")
+    _kill_by_cmdline("api_server.py", "ACE-Step")
+
+    # 3. Also try via services module (uses tracked Popen handles -- most reliable
+    #    when app.py spawned the workers through the normal path)
     try:
         from services import manager as svc
-        # shutdown_all() uses three kill layers: proc handle, port scan, and
-        # wmic process-name scan. The last layer is the reliable backstop when
-        # _assign_to_job() failed (e.g. process already in Pinokio Job Object).
         svc.shutdown_all()
     except Exception as e:
-        log.warning("Service cleanup error: %s", e)
+        log.warning("Service module shutdown failed (non-fatal): %s", e)
+
+    # 4. Kill app.py: via tracked proc handle if we spawned it...
     srv.stop()
+
+    # 5. ...and via port file PID as backstop for when we attached to a
+    #    pre-existing server (srv._proc is None in that path)
+    _, server_pid = read_port_file()
+    if server_pid:
+        log.info("Killing app.py by port file PID %d", server_pid)
+        kill_pid(server_pid)
+
     clear_port_file()
     os._exit(0)
 
