@@ -1,6 +1,6 @@
-"""Song Video API routes — /api/song-video/*
+"""Song Video API routes -- /api/song-video/*
 
-Upload a song → analyze it (BPM, key, energy profile) → generate a music video
+Upload a song -> analyze it (BPM, key, energy profile) -> generate a music video
 that fits the song's duration using chained I2V clips.
 """
 import asyncio
@@ -117,10 +117,10 @@ async def generate(request: Request):
     Body:
         audio_path      str   path to uploaded audio file (required)
         photo_path      str   optional anchor image path
-        video_prompt    str   story idea / vibe (optional — AI fills if blank)
-        audio_analysis  dict  result from /analyze (optional — skips re-analysis)
+        video_prompt    str   story idea / vibe (optional -- AI fills if blank)
+        audio_analysis  dict  result from /analyze (optional -- skips re-analysis)
         model           str   WanGP model name
-        clip_duration   int   seconds per clip (8–20)
+        clip_duration   int   seconds per clip (8-20)
         num_clips       int   override clip count (auto-calculated from duration if omitted)
         steps           int
         guidance        float
@@ -136,7 +136,7 @@ async def generate(request: Request):
     photo_path = body.get("photo_path", "") or ""
 
     if not audio_path or not os.path.isfile(audio_path):
-        raise HTTPException(400, "Audio file not found — please re-upload the song")
+        raise HTTPException(400, "Audio file not found -- please re-upload the song")
     if photo_path and not os.path.isfile(photo_path):
         raise HTTPException(400, f"Image not found: {photo_path}")
 
