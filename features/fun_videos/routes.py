@@ -501,6 +501,13 @@ async def brainstorm(request: Request):
         system = (
             "You help users create AI video generation prompts and ACE-Step music directions.\n\n"
             "IDEA: 1-2 sentences describing vivid physical action in the video (what the subject DOES).\n"
+            "  - When a photo is provided, the subject and setting MUST match what is actually visible. "
+            "Never invent new characters, animals, or props that are not in the image. "
+            "If you can't tell what the subject is, describe motion that fits whatever is plainly visible.\n"
+            "  - Describe ONE concrete action a real camera could capture in 5 seconds. "
+            "BANNED words: transforms, becomes, reveals, establishes, unfolds, snaps to, the camera, we see. "
+            "These break downstream video generation -- use plain motion verbs instead "
+            "(swings, leans, lifts, turns, settles, drifts, rises, etc.).\n"
             "LYRIC DIRECTION: <=15 words. Format: \"[genre/energy], [lyric theme or voice]\". "
             "Pick something with real character -- match the mood and subject of the image. "
             "Examples: \"gypsy punk energy, sardonic lyrics about chaos\" | \"dark cabaret wit, ironic lyrics about vanity\" | \"dreamy lo-fi folk, wistful vocals\" | \"raw punk, confrontational\" | \"instrumental, no vocals\".\n\n"

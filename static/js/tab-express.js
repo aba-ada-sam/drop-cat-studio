@@ -329,9 +329,11 @@ export function init(panel) {
     try {
       const msg = existingIdea
         ? existingIdea
-        : 'Create a fun, high-energy video: describe dramatic physical movement or a wild transformation happening to the subject. ' +
-          'Also write a lyric direction for a song with real character and personality -- pick a style that actually fits the image: ' +
-          'could be gypsy punk energy, dark cabaret wit, dreamy folk, raw punk, world music, or anything with a distinctive voice. ' +
+        : 'Look at the photo. Describe ONE specific physical action the visible subject performs, rooted in what is actually shown -- their pose, setting, expression, props. ' +
+          'Do NOT invent characters, animals, or props that are not in the image. ' +
+          'Do NOT use the words transforms, becomes, reveals, establishes, unfolds, or "the camera". ' +
+          'Concrete physical motion only -- something a real camera could capture in 5 seconds. ' +
+          'Then write a lyric direction for a song that fits the image -- gypsy punk energy, dark cabaret wit, dreamy folk, raw punk, world music, or any distinctive voice. ' +
           'Avoid generic upbeat pop. Real sung lyrics with something to say, never instrumental.';
       const data = await _brainstorm(msg);
       if (data.reply) {
