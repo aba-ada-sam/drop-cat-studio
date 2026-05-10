@@ -949,7 +949,8 @@ def run_multi_pipeline(job, photo_path, settings):
 
     # ── Free VRAM before WanGP ────────────────────────────────────────────
     forge_unloaded = unload_checkpoint()
-    if not skip_audio:
+    try:
+      if not skip_audio:
         try:
             from services.manager import stop_service, acestep_alive
             if acestep_alive():
@@ -958,381 +959,376 @@ def run_multi_pipeline(job, photo_path, settings):
         except Exception as _e:
             log.debug("ACE-Step pre-stop skipped: %s", _e)
 
-    # ── Phase 1: Generate clips sequentially ──────────────────────────────
-    # Clips chain: clip_1 starts from the source photo; clips 2+ start from
-    # the last frame of the previous clip extracted as PNG (lossless).
-    # _chain_anchor trims each clip to _CHAIN_TRIM_RATIO of its generated
-    # length and pulls the actual last frame of the trimmed clip, so
-    # clip i ends on the same frame clip i+1 starts from. That makes
-    # hard-cut concat seamless and removes the visible fade.
-    # If anchoring fails for any clip, that clip resets to the source
-    # photo rather than failing the entire job. Every reanchor_every
-    # clips, we deliberately reset back to the source to break compounding
-    # quality drift on long stories.
+        # ── Phase 1: Generate clips sequentially ──────────────────────────────
+      # Clips chain: clip_1 starts from the source photo; clips 2+ start from
+      # the last frame of the previous clip extracted as PNG (lossless).
+      # _chain_anchor trims each clip to _CHAIN_TRIM_RATIO of its generated
+      # length and pulls the actual last frame of the trimmed clip, so
+      # clip i ends on the same frame clip i+1 starts from. That makes
+      # hard-cut concat seamless and removes the visible fade.
+      # If anchoring fails for any clip, that clip resets to the source
+      # photo rather than failing the entire job. Every reanchor_every
+      # clips, we deliberately reset back to the source to break compounding
+      # quality drift on long stories.
 
-    # Compress the clip-generation progress window when director passes will follow
-    # so there is room for review/re-shoot phases before the audio phase at 76%+.
-    _clip_pct_range = {0: 65, 1: 45, 2: 35}.get(director_passes, 35)
+      # Compress the clip-generation progress window when director passes will follow
+      # so there is room for review/re-shoot phases before the audio phase at 76%+.
+      _clip_pct_range = {0: 65, 1: 45, 2: 35}.get(director_passes, 35)
 
-    clip_paths: list[str] = []
-    clip_durations: list[float] = []     # actual probed durations for director frame extraction
-    prev_frame_path: str | None = None   # PNG chain frame from previous clip
+      clip_paths: list[str] = []
+      clip_durations: list[float] = []     # actual probed durations for director frame extraction
+      prev_frame_path: str | None = None   # PNG chain frame from previous clip
 
-    # Pre-process the original photo to exact WanGP dimensions
-    prepped_photo: str | None = None
-    if photo_path and os.path.isfile(photo_path):
-        prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
+      # Pre-process the original photo to exact WanGP dimensions
+      prepped_photo: str | None = None
+      if photo_path and os.path.isfile(photo_path):
+          prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
 
-    _last_error: list[str | None] = [None]
+      _last_error: list[str | None] = [None]
 
-    for i, clip_data in enumerate(story_arc):
-        if _stopped():
-            break
+      for i, clip_data in enumerate(story_arc):
+          if _stopped():
+              break
 
-        # story_arc entries are dicts {"prompt": str, "duration": float}
-        if isinstance(clip_data, dict):
-            clip_prompt  = clip_data.get("prompt", "")
-            this_clip_dur = max(4.0, min(15.0, float(clip_data.get("duration", clip_dur))))
-        else:
-            clip_prompt   = str(clip_data)
-            this_clip_dur = clip_dur
+          # story_arc entries are dicts {"prompt": str, "duration": float}
+          if isinstance(clip_data, dict):
+              clip_prompt  = clip_data.get("prompt", "")
+              this_clip_dur = max(4.0, min(15.0, float(clip_data.get("duration", clip_dur))))
+          else:
+              clip_prompt   = str(clip_data)
+              this_clip_dur = clip_dur
 
-        clip_num = i + 1
-        pct_start = 10 + int((i / n_clips) * _clip_pct_range)
-        pct_end   = 10 + int(((i + 1) / n_clips) * _clip_pct_range)
+          clip_num = i + 1
+          pct_start = 10 + int((i / n_clips) * _clip_pct_range)
+          pct_end   = 10 + int(((i + 1) / n_clips) * _clip_pct_range)
 
-        job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}...")
+          job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}...")
 
-        def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num):
-            pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
-            job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
+          def _video_progress(step, total, _s=pct_start, _e=pct_end, _cn=clip_num):
+              pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
+              job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
-        finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
-        # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
-        clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
-        clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+          finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
+          # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
+          clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
+          clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-        effective_guidance = guidance
+          effective_guidance = guidance
 
-        clip_path = None
-        for _attempt in range(2):
-            if _stopped():
-                break
-            if _attempt > 0:
-                # WanGP worker may have restarted (token mismatch, watchdog, etc.).
-                # Give it a few seconds to settle before retrying the clip.
-                _log(f"[info] Clip {clip_num}: retrying after worker restart...")
-                time.sleep(4)
-            try:
-                clip_path = video_generator.generate_video(
-                    image_path=clip_start_image,
-                    prompt=finalized,
-                    out_path=clip_out,
-                    duration=this_clip_dur,
-                    model_name=model_name,
-                    resolution=resolution,
-                    override_width=int(ow) if ow else None,
-                    override_height=int(oh) if oh else None,
-                    steps=steps,
-                    guidance=effective_guidance,
-                    seed=seed,
-                    negative_prompt=video_generator.negative_prompt_for(model_name),
-                    stop_check=_stopped,
-                    log_fn=_log,
-                    progress_fn=_video_progress,
-                )
-            except Exception as e:
-                err = str(e)
-                _log(f"[error] Clip {clip_num} failed (attempt {_attempt + 1}): {err}")
-                _last_error[0] = err
-                if "out of memory" in err.lower() or "cuda error" in err.lower():
-                    from services import manager as _svc
-                    threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
-                    break  # OOM: don't retry, abort loop
-                continue  # other exception: retry once
-            if clip_path:
-                break  # success
+          clip_path = None
+          for _attempt in range(2):
+              if _stopped():
+                  break
+              if _attempt > 0:
+                  # WanGP worker may have restarted (token mismatch, watchdog, etc.).
+                  # Give it a few seconds to settle before retrying the clip.
+                  _log(f"[info] Clip {clip_num}: retrying after worker restart...")
+                  time.sleep(4)
+              try:
+                  clip_path = video_generator.generate_video(
+                      image_path=clip_start_image,
+                      prompt=finalized,
+                      out_path=clip_out,
+                      duration=this_clip_dur,
+                      model_name=model_name,
+                      resolution=resolution,
+                      override_width=int(ow) if ow else None,
+                      override_height=int(oh) if oh else None,
+                      steps=steps,
+                      guidance=effective_guidance,
+                      seed=seed,
+                      negative_prompt=video_generator.negative_prompt_for(model_name),
+                      stop_check=_stopped,
+                      log_fn=_log,
+                      progress_fn=_video_progress,
+                  )
+              except Exception as e:
+                  err = str(e)
+                  _log(f"[error] Clip {clip_num} failed (attempt {_attempt + 1}): {err}")
+                  _last_error[0] = err
+                  if "out of memory" in err.lower() or "cuda error" in err.lower():
+                      from services import manager as _svc
+                      threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
+                      break  # OOM: don't retry, abort loop
+                  continue  # other exception: retry once
+              if clip_path:
+                  break  # success
 
-        if _stopped():
-            break
+          if _stopped():
+              break
 
-        if not clip_path:
-            _log(f"[error] Clip {clip_num} produced no output after retries -- stopping early")
-            break
+          if not clip_path:
+              _log(f"[error] Clip {clip_num} produced no output after retries -- stopping early")
+              break
 
-        clip_paths.append(clip_path)
-        _log(f"[info] Clip {clip_num}/{n_clips} complete")
+          clip_paths.append(clip_path)
+          _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
-        # Trim each clip and extract the chain anchor at the SAME timestamp
-        # so the next clip starts exactly where this one ends -- frame-exact
-        # hard-cut concat with no visible jump.
-        if i < len(story_arc) - 1:
-            frame_out = str(job_dir / f"frame_{i:02d}.png")
-            ok, new_dur = _chain_anchor(clip_path, frame_out)
-            clip_durations.append(new_dur)
-            if not ok:
-                log.warning("[multi] Chain anchor failed for clip %d -- next clip resets to source", i + 1)
-                prev_frame_path = None
-            elif reanchor_every > 0 and (i + 1) % reanchor_every == 0:
-                # Periodic re-anchor: clip (i+2) restarts from the source photo
-                # to break the compounding quality drift on long stories.
-                # Requires n_clips > reanchor_every to be worth doing.
-                if n_clips > reanchor_every:
-                    log.info("[multi] Re-anchoring clip %d back to source photo (every %d)",
-                             i + 2, reanchor_every)
-                    prev_frame_path = None
-                else:
-                    prev_frame_path = frame_out
-            else:
-                prev_frame_path = frame_out
-        else:
-            clip_durations.append(probe_duration(clip_path) or this_clip_dur)
+          # Trim each clip and extract the chain anchor at the SAME timestamp
+          # so the next clip starts exactly where this one ends -- frame-exact
+          # hard-cut concat with no visible jump.
+          if i < len(story_arc) - 1:
+              frame_out = str(job_dir / f"frame_{i:02d}.png")
+              ok, new_dur = _chain_anchor(clip_path, frame_out)
+              clip_durations.append(new_dur)
+              if not ok:
+                  log.warning("[multi] Chain anchor failed for clip %d -- next clip resets to source", i + 1)
+                  prev_frame_path = None
+              elif reanchor_every > 0 and (i + 1) % reanchor_every == 0:
+                  # Periodic re-anchor: clip (i+2) restarts from the source photo
+                  # to break the compounding quality drift on long stories.
+                  # Requires n_clips > reanchor_every to be worth doing.
+                  if n_clips > reanchor_every:
+                      log.info("[multi] Re-anchoring clip %d back to source photo (every %d)",
+                               i + 2, reanchor_every)
+                      prev_frame_path = None
+                  else:
+                      prev_frame_path = frame_out
+              else:
+                  prev_frame_path = frame_out
+          else:
+              clip_durations.append(probe_duration(clip_path) or this_clip_dur)
 
-    if _stopped():
-        if forge_unloaded:
-            reload_checkpoint()
-        return
+      if _stopped():
+          return
 
-    if not clip_paths:
-        if forge_unloaded:
-            reload_checkpoint()
-        raw = _last_error[0] or "No clips generated -- check WanGP is running"
-        raise RuntimeError(f"Multi-video failed: {raw}")
+      if not clip_paths:
+          raw = _last_error[0] or "No clips generated -- check WanGP is running"
+          raise RuntimeError(f"Multi-video failed: {raw}")
 
-    clips_end_pct = 10 + _clip_pct_range
-    job.update(progress=clips_end_pct, message=f"All {len(clip_paths)} clips done -- generating transitions...")
-    job.meta["clips_generated"] = len(clip_paths)
-    job.meta["clip_paths"] = clip_paths
+      clips_end_pct = 10 + _clip_pct_range
+      job.update(progress=clips_end_pct, message=f"All {len(clip_paths)} clips done -- generating transitions...")
+      job.meta["clips_generated"] = len(clip_paths)
+      job.meta["clip_paths"] = clip_paths
 
-    # ── Phase 2: Compile clips into one video ──────────────────────────────
-    # Clips are chained (each starts from the previous clip's last frame),
-    # so adjacent boundaries share the same frame. _chain_anchor aligned
-    # each clip's end with the next clip's start image, so a hard-cut concat
-    # is frame-exact -- crossfade or AI bridges would only add cross-dissolve
-    # sludge over already-seamless joins.
-    compile_pct = clips_end_pct + 1
-    job.update(progress=compile_pct, message="Compiling clips...")
-    concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
+      # ── Phase 2: Compile clips into one video ──────────────────────────────
+      # Clips are chained (each starts from the previous clip's last frame),
+      # so adjacent boundaries share the same frame. _chain_anchor aligned
+      # each clip's end with the next clip's start image, so a hard-cut concat
+      # is frame-exact -- crossfade or AI bridges would only add cross-dissolve
+      # sludge over already-seamless joins.
+      compile_pct = clips_end_pct + 1
+      job.update(progress=compile_pct, message="Compiling clips...")
+      concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
 
-    if not _concat_clips(clip_paths, concat_path):
-        log.warning("[multi] Concat failed -- using first clip only")
-        concat_path = clip_paths[0]
+      if not _concat_clips(clip_paths, concat_path):
+          log.warning("[multi] Concat failed -- using first clip only")
+          concat_path = clip_paths[0]
 
-    # ── Director passes (optional) ────────────────────────────────────────
-    # Each pass analyzes the assembled video, re-generates weak clips, and
-    # re-assembles. Audio is only generated on the final cut.
-    if director_passes >= 1 and not _stopped():
-        _pass_ranges = {
-            1: [(compile_pct + 2, 74)],
-            2: [(compile_pct + 2, 60), (61, 74)],
-        }.get(director_passes, [(compile_pct + 2, 74)])
+      # ── Director passes (optional) ────────────────────────────────────────
+      # Each pass analyzes the assembled video, re-generates weak clips, and
+      # re-assembles. Audio is only generated on the final cut.
+      if director_passes >= 1 and not _stopped():
+          _pass_ranges = {
+              1: [(compile_pct + 2, 74)],
+              2: [(compile_pct + 2, 60), (61, 74)],
+          }.get(director_passes, [(compile_pct + 2, 74)])
 
-        current_clips = clip_paths
-        current_durs = clip_durations
-        current_arc = story_arc
-        current_assembled = concat_path
+          current_clips = clip_paths
+          current_durs = clip_durations
+          current_arc = story_arc
+          current_assembled = concat_path
 
-        for pass_idx, (p_start, p_end) in enumerate(_pass_ranges):
-            if _stopped():
-                break
-            current_clips, current_durs, current_arc, current_assembled = _run_director_pass(
-                job=job, llm_router=llm_router,
-                clip_paths=current_clips, clip_durations=current_durs, story_arc=current_arc,
-                prepped_photo=prepped_photo, assembled_path=current_assembled,
-                settings=settings, job_dir=job_dir,
-                pass_num=pass_idx + 1, pct_start=p_start, pct_end=p_end,
-                _log=_log, _stopped=_stopped,
-                video_generator=video_generator,
-                model_name=model_name, resolution=resolution,
-                ow=ow, oh=oh, steps=steps, guidance=guidance, seed=seed,
-                motion_style=motion_style,
-            )
+          for pass_idx, (p_start, p_end) in enumerate(_pass_ranges):
+              if _stopped():
+                  break
+              current_clips, current_durs, current_arc, current_assembled = _run_director_pass(
+                  job=job, llm_router=llm_router,
+                  clip_paths=current_clips, clip_durations=current_durs, story_arc=current_arc,
+                  prepped_photo=prepped_photo, assembled_path=current_assembled,
+                  settings=settings, job_dir=job_dir,
+                  pass_num=pass_idx + 1, pct_start=p_start, pct_end=p_end,
+                  _log=_log, _stopped=_stopped,
+                  video_generator=video_generator,
+                  model_name=model_name, resolution=resolution,
+                  ow=ow, oh=oh, steps=steps, guidance=guidance, seed=seed,
+                  motion_style=motion_style,
+              )
 
-        clip_paths = current_clips
-        clip_durations = current_durs
-        story_arc = current_arc
-        concat_path = current_assembled
-        job.meta["clip_paths"] = clip_paths
+          clip_paths = current_clips
+          clip_durations = current_durs
+          story_arc = current_arc
+          concat_path = current_assembled
+          job.meta["clip_paths"] = clip_paths
 
-    job.meta["concat_path"] = concat_path
+      job.meta["concat_path"] = concat_path
 
-    # ── Phase 3: Audio ────────────────────────────────────────────────────
-    if skip_audio:
-        job.output = concat_path
-        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Multi-video done ({len(clip_paths)} clips, no audio)"
-        if forge_unloaded:
-            reload_checkpoint()
-        return
+      # ── Phase 3: Audio ────────────────────────────────────────────────────
+      if skip_audio:
+          job.output = concat_path
+          from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
+          job.message = f"Multi-video done ({len(clip_paths)} clips, no audio)"
+          return
 
-    # Warm up ACE-Step while we do analysis
-    try:
-        from services.manager import start_acestep, acestep_alive
-        if not acestep_alive():
-            threading.Thread(target=start_acestep, daemon=True).start()
-            log.info("[multi] ACE-Step warm-up started after WanGP phase")
-    except Exception as _e:
-        log.debug("ACE-Step warm-up skipped: %s", _e)
+      # Warm up ACE-Step while we do analysis
+      try:
+          from services.manager import start_acestep, acestep_alive
+          if not acestep_alive():
+              threading.Thread(target=start_acestep, daemon=True).start()
+              log.info("[multi] ACE-Step warm-up started after WanGP phase")
+      except Exception as _e:
+          log.debug("ACE-Step warm-up skipped: %s", _e)
 
-    if not music_prompt:
-        job.update(progress=78, message="Analyzing video for music direction...")
-        try:
-            frames = _sample_music_frames(concat_path, llm_router)
-            if frames:
-                result = analyzer.generate_music_prompt(llm_router, frames, user_dir)
-                music_prompt = result.get("music_prompt", "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums")
-                if not settings.get("bpm") and result.get("bpm"):
-                    settings["bpm"] = result["bpm"]
-        except Exception as e:
-            log.warning("[multi] Post-video music analysis failed: %s", e)
-        if not music_prompt:
-            music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
-    else:
-        job.update(progress=78, message="Using pre-generated music direction...")
+      if not music_prompt:
+          job.update(progress=78, message="Analyzing video for music direction...")
+          try:
+              frames = _sample_music_frames(concat_path, llm_router)
+              if frames:
+                  result = analyzer.generate_music_prompt(llm_router, frames, user_dir)
+                  music_prompt = result.get("music_prompt", "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums")
+                  if not settings.get("bpm") and result.get("bpm"):
+                      settings["bpm"] = result["bpm"]
+          except Exception as e:
+              log.warning("[multi] Post-video music analysis failed: %s", e)
+          if not music_prompt:
+              music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
+      else:
+          job.update(progress=78, message="Using pre-generated music direction...")
 
-    if not instrumental and not lyrics:
-        job.update(progress=80, message="Writing lyrics...")
-        try:
-            frames = _sample_music_frames(concat_path, llm_router)
-            lyrics = analyzer.generate_lyrics(
-                llm_router, frames, music_prompt, lyric_dir or user_dir,
-            )
-        except Exception as e:
-            log.warning("[multi] Lyrics generation failed: %s", e)
+      if not instrumental and not lyrics:
+          job.update(progress=80, message="Writing lyrics...")
+          try:
+              frames = _sample_music_frames(concat_path, llm_router)
+              lyrics = analyzer.generate_lyrics(
+                  llm_router, frames, music_prompt, lyric_dir or user_dir,
+              )
+          except Exception as e:
+              log.warning("[multi] Lyrics generation failed: %s", e)
 
-    if not instrumental and not lyrics:
-        lyrics = (
-            "[verse]\nFrames in motion, stories unfold\n"
-            "Every moment worth its weight in gold\n"
-            "[chorus]\nLife in motion, frame by frame\n"
-            "Nothing ever stays the same"
-        )
+      if not instrumental and not lyrics:
+          lyrics = (
+              "[verse]\nFrames in motion, stories unfold\n"
+              "Every moment worth its weight in gold\n"
+              "[chorus]\nLife in motion, frame by frame\n"
+              "Nothing ever stays the same"
+          )
 
-    job.update(progress=82, message="Generating audio for full story...")
-    forge_was_unloaded = forge_unloaded or unload_checkpoint()
+      job.update(progress=82, message="Generating audio for full story...")
 
-    total_dur = probe_duration(concat_path)
-    audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
-        d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
-        for d in story_arc
-    ) + 2.0)
+      total_dur = probe_duration(concat_path)
+      audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
+          d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
+          for d in story_arc
+      ) + 2.0)
 
-    def _audio_progress(elapsed_s):
-        job.update(
-            progress=82 + min(8, int(elapsed_s) // 10),
-            message=f"Generating audio... {elapsed_s}s elapsed",
-        )
+      def _audio_progress(elapsed_s):
+          job.update(
+              progress=82 + min(8, int(elapsed_s) // 10),
+              message=f"Generating audio... {elapsed_s}s elapsed",
+          )
 
-    try:
-        audio_path, audio_err = audio_generator.generate_audio(
-            prompt=music_prompt,
-            duration=audio_dur,
-            output_dir=str(job_dir),
-            audio_format=settings.get("audio_format", "mp3"),
-            bpm=settings.get("bpm"),
-            steps=int(settings.get("audio_steps", 8)),
-            guidance=float(settings.get("audio_guidance", 7.0)),
-            seed=-1,
-            lyrics=lyrics,
-            instrumental=instrumental,
-            stop_event=job.stop_event,
-            progress_cb=_audio_progress,
-        )
+      audio_path, audio_err = audio_generator.generate_audio(
+          prompt=music_prompt,
+          duration=audio_dur,
+          output_dir=str(job_dir),
+          audio_format=settings.get("audio_format", "mp3"),
+          bpm=settings.get("bpm"),
+          steps=int(settings.get("audio_steps", 8)),
+          guidance=float(settings.get("audio_guidance", 7.0)),
+          seed=-1,
+          lyrics=lyrics,
+          instrumental=instrumental,
+          stop_event=job.stop_event,
+          progress_cb=_audio_progress,
+      )
+
+      if _stopped():
+          return
+
+      if not audio_path:
+          _log(f"[warning] Audio failed: {audio_err} -- video saved without audio")
+          job.output = concat_path
+          from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
+          job.message = f"Video saved ({len(clip_paths)} clips, no audio -- ACE-Step failed: {audio_err})"
+          return
+
+      # ── Phase 4: Merge ────────────────────────────────────────────────────
+      job.update(progress=92, message="Merging video + audio...")
+
+      model_tag  = model_name.split()[0].lower()
+      final_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}.mp4")
+
+      merged = video_generator.merge_video_audio(concat_path, audio_path, final_path, log_fn=_log)
+
+      if merged:
+          # ── Phase 5: Upscale (optional) ───────────────────────────────────────
+          upscale_on     = settings.get("upscale", True)
+          upscale_scale  = float(settings.get("upscale_scale", 2.0))
+          upscale_method = settings.get("upscale_method", "ffmpeg")
+          if upscale_on and not _stopped():
+              job.update(progress=95, message="Upscaling video...")
+              try:
+                  from core.upscaler import upscale_video
+                  up_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}_up.mp4")
+                  up_out, up_err = upscale_video(merged, up_path,
+                                                 scale=upscale_scale, method=upscale_method)
+                  if up_out:
+                      merged = up_out
+                  else:
+                      log.warning("[multi] Upscale failed: %s -- using original", up_err)
+              except Exception as _ue:
+                  log.warning("[multi] Upscale error: %s -- using original", _ue)
+
+          job.output = merged
+          from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
+          job.meta.update({"final_path": merged, "music_prompt": music_prompt})
+          job.message = f"Multi-video complete! ({len(clip_paths)} clips)"
+
+          # Gallery push
+          try:
+              norm = merged.replace("\\", "/")
+              idx  = norm.lower().find("/output/")
+              url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
+              elapsed = (time.time() - job.started_at) if job.started_at else None
+              gallery_push(
+                  url, tab="create-videos",
+                  prompt=(story_arc[0].get("prompt", "") if isinstance(story_arc[0], dict) else str(story_arc[0]))[:120] if story_arc else "",
+                  model=model_name,
+                  metadata={
+                      "path": merged,
+                      "job_id": job.id,
+                      "clips": len(clip_paths),
+                      "story_arc": story_arc,
+                      "elapsed_seconds": elapsed,
+                      "model": model_name,
+                      "duration_sec": total_dur or clip_dur * len(clip_paths),
+                  },
+              )
+          except Exception as e:
+              log.warning("gallery_push failed: %s", e)
+
+          # Session tracking
+          try:
+              from core.session import get_current as get_session
+              get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
+          except Exception as e:
+              log.warning("session.add_file failed: %s", e)
+
+          # Clean up ALL intermediates -- only the merged file is needed.
+          # Director re-shoots leave orphaned clip_*_p{N}_*.mp4, concat_p{N}_*.mp4,
+          # frame_p{N}_*.png, and review-frame rv_*.jpg files behind that the
+          # narrow clip_paths sweep would miss. Glob each pattern instead.
+          merged_abs = os.path.abspath(merged)
+          for pattern in ("clip_*.mp4", "concat_*.mp4", "frame_*.png", "rv_*.jpg"):
+              for stale in job_dir.glob(pattern):
+                  try:
+                      if os.path.abspath(str(stale)) == merged_abs:
+                          continue
+                      stale.unlink()
+                  except Exception:
+                      pass
+      else:
+          job.output = concat_path
+          from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
+          job.message = f"Multi-video done ({len(clip_paths)} clips, audio merge failed)"
+          try:
+              from core.session import get_current as get_session
+              get_session().add_file(Path(concat_path).name, "video", "fun_videos", path=concat_path)
+          except Exception:
+              pass
     finally:
-        if forge_was_unloaded:
-            reload_checkpoint()
-
-    if _stopped():
-        return
-
-    if not audio_path:
-        _log(f"[warning] Audio failed: {audio_err} -- video saved without audio")
-        job.output = concat_path
-        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Video saved ({len(clip_paths)} clips, no audio -- ACE-Step failed: {audio_err})"
-        return
-
-    # ── Phase 4: Merge ────────────────────────────────────────────────────
-    job.update(progress=92, message="Merging video + audio...")
-
-    model_tag  = model_name.split()[0].lower()
-    final_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}.mp4")
-
-    merged = video_generator.merge_video_audio(concat_path, audio_path, final_path, log_fn=_log)
-
-    if merged:
-        # ── Phase 5: Upscale (optional) ───────────────────────────────────────
-        upscale_on     = settings.get("upscale", True)
-        upscale_scale  = float(settings.get("upscale_scale", 2.0))
-        upscale_method = settings.get("upscale_method", "ffmpeg")
-        if upscale_on and not _stopped():
-            job.update(progress=95, message="Upscaling video...")
+        if forge_unloaded:
             try:
-                from core.upscaler import upscale_video
-                up_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}_up.mp4")
-                up_out, up_err = upscale_video(merged, up_path,
-                                               scale=upscale_scale, method=upscale_method)
-                if up_out:
-                    merged = up_out
-                else:
-                    log.warning("[multi] Upscale failed: %s -- using original", up_err)
-            except Exception as _ue:
-                log.warning("[multi] Upscale error: %s -- using original", _ue)
-
-        job.output = merged
-        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.meta.update({"final_path": merged, "music_prompt": music_prompt})
-        job.message = f"Multi-video complete! ({len(clip_paths)} clips)"
-
-        # Gallery push
-        try:
-            norm = merged.replace("\\", "/")
-            idx  = norm.lower().find("/output/")
-            url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
-            elapsed = (time.time() - job.started_at) if job.started_at else None
-            gallery_push(
-                url, tab="create-videos",
-                prompt=(story_arc[0].get("prompt", "") if isinstance(story_arc[0], dict) else str(story_arc[0]))[:120] if story_arc else "",
-                model=model_name,
-                metadata={
-                    "path": merged,
-                    "job_id": job.id,
-                    "clips": len(clip_paths),
-                    "story_arc": story_arc,
-                    "elapsed_seconds": elapsed,
-                    "model": model_name,
-                    "duration_sec": total_dur or clip_dur * len(clip_paths),
-                },
-            )
-        except Exception as e:
-            log.warning("gallery_push failed: %s", e)
-
-        # Session tracking
-        try:
-            from core.session import get_current as get_session
-            get_session().add_file(Path(merged).name, "video", "fun_videos", path=merged)
-        except Exception as e:
-            log.warning("session.add_file failed: %s", e)
-
-        # Clean up ALL intermediates -- only the merged file is needed.
-        # Director re-shoots leave orphaned clip_*_p{N}_*.mp4, concat_p{N}_*.mp4,
-        # frame_p{N}_*.png, and review-frame rv_*.jpg files behind that the
-        # narrow clip_paths sweep would miss. Glob each pattern instead.
-        merged_abs = os.path.abspath(merged)
-        for pattern in ("clip_*.mp4", "concat_*.mp4", "frame_*.png", "rv_*.jpg"):
-            for stale in job_dir.glob(pattern):
-                try:
-                    if os.path.abspath(str(stale)) == merged_abs:
-                        continue
-                    stale.unlink()
-                except Exception:
-                    pass
-    else:
-        job.output = concat_path
-        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Multi-video done ({len(clip_paths)} clips, audio merge failed)"
-        try:
-            from core.session import get_current as get_session
-            get_session().add_file(Path(concat_path).name, "video", "fun_videos", path=concat_path)
-        except Exception:
-            pass
+                reload_checkpoint()
+            except Exception as _re:
+                log.debug("forge reload after multi-pipeline failed: %s", _re)
