@@ -182,7 +182,12 @@ export function init(panel) {
 
   function _applyImage(path, url) {
     if (path !== _imagePath) _resetPromptsForNewImage();
-    _imagePath = path;
+    // Only adopt real server paths into _imagePath. blob: URLs are for the
+    // visual preview only -- the server needs a path it can stat(), and any
+    // brainstorm/AI call made before the upload completes must wait for the
+    // real path (see _uploadInFlight below) instead of silently falling back
+    // to text-only mode and hallucinating subjects not in the photo.
+    if (path && !path.startsWith('blob:')) _imagePath = path;
     preview.src = url;
     preview.style.display = '';
     dropHint.style.display = 'none';
@@ -212,16 +217,25 @@ export function init(panel) {
   // Instant preview: show local blob URL immediately, upload in background.
   // The file is already on disk; waiting for a server round-trip + a second
   // HTTP fetch of /uploads/... before showing anything looks like dial-up.
+  // Tracks the in-flight upload so AI calls (Spark, lyric-gen, etc.) can
+  // await the real server path instead of racing with the blob: preview.
+  let _uploadInFlight = null;
+
   async function _handleFile(file) {
     const blobUrl = URL.createObjectURL(file);
-    _applyImage(blobUrl, blobUrl);  // path placeholder; replaced after upload
-    try {
-      const data = await apiUpload('/api/fun/upload', [file]);
-      const f = data.files?.[0];
-      if (f) _imagePath = f.path;  // swap placeholder for real server path
-    } catch (err) {
-      toast(err.message, 'error');
-    }
+    _applyImage(blobUrl, blobUrl);  // visual preview only; _imagePath stays null
+    _uploadInFlight = (async () => {
+      try {
+        const data = await apiUpload('/api/fun/upload', [file]);
+        const f = data.files?.[0];
+        if (f) _imagePath = f.path;
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        _uploadInFlight = null;
+      }
+    })();
+    return _uploadInFlight;
   }
 
   dropZone.addEventListener('drop', async e => {
@@ -264,6 +278,10 @@ export function init(panel) {
   // Shared brainstorm call -- updates fields, returns {idea, lyric_direction, reply}
   let _chatHistory = [];
   async function _brainstorm(message, { ideaOnly = false, lyricOnly = false } = {}) {
+    // If the user just dropped an image, wait for the upload to finish so
+    // the LLM gets the real server path instead of seeing image_path="" and
+    // silently falling back to text-only hallucination mode.
+    if (_uploadInFlight) await _uploadInFlight;
     const body = {
       image_path:    _imagePath || '',
       message,
