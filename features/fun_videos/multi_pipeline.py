@@ -123,7 +123,7 @@ PROMPT SHAPE (mandatory for every clip):
   2. ONE MICRO-MOTION (15-20 words): ONE small physical change happening in
      the scene. See motion hierarchy below.
   3. SCENE ANCHOR (8-12 words): Setting + visual style, restated every clip.
-  4. CAMERA NOTE (4-5 words, LAST): "Static frame, no zoom."
+  4. CAMERA NOTE (4-5 words, LAST): "Static shot, fixed camera."
 
 MOTION HIERARCHY -- choose the SAFEST option available for the scene:
   BEST (least risk of face blur):
@@ -148,7 +148,7 @@ MOTION HIERARCHY -- choose the SAFEST option available for the scene:
 BANNED (cause LTX to replace the scene): walks, steps, runs, jumps, kneels,
 rises, turns, exits, enters, climbs, pivots, reaches across.
 BANNED: erupts, slams, explodes, thrashes, surges, screams, blasts, roars.
-BANNED: "camera locked", "locked off", "locked frame" -- use "static frame" LAST only.
+BANNED: "camera locked", "locked off", "locked frame", "no zoom" -- use "static shot, fixed camera" LAST only.
 
 ARC: each clip = same scene, one different micro-detail. Vary which prop,
 which fabric element, which background feature moves. No crescendo.\
@@ -180,7 +180,7 @@ PROMPT SHAPE (use this exact structure, every clip):
   2. ENVIRONMENT MOTION (12-18 words): ONE environmental change from the ALLOWED list.
      Must be physically present in or plausible from the original scene.
   3. SCENE ANCHOR (8-12 words): setting + visual style, restated every clip.
-  4. CAMERA LOCK (fixed, always last): "no zoom, no pan, no camera movement."
+  4. CAMERA LOCK (fixed, always last): "Static shot, fixed camera."
 
 ARC: same scene, one different environmental detail per clip.
 Clips feel like a breathing photograph, not an action sequence.
@@ -384,7 +384,7 @@ Rate each clip 1-5:
 For clips rated <= 2: write a corrected calm prompt (35-55 words, environment-only motion).
   - Subject described as completely still
   - ONE environmental change only (light shift, steam, shadow, fabric settle, curtain stir)
-  - Add camera lock phrase at end: "no zoom, no pan, no camera movement."
+  - Add camera lock phrase at end: "Static shot, fixed camera."
 Apply TYPE rules:
   TYPE A (people/characters): name their visual markers (hair, clothing, skin) -- no body motion
   TYPE B (landscape/objects): describe background element change only
@@ -892,12 +892,11 @@ def run_multi_pipeline(job, photo_path, settings):
     oh               = settings.get("override_height")
     steps            = int(settings.get("video_steps", 30))
     guidance         = float(settings.get("video_guidance", 7.5))
-    # LTX-2 Distilled: cap steps at 12, guidance at 4.0.
-    # The distilled schedule tolerates up to ~12 steps before quality regresses.
-    # Guidance above 4.0 over-saturates the compressed schedule.
+    # LTX-2 Distilled: two-stage compressed schedule. Optimal 4-8 steps; beyond 8 regresses.
+    # Guidance above 3.5 over-saturates the compressed schedule.
     if "ltx" in model_name.lower() and "distilled" in model_name.lower():
-        steps    = min(steps, 12)
-        guidance = min(guidance, 4.0)
+        steps    = min(steps, 8)
+        guidance = min(guidance, 3.5)
     seed             = int(settings.get("video_seed", -1))
     skip_audio       = settings.get("skip_audio", False)
     instrumental     = settings.get("instrumental", False)
@@ -907,17 +906,11 @@ def run_multi_pipeline(job, photo_path, settings):
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
-    # For LTX-2 (8 denoising steps), each chained clip starts from a generated
-    # frame that already has LTX softness artifacts. By clip 5+ these compound
-    # into visible quality loss and subject drift. Resetting to the source photo
-    # every 3 clips keeps identity stable at the cost of a slight visual cut --
-    # For LTX: every clip starts from the clean source photo (reanchor_every=1).
-    # Chaining LTX clips compounds softness artifacts -- by clip 3 the input frame
-    # is already degraded enough to trigger hallucination and subject replacement.
-    # Visual continuity comes from consistent prompt anchoring, not frame chaining.
-    # Wan at 25 steps produces sharp enough frames that chaining is safe (default 0).
+    # reanchor_every=0: every clip chains from the last frame of the previous one,
+    # creating a coherent story. LTX at 8 steps has strong image conditioning so
+    # chained frames stay anchored. Reset to source only when the user overrides.
     _is_ltx = "ltx" in model_name.lower()
-    reanchor_every   = int(settings.get("reanchor_every", 1 if _is_ltx else 0))
+    reanchor_every   = int(settings.get("reanchor_every", 0))
     motion_style     = settings.get("motion_style") or ("calm" if _is_ltx else "dynamic")
 
     if not story_arc:
