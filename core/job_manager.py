@@ -167,14 +167,14 @@ class JobManager:
             return False
         job.stop_event.set()
         if job.status == "queued":
-            job.status = "cancelled"
-            job.message = "Cancelled by user"
-            job.finished_at = time.time()
-            # Remove from GPU queue
-            try:
-                self._gpu_queue.remove(job_id)
-            except ValueError:
-                pass
+            with self._lock:
+                job.status = "cancelled"
+                job.message = "Cancelled by user"
+                job.finished_at = time.time()
+                try:
+                    self._gpu_queue.remove(job_id)
+                except ValueError:
+                    pass
         return True
 
     def dismiss(self, job_id: str) -> bool:
@@ -499,11 +499,19 @@ class JobManager:
                 self._gpu_event.clear()
 
                 while self._gpu_queue and not self._paused:
-                    job_id = self._gpu_queue[0]
+                    with self._lock:
+                        if not self._gpu_queue:
+                            break
+                        job_id = self._gpu_queue[0]
                     job = self.get(job_id)
 
                     if job is None or job.status == "cancelled":
-                        self._gpu_queue.popleft()
+                        with self._lock:
+                            try:
+                                if self._gpu_queue and self._gpu_queue[0] == job_id:
+                                    self._gpu_queue.popleft()
+                            except IndexError:
+                                pass
                         continue
 
                     job.status = "running"
@@ -560,7 +568,12 @@ class JobManager:
                                     "restart the app if the next job hangs"
                                 )
 
-                    self._gpu_queue.popleft()
+                    with self._lock:
+                        try:
+                            if self._gpu_queue and self._gpu_queue[0] == job_id:
+                                self._gpu_queue.popleft()
+                        except IndexError:
+                            pass
 
                     # VRAM cleanup between GPU jobs
                     import gc
@@ -569,8 +582,9 @@ class JobManager:
                         import torch
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
-                    except Exception:
-                        pass  # CUDA RuntimeError must not kill the worker thread
+                    except Exception as _cuda_exc:
+                        # CUDA RuntimeError must not kill the worker thread
+                        log.debug("torch.cuda.empty_cache failed: %s", _cuda_exc)
                     time.sleep(1)
 
             except Exception as _worker_exc:

@@ -912,14 +912,18 @@ def _watchdog_loop():
         try:
             status = get_status()
 
-            # Check WanGP worker -- restart if we launched it but it died
-            if _wangp_worker_proc and _wangp_worker_proc.poll() is not None:
+            # Check WanGP worker -- restart if we launched it but it died.
+            # Snapshot the global to a local so a concurrent stop_service()
+            # setting it to None can't NPE the .poll() call.
+            wangp_proc = _wangp_worker_proc
+            if wangp_proc and wangp_proc.poll() is not None:
                 log.warning("[watchdog] WanGP worker died -- restarting")
                 _set_status("wangp", state="error", message="Worker crashed -- restarting...")
                 start_wangp_worker()
 
-            # Check ACE-Step
-            if _acestep_proc and _acestep_proc.poll() is not None:
+            # Check ACE-Step (same snapshot pattern as WanGP)
+            acestep_proc = _acestep_proc
+            if acestep_proc and acestep_proc.poll() is not None:
                 log.warning("[watchdog] ACE-Step died -- restarting")
                 _set_status("acestep", state="error", message="Server crashed -- restarting...")
                 start_acestep()
