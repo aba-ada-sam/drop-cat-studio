@@ -636,7 +636,16 @@ def _find_anchor(job_dir: Path, i: int, current_pass: int) -> str | None:
         if p.exists():
             return str(p)
     p = job_dir / f"frame_{i:02d}.png"
-    return str(p) if p.exists() else None
+    if p.exists():
+        return str(p)
+    # No anchor found. Caller will fall back to prepped_photo, which can
+    # cause a visible subject discontinuity at clip i's junction. Warn so
+    # the failed anchor write upstream is at least visible in logs.
+    if current_pass > 0:
+        log.warning("[anchor] No cached frame for clip %d at pass %d -- "
+                    "falling back to source photo (junction may jump)",
+                    i, current_pass)
+    return None
 
 
 def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RATIO) -> tuple[bool, float]:

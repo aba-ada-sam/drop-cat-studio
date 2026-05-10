@@ -497,10 +497,10 @@ def run_pipeline(job, photo_path, settings):
         return
 
     if not audio_path:
-        _log(f"[warning] Audio failed: {audio_err} — returning video only")
+        _log(f"[warning] Audio failed: {audio_err} -- video saved without audio")
         job.output = video_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Video generated (audio failed: {audio_err})"
+        job.message = f"Video saved (no audio -- ACE-Step failed: {audio_err})"
         _gallery(video_path)
         return
 
