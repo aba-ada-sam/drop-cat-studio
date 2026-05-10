@@ -32,6 +32,17 @@ _FALLBACK_PHASES = [
     "reaches final explosive beat, energy released",
 ]
 
+_FALLBACK_PHASES_CALM = [
+    "ambient light shifts softly across the scene, subject completely still",
+    "steam rises gently, background details settle, subject motionless",
+    "shadow creeps slowly across the surface, atmosphere breathes",
+    "curtain stirs slightly from unseen air, scene holds steady",
+    "distant element drifts gently, foreground subject unchanged",
+    "light quality shifts subtly, texture catches new angle",
+    "water surface ripples faintly in the background",
+    "cloud shadow passes overhead, scene breathes in stillness",
+]
+
 
 # ── Story arc generation ──────────────────────────────────────────────────────
 
@@ -445,6 +456,7 @@ def _run_director_pass(
     _log, _stopped,
     video_generator, model_name: str, resolution: str,
     ow, oh, steps: int, guidance: float, seed: int,
+    motion_style: str | None = None,
 ) -> tuple[list, list, list, str]:
     """Analyze assembled video; re-generate weak clips; re-assemble.
 
@@ -512,7 +524,7 @@ def _run_director_pass(
             job.update(progress=pp, message=f"Director p{pass_num} clip {i + 1}: step {step}/{total}")
 
         job.update(progress=pct, message=f"{action} clip {i + 1}/{n}...")
-        finalized = _finalize_prompt(clip_prompt, model_name)
+        finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
 
         try:
             clip_path = video_generator.generate_video(
@@ -856,13 +868,15 @@ def run_multi_pipeline(job, photo_path, settings):
     # Wan at 25 steps produces sharp enough frames that chaining is safe (default 0).
     _is_ltx = "ltx" in model_name.lower()
     reanchor_every   = int(settings.get("reanchor_every", 1 if _is_ltx else 0))
+    motion_style     = settings.get("motion_style") or ("calm" if _is_ltx else "dynamic")
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
         # Same trim compensation applied in run_multi_prep.
         fb_dur = clip_dur / _CHAIN_TRIM_RATIO
+        phases = _FALLBACK_PHASES_CALM if motion_style == "calm" else _FALLBACK_PHASES
         story_arc = [
-            {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": fb_dur}
+            {"prompt": base + phases[i % len(phases)], "duration": fb_dur}
             for i in range(n_clips)
         ]
 
@@ -943,7 +957,7 @@ def run_multi_pipeline(job, photo_path, settings):
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
-        finalized = _finalize_prompt(clip_prompt, model_name)
+        finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
         # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
         clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
         clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
@@ -1101,6 +1115,7 @@ def run_multi_pipeline(job, photo_path, settings):
                 video_generator=video_generator,
                 model_name=model_name, resolution=resolution,
                 ow=ow, oh=oh, steps=steps, guidance=guidance, seed=seed,
+                motion_style=motion_style,
             )
 
         clip_paths = current_clips

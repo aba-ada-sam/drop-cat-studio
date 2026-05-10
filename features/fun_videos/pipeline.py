@@ -38,9 +38,24 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 _PROMPT_SUFFIXES = {
     # LTX-2 image conditioning is very strong and produces near-static output without
     # explicit motion language. Force movement with every prompt.
-    "ltx":  "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
-    "wan":  "smooth animation, photorealistic, high quality, detailed",
+    "ltx":      "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
+    # Calm mode: environment-only motion. Subject-motion keywords directly contradict
+    # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
+    "ltx_calm": "natural atmospheric motion, smooth temporal consistency, photorealistic, high quality",
+    "wan":      "smooth animation, photorealistic, high quality, detailed",
 }
+
+
+def _finalize_prompt(prompt: str, model_name: str, motion_style: str | None = None) -> str:
+    """Append model-appropriate quality suffix to any video prompt."""
+    base = (prompt or "").strip().rstrip(".,;")
+    if "ltx" in model_name.lower():
+        key = "ltx_calm" if motion_style == "calm" else "ltx"
+    else:
+        key = "wan"
+    suffix = _PROMPT_SUFFIXES[key]
+    return f"{base}, {suffix}" if base else suffix
+
 
 def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
     """Center-crop + resize src image to exactly target_w × target_h.
@@ -77,12 +92,7 @@ def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
         return src
 
 
-def _finalize_prompt(prompt: str, model_name: str) -> str:
-    """Append model-appropriate quality suffix to any video prompt."""
-    base = (prompt or "").strip().rstrip(".,;")
-    key = "ltx" if "ltx" in model_name.lower() else "wan"
-    suffix = _PROMPT_SUFFIXES[key]
-    return f"{base}, {suffix}" if base else suffix
+
 
 
 def run_prep(job, photo_path, settings):
