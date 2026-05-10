@@ -42,6 +42,33 @@ def _resolve_path(raw: str) -> str:
     return raw
 
 
+# Banned motion words that wreck downstream video generation. The story-arc
+# system prompt forbids these, but Sonnet/Haiku still slip them in occasionally.
+# We rewrite at the brainstorm stage so the user-visible idea stays clean.
+_BANNED_MOTION_REWRITES = {
+    "transforms into": "shifts toward",
+    "transforms":      "shifts",
+    "becomes":         "settles into being",
+    "reveals":         "shows",
+    "establishes":     "holds",
+    "unfolds":         "plays out",
+    "snaps to":        "moves to",
+    "the camera":      "the frame",
+    "we see":          "visible",
+}
+
+
+def _scrub_banned_motion_words(text: str) -> str:
+    """Replace banned action words with neutral equivalents (case-insensitive)."""
+    import re
+    if not text:
+        return text
+    out = text
+    for bad, good in _BANNED_MOTION_REWRITES.items():
+        out = re.sub(re.escape(bad), good, out, flags=re.IGNORECASE)
+    return out
+
+
 def _validate_image(data: bytes, filename: str) -> Image.Image:
     """Validate image data. Returns the PIL Image on success, raises HTTPException on failure."""
     if len(data) > MAX_IMAGE_MB * 1024 * 1024:
@@ -476,7 +503,10 @@ async def brainstorm(request: Request):
     Returns JSON with updated fields plus a short reply sentence.
     """
     from app import get_llm_router
-    from core.llm_client import TIER_FAST as _TIER, parse_json_response
+    # Brainstorm uses BALANCED (Sonnet) not FAST (Haiku): Sonnet is visibly
+    # better at concrete physical-action prompts and lyric direction with
+    # character. Cost difference for one user-triggered call is negligible.
+    from core.llm_client import TIER_BALANCED as _TIER, parse_json_response
     llm_router = get_llm_router()
 
     body = await request.json()
@@ -594,8 +624,17 @@ async def brainstorm(request: Request):
             "prompt": data.get("prompt") or None,
             "reply":  data.get("reply")  or result[:120],
         }
+
+    # Banned-word post-filter: even with the system prompt rule, LLMs
+    # occasionally slip in 'transforms', 'becomes', etc. The downstream
+    # story-arc generator strips these anyway, so we replace them with
+    # plain physical verbs at the source so the user sees a clean idea.
+    idea = data.get("idea") or None
+    if idea:
+        idea = _scrub_banned_motion_words(idea)
+
     return {
-        "idea":            data.get("idea")            or None,
+        "idea":            idea,
         "lyric_direction": data.get("lyric_direction") or None,
         "reply":           data.get("reply")           or result[:120],
     }
@@ -657,7 +696,7 @@ async def add_music(request: Request):
                 log.warning("Music analysis failed: %s", e)
 
         if not music_prompt:
-            music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
+            music_prompt = "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere"
 
         instrumental = cfg_settings.get("instrumental", False)
         lyrics = ""

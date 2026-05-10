@@ -324,7 +324,10 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
     try:
         text = router.route(
             [{"role": "user", "content": prompt}],
-            tier=TIER_FAST,
+            # BALANCED (Sonnet) for lyrics: Haiku produces flat generic verses;
+            # Sonnet picks the user's stated style (gypsy punk, cabaret, etc.)
+            # and writes lines that actually rhyme and have wit.
+            tier=TIER_BALANCED,
             system=LYRICS_SYSTEM,
             max_tokens=200,  # ~150 tokens output keeps ACE-Step under its KV block limit
         )
@@ -357,7 +360,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
                 format_json=True,
             )
             result = parse_json_response(text)
-            return result or {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80}
+            return result or {"music_prompt": "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere", "bpm": 80}
         except Exception as e:
             log.warning("Music prompt vision call failed, falling back to text: %s", e)
 
@@ -373,10 +376,13 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
     try:
         text = router.route(
             [{"role": "user", "content": "\n".join(parts)}],
-            tier=TIER_FAST, system=MUSIC_PROMPT_SYSTEM, max_tokens=300,
+            # BALANCED (Sonnet) not FAST (Haiku): the music_prompt drives ACE-Step,
+            # and Haiku consistently picks the safest generic indie-folk default
+            # while Sonnet actually picks a genre with character that fits the scene.
+            tier=TIER_BALANCED, system=MUSIC_PROMPT_SYSTEM, max_tokens=300,
         )
         result = parse_json_response(text)
-        return result or {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80}
+        return result or {"music_prompt": "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere", "bpm": 90}
     except Exception as e:
         log.warning("Music prompt text generation failed: %s", e)
-        return {"music_prompt": "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums", "bpm": 80, "error": str(e)}
+        return {"music_prompt": "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere", "bpm": 90, "error": str(e)}
