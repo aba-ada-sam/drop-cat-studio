@@ -42,16 +42,19 @@ def negative_prompt_for(model_name: str) -> str:
     return _NEG_WAN
 
 MODELS = {
-    # steps/guidance are optimal defaults for the model's denoising schedule.
-    # LTX-2 Distilled tolerates 4-12 steps; 12 gives better temporal consistency
-    # for complex subjects (faces, fur, clothing) without overshooting the schedule.
-    # CFG >4 over-saturates the distilled schedule. Wan2.1 needs 25 steps and CFG ~5.5.
-    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5},
-    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5},
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 12, "guidance": 3.0},
-    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 25, "guidance": 3.5},
-    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5},
-    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0},
+    # Per-model defaults sent to the UI so controls change automatically on model switch.
+    # default_clips / default_dur: what the multi-clip slider resets to.
+    # motion: "calm" (environment-only, no subject movement) or "dynamic" (kinetic).
+    # Wan I2V: strong subject anchoring, handles 4 clips + dynamic motion fine.
+    # LTX Distilled: 12-step budget cannot maintain complex subject detail across clips;
+    #   cap at 2 clips and calm motion to prevent identity drift.
+    # LTX Dev13B: full 25 steps, better identity -- 3 clips OK with calm.
+    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 5, "motion": "dynamic"},
+    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 5, "motion": "dynamic"},
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 12, "guidance": 3.0, "default_clips": 2, "default_dur": 5, "motion": "calm"},
+    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 25, "guidance": 3.5, "default_clips": 3, "default_dur": 5, "motion": "calm"},
+    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 5, "motion": "dynamic"},
+    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 5, "motion": "dynamic"},
 }
 
 

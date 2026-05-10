@@ -455,7 +455,7 @@ async def list_models():
     # Find the matching model key (config stores the short name used in MODELS)
     default_key = configured if configured in MODELS else next(
         (k for k in MODELS if configured and configured.lower() in k.lower()), None
-    )
+    ) or "Wan2.1-I2V-14B-480P"
     return {
         "models": {name: info for name, info in MODELS.items()},
         "default": default_key,

@@ -620,6 +620,9 @@ export function init(panel) {
   function _applyFvModelDefaults(m) {
     if (!m) return;
     if (m.res && m.res[1]) _fvQualPx = m.res[1];
+    // Clip count and duration -- per-model sweet spot
+    if (m.default_clips != null) { clipsSlider.value = m.default_clips; _refreshMultiTotal(); }
+    if (m.default_dur   != null) { durSlider.value   = m.default_dur;   _refreshMultiTotal(); }
     const maxSec = m.max_sec || 20;
     const durInput = durSlider.el.querySelector('input');
     if (durInput) { durInput.max = String(maxSec); }
@@ -629,11 +632,9 @@ export function init(panel) {
     modelInfo.textContent = `Max ${maxSec}s  --  ${m.res ? m.res[0]+'x'+m.res[1] : ''}  --  ${m.fps || '?'}fps`;
     _updateFvRatioAvailability();
     _computeFvDims();
-    // Auto-set motion style: LTX defaults to Calm (low step count = ghost risk on faces),
-    // Wan defaults to Dynamic (25 steps handles kinetic motion without smearing).
-    const name = modelSel.value || '';
+    // Motion style from model definition -- no string guessing
     if (typeof _setMotionStyle === 'function') {
-      _setMotionStyle(name.toLowerCase().includes('ltx') ? 'calm' : 'dynamic');
+      _setMotionStyle(m.motion || 'dynamic');
     }
   }
 
@@ -646,7 +647,7 @@ export function init(panel) {
     modelSel.innerHTML = '';
     for (const [name] of Object.entries(_models))
       modelSel.appendChild(el('option', { value: name, text: name }));
-    const preferred = data.default || Object.keys(_models).find(k => k.includes('LTX'));
+    const preferred = data.default || Object.keys(_models).find(k => k.includes('Wan2.1-I2V-14B-480P')) || Object.keys(_models)[0];
     if (preferred && _models[preferred]) modelSel.value = preferred;
     modelSel.dispatchEvent(new Event('change'));
   }).catch(() => toast('Could not load video models — using defaults', 'error'));
