@@ -485,11 +485,21 @@ def show_splash(srv: ServerManager) -> None:
     tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
              font=("Arial", 13)).pack(pady=4)
 
-    # Skip button -- hidden until 8s or server detected externally
+    _skip_port = [None]  # shared between skip handler and _bg thread
+
+    def _do_skip():
+        # Find any running server so open_app_window gets a valid port
+        _skip_port[0] = find_running_server() or srv.port
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    # Skip button -- hidden until 8s
     skip_btn = tk.Button(
         root, text="Skip waiting", bg="#1a0a0a", fg="#6a5a4a",
         relief="flat", bd=0, font=("Arial", 8), cursor="hand2",
-        command=lambda: root.destroy(),
+        command=_do_skip,
     )
     skip_btn.pack(pady=(4, 0))
     skip_btn.pack_forget()  # hidden initially
@@ -509,10 +519,16 @@ def show_splash(srv: ServerManager) -> None:
         deadline = time.time() + 120
         while not srv.ready and not srv._gave_up and time.time() < deadline:
             # Also accept a server started by an external process (e.g. manual restart)
-            if find_running_server():
+            ext = find_running_server()
+            if ext:
+                if not srv.port:
+                    srv._port = ext
                 break
             time.sleep(0.4)
-        root.after(0, root.destroy)
+        try:
+            root.after(0, root.destroy)
+        except Exception:
+            pass
 
     def _show_skip():
         try:
@@ -524,6 +540,9 @@ def show_splash(srv: ServerManager) -> None:
     root.after(8000, _show_skip)
     threading.Thread(target=_bg, daemon=True).start()
     root.mainloop()
+    # mainloop exited -- use skip port if bg thread didn't set srv.port
+    if _skip_port[0] and not srv.port:
+        srv._port = _skip_port[0]
 
 
 def _shutdown(srv: "ServerManager") -> None:
