@@ -80,7 +80,7 @@ def clear_port_file() -> None:
         pass
 
 
-def server_responds(port: int, timeout: float = 0.4) -> bool:
+def server_responds(port: int, timeout: float = 1.5) -> bool:
     try:
         with urlopen(f"http://127.0.0.1:{port}/api/system", timeout=timeout) as r:
             return r.status == 200
@@ -89,10 +89,16 @@ def server_responds(port: int, timeout: float = 0.4) -> bool:
 
 
 def find_running_server() -> int | None:
-    """Check only the port recorded in .dcs-port — no blind scan."""
+    """Check .dcs-port first, then scan 7860-7879 as fallback."""
     port, _ = read_port_file()
     if port and server_responds(port):
         return port
+    # Port file missing or stale -- scan the full range
+    for p in range(7860, 7880):
+        if p == port:
+            continue  # already checked above
+        if server_responds(p):
+            return p
     return None
 
 
