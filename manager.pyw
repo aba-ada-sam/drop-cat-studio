@@ -600,7 +600,7 @@ def show_splash(srv: ServerManager) -> None:
         root.after(0, lambda: status.set("Starting server..."))
         srv.start()
         deadline = time.time() + 120
-        while not srv.ready and not srv._gave_up and time.time() < deadline:
+        while not srv.ready and time.time() < deadline:
             # Also accept a server started by an external process (e.g. manual restart)
             ext = find_running_server()
             if ext:
