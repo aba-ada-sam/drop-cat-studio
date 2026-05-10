@@ -21,6 +21,10 @@ import threading
 import time
 from pathlib import Path
 
+# Suppress console windows for all subprocess calls on Windows.
+# Without this every git/pip/netstat/taskkill briefly flashes a terminal.
+_NW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
 # -- Paths ---------------------------------------------------------------------
 
 ROOT       = Path(__file__).resolve().parent
@@ -122,7 +126,7 @@ def kill_pid(pid: int | None) -> None:
         return
     try:
         subprocess.run(["taskkill", "/PID", str(pid), "/F"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, **_NW)
         log.info("Killed PID %d", pid)
     except Exception as exc:
         log.warning("taskkill %d failed: %s", pid, exc)
@@ -144,7 +148,7 @@ def _do_git_pull(on_status=None) -> None:
     try:
         sha_before = subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, **_NW,
         ).stdout.strip()
     except Exception:
         sha_before = ""
@@ -152,7 +156,7 @@ def _do_git_pull(on_status=None) -> None:
     try:
         subprocess.run(
             ["git", "-C", str(ROOT), "pull", "--ff-only", "origin", "master"],
-            capture_output=True, timeout=30,
+            capture_output=True, timeout=30, **_NW,
         )
     except Exception as exc:
         log.warning("git pull skipped: %s", exc)
@@ -161,7 +165,7 @@ def _do_git_pull(on_status=None) -> None:
     try:
         sha_after = subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, **_NW,
         ).stdout.strip()
     except Exception:
         sha_after = sha_before
@@ -174,7 +178,7 @@ def _do_git_pull(on_status=None) -> None:
         try:
             diff = subprocess.run(
                 ["git", "-C", str(ROOT), "diff", "--name-only", sha_before, sha_after, "--", "requirements.txt"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, **_NW,
             )
             req_changed = bool(diff.stdout.strip())
         except Exception:
@@ -188,7 +192,7 @@ def _do_git_pull(on_status=None) -> None:
                 if req.exists():
                     subprocess.run(
                         ["pip", "install", "-q", "-r", str(req)],
-                        capture_output=True, timeout=180,
+                        capture_output=True, timeout=180, **_NW,
                     )
             except Exception as exc:
                 log.warning("pip install failed (non-fatal): %s", exc)
@@ -222,7 +226,7 @@ def _ensure_shortcut() -> None:
         )
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
-            capture_output=True, timeout=15,
+            capture_output=True, timeout=15, **_NW,
         )
         log.info("Desktop shortcut updated -> launch-silent.vbs")
     except Exception as exc:
@@ -569,7 +573,7 @@ def show_splash(srv: ServerManager) -> None:
 def _kill_procs_on_port(port: int, label: str) -> None:
     """Kill all processes listening on port (including non-LISTENING ones via wmic)."""
     try:
-        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5, **_NW)
         for line in r.stdout.splitlines():
             if f":{port}" in line and "LISTENING" in line:
                 parts = line.split()
@@ -577,7 +581,7 @@ def _kill_procs_on_port(port: int, label: str) -> None:
                 if pid_s.isdigit() and int(pid_s) > 0:
                     log.info("Killing %s on port %d (PID %s)", label, port, pid_s)
                     subprocess.run(["taskkill", "/F", "/T", "/PID", pid_s],
-                                   capture_output=True, timeout=5)
+                                   capture_output=True, timeout=5, **_NW)
     except Exception as e:
         log.warning("Port kill %d failed: %s", port, e)
 
@@ -598,7 +602,7 @@ def _kill_by_cmdline(script: str, label: str) -> None:
         )
         r = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, **_NW,
         )
         for line in r.stdout.splitlines():
             pid_s = line.strip()
@@ -609,7 +613,7 @@ def _kill_by_cmdline(script: str, label: str) -> None:
                 continue
             log.info("Killing stale %s (PID %d) by cmdline scan", label, pid)
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                           capture_output=True, timeout=5)
+                           capture_output=True, timeout=5, **_NW)
     except Exception as e:
         log.warning("Cmdline kill for %s failed: %s", label, e)
 
@@ -618,14 +622,16 @@ def _shutdown(srv: "ServerManager") -> None:
     """Kill all DCS-related processes, then exit."""
     log.info("Shutting down")
 
-    # 1. Kill GPU workers by port (fast -- catches LISTENING processes)
+    # 1. Kill GPU workers + Forge by port (fast -- catches LISTENING processes)
     _kill_procs_on_port(7899, "WanGP")
     _kill_procs_on_port(8019, "ACE-Step")
+    _kill_procs_on_port(7861, "Forge")
 
     # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
     #    orphans that port kill misses, e.g. second worker that lost the port race)
     _kill_by_cmdline("wangp_worker.py", "WanGP")
     _kill_by_cmdline("api_server.py", "ACE-Step")
+    _kill_by_cmdline("webui.py", "Forge")
 
     # 3. Also try via services module (uses tracked Popen handles -- most reliable
     #    when app.py spawned the workers through the normal path)

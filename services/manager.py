@@ -143,7 +143,7 @@ def _kill_stale_gpu_processes() -> None:
             )
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, **_popen_flags(),
             )
             for line in result.stdout.splitlines():
                 pid_str = line.strip()
@@ -155,7 +155,7 @@ def _kill_stale_gpu_processes() -> None:
                 log.info("Killing stale %s orphan (PID %d)", label, pid)
                 subprocess.run(
                     ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True, timeout=5,
+                    capture_output=True, timeout=5, **_popen_flags(),
                 )
         except Exception as e:
             log.debug("Could not scan for stale %s processes: %s", label, e)
@@ -641,7 +641,7 @@ def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
     killed_any = False
     try:
         result = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5, **_popen_flags(),
         )
         for line in result.stdout.splitlines():
             if f":{port}" in line and "LISTENING" in line:
@@ -650,7 +650,7 @@ def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
                 if pid > 0:
                     log.info("Killing frozen %s on port %d (pid %d)", label, port, pid)
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                                   capture_output=True, timeout=5)
+                                   capture_output=True, timeout=5, **_popen_flags())
                     killed_any = True
     except Exception as e:
         log.warning("Failed to kill process on port %d: %s", port, e)
@@ -661,7 +661,7 @@ def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
         while time.time() < deadline:
             try:
                 result = subprocess.run(
-                    ["netstat", "-ano"], capture_output=True, text=True, timeout=2,
+                    ["netstat", "-ano"], capture_output=True, text=True, timeout=2, **_popen_flags(),
                 )
                 still_listening = any(
                     f":{port}" in ln and "LISTENING" in ln
