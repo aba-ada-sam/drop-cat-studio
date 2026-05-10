@@ -677,6 +677,10 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .dot.error { background: var(--red); }
 .dot.not_configured, .dot.not_running { background: var(--text-3); }
 .dot.ready { background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+/* Adobe agent connection pills */
+.adobe-dot { width:8px;height:8px;border-radius:50%;background:var(--text-3);flex-shrink:0;transition:background .3s; }
+.adobe-dot.connected { background:var(--green);box-shadow:0 0 5px var(--green); }
+.adobe-dot.disconnected { background:var(--text-3); }
 
 @keyframes pulse {
   0%,100% { opacity: 1; }
