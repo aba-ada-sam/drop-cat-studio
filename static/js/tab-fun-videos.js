@@ -1005,7 +1005,7 @@ export function init(panel) {
       const base = _buildFvPayload();
       const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
       const payload  = _multiVideo
-        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity, dramatic', motion_style: _motionStyle }
+        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity', motion_style: _motionStyle }
         : base;
       const { job_id } = await api(endpoint, {
         method: 'POST',

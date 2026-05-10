@@ -43,6 +43,11 @@ _PROMPT_SUFFIXES = {
     # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
     "ltx_calm": "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
     "wan":      "smooth animation, photorealistic, high quality, detailed",
+    # Wan + calm: Wan I2V can be run in calm mode for breathing-photograph stories.
+    # Without a matching suffix the per-clip prompt picked up "smooth animation" --
+    # a kinetic hint that fights the CALM story-arc system prompt. Mirror the LTX
+    # calm suffix so subject-still and static-camera are restated every clip.
+    "wan_calm": "subject completely still, environment in gentle motion, static shot, fixed camera, photorealistic, high quality",
 }
 
 
@@ -52,7 +57,7 @@ def _finalize_prompt(prompt: str, model_name: str, motion_style: str | None = No
     if "ltx" in model_name.lower():
         key = "ltx_calm" if motion_style == "calm" else "ltx"
     else:
-        key = "wan"
+        key = "wan_calm" if motion_style == "calm" else "wan"
     suffix = _PROMPT_SUFFIXES[key]
     return f"{base}, {suffix}" if base else suffix
 

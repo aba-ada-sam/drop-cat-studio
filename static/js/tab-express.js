@@ -999,7 +999,11 @@ export function init(panel) {
           video_prompt:    motionPrompt,
           music_prompt:    '',
           lyric_direction: lyricInput.value.trim(),
-          user_direction:  'cinematic narrative, story continuity, dramatic',
+          // No "dramatic" here -- Express defaults to LTX which defaults to CALM
+          // motion. "Dramatic" in the user direction fights the CALM system prompt
+          // and forces the story-arc LLM to reconcile contradictory signals. Let
+          // the system prompt (per motion_style) drive the energy.
+          user_direction:  'cinematic narrative, story continuity',
           model:           _model,
           clip_duration:       _duration,
           num_clips:           _numClips,
