@@ -275,19 +275,15 @@ def open_app_window(port: int) -> "subprocess.Popen | None":
 # -- Server process manager ----------------------------------------------------
 
 class ServerManager:
-    MAX_RESTARTS   = 5
-    RESTART_WINDOW = 60
-    RESTART_DELAY  = 3
-    READY_TIMEOUT  = 120
+    READY_TIMEOUT = 120
 
-    def __init__(self) -> None:
+    def __init__(self, on_crash=None) -> None:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._port: int | None = None
-        self._restart_times: list[float] = []
-        self._gave_up = False
+        self._on_crash = on_crash  # callable(exit_code) -- shown to user on unexpected exit
 
     @property
     def port(self) -> int | None:
@@ -316,6 +312,9 @@ class ServerManager:
         self._port = None
         with self._lock:
             self._kill_current()
+        self._stop_event.clear()
+        self._spawn()
+        threading.Thread(target=self._watch, daemon=True, name="srv-watch").start()
 
     def _kill_current(self) -> None:
         proc = self._proc
@@ -388,9 +387,6 @@ class ServerManager:
             with self._lock:
                 proc = self._proc
             if proc is None:
-                if not self._stop_event.is_set() and not self._gave_up:
-                    time.sleep(self.RESTART_DELAY)
-                    self._spawn()
                 time.sleep(1)
                 continue
             ret = proc.poll()
@@ -400,23 +396,85 @@ class ServerManager:
             if self._stop_event.is_set():
                 log.info("Server exited (manager stopping)")
                 return
-            log.warning("Server exited with code %s -- considering restart", ret)
+            # Unexpected exit -- notify the user instead of silently restarting.
+            log.warning("Server exited unexpectedly (code %s)", ret)
             self._ready_event.clear()
             self._port = None
-            now = time.monotonic()
-            self._restart_times = [t for t in self._restart_times if now - t < self.RESTART_WINDOW]
-            if len(self._restart_times) >= self.MAX_RESTARTS:
-                log.error("Server crashed %d times in %ds -- giving up.",
-                          self.MAX_RESTARTS, self.RESTART_WINDOW)
-                self._gave_up = True
-                return
-            self._restart_times.append(now)
-            log.info("Restarting server in %ds (attempt %d/%d)...",
-                     self.RESTART_DELAY, len(self._restart_times), self.MAX_RESTARTS)
             with self._lock:
                 self._proc = None
-            time.sleep(self.RESTART_DELAY)
-            self._spawn()
+            if self._on_crash:
+                self._on_crash(ret)
+            return
+
+
+# -- Crash notification --------------------------------------------------------
+
+def _show_crash_ui(srv: "ServerManager", exit_code: int) -> None:
+    """Pop a crash notification with Restart / Quit buttons.
+
+    Called from the srv._on_crash callback (background thread) via root.after
+    so tkinter runs on the main thread. The Chrome window is still open showing
+    a dead page -- restarting brings it back without relaunching Chrome.
+    """
+    try:
+        import tkinter as tk
+    except ImportError:
+        log.error("Server crashed (exit %s) -- tkinter unavailable, cannot show UI", exit_code)
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    root.attributes("-topmost", True)
+
+    W, H = 340, 200
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 16, "bold")).pack(pady=(22, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+
+    tk.Label(root, text="Server stopped unexpectedly.", bg="#0d0606", fg="#f0e6d0",
+             font=("Arial", 10)).pack(pady=(14, 2))
+    tk.Label(root, text=f"Exit code: {exit_code}  --  see logs/server.log",
+             bg="#0d0606", fg="#6a5a4a", font=("Arial", 8)).pack()
+
+    btn_frame = tk.Frame(root, bg="#0d0606")
+    btn_frame.pack(pady=18)
+
+    def _restart():
+        root.destroy()
+        # show_splash drives the same startup sequence as initial launch
+        show_splash(srv)
+        if srv.port:
+            # Chrome window is still open -- just reload it
+            try:
+                import urllib.request as _ur
+                _ur.urlopen(f"http://127.0.0.1:{srv.port}/", timeout=2)
+            except Exception:
+                pass
+
+    def _quit():
+        root.destroy()
+        _shutdown(srv)
+
+    tk.Button(
+        btn_frame, text="  Restart  ", bg="#c41e3a", fg="#f0e6d0",
+        activebackground="#a01828", activeforeground="#f0e6d0",
+        relief="flat", bd=0, font=("Arial", 10, "bold"), cursor="hand2",
+        padx=14, pady=6, command=_restart,
+    ).pack(side="left", padx=10)
+
+    tk.Button(
+        btn_frame, text="  Quit  ", bg="#2a1010", fg="#8a7a6a",
+        activebackground="#1a0808", activeforeground="#f0e6d0",
+        relief="flat", bd=0, font=("Arial", 10), cursor="hand2",
+        padx=14, pady=6, command=_quit,
+    ).pack(side="left", padx=10)
+
+    root.mainloop()
 
 
 # -- Opening splash (already-running path) -------------------------------------
@@ -719,7 +777,11 @@ def main() -> None:
     _ensure_shortcut()
 
     _diag("_ensure_shortcut done -- finding server")
-    srv = ServerManager()
+
+    def _on_crash(exit_code: int) -> None:
+        threading.Thread(target=_show_crash_ui, args=(srv, exit_code), daemon=True).start()
+
+    srv = ServerManager(on_crash=_on_crash)
 
     # Fast check: is a server already recorded in .dcs-port and alive?
     existing_port = find_running_server()
