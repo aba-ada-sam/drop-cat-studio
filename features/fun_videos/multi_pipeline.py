@@ -337,13 +337,14 @@ def _generate_story_arc(
 
     # -- Step 3: built-in fallback (always works, preserves user idea) --
     base = (initial_idea.strip() + ", ") if initial_idea else ""
+    phases = _FALLBACK_PHASES_CALM if resolved_style == "calm" else _FALLBACK_PHASES
     return [
-        {"prompt": base + _FALLBACK_PHASES[i % len(_FALLBACK_PHASES)], "duration": default_clip_dur}
+        {"prompt": base + phases[i % len(phases)], "duration": default_clip_dur}
         for i in range(n_clips)
     ], "fallback"
 
 
-_DIRECTOR_SYSTEM = """\
+_DIRECTOR_SYSTEM_DYNAMIC = """\
 You are a film director reviewing footage from a multi-clip AI-generated short film.
 You will be shown 2 frames per clip (early frame and late frame within each clip's segment).
 Your job: identify clips that failed so they can be re-shot.
@@ -366,6 +367,38 @@ Clips rated >= 3 should be kept as-is.
 Return ONLY valid JSON, no other text:
 {"ratings": [5, 3, 2, 4], "regenerate": [{"clip_idx": 2, "new_prompt": "..."}], "notes": "one sentence what you changed and why"}
 """
+
+_DIRECTOR_SYSTEM_CALM = """\
+You are a film director reviewing footage from a calm, scene-hold short film.
+You will be shown 2 frames per clip (early frame and late frame within each clip's segment).
+Mode: CALM. The subject must be COMPLETELY STILL. Motion comes only from the environment.
+Your job: identify clips that failed so they can be re-shot.
+
+Rate each clip 1-5:
+  5 = excellent -- subject pixel-stable, environment motion visible (light, steam, shadow, curtain), scene preserved
+  4 = good -- minor flicker but acceptable
+  3 = passable -- slight subject drift but scene held
+  2 = weak -- subject visibly animated (head moved, eyes shifted, body moved), or scene replaced
+  1 = bad -- subject replaced, scene changed to different location, or environment motion absent entirely
+
+For clips rated <= 2: write a corrected calm prompt (35-55 words, environment-only motion).
+  - Subject described as completely still
+  - ONE environmental change only (light shift, steam, shadow, fabric settle, curtain stir)
+  - Add stabilizer phrase at end: "180-degree shutter, natural motion blur, static frame."
+Apply TYPE rules:
+  TYPE A (people/characters): name their visual markers (hair, clothing, skin) -- no body motion
+  TYPE B (landscape/objects): describe background element change only
+
+Be conservative: flag at most 2-3 clips. Only flag clips where the subject moved or scene changed.
+A still-subject clip with barely visible environment motion is rated 3 (passable), NOT flagged.
+
+Return ONLY valid JSON, no other text:
+{"ratings": [5, 3, 2, 4], "regenerate": [{"clip_idx": 2, "new_prompt": "..."}], "notes": "one sentence what you changed and why"}
+"""
+
+
+def _director_system_for_style(motion_style: str | None) -> str:
+    return _DIRECTOR_SYSTEM_CALM if motion_style == "calm" else _DIRECTOR_SYSTEM_DYNAMIC
 
 
 def _extract_review_frames(clip_paths: list[str], clip_durations: list[float], job_dir: Path, pass_num: int) -> list[list]:
@@ -400,7 +433,7 @@ def _extract_review_frames(clip_paths: list[str], clip_durations: list[float], j
     return result
 
 
-def _director_analyze(llm_router, frames_per_clip: list[list], story_arc: list, user_idea: str, pass_num: int) -> dict:
+def _director_analyze(llm_router, frames_per_clip: list[list], story_arc: list, user_idea: str, pass_num: int, motion_style: str | None = None) -> dict:
     """Send review frames to LLM vision; get per-clip ratings and re-shoot instructions.
 
     Returns {"ratings": [...], "regenerate": [{"clip_idx": int, "new_prompt": str}], "notes": str}.
@@ -432,7 +465,7 @@ def _director_analyze(llm_router, frames_per_clip: list[list], story_arc: list, 
     try:
         text = llm_router.route_vision(
             user_msg, all_frames,
-            tier=TIER_BALANCED, system=_DIRECTOR_SYSTEM, max_tokens=800,
+            tier=TIER_BALANCED, system=_director_system_for_style(motion_style), max_tokens=800,
         )
         data = parse_json_response(text)
         if not data:
@@ -480,7 +513,7 @@ def _run_director_pass(
 
     job.update(progress=pct_start + max(1, rng // 4), message=f"Director analyzing pass {pass_num} clips...")
     user_idea = settings.get("video_prompt", "") or settings.get("user_direction", "")
-    analysis = _director_analyze(llm_router, frames_per_clip, story_arc, user_idea, pass_num)
+    analysis = _director_analyze(llm_router, frames_per_clip, story_arc, user_idea, pass_num, motion_style=motion_style)
 
     regen_list = sorted(analysis.get("regenerate", []), key=lambda r: r["clip_idx"])
     if not regen_list:
