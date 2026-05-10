@@ -320,17 +320,8 @@ def run_song_prep(job, photo_path, settings):
 
 def run_song_pipeline(job, photo_path, settings):
     """Song-video GPU pipeline: N chained clips -> concat -> merge with user's audio."""
-    from app import gallery_push
     from features.fun_videos import video_generator
     from services.forge_client import unload_checkpoint, reload_checkpoint
-
-    def _log(msg):
-        log.info(msg)
-        display = msg.removeprefix("[info] ").removeprefix("[error] ").removeprefix("[warning] ").removeprefix("[success] ")
-        job.update(message=display)
-
-    def _stopped():
-        return job.stop_event.is_set()
 
     # -- Settings ----------------------------------------------------------
     n_clips        = int(settings.get("num_clips", 10))
@@ -369,7 +360,37 @@ def run_song_pipeline(job, photo_path, settings):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
 
     # -- Free VRAM ---------------------------------------------------------
+    # Wrapped in try/finally below so reload_checkpoint() always fires, even
+    # on a subprocess timeout / unexpected raise out of the GPU loop or merge.
     forge_unloaded = unload_checkpoint()
+    try:
+        _do_song_gpu_phase(
+            job, photo_path, settings, job_dir,
+            n_clips, clip_durations, beat_positions, model_name,
+            resolution, ow, oh, tw, th, steps, guidance, seed,
+            audio_path, audio_dur, story_arc, clip_dur,
+        )
+    finally:
+        if forge_unloaded:
+            reload_checkpoint()
+
+
+def _do_song_gpu_phase(
+    job, photo_path, settings, job_dir,
+    n_clips, clip_durations, beat_positions, model_name,
+    resolution, ow, oh, tw, th, steps, guidance, seed,
+    audio_path, audio_dur, story_arc, clip_dur,
+):
+    from app import gallery_push
+    from features.fun_videos import video_generator
+
+    def _log(msg):
+        log.info(msg)
+        display = msg.removeprefix("[info] ").removeprefix("[error] ").removeprefix("[warning] ").removeprefix("[success] ")
+        job.update(message=display)
+
+    def _stopped():
+        return job.stop_event.is_set()
 
     # -- Phase 1: Generate clips -------------------------------------------
     clip_paths: list[str] = []
@@ -564,18 +585,11 @@ def run_song_pipeline(job, photo_path, settings):
             _log(f"[info] Clip {clip_num}/{n_clips} complete")
 
     if _stopped():
-        if forge_unloaded:
-            reload_checkpoint()
         return
 
     if not clip_paths:
-        if forge_unloaded:
-            reload_checkpoint()
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Song video failed: {raw}")
-
-    if forge_unloaded:
-        reload_checkpoint()
 
     job.meta["stage"] = "concatenating"
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
