@@ -653,9 +653,9 @@ export function init(panel) {
 
   // Director passes: AI reviews and re-shoots weak clips between passes
   const DIRECTOR_OPTIONS = [
-    { label: 'Quick',    value: '0', tip: 'Single pass, no review' },
-    { label: 'Reviewed', value: '1', tip: 'AI reviews + re-shoots weak clips once' },
-    { label: 'Refined',  value: '2', tip: 'Two rounds of AI review and re-direction' },
+    { label: 'Off',      value: '0', tip: 'No director review -- clips ship as generated' },
+    { label: 'Reviewed', value: '1', tip: 'AI reviews + re-shoots weak clips once. Samples 1 frame/sec per clip (max 12), downscaled locally before sending to the AI for speed.' },
+    { label: 'Refined',  value: '2', tip: 'Two rounds of AI review and re-direction. Same per-clip frame sampling on each pass.' },
   ];
   const { row: directorRow } = _makeChipGroup(
     DIRECTOR_OPTIONS.map(d => ({ label: d.label, value: d.value, title: d.tip })),

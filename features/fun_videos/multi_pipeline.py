@@ -401,53 +401,130 @@ def _director_system_for_style(motion_style: str | None) -> str:
     return _DIRECTOR_SYSTEM_CALM if motion_style == "calm" else _DIRECTOR_SYSTEM_DYNAMIC
 
 
-def _extract_review_frames(clip_paths: list[str], clip_durations: list[float], job_dir: Path, pass_num: int) -> list[list]:
-    """Extract 2 b64-encoded jpg frames per clip, sampled directly from each clip file.
+def _extract_review_frames(
+    clip_paths: list[str],
+    clip_durations: list[float],
+    job_dir: Path,
+    pass_num: int,
+    max_frames_per_clip: int = 12,
+    downscale_long_edge: int = 384,
+) -> list[list]:
+    """Sample 1 frame/sec per clip (max 12), downscale via PIL, return b64 list/clip.
 
-    Samples at 15% and 80% of each clip's own duration. Sampling from individual
-    clip files avoids the xfade-overlap problem where assembled-video timestamps
-    drift by fade_dur per clip and can land mid-crossfade.
-    Returns list of [b64_early, b64_late] per clip; entries may be empty on failure.
+    Sampling rule:
+      n_frames = min(max_frames_per_clip, max(1, round(duration)))
+    so a 4s clip yields 4 frames, a 6s clip yields 6, a 12s clip yields 12,
+    and any clip longer than max_frames_per_clip seconds gets the same 12
+    frames spread evenly across the longer duration -- which is the
+    "spread them out" requirement: more wall-time per frame, same coverage.
+
+    Timestamps are centered in each "slot" (k + 0.5)/n so frames don't pile
+    up at clip boundaries. Sampling from individual clip files avoids the
+    xfade-overlap problem where assembled-video timestamps drift.
+
+    Downscale path: ffmpeg extracts a full-res keyframe to a temp JPEG, then
+    PIL opens it, thumbnails to downscale_long_edge on the long edge (LANCZOS,
+    aspect preserved), and re-saves as JPEG q80. The two-stage extract+resize
+    is cheap compared to the vision-LLM call that follows, and a 384px JPEG
+    is roughly 1/6 the byte size of the native frame, which materially speeds
+    up the AI response on cloud APIs (fewer tokens) and on Ollama (less KV).
+
+    Returns list of [b64_1, b64_2, ...] per clip; entries may be empty on failure.
     """
+    from PIL import Image as _PIL_Image
+
     result: list[list] = []
     for i, (path, dur) in enumerate(zip(clip_paths, clip_durations)):
-        t1 = max(0.0, dur * 0.15)
-        t2 = max(0.0, dur * 0.80)
+        # Cap at max_frames_per_clip. For clips longer than that many seconds,
+        # the same N frames spread evenly across the longer duration.
+        n_frames = min(max_frames_per_clip, max(1, int(round(dur))))
+        timestamps = [dur * (k + 0.5) / n_frames for k in range(n_frames)]
+
         frames: list[str] = []
-        for t, label in [(t1, "a"), (t2, "b")]:
-            frame_path = str(job_dir / f"rv_p{pass_num}_c{i:02d}{label}.jpg")
+        for k, t in enumerate(timestamps):
+            raw_path   = job_dir / f"rv_p{pass_num}_c{i:02d}_f{k:02d}_raw.jpg"
+            small_path = job_dir / f"rv_p{pass_num}_c{i:02d}_f{k:02d}.jpg"
+
+            # ffmpeg seek+extract at native resolution (-q:v 2 = near-lossless).
+            # Quality knob lives in the PIL re-save below, not here.
             r = subprocess.run(
-                ["ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", path,
-                 "-vframes", "1", "-q:v", "4", "-vf", "scale=512:-2", frame_path],
+                ["ffmpeg", "-y", "-ss", f"{t:.3f}", "-i", str(path),
+                 "-vframes", "1", "-q:v", "2", str(raw_path)],
                 capture_output=True, timeout=30,
             )
-            if r.returncode == 0 and Path(frame_path).exists():
-                b64 = encode_image_b64(frame_path)
+            if r.returncode != 0 or not raw_path.exists():
+                continue
+
+            try:
+                # PIL downscale: long-edge -> downscale_long_edge, aspect preserved.
+                # Image.thumbnail mutates in place and never upscales.
+                img = _PIL_Image.open(raw_path).convert("RGB")
+                img.thumbnail(
+                    (downscale_long_edge, downscale_long_edge),
+                    _PIL_Image.LANCZOS,
+                )
+                img.save(str(small_path), "JPEG", quality=80, optimize=True)
+                b64 = encode_image_b64(str(small_path))
                 if b64:
                     frames.append(b64)
-            try:
-                Path(frame_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("[director] PIL downscale failed for clip %d frame %d: %s",
+                            i + 1, k, e)
+            finally:
+                # Always clean up both temp files, even on partial failure.
+                try: raw_path.unlink(missing_ok=True)
+                except Exception: pass
+                try: small_path.unlink(missing_ok=True)
+                except Exception: pass
+
         result.append(frames)
+        if frames:
+            log.info("[director] Clip %d/%d: extracted %d frames (dur %.1fs)",
+                     i + 1, len(clip_paths), len(frames), dur)
     return result
 
 
-def _director_analyze(llm_router, frames_per_clip: list[list], story_arc: list, user_idea: str, pass_num: int, motion_style: str | None = None) -> dict:
+def _director_analyze(
+    llm_router, frames_per_clip: list[list], story_arc: list, user_idea: str,
+    pass_num: int, motion_style: str | None = None, model_name: str = "",
+) -> dict:
     """Send review frames to LLM vision; get per-clip ratings and re-shoot instructions.
+
+    motion_style + model_name are surfaced into the user message so the LLM
+    has explicit context for what the clips were supposed to look like:
+      - LTX Distilled + calm   -> still subject, environment-only motion
+      - LTX Distilled + gentle -> micro-motion, face stays still
+      - Wan I2V + dynamic      -> kinetic action, identity holds through motion
+    Without this hint the LLM applies whichever rubric the system prompt set,
+    but doesn't know what *quality* to expect at the model's step budget.
 
     Returns {"ratings": [...], "regenerate": [{"clip_idx": int, "new_prompt": str}], "notes": str}.
     """
     n = len(frames_per_clip)
     clip_descs = []
+    frame_counts = []
     for i, clip_data in enumerate(story_arc):
         p = clip_data.get("prompt", "") if isinstance(clip_data, dict) else str(clip_data)
         d = clip_data.get("duration", 5.0) if isinstance(clip_data, dict) else 5.0
-        clip_descs.append(f"Clip {i + 1} ({d:.0f}s): {p}")
+        n_frames = len(frames_per_clip[i]) if i < len(frames_per_clip) else 0
+        frame_counts.append(n_frames)
+        clip_descs.append(f"Clip {i + 1} ({d:.0f}s, {n_frames} frames shown): {p}")
+
+    # Model + motion context line. Empty when both are absent (legacy callers).
+    ctx_bits = []
+    if model_name:
+        ctx_bits.append(f"Video model: {model_name}")
+    if motion_style:
+        ctx_bits.append(f"Motion style: {motion_style}")
+    ctx_line = (" | ".join(ctx_bits) + "\n\n") if ctx_bits else ""
 
     user_msg = (
-        f"Director pass {pass_num}. Original idea: {user_idea or 'no specific direction'}\n\n"
+        f"Director pass {pass_num}. Original idea: {user_idea or 'no specific direction'}\n"
+        f"{ctx_line}"
         f"Story arc ({n} clips):\n" + "\n".join(clip_descs) + "\n\n"
+        f"Frames are sampled at ~1 per second per clip (max 12), spread evenly "
+        f"across each clip's duration. Use them to judge whether the clip held "
+        f"the source scene and whether motion matches the prompt's intent.\n\n"
         f"Review each clip. Flag those that need re-shooting (rated 1-2). "
         f"Be conservative -- only flag genuinely broken clips.\n\n"
         f"Required JSON:\n"
@@ -513,7 +590,10 @@ def _run_director_pass(
 
     job.update(progress=pct_start + max(1, rng // 4), message=f"Director analyzing pass {pass_num} clips...")
     user_idea = settings.get("video_prompt", "") or settings.get("user_direction", "")
-    analysis = _director_analyze(llm_router, frames_per_clip, story_arc, user_idea, pass_num, motion_style=motion_style)
+    analysis = _director_analyze(
+        llm_router, frames_per_clip, story_arc, user_idea, pass_num,
+        motion_style=motion_style, model_name=model_name,
+    )
 
     regen_list = sorted(analysis.get("regenerate", []), key=lambda r: r["clip_idx"])
     if not regen_list:
