@@ -60,7 +60,7 @@ class Job:
 
     def to_dict(self) -> dict:
         """Serialize for API response (excludes internal fields)."""
-        # Compute live elapsed: started → finished if done, else started → now
+        # Compute live elapsed: started -> finished if done, else started -> now
         elapsed = None
         if self.started_at is not None:
             end = self.finished_at if self.finished_at is not None else time.time()
@@ -133,7 +133,7 @@ class JobManager:
                 )
                 if active_gpu >= max_depth:
                     raise RuntimeError(
-                        f"Queue is full ({active_gpu}/{max_depth} video jobs) — "
+                        f"Queue is full ({active_gpu}/{max_depth} video jobs) -- "
                         f"wait for a video to finish before adding more"
                     )
             self._jobs[job.id] = job
@@ -142,7 +142,7 @@ class JobManager:
 
         if job_type in GPU_JOB_TYPES:
             self._gpu_event.set()
-            log.info("Job %s (%s) queued for GPU — position %d",
+            log.info("Job %s (%s) queued for GPU -- position %d",
                      job.id, job_type, len(self._gpu_queue))
         else:
             # Non-GPU: run immediately in a thread
@@ -200,7 +200,7 @@ class JobManager:
             return len(removable)
 
     def pause(self):
-        """Pause the GPU queue — current job finishes, no new jobs start until resume()."""
+        """Pause the GPU queue -- current job finishes, no new jobs start until resume()."""
         self._paused = True
 
     def resume(self):
@@ -237,7 +237,7 @@ class JobManager:
         """Submit a GPU job with a non-blocking prep phase.
 
         prep_fn(job, *args, **kwargs) runs immediately in a background thread
-        with no GPU lock — it can run concurrently with other GPU jobs in the
+        with no GPU lock -- it can run concurrently with other GPU jobs in the
         queue. When prep finishes the job automatically enters the GPU queue
         and gpu_fn runs under the normal GPU lock.
 
@@ -286,13 +286,13 @@ class JobManager:
                 job.finished_at = time.time()
                 return
 
-            # Prep done — hand off to GPU queue
+            # Prep done -- hand off to GPU queue
             job.status = "queued"
-            job.message = "Waiting for GPU…"
+            job.message = "Waiting for GPU..."
             with self._lock:
                 self._gpu_queue.append(job.id)
             self._gpu_event.set()
-            log.info("Job %s (%s) prep done, queued for GPU — position %d",
+            log.info("Job %s (%s) prep done, queued for GPU -- position %d",
                      job.id, job_type, len(self._gpu_queue))
 
         t = threading.Thread(target=_run_prep, daemon=True)
@@ -404,7 +404,7 @@ class JobManager:
                 continue
             if len(job._worker_args) < 2:
                 continue
-            # Strip internal prep-phase keys (_story_arc, _clip_durations, etc.) —
+            # Strip internal prep-phase keys (_story_arc, _clip_durations, etc.) --
             # prep will re-run on restore so fresh values are computed.
             raw_settings = job._worker_args[1]
             settings = {k: v for k, v in raw_settings.items() if not k.startswith("_")} \
@@ -448,7 +448,7 @@ class JobManager:
             feature = record.get("feature")
             handler = registry.get(feature)
             if not handler:
-                log.warning("[queue-restore] No restore handler for %r — skipping", feature)
+                log.warning("[queue-restore] No restore handler for %r -- skipping", feature)
                 failed += 1
                 continue
             try:
@@ -459,7 +459,7 @@ class JobManager:
                 )
                 if job:
                     restored += 1
-                    log.info("[queue-restore] Restored %r job — new id %s", feature, job.id)
+                    log.info("[queue-restore] Restored %r job -- new id %s", feature, job.id)
             except Exception as e:
                 log.error("[queue-restore] Failed to restore %r job: %s", feature, e)
                 failed += 1
@@ -483,13 +483,13 @@ class JobManager:
             for jid in to_remove:
                 del self._jobs[jid]
 
-    # ── Internal ──────────────────────────────────────────────────────────
+    # -- Internal ----------------------------------------------------------
 
     def _gpu_queue_worker(self):
         """Background thread that processes GPU jobs sequentially.
 
-        The outer while True is wrapped in a broad except so no exception —
-        including CUDA RuntimeErrors from torch.cuda.empty_cache() — can ever
+        The outer while True is wrapped in a broad except so no exception --
+        including CUDA RuntimeErrors from torch.cuda.empty_cache() -- can ever
         kill this thread.  A dead worker means every subsequent GPU job hangs
         as 'queued' forever, which is far worse than logging and continuing.
         """
@@ -541,13 +541,13 @@ class JobManager:
                         log.info("Waiting up to 30s for timed-out job thread to exit...")
                         worker.join(timeout=30)
                         if worker.is_alive():
-                            # Thread is stuck — most likely blocked on a WanGP HTTP call
+                            # Thread is stuck -- most likely blocked on a WanGP HTTP call
                             # (e.g. polling /status or /generate while WanGP is mid-generation).
                             # Restarting the WanGP worker closes the listening socket, which
                             # causes the blocked HTTP call to raise a ConnectionError and lets
                             # the thread exit on its next stop_check iteration.
                             log.warning(
-                                "Job %s thread still alive after 30s grace — "
+                                "Job %s thread still alive after 30s grace -- "
                                 "restarting WanGP worker to unblock stuck connection",
                                 job.id,
                             )
@@ -559,12 +559,12 @@ class JobManager:
                             worker.join(timeout=15)
                             if worker.is_alive():
                                 log.error(
-                                    "Job %s thread STILL alive after WanGP stop — "
+                                    "Job %s thread STILL alive after WanGP stop -- "
                                     "proceeding anyway; VRAM contention possible",
                                     job.id,
                                 )
                                 job.message = (
-                                    f"Timed out after {timeout}s — WanGP restart failed; "
+                                    f"Timed out after {timeout}s -- WanGP restart failed; "
                                     "restart the app if the next job hangs"
                                 )
 
@@ -589,7 +589,7 @@ class JobManager:
 
             except Exception as _worker_exc:
                 log.exception(
-                    "GPU queue worker caught unexpected exception — "
+                    "GPU queue worker caught unexpected exception -- "
                     "continuing after 2s (job %s may need retry): %s",
                     locals().get('job_id', '?'), _worker_exc,
                 )

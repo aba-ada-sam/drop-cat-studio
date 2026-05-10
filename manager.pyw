@@ -1,5 +1,5 @@
 """
-manager.pyw — Drop Cat Go Studio window manager
+manager.pyw -- Drop Cat Go Studio window manager
 Run with:  pythonw.exe manager.pyw
 
 - Shows tkinter loading splash instantly while server starts
@@ -21,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# -- Paths ---------------------------------------------------------------------
 
 ROOT       = Path(__file__).resolve().parent
 APP_PY     = ROOT / "app.py"
@@ -46,7 +46,7 @@ PORT_TRIES = 20
 _MUTEX_HANDLE = None  # held at module level so GC never releases it
 
 
-# ── Python interpreter ────────────────────────────────────────────────────────
+# -- Python interpreter --------------------------------------------------------
 
 def _python_exe() -> str:
     exe = Path(sys.executable)
@@ -62,7 +62,7 @@ def _python_exe() -> str:
 PYTHON = _python_exe()
 
 
-# ── Port helpers ──────────────────────────────────────────────────────────────
+# -- Port helpers --------------------------------------------------------------
 
 def read_port_file() -> tuple[int | None, int | None]:
     try:
@@ -128,7 +128,7 @@ def kill_pid(pid: int | None) -> None:
         log.warning("taskkill %d failed: %s", pid, exc)
 
 
-# ── Auto-update (git pull + pip install) ─────────────────────────────────────
+# -- Auto-update (git pull + pip install) -------------------------------------
 
 def _do_git_pull(on_status=None) -> None:
     """Pull latest code; pip-install deps only if the commit changed. Non-fatal."""
@@ -137,10 +137,10 @@ def _do_git_pull(on_status=None) -> None:
             on_status(msg)
 
     if not shutil.which("git"):
-        log.info("git not on PATH — skipping update check")
+        log.info("git not on PATH -- skipping update check")
         return
 
-    _status("Checking for updates…")
+    _status("Checking for updates...")
     try:
         sha_before = subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -167,8 +167,8 @@ def _do_git_pull(on_status=None) -> None:
         sha_after = sha_before
 
     if sha_before and sha_after and sha_before != sha_after:
-        log.info("New code pulled (%s → %s)", sha_before[:7], sha_after[:7])
-        # Only pip-install if requirements.txt itself changed — avoids a
+        log.info("New code pulled (%s -> %s)", sha_before[:7], sha_after[:7])
+        # Only pip-install if requirements.txt itself changed -- avoids a
         # 30-60s dep-resolution crawl on every code-only update.
         req_changed = False
         try:
@@ -178,11 +178,11 @@ def _do_git_pull(on_status=None) -> None:
             )
             req_changed = bool(diff.stdout.strip())
         except Exception:
-            req_changed = True  # can't tell — be safe and install
+            req_changed = True  # can't tell -- be safe and install
 
         if req_changed:
-            log.info("requirements.txt changed — updating dependencies")
-            _status("Updating dependencies…")
+            log.info("requirements.txt changed -- updating dependencies")
+            _status("Updating dependencies...")
             try:
                 req = ROOT / "requirements.txt"
                 if req.exists():
@@ -193,12 +193,12 @@ def _do_git_pull(on_status=None) -> None:
             except Exception as exc:
                 log.warning("pip install failed (non-fatal): %s", exc)
         else:
-            log.info("requirements.txt unchanged — skipping pip install")
+            log.info("requirements.txt unchanged -- skipping pip install")
     else:
         log.info("Already up to date")
 
 
-# ── Desktop shortcut self-update ──────────────────────────────────────────────
+# -- Desktop shortcut self-update ----------------------------------------------
 
 def _ensure_shortcut() -> None:
     """Keep the desktop shortcut pointing at launch-silent.vbs via wscript.exe."""
@@ -224,12 +224,12 @@ def _ensure_shortcut() -> None:
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True, timeout=15,
         )
-        log.info("Desktop shortcut updated → launch-silent.vbs")
+        log.info("Desktop shortcut updated -> launch-silent.vbs")
     except Exception as exc:
         log.warning("_ensure_shortcut failed (non-fatal): %s", exc)
 
 
-# ── Open app window ───────────────────────────────────────────────────────────
+# -- Open app window -----------------------------------------------------------
 
 def open_app_window(port: int) -> "subprocess.Popen | None":
     """Open the app in Chrome --app mode using a dedicated profile.
@@ -261,14 +261,14 @@ def open_app_window(port: int) -> "subprocess.Popen | None":
             proc = subprocess.Popen(args)
             log.info("Opened Chrome --app on port %d (profile: %s)", port, profile_dir)
             return proc
-    # Chrome not found — fall back to default browser (can't track close)
+    # Chrome not found -- fall back to default browser (can't track close)
     import webbrowser
     webbrowser.open(url)
     log.warning("Chrome not found, opened default browser")
     return None
 
 
-# ── Server process manager ────────────────────────────────────────────────────
+# -- Server process manager ----------------------------------------------------
 
 class ServerManager:
     MAX_RESTARTS   = 5
@@ -396,18 +396,18 @@ class ServerManager:
             if self._stop_event.is_set():
                 log.info("Server exited (manager stopping)")
                 return
-            log.warning("Server exited with code %s — considering restart", ret)
+            log.warning("Server exited with code %s -- considering restart", ret)
             self._ready_event.clear()
             self._port = None
             now = time.monotonic()
             self._restart_times = [t for t in self._restart_times if now - t < self.RESTART_WINDOW]
             if len(self._restart_times) >= self.MAX_RESTARTS:
-                log.error("Server crashed %d times in %ds — giving up.",
+                log.error("Server crashed %d times in %ds -- giving up.",
                           self.MAX_RESTARTS, self.RESTART_WINDOW)
                 self._gave_up = True
                 return
             self._restart_times.append(now)
-            log.info("Restarting server in %ds (attempt %d/%d)…",
+            log.info("Restarting server in %ds (attempt %d/%d)...",
                      self.RESTART_DELAY, len(self._restart_times), self.MAX_RESTARTS)
             with self._lock:
                 self._proc = None
@@ -415,7 +415,7 @@ class ServerManager:
             self._spawn()
 
 
-# ── Opening splash (already-running path) ─────────────────────────────────────
+# -- Opening splash (already-running path) -------------------------------------
 
 def _show_opening_splash() -> None:
     """Show 'Opening...' window while finding + opening the existing server.
@@ -442,7 +442,7 @@ def _show_opening_splash() -> None:
              font=("Arial Black", 20, "bold")).pack(pady=(28, 2))
     tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
              font=("Arial", 8)).pack()
-    tk.Label(root, text="Opening…", bg="#0d0606", fg="#6a5a4a",
+    tk.Label(root, text="Opening...", bg="#0d0606", fg="#6a5a4a",
              font=("Arial", 9)).pack(pady=(14, 0))
 
     _done = threading.Event()
@@ -466,10 +466,10 @@ def _show_opening_splash() -> None:
     root.mainloop()
 
 
-# ── Loading splash (tkinter) ──────────────────────────────────────────────────
+# -- Loading splash (tkinter) --------------------------------------------------
 
 def show_splash(srv: ServerManager) -> None:
-    """Frameless loading window: pulls updates → starts server → closes.
+    """Frameless loading window: pulls updates -> starts server -> closes.
 
     Drives the full startup sequence in a background thread so the window
     appears immediately. srv.start() is called from here, not from main().
@@ -498,11 +498,11 @@ def show_splash(srv: ServerManager) -> None:
     tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
              font=("Arial", 8)).pack()
 
-    status = tk.StringVar(value="Checking for updates…")
+    status = tk.StringVar(value="Checking for updates...")
     tk.Label(root, textvariable=status, bg="#0d0606", fg="#6a5a4a",
              font=("Arial", 9)).pack(pady=(16, 0))
 
-    dot_var = tk.StringVar(value="●○○○")
+    dot_var = tk.StringVar(value="*ooo")
     tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
              font=("Arial", 13)).pack(pady=4)
 
@@ -525,7 +525,7 @@ def show_splash(srv: ServerManager) -> None:
     skip_btn.pack(pady=(4, 0))
     skip_btn.pack_forget()  # hidden initially
 
-    dots = ["●○○○", "○●○○", "○○●○", "○○○●"]
+    dots = ["*ooo", "o*oo", "oo*o", "ooo*"]
     idx = [0]
 
     def _tick():
@@ -535,7 +535,7 @@ def show_splash(srv: ServerManager) -> None:
 
     def _bg():
         _do_git_pull(on_status=lambda s: root.after(0, lambda: status.set(s)))
-        root.after(0, lambda: status.set("Starting server…"))
+        root.after(0, lambda: status.set("Starting server..."))
         srv.start()
         deadline = time.time() + 120
         while not srv.ready and not srv._gave_up and time.time() < deadline:
@@ -649,7 +649,7 @@ def _shutdown(srv: "ServerManager") -> None:
     os._exit(0)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# -- Entry point ---------------------------------------------------------------
 
 def _diag(msg: str) -> None:
     """Append a timestamped line to manager_diag.txt for silent-crash diagnosis."""
@@ -670,9 +670,9 @@ def main() -> None:
     import ctypes as _ct
     _k32 = _ct.WinDLL("kernel32", use_last_error=True)
     _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
-    if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS — another manager owns it
+    if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS -- another manager owns it
         # Find the other manager's PID and check if its server is still alive.
-        # If the server is dead the old manager is a zombie — kill it and take over.
+        # If the server is dead the old manager is a zombie -- kill it and take over.
         other_pid = None
         try:
             import psutil
@@ -692,13 +692,13 @@ def main() -> None:
 
         if existing_alive and not other_pid:
             # Mutex held by an undetectable process and server is alive -- just open.
-            log.info("Server on port %d alive, no trackable manager — opening window", existing_alive)
+            log.info("Server on port %d alive, no trackable manager -- opening window", existing_alive)
             _show_opening_splash()
             sys.exit(0)
         else:
             # Kill any stuck manager so WE take over Chrome tracking and shutdown.
             if other_pid:
-                log.info("Replacing stuck manager PID %d — taking over Chrome tracking", other_pid)
+                log.info("Replacing stuck manager PID %d -- taking over Chrome tracking", other_pid)
                 kill_pid(other_pid)
                 time.sleep(0.5)
             if not existing_alive:
@@ -712,7 +712,7 @@ def main() -> None:
     # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)
     _ensure_shortcut()
 
-    _diag("_ensure_shortcut done — finding server")
+    _diag("_ensure_shortcut done -- finding server")
     srv = ServerManager()
 
     # Fast check: is a server already recorded in .dcs-port and alive?
@@ -720,17 +720,17 @@ def main() -> None:
 
     chrome_proc = None
     if existing_port:
-        _diag(f"server already on port {existing_port} — opening window")
+        _diag(f"server already on port {existing_port} -- opening window")
         log.info("Server already on port %d", existing_port)
         srv._port = existing_port
         srv._ready_event.set()
         chrome_proc = open_app_window(existing_port)
     else:
-        # show_splash drives the full startup: git pull → srv.start() → wait ready
-        _diag("no server found — calling show_splash")
-        log.info("Starting fresh — splash will handle git pull + server start")
+        # show_splash drives the full startup: git pull -> srv.start() -> wait ready
+        _diag("no server found -- calling show_splash")
+        log.info("Starting fresh -- splash will handle git pull + server start")
         show_splash(srv)
-        _diag(f"show_splash returned — srv.port={srv.port}")
+        _diag(f"show_splash returned -- srv.port={srv.port}")
         if srv.port:
             chrome_proc = open_app_window(srv.port)
         else:
@@ -741,10 +741,10 @@ def main() -> None:
     _diag("waiting for window close")
     if chrome_proc is not None:
         chrome_proc.wait()
-        log.info("App window closed — shutting down")
+        log.info("App window closed -- shutting down")
         _shutdown(srv)
     else:
-        # No trackable window — keep manager alive as a watchdog indefinitely
+        # No trackable window -- keep manager alive as a watchdog indefinitely
         srv._stop_event.wait()
 
 

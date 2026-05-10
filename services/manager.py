@@ -22,7 +22,7 @@ from core import config as cfg
 
 log = logging.getLogger(__name__)
 
-# ── Windows Job Object — kill GPU children when DCS dies for any reason ───────
+# -- Windows Job Object -- kill GPU children when DCS dies for any reason -------
 # A Job Object with KILL_ON_JOB_CLOSE is the OS-level guarantee: when the DCS
 # Python process exits (clean, crash, or Task Manager kill), Windows closes the
 # job handle and immediately terminates every process assigned to it.
@@ -85,7 +85,7 @@ def _init_job_object() -> None:
             return
 
         _JOB_HANDLE = job
-        log.info("Job Object armed — GPU subprocesses will die with DCS (any exit)")
+        log.info("Job Object armed -- GPU subprocesses will die with DCS (any exit)")
     except Exception as exc:
         log.warning("Job Object setup failed (non-fatal): %s", exc)
 
@@ -167,7 +167,7 @@ def _popen_flags() -> dict:
         return {"creationflags": subprocess.CREATE_NO_WINDOW}
     return {}
 
-# ── Status tracking ──────────────────────────────────────────────────────────
+# -- Status tracking ----------------------------------------------------------
 
 _status_lock = threading.Lock()
 _service_status: dict = {
@@ -196,7 +196,7 @@ def _set_status(service: str, **kwargs):
         _service_status[service].update(kwargs)
 
 
-# ── Port / HTTP helpers ──────────────────────────────────────────────────────
+# -- Port / HTTP helpers ------------------------------------------------------
 
 def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
     try:
@@ -214,7 +214,7 @@ def http_get(url: str, timeout: int = 5) -> dict | None:
         return None
 
 
-# ── ACE-Step ─────────────────────────────────────────────────────────────────
+# -- ACE-Step -----------------------------------------------------------------
 
 ACESTEP_HOST = "127.0.0.1"
 ACESTEP_PORT = 8019
@@ -241,7 +241,7 @@ def start_acestep() -> tuple[bool, str | None]:
 
         acestep_root = cfg.get_acestep_root()
         if acestep_root is None:
-            msg = "ACE-Step path not configured — set it in Settings"
+            msg = "ACE-Step path not configured -- set it in Settings"
             _set_status("acestep", state="not_configured", message=msg)
             return False, msg
 
@@ -296,7 +296,7 @@ def start_acestep() -> tuple[bool, str | None]:
 
             threading.Thread(target=_drain, args=(proc,), daemon=True).start()
 
-            deadline = time.time() + 300  # 5 min — LM model loading takes ~90s
+            deadline = time.time() + 300  # 5 min -- LM model loading takes ~90s
 
             # Phase 1: wait for uvicorn to bind the port (~5s)
             while time.time() < deadline:
@@ -313,9 +313,9 @@ def start_acestep() -> tuple[bool, str | None]:
                 return False, msg
 
             # Phase 2: port open; wait for model loading (~90s).
-            # uvicorn queues HTTP requests during startup — issue one long-timeout
+            # uvicorn queues HTTP requests during startup -- issue one long-timeout
             # request so we get the response as soon as initialization finishes.
-            log.info("ACE-Step port %d open — waiting for model to load...", ACESTEP_PORT)
+            log.info("ACE-Step port %d open -- waiting for model to load...", ACESTEP_PORT)
             _set_status("acestep", state="starting",
                         message="ACE-Step loading model into VRAM (~90s)...")
             while time.time() < deadline:
@@ -326,7 +326,7 @@ def start_acestep() -> tuple[bool, str | None]:
                 )
                 if result is not None:
                     _set_status("acestep", state="running",
-                                message="ACE-Step ready — music generation available",
+                                message="ACE-Step ready -- music generation available",
                                 port=ACESTEP_PORT, pid=proc.pid)
                     log.info("ACE-Step started and ready on port %d", ACESTEP_PORT)
                     return True, None
@@ -346,7 +346,7 @@ def start_acestep() -> tuple[bool, str | None]:
         return False, msg
 
 
-# ── WanGP ────────────────────────────────────────────────────────────────────
+# -- WanGP --------------------------------------------------------------------
 
 WANGP_GRADIO_PORTS = [7862, 7863, 7864]  # 7860=DropCat, 7861=Forge
 WANGP_WORKER_PORT = 7899
@@ -381,7 +381,7 @@ def check_wangp() -> dict:
     gradio_port = _detect_wangp_gradio()
     if gradio_port:
         return {"state": "running", "message": f"WanGP Gradio on port {gradio_port}", "mode": "gradio", "port": gradio_port}
-    return {"state": "ready", "message": "WanGP configured — will use subprocess per request", "mode": "subprocess"}
+    return {"state": "ready", "message": "WanGP configured -- will use subprocess per request", "mode": "subprocess"}
 
 
 def start_wangp_worker() -> tuple[bool, str | None]:
@@ -400,7 +400,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
 
         wan_root = cfg.get("wan2gp_root")
         if not wan_root:
-            msg = "WanGP path not configured — set it in Settings"
+            msg = "WanGP path not configured -- set it in Settings"
             _set_status("wangp", state="not_configured", message=msg)
             return False, msg
 
@@ -483,14 +483,14 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             return False, msg
 
 
-# ── Lifecycle ────────────────────────────────────────────────────────────────
+# -- Lifecycle ----------------------------------------------------------------
 
 def quick_detect():
     """Fast synchronous snapshot of which services are already running.
 
     Called in the lifespan before the server starts accepting requests so the
     very first /api/system response returns real states instead of 'unknown'.
-    Each check is just a socket connect — completes in <50ms if the service
+    Each check is just a socket connect -- completes in <50ms if the service
     is up, or fails fast (connection refused) if it's down.
     """
     if wangp_worker_alive():
@@ -501,7 +501,7 @@ def quick_detect():
         wan_root = cfg.get("wan2gp_root")
         if wan_root:
             _set_status("wangp", state="ready",
-                        message="WanGP configured — starting worker...")
+                        message="WanGP configured -- starting worker...")
         else:
             _set_status("wangp", state="not_configured",
                         message="WanGP path not configured")
@@ -514,7 +514,7 @@ def quick_detect():
                         port=FORGE_PORT)
         else:
             _set_status("forge", state="not_running",
-                        message="Forge not running — use Services tab to start")
+                        message="Forge not running -- use Services tab to start")
     except Exception:
         _set_status("forge", state="not_running", message="Forge not detected")
 
@@ -531,10 +531,10 @@ def quick_detect():
         acestep_root = cfg.get("acestep_root")
         if acestep_root:
             _set_status("acestep", state="ready",
-                        message="ACE-Step ready — starts automatically when you generate music")
+                        message="ACE-Step ready -- starts automatically when you generate music")
         else:
             _set_status("acestep", state="not_configured",
-                        message="ACE-Step not configured — set path in Settings")
+                        message="ACE-Step not configured -- set path in Settings")
 
     log.info("Quick service detect complete")
 
@@ -559,7 +559,7 @@ def startup_all():
         if root is None:
             detected = cfg.auto_detect_acestep()
             if detected:
-                log.info("ACE-Step auto-detected at %s — saving to config", detected)
+                log.info("ACE-Step auto-detected at %s -- saving to config", detected)
                 cfg.save({"acestep_root": detected})
         start_acestep()
 
@@ -602,10 +602,10 @@ def startup_all():
         acestep_root = cfg.get("acestep_root")
         if acestep_root:
             _set_status("acestep", state="ready",
-                        message="ACE-Step ready — starts automatically when you generate music")
+                        message="ACE-Step ready -- starts automatically when you generate music")
         else:
             _set_status("acestep", state="not_configured",
-                        message="ACE-Step not configured — set path in Settings for music generation")
+                        message="ACE-Step not configured -- set path in Settings for music generation")
 
     # Start the health watchdog
     start_watchdog()
@@ -748,7 +748,7 @@ def restart_service(name: str) -> tuple[bool, str | None]:
     return False, f"Unknown service: {name}"
 
 
-# ── Forge auto-start ─────────────────────────────────────────────────────────
+# -- Forge auto-start ---------------------------------------------------------
 
 _forge_proc: subprocess.Popen | None = None
 
@@ -769,10 +769,10 @@ def start_forge() -> tuple[bool, str | None]:
     """Start Forge SD WebUI as a fully detached process.
 
     Forge is launched via PowerShell Start-Process so it runs independently
-    of Drop Cat Go Studio — it survives app restarts and closing the app.
+    of Drop Cat Go Studio -- it survives app restarts and closing the app.
 
     If Forge's port is already open (model still loading), we skip the launch
-    and just wait for the API to become ready — prevents killing a loading Forge.
+    and just wait for the API to become ready -- prevents killing a loading Forge.
     """
     global _forge_proc
     from services.forge_client import forge_alive, FORGE_PORT
@@ -786,7 +786,7 @@ def start_forge() -> tuple[bool, str | None]:
 
     # Port open but API not yet ready = Forge is mid-startup; don't kill it
     if _forge_port_open(FORGE_PORT):
-        log.info("Forge port %d is open — model still loading, waiting...", FORGE_PORT)
+        log.info("Forge port %d is open -- model still loading, waiting...", FORGE_PORT)
         _set_status("forge", state="starting",
                     message="Forge loading model, please wait (~90s)...")
         # Fall through to the poll loop below without launching a new process
@@ -804,9 +804,9 @@ def start_forge() -> tuple[bool, str | None]:
 
     try:
         if webui_bat is not None:
-            # Fresh launch — Forge isn't running at all
+            # Fresh launch -- Forge isn't running at all
             _set_status("forge", state="starting",
-                        message="Starting Forge SD — loading model, please wait (~90s)...")
+                        message="Starting Forge SD -- loading model, please wait (~90s)...")
             log.info("Starting Forge SD from %s (detached)...", forge_root)
 
             # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser
@@ -822,8 +822,8 @@ def start_forge() -> tuple[bool, str | None]:
                  "-Command", ps_args],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            log.info("Forge launch command sent — polling for API...")
-        _forge_proc = None  # detached — no handle to track
+            log.info("Forge launch command sent -- polling for API...")
+        _forge_proc = None  # detached -- no handle to track
 
         # Poll until Forge API responds (up to 5 minutes for large models)
         deadline = time.time() + 300
@@ -843,7 +843,7 @@ def start_forge() -> tuple[bool, str | None]:
                 last_log = time.time()
             time.sleep(5)
 
-        msg = "Forge did not respond within 5 minutes — check C:\\forge\\webui-user.bat"
+        msg = "Forge did not respond within 5 minutes -- check C:\\forge\\webui-user.bat"
         _set_status("forge", state="error", message=msg)
         log.error(msg)
         return False, msg
@@ -855,7 +855,7 @@ def start_forge() -> tuple[bool, str | None]:
         return False, msg
 
 
-# ── Ollama auto-start ────────────────────────────────────────────────────────
+# -- Ollama auto-start --------------------------------------------------------
 
 def _find_ollama() -> str | None:
     import shutil
@@ -903,7 +903,7 @@ def start_ollama() -> tuple[bool, str | None]:
         return False, f"Failed to start Ollama: {e}"
 
 
-# ── Health watchdog ──────────────────────────────────────────────────────────
+# -- Health watchdog ----------------------------------------------------------
 
 def _watchdog_loop():
     """Periodically check managed services and restart crashed ones."""
@@ -929,7 +929,7 @@ def _watchdog_loop():
                 start_acestep()
 
             # Forge is user-managed (image gen is separate from video gen).
-            # Just passively detect its state — never auto-restart it.
+            # Just passively detect its state -- never auto-restart it.
             from services.forge_client import forge_alive as _forge_alive
             forge_state = status.get("forge", {}).get("state", "unknown")
             if forge_state in ("not_running", "unknown", "error", "ready"):
@@ -940,7 +940,7 @@ def _watchdog_loop():
             elif forge_state == "running":
                 if not _forge_alive():
                     _set_status("forge", state="not_running",
-                                message="Forge not running — use Services tab to start")
+                                message="Forge not running -- use Services tab to start")
 
             # Ensure Ollama stays up (lightweight check)
             if not ollama_alive():
@@ -956,7 +956,7 @@ def start_watchdog():
     log.info("Service health watchdog started (30s interval)")
 
 
-# ── Lifecycle ────────────────────────────────────────────────────────────────
+# -- Lifecycle ----------------------------------------------------------------
 
 def shutdown_all():
     """Cleanly shut down managed services."""
