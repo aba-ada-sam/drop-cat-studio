@@ -9,9 +9,9 @@
  *  5. Results summary at the bottom
  */
 
-import { apiFetch, toast }          from './shell/toast.js';
-import { el, createDropZone }       from './components.js';
-import { pollJob }                  from './api.js';
+import { apiFetch, toast }          from './shell/toast.js?v=20260503a';
+import { el }                       from './components.js?v=20260507a';
+import { pollJob }                  from './api.js?v=20260505e';
 
 let _panel    = null;
 let _tasks    = [];      // current planned task list
@@ -242,12 +242,13 @@ async function _onRun() {
 }
 
 function _pollProgress(jobId) {
-  pollJob(jobId, {
-    onTick: (job) => {
+  pollJob(
+    jobId,
+    (job) => {
       const results = job.meta?.results || [];
       results.forEach((r, i) => _updateStepIcon(i, r.status));
     },
-    onDone: (job) => {
+    (job) => {
       _polling = false;
       const runBtn = _panel.querySelector('#adobe-run-btn');
       if (runBtn) { runBtn.disabled = false; runBtn.textContent = 'Run Plan'; }
@@ -257,7 +258,7 @@ function _pollProgress(jobId) {
       const fails = results.filter(r => r.status === 'error').length;
       toast(fails ? `Done with ${fails} error${fails > 1 ? 's' : ''}` : 'All steps complete', fails ? 'warning' : 'success');
     },
-    onError: (job) => {
+    (job) => {
       _polling = false;
       const runBtn = _panel.querySelector('#adobe-run-btn');
       if (runBtn) { runBtn.disabled = false; runBtn.textContent = 'Run Plan'; }
@@ -266,7 +267,7 @@ function _pollProgress(jobId) {
       _showResults(results);
       toast('Run stopped: ' + (job.error || 'unknown error'), 'error');
     },
-  });
+  );
 }
 
 // ── Step icon updates ─────────────────────────────────────────────────────────
