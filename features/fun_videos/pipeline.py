@@ -120,7 +120,7 @@ def run_prep(job, photo_path, settings):
     # applies to all modes (audio, video-only, MMAudio). Without this, blank prompts
     # produce frozen/static clips regardless of audio settings.
     if not video_prompt:
-        job.update(progress=3, message="Writing motion prompt…")
+        job.update(progress=3, message="Writing motion prompt...")
         try:
             auto_prompt = analyzer.generate_video_prompt_auto(
                 llm_router,
@@ -137,7 +137,7 @@ def run_prep(job, photo_path, settings):
     if not needs_audio or (music_prompt and instrumental):
         return  # no audio prep needed — video prompt is already set above
 
-    job.update(progress=5, message="Getting music direction…")
+    job.update(progress=5, message="Getting music direction...")
     try:
         # Cloud providers (Anthropic/OpenAI) must not receive NSFW images.
         # Pass frames only when Ollama is active; cloud gets text context instead.
@@ -159,7 +159,7 @@ def run_prep(job, photo_path, settings):
         else:
             scene_desc = ""
         if not instrumental:
-            job.update(progress=8, message="Writing lyrics…")
+            job.update(progress=8, message="Writing lyrics...")
             lyrics = analyzer.generate_lyrics(
                 llm_router, [],
                 music_prompt, lyric_direction or user_direction,
@@ -171,9 +171,9 @@ def run_prep(job, photo_path, settings):
         if music_prompt:
             settings["_prepped_music_prompt"] = music_prompt
     except Exception as e:
-        log.warning("[warning] Pre-analysis failed: %s — will retry during GPU phase", e)
+        log.warning("[warning] Pre-analysis failed: %s -- will retry during GPU phase", e)
 
-    job.update(progress=9, message="Analysis complete, waiting for GPU…")
+    job.update(progress=9, message="Analysis complete, waiting for GPU...")
 
 
 def run_pipeline(job, photo_path, settings):
@@ -294,7 +294,7 @@ def run_pipeline(job, photo_path, settings):
                     if lyrics:
                         _log("[info] Lyrics generated")
         except Exception as e:
-            _log(f"[warning] Pre-analysis failed: {e} — will retry after video")
+            _log(f"[warning] Pre-analysis failed: {e} -- will retry after video")
 
     if _stopped():
         return
@@ -374,12 +374,12 @@ def run_pipeline(job, photo_path, settings):
     if _stopped():
         return
     if not video_path:
-        raw = _last_error[0] or "WanGP worker not running — check Settings and start WanGP"
+        raw = _last_error[0] or "WanGP worker not running -- check Settings and start WanGP"
         if "out of memory" in raw.lower() or "cuda error" in raw.lower():
             from services import manager as _svc
             threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
             raise RuntimeError(
-                "CUDA out of memory — WanGP is restarting. "
+                "CUDA out of memory -- WanGP is restarting. "
                 "Try fewer steps (≤30), shorter duration (≤8s), or a smaller model, then generate again."
             )
         raise RuntimeError(f"Video generation failed: {raw}")

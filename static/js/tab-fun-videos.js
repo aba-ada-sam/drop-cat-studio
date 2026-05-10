@@ -1,5 +1,5 @@
 ﻿/**
- * Drop Cat Go Studio — Create Videos
+ * Drop Cat Go Studio -- Create Videos
  * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
@@ -8,7 +8,7 @@ import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
-// Concurrency limiter for thumbnail extraction — caps parallel <video> preloads.
+// Concurrency limiter for thumbnail extraction -- caps parallel <video> preloads.
 const _thumbQueue = { running: 0, max: 4, pending: [] };
 function _thumbSlot(fn) {
   return new Promise(resolve => {
@@ -239,7 +239,7 @@ export function init(panel) {
   root.appendChild(videoToggleRow);
   const videoChk = el('input', { type: 'checkbox', id: 'fv-video-toggle' });
   videoToggleRow.appendChild(videoChk);
-  videoToggleRow.appendChild(el('label', { for: 'fv-video-toggle', style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;', text: '+ Start video — use a video as the source instead of an image (video-to-video)' }));
+  videoToggleRow.appendChild(el('label', { for: 'fv-video-toggle', style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;', text: '+ Start video -- use a video as the source instead of an image (video-to-video)' }));
 
   const videoCard = el('div', { class: 'card', style: 'display:none; padding:12px;' });
   root.appendChild(videoCard);
@@ -274,7 +274,7 @@ export function init(panel) {
 
   const endChk = el('input', { type: 'checkbox', id: 'fv-end-toggle' });
   const endToggleLabel = el('label', { for: 'fv-end-toggle', style: 'font-size:.82rem; color:var(--text-3); cursor:pointer; user-select:none;',
-    text: '+ End image — morph from start to end' });
+    text: '+ End image -- morph from start to end' });
   endToggleRow.appendChild(endChk);
   endToggleRow.appendChild(endToggleLabel);
 
@@ -326,7 +326,7 @@ export function init(panel) {
   root.appendChild(promptCard);
   promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
   promptCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;',
-    text: 'Describe the action — what does the subject DO? Camera moves are secondary.' }));
+    text: 'Describe the action -- what does the subject DO? Camera moves are secondary.' }));
   const PROMPT_PLACEHOLDER = 'e.g. "Throws head back laughing, hair whipping sideways, hands clap wildly, energy radiates outward, camera pulls back to reveal full burst of motion"';
   const PROMPT_DEFAULT     = 'Subject erupts into motion, hair and clothes responding to sudden energy, arms move expressively, dynamic action fills every corner of the frame';
   const promptTA = el('textarea', { rows: '3', style: 'width:100%; resize:vertical; font-size:.9rem;',
@@ -340,7 +340,7 @@ export function init(panel) {
   }, [
     promptSpinner,
     promptStatusMsg,
-    el('span', { style: 'color:var(--text-3);', text: '— or just click Generate to skip' }),
+    el('span', { style: 'color:var(--text-3);', text: '-- or just click Generate to skip' }),
   ]);
   promptCard.appendChild(promptStatus);
 
@@ -356,7 +356,7 @@ export function init(panel) {
   // force=true: regenerates even if prompt textarea already has content.
   async function _autoGeneratePrompt(imagePath, force = false) {
     if (!force && promptTA.value.trim()) return;
-    // Don't fire Ollama while a video job is running — it competes for VRAM.
+    // Don't fire Ollama while a video job is running -- it competes for VRAM.
     // The user can still click "Create Story" manually (force=true bypasses this).
     if (!force && _activeJobId) return;
     if (_autoPromptAbort) _autoPromptAbort.abort();
@@ -368,7 +368,7 @@ export function init(panel) {
     promptStatusMsg.textContent = 'Generating motion prompt from image...';
     promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--accent); margin-top:5px; align-items:center; gap:6px;';
     storyBtn.disabled = true;
-    storyBtn.textContent = '…';
+    storyBtn.textContent = '...';
 
     // Safety timeout -- Ollama vision cold-start can take 30s+; after 45s give up,
     // populate the textarea with the default prompt so the user has something
@@ -651,7 +651,7 @@ export function init(panel) {
     const preferred = data.default || Object.keys(_models).find(k => k.includes('Wan2.1-I2V-14B-480P')) || Object.keys(_models)[0];
     if (preferred && _models[preferred]) modelSel.value = preferred;
     modelSel.dispatchEvent(new Event('change'));
-  }).catch(() => toast('Could not load video models — using defaults', 'error'));
+  }).catch(() => toast('Could not load video models -- using defaults', 'error'));
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   const audioCard = el('div', { class: 'card', style: 'padding:14px;' });
@@ -668,7 +668,7 @@ export function init(panel) {
 
   // Music prompt + AI suggest
   const musicIn = el('input', { type: 'text', style: 'flex:1;',
-    placeholder: 'Music style — genre, mood, tempo, instruments (blank = AI picks from video)',
+    placeholder: 'Music style -- genre, mood, tempo, instruments (blank = AI picks from video)',
   });
   const musicSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', title: 'AI suggests a music style from your motion prompt', style: 'flex-shrink:0;' });
   audioBody.appendChild(el('div', { style: 'margin-bottom:8px;' }, [
@@ -676,7 +676,7 @@ export function init(panel) {
     el('div', { style: 'display:flex; gap:6px;' }, [musicIn, musicSuggestBtn]),
   ]));
 
-  // Song/instrumental — default is SONG (unchecked)
+  // Song/instrumental -- default is SONG (unchecked)
   const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
     instrChk,
@@ -687,7 +687,7 @@ export function init(panel) {
   const lyricGuideWrap = el('div');
   const lyricGuideTA = el('textarea', {
     rows: '2',
-    placeholder: 'Lyric direction — theme, mood, subject, e.g. "uplifting, overcoming challenges, anthemic chorus"',
+    placeholder: 'Lyric direction -- theme, mood, subject, e.g. "uplifting, overcoming challenges, anthemic chorus"',
     style: 'width:100%; resize:vertical; font-size:.82rem;',
   });
   lyricGuideWrap.appendChild(el('div', {}, [
@@ -703,7 +703,7 @@ export function init(panel) {
 
   // Suggest music from motion prompt text (no video yet at this point)
   musicSuggestBtn.addEventListener('click', async () => {
-    musicSuggestBtn.disabled = true; musicSuggestBtn.textContent = '…';
+    musicSuggestBtn.disabled = true; musicSuggestBtn.textContent = '...';
     try {
       const hint = [promptTA.value.trim(), lyricGuideTA.value.trim()].filter(Boolean).join(' | ');
       const data = await api('/api/fun/brainstorm', {
@@ -789,8 +789,8 @@ export function init(panel) {
     exportBtn.addEventListener('click', async () => {
       const videoPath = getVideoPath();
       if (!videoPath) return;
-      if (_offsetMs === 0) { syncStatus.textContent = 'No offset — nothing to export'; return; }
-      exportBtn.disabled = true; syncStatus.textContent = 'Baking…';
+      if (_offsetMs === 0) { syncStatus.textContent = 'No offset -- nothing to export'; return; }
+      exportBtn.disabled = true; syncStatus.textContent = 'Baking...';
       try {
         const data = await api('/api/fun/sync-audio', {
           method: 'POST',
@@ -853,7 +853,7 @@ export function init(panel) {
     totalLabel.textContent = `~${_multiClips * dur}s total`;
   }
   clipsSlider.addEventListener('input', _refreshMultiTotal);
-  // durSlider is a createSlider() wrapper — listen on the inner <input>
+  // durSlider is a createSlider() wrapper -- listen on the inner <input>
   durSlider.el.querySelector('input').addEventListener('input', _refreshMultiTotal);
 
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
@@ -905,7 +905,7 @@ export function init(panel) {
   const prog = createProgressCard(progWrap);
   prog.onCancel(async () => {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
-    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping…', 'info'); }
+    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping...', 'info'); }
   });
 
   const vidWrap = el('div');
@@ -1017,7 +1017,7 @@ export function init(panel) {
       _activePoller = pollJob(
         job_id,
         (j) => {
-          const msg = j.message || (j.status === 'queued' ? 'Queued — waiting for GPU...' : 'Working...');
+          const msg = j.message || (j.status === 'queued' ? 'Queued -- waiting for GPU...' : 'Working...');
           prog.update(j.progress || 0, msg);
         },
         (j) => {
@@ -1037,7 +1037,7 @@ export function init(panel) {
             resultTabBar.style.display = 'none';
             player.show(pathToUrl(bestPath), bestPath);
 
-            // Redo Audio + Sync — build once, update paths on each generation
+            // Redo Audio + Sync -- build once, update paths on each generation
             let redoCard = vidWrap.querySelector('.redo-audio-card');
             // Load sync preview whenever we have a new mix (even on repeat generations)
             if (redoCard?._syncTool && _mixPath) redoCard._syncTool.load(_mixPath);
@@ -1083,7 +1083,7 @@ export function init(panel) {
                   _mixPath = newPath;
                   resultTabBar.style.display = 'flex';
                   _showResultTab('mix');
-                  toast('Sync applied — playing adjusted video', 'success');
+                  toast('Sync applied -- playing adjusted video', 'success');
                 },
               );
               redoCard.appendChild(syncTool);
@@ -1094,7 +1094,7 @@ export function init(panel) {
               // AI suggest for redo (has real video path)
               redoSuggestBtn.addEventListener('click', async () => {
                 if (!_rawPath) { toast('Generate a video first', 'info'); return; }
-                redoSuggestBtn.disabled = true; redoSuggestBtn.textContent = '…';
+                redoSuggestBtn.disabled = true; redoSuggestBtn.textContent = '...';
                 try {
                   const data = await api('/api/fun/suggest-music', {
                     method: 'POST',
@@ -1112,7 +1112,7 @@ export function init(panel) {
 
               redoBtn.addEventListener('click', async () => {
                 if (!_rawPath) return;
-                redoBtn.disabled = true; redoProg.style.display = ''; redoProg.textContent = 'Submitting…';
+                redoBtn.disabled = true; redoProg.style.display = ''; redoProg.textContent = 'Submitting...';
                 try {
                   const { job_id: rid } = await api('/api/fun/add-music', {
                     method: 'POST',
@@ -1124,7 +1124,7 @@ export function init(panel) {
                     }),
                   });
                   pollJob(rid,
-                    (j) => { redoProg.textContent = j.message || 'Working…'; },
+                    (j) => { redoProg.textContent = j.message || 'Working...'; },
                     (j) => {
                       redoBtn.disabled = false; redoProg.style.display = 'none';
                       if (j.output) {
@@ -1154,7 +1154,7 @@ export function init(panel) {
               toast('Clip sent to Add Transitions tab', 'success');
             };
           } else {
-            toast('Generation finished but no output file found — check server logs', 'error');
+            toast('Generation finished but no output file found -- check server logs', 'error');
           }
         },
         (err) => {
@@ -1175,8 +1175,8 @@ export function init(panel) {
   });
 
   // ── Add Audio to Any Video ─────────────────────────────────────────────────
-  // Lets the user add AI-generated music to any video — newly generated, uploaded,
-  // or anything from the gallery — without running a new video generation.
+  // Lets the user add AI-generated music to any video -- newly generated, uploaded,
+  // or anything from the gallery -- without running a new video generation.
   const extAudioToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:4px;' });
   root.appendChild(extAudioToggleRow);
   const extAudioToggle = el('input', { type: 'checkbox', id: 'fv-ext-audio-toggle' });
@@ -1206,7 +1206,7 @@ export function init(panel) {
   const extPickRow = el('div', { style: 'display:flex; gap:8px; margin-bottom:10px;' });
   const extFileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none;' });
   extAudioSection.appendChild(extFileInput);
-  const extOpenBtn = el('button', { class: 'btn btn-sm', text: 'Browse video file…' });
+  const extOpenBtn = el('button', { class: 'btn btn-sm', text: 'Browse video file...' });
   extPickRow.appendChild(extOpenBtn);
   const extFromGalleryBtn = el('button', { class: 'btn btn-sm', text: 'Pick from Recent Media' });
   extPickRow.appendChild(extFromGalleryBtn);
@@ -1235,7 +1235,7 @@ export function init(panel) {
   extFromGalleryBtn.addEventListener('click', async () => {
     const isVisible = extGalleryList.style.display !== 'none';
     if (isVisible) { extGalleryList.style.display = 'none'; return; }
-    extGalleryList.innerHTML = '<div style="padding:8px;font-size:.8rem;color:var(--text-3);">Loading…</div>';
+    extGalleryList.innerHTML = '<div style="padding:8px;font-size:.8rem;color:var(--text-3);">Loading...</div>';
     extGalleryList.style.display = '';
     try {
       const data = await apiFetch('/api/gallery?limit=48');
@@ -1274,7 +1274,7 @@ export function init(panel) {
   const extInstrChk = el('input', { type: 'checkbox', id: 'fv-ext-instr' });
   const extLyricWrap = el('div', { style: 'margin-bottom:10px;' });
   const extLyricTA = el('textarea', { rows: '2', style: 'width:100%; font-size:.82rem; resize:vertical;',
-    placeholder: 'Lyric direction — theme, mood, subject',
+    placeholder: 'Lyric direction -- theme, mood, subject',
   });
   extLyricWrap.appendChild(el('label', { text: 'Lyric Direction', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }));
   extLyricWrap.appendChild(extLyricTA);
@@ -1291,7 +1291,7 @@ export function init(panel) {
 
   extSuggestBtn.addEventListener('click', async () => {
     if (!_extVideoPath) { toast('Pick a video first', 'info'); return; }
-    extSuggestBtn.disabled = true; extSuggestBtn.textContent = '…';
+    extSuggestBtn.disabled = true; extSuggestBtn.textContent = '...';
     try {
       const data = await api('/api/fun/suggest-music', {
         method: 'POST',
@@ -1335,7 +1335,7 @@ export function init(panel) {
     }
     extGenBtn.disabled = true;
     extProgRow.style.display = '';
-    extProgRow.textContent = 'Submitting…';
+    extProgRow.textContent = 'Submitting...';
     try {
       const { job_id } = await api('/api/fun/add-music', {
         method: 'POST',
@@ -1347,7 +1347,7 @@ export function init(panel) {
         }),
       });
       pollJob(job_id,
-        (j) => { extProgRow.textContent = j.message || 'Working…'; },
+        (j) => { extProgRow.textContent = j.message || 'Working...'; },
         (j) => {
           extGenBtn.disabled = false; extProgRow.style.display = 'none';
           if (j.output) {

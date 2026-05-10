@@ -155,7 +155,7 @@ def generate_audio(
         # Lazy-start: ACE-Step is deferred to keep VRAM free for Ollama.
         # Start it now and wait for it to be ready.
         from services.manager import start_acestep
-        log.info("ACE-Step not running — starting on demand for audio generation...")
+        log.info("ACE-Step not running -- starting on demand for audio generation...")
         if progress_cb:
             progress_cb(-1)  # signal "starting service"
         ok, err = start_acestep()

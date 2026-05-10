@@ -827,7 +827,7 @@ def run_multi_prep(job, photo_path, settings):
     # ── Music direction ────────────────────────────────────────────────────
     music_prompt = settings.get("music_prompt", "")
     if not music_prompt:
-        job.update(progress=7, message="Getting music direction…")
+        job.update(progress=7, message="Getting music direction...")
         try:
             provider = llm_router._provider()
             if provider == "ollama" and photo_path and os.path.isfile(photo_path):
@@ -853,7 +853,7 @@ def run_multi_prep(job, photo_path, settings):
 
     # ── Lyrics ────────────────────────────────────────────────────────────
     if not instrumental and not settings.get("_prepped_lyrics") and music_prompt:
-        job.update(progress=9, message="Writing lyrics…")
+        job.update(progress=9, message="Writing lyrics...")
         try:
             lyrics = analyzer.generate_lyrics(
                 llm_router, [], music_prompt, lyric_direction or user_idea,
@@ -1104,39 +1104,19 @@ def run_multi_pipeline(job, photo_path, settings):
     job.meta["clips_generated"] = len(clip_paths)
     job.meta["clip_paths"] = clip_paths
 
-    # ── Phase 2a: Bridge clips ─────────────────────────────────────────────
-    # Clips are now chained (each starts from the previous clip's last frame),
-    # so adjacent clip boundaries share the same frame. A bridge from frame_X
-    # to frame_X is a no-op that wastes a full GPU pass. Use crossfade instead.
-    bridge_clips: list[str | None] = []
-
-    # ── Phase 2b: Compile clips + bridges into one video ─────────────────
+    # ── Phase 2: Compile clips into one video ──────────────────────────────
+    # Clips are chained (each starts from the previous clip's last frame),
+    # so adjacent boundaries share the same frame. _chain_anchor aligned
+    # each clip's end with the next clip's start image, so a hard-cut concat
+    # is frame-exact -- crossfade or AI bridges would only add cross-dissolve
+    # sludge over already-seamless joins.
     compile_pct = clips_end_pct + 1
-    job.update(progress=compile_pct, message="Compiling clips with transitions...")
+    job.update(progress=compile_pct, message="Compiling clips...")
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
 
-    if bridge_clips and not _stopped():
-        from features.video_bridges.bridge_generator import compile_with_bridges
-        compiled = compile_with_bridges(
-            segment_paths=clip_paths,
-            bridge_paths=bridge_clips,
-            out_path=concat_path,
-            resolution=resolution,
-            log_fn=_log,
-        )
-        if not compiled:
-            log.warning("[multi] compile_with_bridges failed -- falling back to xfade concat")
-            compiled = None
-    else:
-        compiled = None
-
-    if not compiled:
-        # Hard-cut concat: chain_anchor aligned each clip's end with the
-        # next clip's start image, so cuts are frame-exact and a crossfade
-        # would only introduce visible cross-dissolve sludge.
-        if not _concat_clips(clip_paths, concat_path):
-            log.warning("[multi] Concat failed -- using first clip only")
-            concat_path = clip_paths[0]
+    if not _concat_clips(clip_paths, concat_path):
+        log.warning("[multi] Concat failed -- using first clip only")
+        concat_path = clip_paths[0]
 
     # ── Director passes (optional) ────────────────────────────────────────
     # Each pass analyzes the assembled video, re-generates weak clips, and
@@ -1195,7 +1175,7 @@ def run_multi_pipeline(job, photo_path, settings):
         log.debug("ACE-Step warm-up skipped: %s", _e)
 
     if not music_prompt:
-        job.update(progress=78, message="Analyzing video for music direction…")
+        job.update(progress=78, message="Analyzing video for music direction...")
         try:
             frames = _sample_music_frames(concat_path, llm_router)
             if frames:
@@ -1208,10 +1188,10 @@ def run_multi_pipeline(job, photo_path, settings):
         if not music_prompt:
             music_prompt = "indie folk, fingerpicked acoustic guitar, upright bass, brushed drums"
     else:
-        job.update(progress=78, message="Using pre-generated music direction…")
+        job.update(progress=78, message="Using pre-generated music direction...")
 
     if not instrumental and not lyrics:
-        job.update(progress=80, message="Writing lyrics…")
+        job.update(progress=80, message="Writing lyrics...")
         try:
             frames = _sample_music_frames(concat_path, llm_router)
             lyrics = analyzer.generate_lyrics(
@@ -1273,7 +1253,7 @@ def run_multi_pipeline(job, photo_path, settings):
         return
 
     # ── Phase 4: Merge ────────────────────────────────────────────────────
-    job.update(progress=92, message="Merging video + audio…")
+    job.update(progress=92, message="Merging video + audio...")
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"multi_{model_tag}_{time.strftime('%H%M%S')}.mp4")

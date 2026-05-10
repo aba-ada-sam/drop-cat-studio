@@ -44,10 +44,10 @@ export function init(panel) {
   };
 
   // Per-model optimal defaults.
-  // LTX-2 Distilled is a distilled model (like SDXL-Lightning) — its denoising
+  // LTX-2 Distilled is a distilled model (like SDXL-Lightning) -- its denoising
   // schedule is compressed into 4-8 steps. Running 20+ steps overshoots the
   // schedule and degrades quality. CFG 3 matches its low-guidance training regime.
-  // Wan2.1 models are standard diffusion — they need 25 steps and higher CFG.
+  // Wan2.1 models are standard diffusion -- they need 25 steps and higher CFG.
   const MODEL_DEFAULTS = {
     'LTX-2 Dev19B Distilled': { steps: 12, guidance: 3.0, duration: 5 },
     'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 5 },
@@ -396,7 +396,7 @@ export function init(panel) {
   );
   _ratioChips = _rChips;
 
-  // Duration slider — declared here so quality chip handler can update it
+  // Duration slider -- declared here so quality chip handler can update it
   const tierMax0  = QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20;
   const durSlider = el('input', { type: 'range', min: '1', max: String(tierMax0), value: String(_duration), step: '1', style: 'flex:1; accent-color:var(--accent);' });
   const durLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: `${_duration}s` });
@@ -405,7 +405,7 @@ export function init(panel) {
     durLabel.textContent = `${_duration}s`;
   });
 
-  // Creativity (guidance_scale) slider — initial value set by _applyModelDefaults below
+  // Creativity (guidance_scale) slider -- initial value set by _applyModelDefaults below
   let _guidance = MODEL_DEFAULTS[_model]?.guidance ?? 3.0;
   const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: String(_guidance), step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
   const guidLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:30px; text-align:right;', text: String(_guidance) });
@@ -752,7 +752,7 @@ export function init(panel) {
     // Optionally vary the prompt on loop iterations
     if (fromLoop && _varyPrompt && _loopCount > 1 && _imagePath) {
       try {
-        await _brainstorm('Create a slightly different variation — same subject and energy but change the action, timing, or camera movement');
+        await _brainstorm('Create a slightly different variation -- same subject and energy but change the action, timing, or camera movement');
       } catch (_) {}
     }
 
@@ -761,7 +761,7 @@ export function init(panel) {
     const needLyric  = !lyricInput.value.trim();
 
     if (needIdea && needLyric && _imagePath) {
-      // Both blank + image — one brainstorm call fills both with energy
+      // Both blank + image -- one brainstorm call fills both with energy
       _showProgress(3, 'AI is reading your photo...');
       try {
         await _brainstorm(
@@ -780,7 +780,7 @@ export function init(panel) {
             method: 'POST',
             body: JSON.stringify({
               image_path: _imagePath, num_prompts: 1, creativity: 9, max_tokens: 400,
-              user_direction: 'explosive physical action — subject must be actively moving and doing something dramatic',
+              user_direction: 'explosive physical action -- subject must be actively moving and doing something dramatic',
             }),
           });
           const p = data.prompts?.[0];
@@ -791,7 +791,7 @@ export function init(panel) {
       } else {
         motionPrompt = ideaInput.value.trim();
       }
-      // Always generate a lyric direction when missing — bare ideas produce flat music
+      // Always generate a lyric direction when missing -- bare ideas produce flat music
       if (needLyric) {
         _showProgress(8, 'AI is picking your music vibe...');
         try {
@@ -825,7 +825,7 @@ export function init(panel) {
       return true;
     } catch (e) {
       if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
-        toast('Queue is full — wait for the current video to finish', 'error');
+        toast('Queue is full -- wait for the current video to finish', 'error');
       } else {
         toast(e.message, 'error');
       }
@@ -838,14 +838,14 @@ export function init(panel) {
   // Cancels any previously running watcher so only one job's progress shows at a time.
   function _watchJob(job_id) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
-    _showProgress(2, 'Added to queue…');
+    _showProgress(2, 'Added to queue...');
     return new Promise(resolve => {
       const poller = pollJob(job_id,
         j => {
           if (j.status === 'queued') {
             const pos = j.queue_position;
             const label = pos === 0 ? 'up next' : `position ${pos + 1}`;
-            _showProgress(2, `In queue — ${label}…`);
+            _showProgress(2, `In queue -- ${label}...`);
           } else {
             const pct = j.progress || 5;
             _showProgress(pct, j.message || `${pct}%`);
@@ -871,9 +871,9 @@ export function init(panel) {
       _loopCount++;
       // _generateOne returns as soon as the job is submitted; await the watch promise for completion
       const submitted = await _generateOne(true);
-      if (!submitted) { _stopLoop(); toast('Loop stopped — failed to submit job', 'error'); break; }
+      if (!submitted) { _stopLoop(); toast('Loop stopped -- failed to submit job', 'error'); break; }
       const ok = await _watchJob(_jobId);
-      if (!ok) { _stopLoop(); toast('Loop stopped — generation failed', 'error'); break; }
+      if (!ok) { _stopLoop(); toast('Loop stopped -- generation failed', 'error'); break; }
       if (!_looping) break;
       // Brief pause so the user can see the result before next run kicks in
       await new Promise(r => setTimeout(r, 2500));
@@ -969,7 +969,7 @@ export function init(panel) {
       return true;
     } catch (e) {
       if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
-        toast('Queue is full — wait for the current video to finish', 'error');
+        toast('Queue is full -- wait for the current video to finish', 'error');
       } else {
         toast(e.message, 'error');
       }

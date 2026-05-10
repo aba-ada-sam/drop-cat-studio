@@ -152,7 +152,7 @@ def _require_ai():
         return
     st = ollama_status()
     if not st.get("available"):
-        raise HTTPException(503, "No AI provider available — add an Anthropic/OpenAI key or start Ollama")
+        raise HTTPException(503, "No AI provider available -- add an Anthropic/OpenAI key or start Ollama")
     needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
     installed = get_ollama_models()
     if installed and not any(m.startswith(needed.split(":")[0]) for m in installed):
@@ -547,10 +547,10 @@ async def brainstorm(request: Request):
     except Exception as exc:
         msg = str(exc)
         if "rate limit" in msg.lower() or "429" in msg:
-            raise HTTPException(429, "AI rate limit reached — try again in a moment")
+            raise HTTPException(429, "AI rate limit reached -- try again in a moment")
         if "connection" in msg.lower() or "refused" in msg.lower():
-            raise HTTPException(503, "AI service unavailable — check that Ollama or your API key is configured")
-        raise HTTPException(502, f"AI error — {msg[:120]}")
+            raise HTTPException(503, "AI service unavailable -- check that Ollama or your API key is configured")
+        raise HTTPException(502, f"AI error -- {msg[:120]}")
 
     try:
         parsed = parse_json_response(result)
@@ -609,7 +609,7 @@ async def add_music(request: Request):
         import time as _time
         from pathlib import Path as _Path
 
-        job.update(progress=5, message="Analyzing video…")
+        job.update(progress=5, message="Analyzing video...")
 
         music_prompt = cfg_settings.get("music_prompt", "").strip()
         user_direction = cfg_settings.get("user_direction", "").strip()
@@ -631,7 +631,7 @@ async def add_music(request: Request):
         instrumental = cfg_settings.get("instrumental", False)
         lyrics = ""
         if not instrumental:
-            job.update(progress=15, message="Writing lyrics…")
+            job.update(progress=15, message="Writing lyrics...")
             try:
                 lyric_direction = cfg_settings.get("lyric_direction", "") or cfg_settings.get("user_direction", "")
                 lyrics = analyzer.generate_lyrics(llm_router, [], music_prompt, lyric_direction)
@@ -640,7 +640,7 @@ async def add_music(request: Request):
             if not lyrics:
                 lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
 
-        job.update(progress=20, message="Generating music…")
+        job.update(progress=20, message="Generating music...")
 
         from services.forge_client import unload_checkpoint, reload_checkpoint
         forge_was_unloaded = unload_checkpoint()
@@ -650,7 +650,7 @@ async def add_music(request: Request):
 
         def _audio_progress(elapsed_s):
             job.update(progress=20 + min(60, int(elapsed_s / audio_dur * 60)),
-                       message=f"Generating music… {elapsed_s:.0f}s elapsed")
+                       message=f"Generating music... {elapsed_s:.0f}s elapsed")
 
         try:
             audio_path, audio_err = audio_generator.generate_audio(
@@ -676,7 +676,7 @@ async def add_music(request: Request):
         if not audio_path:
             raise RuntimeError(f"Audio generation failed: {audio_err}")
 
-        job.update(progress=85, message="Mixing audio into video…")
+        job.update(progress=85, message="Mixing audio into video...")
 
         stem = _Path(vpath).stem
         final = str(_Path(vpath).parent / f"{stem}_with_music_{_time.strftime('%H%M%S')}.mp4")
@@ -692,7 +692,7 @@ async def add_music(request: Request):
 
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Done — music prompt: {music_prompt[:60]}"
+        job.message = f"Done -- music prompt: {music_prompt[:60]}"
 
     label = f"Add music: {Path(video_path).stem[:24]}"
     try:

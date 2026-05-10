@@ -60,7 +60,7 @@ Return ONLY valid JSON."""
 VIDEO_PROMPT_AUTO_SYSTEM = """You are a kinetic action director writing motion prompts for an image-to-video AI.
 You have NOT seen the image. Write an explosive motion prompt based only on the context given.
 
-Rules — the prompt MUST:
+Rules -- the prompt MUST:
 - Open with a violent, kinetic action verb (erupts, whips, slams, surges, arches, tears, launches, thrashes)
 - Describe continuous physical movement: body, hair, fabric, environment all in motion simultaneously
 - Be 35-55 words, one tight paragraph
@@ -72,7 +72,7 @@ For sensual/adult content: flowing fabric, arching bodies, cascading hair, delib
 For animals: explosive sprinting, fur rippling, muscles firing.
 For landscapes: wind, weather, water, fire all moving together.
 
-Return ONLY the raw prompt text — no JSON, no quotes, no commentary."""
+Return ONLY the raw prompt text -- no JSON, no quotes, no commentary."""
 
 MUSIC_PROMPT_SYSTEM = """You are a music director choosing a score for a short video.
 
@@ -142,7 +142,7 @@ STRICT RULES:
 
 
 def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: str = "") -> str:
-    """Generate a kinetic motion prompt with no image — fast cloud text call.
+    """Generate a kinetic motion prompt with no image -- fast cloud text call.
 
     Used when the user hasn't written a video prompt and a cloud API is active
     (we can't send potentially NSFW images to cloud vision models).
@@ -155,7 +155,7 @@ def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: s
         parts.append(f"Creative direction: {user_direction}")
     if not subject_hint and not user_direction:
         parts.append("Subject: a person in a dramatic, dynamic scene.")
-    parts.append("Make it kinetic — every element should be in violent, expressive motion.")
+    parts.append("Make it kinetic -- every element should be in violent, expressive motion.")
     try:
         text = router.route(
             [{"role": "user", "content": "\n".join(parts)}],
@@ -258,7 +258,7 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
         result = parse_json_response(last_text)
         if result and isinstance(result, dict) and result.get("prompts"):
             return result
-        # Model returned a top-level array instead of {"prompts": [...]} — common
+        # Model returned a top-level array instead of {"prompts": [...]} -- common
         if isinstance(result, list) and result:
             prompts = []
             for i, item in enumerate(result[:num_prompts]):
@@ -306,7 +306,7 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
                     scene_description: str = "") -> str:
     """Auto-generate ironic/satirical lyrics for a video.
 
-    Uses text-only routing (fast, no vision model) — the music_prompt and
+    Uses text-only routing (fast, no vision model) -- the music_prompt and
     scene_description provide enough context. Passing frames triggers qwen3-vl
     which is 4-5x slower due to thinking-mode overhead.
     """
@@ -340,7 +340,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
 
     When frames are provided and Ollama is the active provider, sends them for
     visual analysis.  When no frames are given (or a cloud provider is active),
-    falls back to text-only generation from user_direction + video_prompt — cloud
+    falls back to text-only generation from user_direction + video_prompt -- cloud
     APIs refuse NSFW images so we never send frames to them.
     """
     use_vision = bool(video_frames_b64) and router._provider() == "ollama"
@@ -361,7 +361,7 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
         except Exception as e:
             log.warning("Music prompt vision call failed, falling back to text: %s", e)
 
-    # Text-only path — fast on cloud APIs, also used as fallback when vision fails
+    # Text-only path -- fast on cloud APIs, also used as fallback when vision fails
     parts = ["Suggest background music for a short AI-generated video."]
     if video_prompt:
         parts.append(f'Video description: "{video_prompt}"')

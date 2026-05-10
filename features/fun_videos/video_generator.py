@@ -124,7 +124,7 @@ def generate_video(
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     # Wait for the persistent worker (it may still be loading after a cold start).
-    # Never fall back to subprocess while the worker process is alive — that would
+    # Never fall back to subprocess while the worker process is alive -- that would
     # spawn a second WanGP instance that competes for VRAM and causes the "two
     # videos" appearance.
     from services.manager import wangp_worker_alive as _proc_alive
@@ -228,7 +228,7 @@ def _generate_via_worker(
         except urllib.error.HTTPError as e:
             if e.code == 409:
                 if log_fn:
-                    log_fn("[info] Worker busy — waiting for current job to finish...")
+                    log_fn("[info] Worker busy -- waiting for current job to finish...")
                 # Poll /health until not busy, checking stop_check each iteration
                 while time.time() < submit_deadline:
                     if stop_check and stop_check():
@@ -280,7 +280,7 @@ def _generate_via_worker(
             # Reject this status if the worker has moved on to a newer job
             if my_token is not None and status.get("token") != my_token:
                 if log_fn:
-                    log_fn("[error] Worker token mismatch — our job was superseded")
+                    log_fn("[error] Worker token mismatch -- our job was superseded")
                 return None
 
             if not status.get("busy"):
@@ -387,7 +387,7 @@ def _generate_via_subprocess(
                     break  # process exited, queue will drain
                 continue
             if line is None:
-                break  # sentinel — subprocess stdout closed
+                break  # sentinel -- subprocess stdout closed
             stripped = line.strip()
             if stripped and log_fn:
                 log_fn(f"[info] {stripped}")
