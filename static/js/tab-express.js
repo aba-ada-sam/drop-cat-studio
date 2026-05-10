@@ -724,13 +724,24 @@ export function init(panel) {
   resultWrap.appendChild(resultActions);
   root.appendChild(resultWrap);
 
+  // High-water mark: progress should only ever climb, never recede. The
+  // backend can legitimately re-emit a lower number when status flips back
+  // to "queued" between prep and GPU phases, but the user reads that as the
+  // bar going backwards. Clamp the BAR width here; the message still updates
+  // freely so users see queue-position text without losing visual progress.
+  let _progressMax = 0;
   function _showProgress(pct, msg) {
     progressWrap.style.display    = 'flex';
     resultWrap.style.display      = 'none';
-    progressFill.style.width      = `${pct}%`;
+    if (pct > _progressMax) _progressMax = pct;
+    progressFill.style.width      = `${_progressMax}%`;
     progressFill.style.background = 'var(--accent)';
     progressMsg.style.color       = 'var(--text-3)';
     progressMsg.textContent       = msg || '';
+  }
+  function _resetProgress() {
+    _progressMax = 0;
+    progressFill.style.width = '0%';
   }
 
   function _showResult(videoPath) {
@@ -872,17 +883,22 @@ export function init(panel) {
   // Cancels any previously running watcher so only one job's progress shows at a time.
   function _watchJob(job_id) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
+    _resetProgress();
     _showProgress(2, 'Added to queue...');
     return new Promise(resolve => {
       const poller = pollJob(job_id,
         j => {
+          // Use server progress whenever it's reported (>= 1). For status=queued
+          // before any prep has run, fall back to the 2% bootstrap so the bar
+          // shows something. Don't fall back to 5 -- that artificially leaps
+          // ahead and makes the next real tick (e.g. progress=3) snap backwards.
+          const reported = Number(j.progress) || 0;
           if (j.status === 'queued') {
             const pos = j.queue_position;
             const label = pos === 0 ? 'up next' : `position ${pos + 1}`;
-            _showProgress(2, `In queue -- ${label}...`);
+            _showProgress(reported >= 1 ? reported : 2, `In queue -- ${label}...`);
           } else {
-            const pct = j.progress || 5;
-            _showProgress(pct, j.message || `${pct}%`);
+            _showProgress(reported >= 1 ? reported : 2, j.message || `${reported}%`);
           }
         },
         j => {
