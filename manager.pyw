@@ -411,6 +411,7 @@ def _show_opening_splash() -> None:
     root.overrideredirect(True)
     root.configure(bg="#0d0606")
     root.attributes("-topmost", True)
+    root.after(5000, lambda: root.attributes("-topmost", False))
 
     W, H = 320, 140
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -464,6 +465,8 @@ def show_splash(srv: ServerManager) -> None:
     root.overrideredirect(True)
     root.configure(bg="#0d0606")
     root.attributes("-topmost", True)
+    # Drop always-on-top after 5s so it can't permanently block other work
+    root.after(5000, lambda: root.attributes("-topmost", False))
 
     W, H = 320, 180
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -482,6 +485,15 @@ def show_splash(srv: ServerManager) -> None:
     tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
              font=("Arial", 13)).pack(pady=4)
 
+    # Skip button -- hidden until 8s or server detected externally
+    skip_btn = tk.Button(
+        root, text="Skip waiting", bg="#1a0a0a", fg="#6a5a4a",
+        relief="flat", bd=0, font=("Arial", 8), cursor="hand2",
+        command=lambda: root.destroy(),
+    )
+    skip_btn.pack(pady=(4, 0))
+    skip_btn.pack_forget()  # hidden initially
+
     dots = ["●○○○", "○●○○", "○○●○", "○○○●"]
     idx = [0]
 
@@ -494,11 +506,22 @@ def show_splash(srv: ServerManager) -> None:
         _do_git_pull(on_status=lambda s: root.after(0, lambda: status.set(s)))
         root.after(0, lambda: status.set("Starting server…"))
         srv.start()
-        while not srv.ready and not srv._gave_up:
+        deadline = time.time() + 120
+        while not srv.ready and not srv._gave_up and time.time() < deadline:
+            # Also accept a server started by an external process (e.g. manual restart)
+            if find_running_server():
+                break
             time.sleep(0.4)
         root.after(0, root.destroy)
 
+    def _show_skip():
+        try:
+            skip_btn.pack(pady=(4, 0))
+        except Exception:
+            pass
+
     _tick()
+    root.after(8000, _show_skip)
     threading.Thread(target=_bg, daemon=True).start()
     root.mainloop()
 
