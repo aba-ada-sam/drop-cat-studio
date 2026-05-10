@@ -87,16 +87,32 @@ def server_responds(port: int, timeout: float = 0.3) -> bool:
         return False
 
 
+def is_dcs_server(port: int, timeout: float = 1.5) -> bool:
+    """Return True only if port has a live DCS server (checks /api/version).
+
+    A plain TCP connect is not enough -- Forge SD also listens in the 7860-7879
+    range. Without this check, manager opens Chrome pointing at Forge and the
+    user sees Forge's 404 instead of DCS.
+    """
+    import urllib.request as _ur
+    try:
+        with _ur.urlopen(f"http://127.0.0.1:{port}/api/version", timeout=timeout) as r:
+            body = r.read(200).decode(errors="replace")
+            return "Drop Cat" in body or "version" in body.lower()
+    except Exception:
+        return False
+
+
 def find_running_server() -> int | None:
-    """Check .dcs-port first, then scan 7860-7879 as fallback."""
+    """Find a live DCS server: check .dcs-port first, then scan 7860-7879."""
     port, _ = read_port_file()
-    if port and server_responds(port):
+    if port and server_responds(port) and is_dcs_server(port):
         return port
     # Port file missing or stale -- scan the full range
     for p in range(7860, 7880):
         if p == port:
             continue  # already checked above
-        if server_responds(p):
+        if server_responds(p) and is_dcs_server(p):
             return p
     return None
 
