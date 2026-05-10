@@ -1,7 +1,7 @@
-"""SD Prompts API routes — /api/prompts/*
+"""SD Prompts API routes -- /api/prompts/*
 
-Image → SD prompt generation with wildcard support and iterative refinement.
-Ported from DropCatGo-SD-Prompts (Gradio → FastAPI REST).
+Image -> SD prompt generation with wildcard support and iterative refinement.
+Ported from DropCatGo-SD-Prompts (Gradio -> FastAPI REST).
 """
 import asyncio
 import logging
@@ -73,7 +73,7 @@ def _build_entries_summary(wc_dir: str) -> str:
     return "\n".join(lines) if lines else "(no wildcard files found)"
 
 
-# ── Prompt Generation ────────────────────────────────────────────────────────
+# -- Prompt Generation --------------------------------------------------------
 
 @router.post("/generate")
 async def gen_prompts(request: Request):
@@ -137,7 +137,7 @@ async def refine(request: Request):
     with _conv_lock:
         conv_state = _conv_states.get(session_id)
     if not conv_state:
-        raise HTTPException(400, "Session not found — please generate prompts first (session may have expired)")
+        raise HTTPException(400, "Session not found -- please generate prompts first (session may have expired)")
     if not feedback:
         raise HTTPException(400, "Feedback required")
 
@@ -161,7 +161,7 @@ async def list_models():
     return {"models": models}
 
 
-# ── Wildcard Management ──────────────────────────────────────────────────────
+# -- Wildcard Management ------------------------------------------------------
 
 @router.get("/wildcards")
 async def list_wildcard_files():
@@ -340,7 +340,7 @@ async def audit_library(request: Request):
     return {"report": report}
 
 
-# ── Auto Curator ─────────────────────────────────────────────────────────────
+# -- Auto Curator -------------------------------------------------------------
 
 @router.post("/curator/analyze")
 async def curator_analyze_endpoint(request: Request):
@@ -372,7 +372,7 @@ async def curator_plan_endpoint(request: Request):
     return {"plan_text": plan_text, "actions": actions}
 
 
-# ── Forge Integration (SD Image Generation) ─────────────────────────────────
+# -- Forge Integration (SD Image Generation) ---------------------------------
 
 def _save_and_register(images_b64: list[str]) -> list[str]:
     """Save generated images to disk and register in the current session."""
@@ -452,7 +452,7 @@ async def enhance_prompt(request: Request):
     sanitizer) or OpenAI, whichever key is configured first. provider="local"
     always uses Ollama.
 
-    allow_rrated is currently informational — the Anthropic/OpenAI pathway
+    allow_rrated is currently informational -- the Anthropic/OpenAI pathway
     already round-trips through nsfw_sanitizer.sanitize/desanitize in
     core.llm_router. Future versions may gate cloud providers when this is
     False; for now it just tags the response so the UI can surface it.
@@ -472,18 +472,18 @@ async def enhance_prompt(request: Request):
     allow_rrated = bool(body.get("allow_rrated", False))
     smart_wildcards = bool(body.get("smart_wildcards", False))
 
-    # Build the wildcard catalog once if smart mode is on — the LLM uses this
+    # Build the wildcard catalog once if smart mode is on -- the LLM uses this
     # to prefer existing tokens over inventing new ones.
     wildcard_catalog: dict | None = None
     wc_dir = cfg.get("sd_wildcards_dir") or ""
     if smart_wildcards:
         try:
             all_wc = wc_get_all(wc_dir)
-            # Keep it bounded — no more than 40 tokens, most useful ones first
+            # Keep it bounded -- no more than 40 tokens, most useful ones first
             # (we pass through in insertion order; _enhance_system truncates to 40).
             wildcard_catalog = {k: v for k, v in all_wc.items() if v}
         except Exception as e:
-            log.warning("smart wildcards: catalog build failed (%s) — continuing without", e)
+            log.warning("smart wildcards: catalog build failed (%s) -- continuing without", e)
             wildcard_catalog = None
 
     force: str | None = None
@@ -525,7 +525,7 @@ async def enhance_prompt(request: Request):
         raise HTTPException(500, f"enhance failed: {e}")
 
     # Persist any LLM-invented wildcards to disk so subsequent /forge/txt2img
-    # expands them. Flat layout — filename stem becomes the __token__ the LLM
+    # expands them. Flat layout -- filename stem becomes the __token__ the LLM
     # already embedded in the prompt. Subfolder would mangle the token path.
     created = result.get("create_wildcards") or []
     persisted: list[dict] = []
@@ -539,7 +539,7 @@ async def enhance_prompt(request: Request):
                 if not name or not entries:
                     continue
                 fpath = target_dir / f"{name}.txt"
-                # Don't clobber an existing wildcard silently — append with dedupe
+                # Don't clobber an existing wildcard silently -- append with dedupe
                 # so a repeated "add wildcard" call grows the pool instead of
                 # replacing Andrew's curated entries.
                 existing: list[str] = []
@@ -578,7 +578,7 @@ async def forge_txt2img(request: Request):
     """Generate image(s) via Forge txt2img.
 
     Supports: HiRes Fix, ADetailer, Forge Couple (regional), all samplers/schedulers.
-    Prompt can include __wildcard__ tokens — Forge's dynamic-prompts extension
+    Prompt can include __wildcard__ tokens -- Forge's dynamic-prompts extension
     resolves them automatically.
 
     For Forge Couple (regional prompting), pass use_forge_couple=true and
@@ -590,7 +590,7 @@ async def forge_txt2img(request: Request):
 
     body = await request.json()
 
-    # Build prompt — handle Forge Couple column joining
+    # Build prompt -- handle Forge Couple column joining
     prompt = body.get("prompt", "")
     columns = body.get("columns", [])     # [left, center, right] from SD Prompts
     use_forge_couple = body.get("use_forge_couple", False)

@@ -11,7 +11,7 @@ let _errorBadge = null;
 
 // Suppress toasts until the splash exits (app is actually visible).
 // app.js dispatches 'dcs:ready' from exitSplash(). Until then errors go
-// silently to the log — the user is staring at a loading screen anyway.
+// silently to the log -- the user is staring at a loading screen anyway.
 let _splashDone = false;
 window.addEventListener('dcs:ready', () => { _splashDone = true; }, { once: true });
 function _inStartup() { return !_splashDone; }
@@ -171,7 +171,7 @@ export function clearErrorLog() {
 }
 
 /**
- * Central fetch wrapper — auto-toasts errors, supports retry.
+ * Central fetch wrapper -- auto-toasts errors, supports retry.
  * Drop-in replacement for fetch() calls that expect JSON.
  */
 export async function apiFetch(path, opts = {}) {
@@ -206,7 +206,7 @@ export async function apiFetch(path, opts = {}) {
       throw new Error(errMsg);
     }
   } catch (e) {
-    if (e.name === 'AbortError') throw e;  // intentional cancellation — no toast
+    if (e.name === 'AbortError') throw e;  // intentional cancellation -- no toast
     if (e.name === 'TypeError') {
       // Network error (offline, refused, CORS)
       const errMsg = `Network error: ${context}`;

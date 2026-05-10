@@ -70,7 +70,7 @@ def generate_bridge(
 
     if allow_fallback:
         if log_fn:
-            log_fn("[warning] WanGP failed — using OpenCV morph fallback")
+            log_fn("[warning] WanGP failed -- using OpenCV morph fallback")
         return _generate_morph_fallback(
             frame_a_path, frame_b_path, prompt, out_path,
             duration=min(duration, 3.0), resolution=resolution, log_fn=log_fn,
@@ -89,7 +89,7 @@ def _generate_morph_fallback(
         import numpy as np
     except ImportError:
         if log_fn:
-            log_fn("[error] OpenCV not installed — cannot generate fallback")
+            log_fn("[error] OpenCV not installed -- cannot generate fallback")
         return None
 
     res_w, res_h = parse_resolution(resolution)

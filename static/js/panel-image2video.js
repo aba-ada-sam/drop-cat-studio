@@ -1,5 +1,5 @@
-﻿/**
- * Drop Cat Go Studio — Image to Video panel.
+/**
+ * Drop Cat Go Studio -- Image to Video panel.
  * Ken Burns slideshow generator with drag-to-reorder images.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
@@ -14,7 +14,7 @@ export function init(panel) {
   const layout = el('div', { class: 'two-panel' });
   panel.appendChild(layout);
 
-  // ── Left: Images ──────────────────────────────────────────────────────
+  // -- Left: Images ------------------------------------------------------
   const left = el('div', { class: 'card' });
   layout.appendChild(left);
   left.appendChild(el('h3', { text: 'Images' }));
@@ -47,13 +47,13 @@ export function init(panel) {
             el('option', { value: m, text: m, ...(m === img.motion ? { selected: 'true' } : {}) })
           )
         ),
-        el('button', { class: 'remove', text: '✕', onclick() { images.splice(i, 1); renderList(); } }),
+        el('button', { class: 'remove', text: 'x', onclick() { images.splice(i, 1); renderList(); } }),
       ]);
       imageList.appendChild(item);
     });
   }
 
-  // ── Right: Settings + Generate ────────────────────────────────────────
+  // -- Right: Settings + Generate ----------------------------------------
   const right = el('div');
   layout.appendChild(right);
 
@@ -119,11 +119,11 @@ export function init(panel) {
             }
             ar.innerHTML = '';
             ar.append(
-              el('button', { class: 'btn btn-sm', text: '→ Add Transitions', onclick() {
+              el('button', { class: 'btn btn-sm', text: '-> Add Transitions', onclick() {
                 handoff('bridges', { type: 'video', path: job.output });
                 document.querySelector('[data-tab="bridges"]')?.click();
               }}),
-              el('button', { class: 'btn btn-primary btn-sm', text: '→ Audio & Export', onclick() {
+              el('button', { class: 'btn btn-primary btn-sm', text: '-> Audio & Export', onclick() {
                 handoff('video-tools', { type: 'video', path: job.output });
                 document.querySelector('[data-tab="video-tools"]')?.click();
               }}),

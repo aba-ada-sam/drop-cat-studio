@@ -1,5 +1,5 @@
-﻿/**
- * Drop Cat Go Studio — Generate Images
+/**
+ * Drop Cat Go Studio -- Generate Images
  *
  * Unified tab: direct Forge interface + AI prompt composition + wildcard workshop.
  * Wildcard tokens (__token__) are expanded server-side before sending to Forge.
@@ -11,7 +11,7 @@ import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 import { handoff } from './handoff.js?v=20260422a';
 import { RegionEditor } from './components/region-editor.js';
 
-// ── Module state ─────────────────────────────────────────────────────────────
+// -- Module state -------------------------------------------------------------
 let forgeStatus    = null;
 let _retryTimer    = null;
 let _forgeAutoStarted = false; // true once we've fired the auto-start request
@@ -24,13 +24,13 @@ export function receiveHandoff(data) {
   if (data?.type === 'image' && data.path) _lastHandoffPath = data.path;
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// -- Init ---------------------------------------------------------------------
 export function init(panel) {
   panel.innerHTML = '';
   const root = el('div', { style: 'display:flex; flex-direction:column; height:100%; overflow-y:auto;' });
   panel.appendChild(root);
 
-  // ── Top area: sidebar + result ───────────────────────────────────────────
+  // -- Top area: sidebar + result -------------------------------------------
   const topArea = el('div', { class: 'wide-layout', style: 'flex:1; min-height:0;' });
   root.appendChild(topArea);
 
@@ -39,7 +39,7 @@ export function init(panel) {
   topArea.appendChild(sidebar);
   topArea.appendChild(mainArea);
 
-  // Backend is read from config on init; switch via Settings → image_provider
+  // Backend is read from config on init; switch via Settings -> image_provider
   let _backend = 'forge';  // 'forge' | 'openai'
 
   function _setBackend(b) {
@@ -50,20 +50,20 @@ export function init(panel) {
     else if (!forgeStatus?.alive) genBtn.disabled = true;
   }
 
-  // ── Talk to me ────────────────────────────────────────────────────────────
+  // -- Talk to me ------------------------------------------------------------
   let _sdChatHistory = [];
   const sdTalkInput   = el('textarea', {
     rows: '2',
     style: 'width:100%; resize:vertical; font-size:.83rem;',
-    placeholder: 'Describe what you\'re imagining — any words, feelings, references. AI builds the prompt.',
+    placeholder: 'Describe what you\'re imagining -- any words, feelings, references. AI builds the prompt.',
   });
-  const sdTalkSendBtn = el('button', { class: 'btn btn-sm btn-primary', text: '→ Send' });
+  const sdTalkSendBtn = el('button', { class: 'btn btn-sm btn-primary', text: '-> Send' });
   const sdTalkReply   = el('div', { style: 'display:none; font-size:.75rem; color:var(--text-3); margin-top:5px; font-style:italic; line-height:1.5;' });
 
   async function _sdSend() {
     const msg = sdTalkInput.value.trim();
     if (!msg) return;
-    sdTalkSendBtn.disabled = true; sdTalkSendBtn.textContent = '…';
+    sdTalkSendBtn.disabled = true; sdTalkSendBtn.textContent = '...';
     sdTalkReply.style.display = 'none';
     try {
       const body = {
@@ -81,7 +81,7 @@ export function init(panel) {
       _sdChatHistory.push({ role: 'assistant', content: data.reply || '' });
       sdTalkInput.value = '';
     } catch (e) { toast(e.message, 'error'); }
-    finally { sdTalkSendBtn.disabled = false; sdTalkSendBtn.textContent = '→ Send'; }
+    finally { sdTalkSendBtn.disabled = false; sdTalkSendBtn.textContent = '-> Send'; }
   }
   sdTalkSendBtn.addEventListener('click', _sdSend);
   sdTalkInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sdSend(); } });
@@ -93,21 +93,21 @@ export function init(panel) {
     sdTalkReply,
   ]));
 
-  // ── Forge status ─────────────────────────────────────────────────────────
+  // -- Forge status ---------------------------------------------------------
   const statusBar = el('div', { class: 'card', style: 'display:flex; align-items:center; gap:8px; padding:8px 12px; flex-shrink:0' });
   const forgeDot  = el('span', { class: 'dot' });
-  const forgeMsg  = el('span', { style: 'font-size:.82rem; flex:1', text: 'Checking Forge…' });
+  const forgeMsg  = el('span', { style: 'font-size:.82rem; flex:1', text: 'Checking Forge...' });
   const modelSel  = el('select', { style: 'font-size:.8rem; max-width:180px; display:none' });
   statusBar.append(forgeDot, forgeMsg, modelSel);
   sidebar.appendChild(statusBar);  // moved into forgeSettings below after it's created
 
-  // ── Prompt card ──────────────────────────────────────────────────────────
+  // -- Prompt card ----------------------------------------------------------
   const promptCard = el('div', { class: 'card', style: 'flex-shrink:0' });
   sidebar.appendChild(promptCard);
 
   const promptArea = el('textarea', {
     rows: '5',
-    placeholder: 'Describe the image…\nUse __wildcard_name__ tokens for variety.\nOr type an idea and hit Compose.',
+    placeholder: 'Describe the image...\nUse __wildcard_name__ tokens for variety.\nOr type an idea and hit Compose.',
     style: 'width:100%; resize:vertical; font-size:.9rem',
   });
   promptCard.appendChild(promptArea);
@@ -130,7 +130,7 @@ export function init(panel) {
     title: 'AI reads your wildcard library, may create new wildcards, and fills the prompt with __tokens__',
   });
   const suffixInput = el('input', {
-    type: 'text', placeholder: 'Style suffix…',
+    type: 'text', placeholder: 'Style suffix...',
     style: 'flex:1; font-size:.8rem',
     value: '',
   });
@@ -138,17 +138,17 @@ export function init(panel) {
   const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });
   composeRow.append(composeBtn, suffixInput, wildcardToggle, wcLabel);
 
-  // ── Forge settings wrapper (status + all forge-specific controls) ─────────
+  // -- Forge settings wrapper (status + all forge-specific controls) ---------
   const forgeSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
   forgeSettings.appendChild(statusBar);  // move statusBar into forgeSettings
   sidebar.appendChild(forgeSettings);
 
-  // ── OpenAI settings ───────────────────────────────────────────────────────
+  // -- OpenAI settings -------------------------------------------------------
   const openaiSettings = el('div', { class: 'card', style: 'display:none; flex-shrink:0; padding:14px; display:none;' });
   sidebar.appendChild(openaiSettings);
   openaiSettings.appendChild(el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:10px;', text: 'DALL-E 3 generates one image at a time. All content is SFW (OpenAI policy).' }));
   const oaiAspectSel = el('select', { style: 'width:100%; margin-bottom:8px; font-size:.85rem;' });
-  [['1:1','Square (1024×1024)'],['16:9','Landscape (1792×1024)'],['9:16','Portrait (1024×1792)']].forEach(([v,t]) => {
+  [['1:1','Square (1024x1024)'],['16:9','Landscape (1792x1024)'],['9:16','Portrait (1024x1792)']].forEach(([v,t]) => {
     oaiAspectSel.appendChild(el('option', { value: v, text: t }));
   });
   openaiSettings.appendChild(el('div', {}, [
@@ -164,7 +164,7 @@ export function init(panel) {
     oaiQualSel,
   ]));
 
-  // ── Settings ─────────────────────────────────────────────────────────────
+  // -- Settings -------------------------------------------------------------
   const settingsBody = el('div', { class: 'card', style: 'flex-shrink:0' });
   forgeSettings.appendChild(settingsBody);
 
@@ -237,7 +237,7 @@ export function init(panel) {
   hrUpscalerSel.appendChild(el('option', { value: 'ESRGAN_4x', text: 'ESRGAN_4x' }));
   hrBody.appendChild(hrUpscalerSel);
 
-  // ── ADetailer ────────────────────────────────────────────────────────────
+  // -- ADetailer ------------------------------------------------------------
   const adDet  = el('details', { style: 'margin-top:8px' });
   const adSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: 'ADetailer (face / hand fix)' });
   adDet.appendChild(adSumm);
@@ -261,7 +261,7 @@ export function init(panel) {
   const adDenoiseSlider = createSlider(adBody, { label: 'Denoise', min: 0.1, max: 1.0, step: 0.05, value: 0.4 });
   const adConfidenceSlider = createSlider(adBody, { label: 'Confidence', min: 0.1, max: 1.0, step: 0.05, value: 0.3 });
 
-  // ── Forge Couple (Regional Prompting) ────────────────────────────────────
+  // -- Forge Couple (Regional Prompting) ------------------------------------
   const fcDet  = el('details', { style: 'margin-top:8px' });
   const fcSumm = el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: 'Regional Prompting (Forge Couple)' });
   fcDet.appendChild(fcSumm);
@@ -309,8 +309,8 @@ export function init(panel) {
   fcDirSel.addEventListener('change', _rebuildFcEditor);
   fcCountSel.addEventListener('change', _rebuildFcEditor);
 
-  // ── Generate button row ──────────────────────────────────────────────────
-  // ── Loop state ────────────────────────────────────────────────────────────
+  // -- Generate button row --------------------------------------------------
+  // -- Loop state ------------------------------------------------------------
   let _sdLooping = false;
   let _sdLoopCount = 0;
 
@@ -326,7 +326,7 @@ export function init(panel) {
   const sdLoopBtn = el('button', {
     class: 'btn',
     text: '∞',
-    title: 'Generate forever — click again to stop',
+    title: 'Generate forever -- click again to stop',
     style: 'font-size:1rem; padding:10px 14px;',
   });
   const stopBtn = el('button', {
@@ -350,9 +350,9 @@ export function init(panel) {
       if (genBtn.disabled) { toast('Wait for the current generation to finish', 'info'); return; }
       _sdLooping = true;
       _sdLoopCount = 0;
-      sdLoopBtn.textContent = '■';
+      sdLoopBtn.textContent = '*';
       sdLoopBtn.classList.add('btn-primary');
-      toast('Looping — click ■ to stop', 'info');
+      toast('Looping -- click * to stop', 'info');
       genBtn.click();
     }
   });
@@ -360,7 +360,7 @@ export function init(panel) {
   const progressMsg = el('div', { style: 'display:none; font-size:.8rem; color:var(--accent); text-align:center; padding:4px 0; flex-shrink:0' });
   sidebar.appendChild(progressMsg);
 
-  // ── Result area ──────────────────────────────────────────────────────────
+  // -- Result area ----------------------------------------------------------
   const resultCard = el('div', { class: 'card', style: 'text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px;' });
   mainArea.appendChild(resultCard);
 
@@ -388,7 +388,7 @@ export function init(panel) {
     const img = generatedImages[currentIdx];
     if (img) { seedInput.value = img.seed + 1; genBtn.click(); }
   }});
-  const btnSendVideos = el('button', { class: 'btn btn-sm', text: '→ Make Videos', onclick() {
+  const btnSendVideos = el('button', { class: 'btn btn-sm', text: '-> Make Videos', onclick() {
     const img = generatedImages[currentIdx];
     if (!img?.path) { toast('Generate an image first', 'error'); return; }
     handoff('create-videos', { type: 'image', path: img.path });
@@ -409,7 +409,7 @@ export function init(panel) {
   const thumbGrid = el('div', { style: 'display:grid; grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); gap:6px; margin-top:8px' });
   mainArea.appendChild(thumbGrid);
 
-  // ── Wildcard Workshop ────────────────────────────────────────────────────
+  // -- Wildcard Workshop ----------------------------------------------------
   const wcSection = el('div', { style: 'flex-shrink:0; margin-top:8px' });
   root.appendChild(wcSection);
 
@@ -493,11 +493,11 @@ export function init(panel) {
     opContents.appendChild(panel);
   }
 
-  // ── Grow panel ──
+  // -- Grow panel --
   const growPanel = opPanels['Grow'];
 
   const conceptInput = el('textarea', {
-    rows: '3', placeholder: 'Describe the wildcard you want to create…\ne.g. "baroque architectural details" or "underwater lighting moods"',
+    rows: '3', placeholder: 'Describe the wildcard you want to create...\ne.g. "baroque architectural details" or "underwater lighting moods"',
     style: 'width:100%; font-size:.85rem; resize:vertical',
   });
   growPanel.appendChild(conceptInput);
@@ -505,7 +505,7 @@ export function init(panel) {
   const growRow = el('div', { style: 'display:flex; gap:8px; margin-top:8px; align-items:center' });
   growPanel.appendChild(growRow);
 
-  const nameInput = el('input', { type: 'text', placeholder: 'File name (optional — auto-derived)', style: 'flex:1; font-size:.82rem' });
+  const nameInput = el('input', { type: 'text', placeholder: 'File name (optional -- auto-derived)', style: 'flex:1; font-size:.82rem' });
   const countSlider = createSlider(growPanel, { label: 'Entries', min: 10, max: 80, step: 5, value: 30 });
 
   growRow.appendChild(nameInput);
@@ -519,7 +519,7 @@ export function init(panel) {
     const concept = conceptInput.value.trim();
     if (!concept) { toast('Describe a concept first', 'error'); return; }
     growBtn.disabled = true;
-    growBtn.textContent = 'Growing…';
+    growBtn.textContent = 'Growing...';
     growResult.style.display = 'none';
     try {
       const data = await api('/api/prompts/wildcards/grow', {
@@ -530,7 +530,7 @@ export function init(panel) {
       growResult.innerHTML = `<span style="color:var(--green)">Created <strong>${escHtml(data.token)}</strong> with ${data.count} entries (+${data.added} new).</span>`;
       const growEntriesDiv = el('div', { style: 'margin-top:4px; color:var(--text-3); max-height:120px; overflow-y:auto; white-space:pre-wrap' });
       const previewEntries = (data.entries || []).slice(0, 10);
-      growEntriesDiv.textContent = previewEntries.join('\n') + (data.count > 10 ? `\n… and ${data.count - 10} more` : '');
+      growEntriesDiv.textContent = previewEntries.join('\n') + (data.count > 10 ? `\n... and ${data.count - 10} more` : '');
       growResult.appendChild(growEntriesDiv);
       nameInput.value = '';
       conceptInput.value = '';
@@ -540,7 +540,7 @@ export function init(panel) {
     growBtn.textContent = 'Grow Wildcards';
   });
 
-  // ── Expand panel ──
+  // -- Expand panel --
   const expandPanel = opPanels['Expand'];
   expandPanel.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-2); margin-bottom:6px', text: 'Select a file on the left, then expand it.' }));
   const expandCount = createSlider(expandPanel, { label: 'New entries', min: 5, max: 50, step: 5, value: 20 });
@@ -552,7 +552,7 @@ export function init(panel) {
   expandBtn.addEventListener('click', async () => {
     if (!selectedWcFile?.path) { toast('Select a wildcard file first', 'error'); return; }
     expandBtn.disabled = true;
-    expandBtn.textContent = 'Expanding…';
+    expandBtn.textContent = 'Expanding...';
     try {
       const data = await api('/api/prompts/expand', {
         method: 'POST',
@@ -569,7 +569,7 @@ export function init(panel) {
     expandBtn.textContent = 'Expand';
   });
 
-  // ── Prune panel ──
+  // -- Prune panel --
   const prunePanel = opPanels['Prune'];
   prunePanel.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-2); margin-bottom:6px', text: 'Select a file on the left, then prune it.' }));
   const pruneLevel = createSlider(prunePanel, { label: 'Aggressiveness', min: 1, max: 5, step: 1, value: 3 });
@@ -583,7 +583,7 @@ export function init(panel) {
   pruneBtn.addEventListener('click', async () => {
     if (!selectedWcFile?.path) { toast('Select a wildcard file first', 'error'); return; }
     pruneBtn.disabled = true;
-    pruneBtn.textContent = 'Pruning…';
+    pruneBtn.textContent = 'Pruning...';
     pruneApplyBtn.style.display = 'none';
     try {
       _lastPruneData = await api('/api/prompts/prune', {
@@ -614,7 +614,7 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // ── Audit panel ──
+  // -- Audit panel --
   const auditPanel = opPanels['Audit'];
   auditPanel.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-2); margin-bottom:6px', text: 'AI analysis of your entire wildcard library.' }));
   const auditBtn = el('button', { class: 'btn btn-primary', text: 'Audit Library', style: 'width:100%' });
@@ -624,7 +624,7 @@ export function init(panel) {
 
   auditBtn.addEventListener('click', async () => {
     auditBtn.disabled = true;
-    auditBtn.textContent = 'Auditing…';
+    auditBtn.textContent = 'Auditing...';
     try {
       const data = await api('/api/prompts/audit', { method: 'POST', body: '{}' });
       auditResult.style.display = '';
@@ -643,7 +643,7 @@ export function init(panel) {
     // nothing to update per-file beyond re-rendering the file list
   }
 
-  // ── Core functions ───────────────────────────────────────────────────────
+  // -- Core functions -------------------------------------------------------
 
   function showImage(idx) {
     if (idx < 0 || idx >= generatedImages.length) return;
@@ -677,7 +677,7 @@ export function init(panel) {
     thumbGrid.appendChild(thumb);
   }
 
-  // ── Lightbox ────────────────────────────────────────────────────────────
+  // -- Lightbox ------------------------------------------------------------
   function openLightbox(idx) {
     if (idx < 0 || idx >= generatedImages.length) return;
     showImage(idx); // keep main card in sync
@@ -783,7 +783,7 @@ export function init(panel) {
         modelSel.innerHTML = '';
         for (const m of forgeStatus.models || []) {
           const v = m.title || m.name;
-          const opt = el('option', { value: v, text: v.length > 30 ? v.slice(0, 28) + '…' : v });
+          const opt = el('option', { value: v, text: v.length > 30 ? v.slice(0, 28) + '...' : v });
           if (v.includes(forgeStatus.current_model || '')) opt.selected = true;
           modelSel.appendChild(opt);
         }
@@ -846,12 +846,12 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // ── AI Compose ───────────────────────────────────────────────────────────
+  // -- AI Compose -----------------------------------------------------------
   composeBtn.addEventListener('click', async () => {
     const idea = promptArea.value.trim();
     if (!idea) { toast('Type an idea in the prompt box first', 'error'); return; }
     composeBtn.disabled = true;
-    composeBtn.textContent = 'Composing…';
+    composeBtn.textContent = 'Composing...';
     try {
       const fcOn = fcEnabled.checked;
       // Smart wildcards need precise JSON following -- prefer cloud AI when available.
@@ -883,15 +883,15 @@ export function init(panel) {
     composeBtn.textContent = 'Compose with AI';
   });
 
-  // ── Generate ─────────────────────────────────────────────────────────────
+  // -- Generate -------------------------------------------------------------
   genBtn.addEventListener('click', async () => {
     const prompt = promptArea.value.trim();
     if (!prompt) { toast('Enter a prompt', 'error'); return; }
 
-    // ── OpenAI path ───────────────────────────────────────────────────────
+    // -- OpenAI path -------------------------------------------------------
     if (_backend === 'openai') {
       genBtn.disabled = true;
-      genBtn.innerHTML = '<span class="spinner"></span> Generating…';
+      genBtn.innerHTML = '<span class="spinner"></span> Generating...';
       try {
         const data = await api('/api/prompts/openai/generate', {
           method: 'POST',
@@ -915,16 +915,16 @@ export function init(panel) {
     if (!forgeStatus?.alive) { toast('Forge is not running', 'error'); return; }
 
     genBtn.disabled          = true;
-    genBtn.innerHTML         = '<span class="spinner"></span> Generating…';
+    genBtn.innerHTML         = '<span class="spinner"></span> Generating...';
     stopBtn.style.display    = '';
     progressMsg.style.display = '';
-    progressMsg.textContent  = 'Submitting…';
+    progressMsg.textContent  = 'Submitting...';
 
     _progressTimer = setInterval(async () => {
       try {
         const p = await api('/api/prompts/forge/progress');
         const pct = Math.round((p.progress || 0) * 100);
-        progressMsg.textContent = pct > 0 ? `Generating… ${pct}%` : 'Generating…';
+        progressMsg.textContent = pct > 0 ? `Generating... ${pct}%` : 'Generating...';
       } catch (_) {}
     }, 1000);
 
@@ -985,7 +985,7 @@ export function init(panel) {
 
   promptArea.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); genBtn.click(); } });
 
-  // ── Config defaults ──────────────────────────────────────────────────────
+  // -- Config defaults ------------------------------------------------------
   async function loadDefaults() {
     try {
       const cfg = await api('/api/config');

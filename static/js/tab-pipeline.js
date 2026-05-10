@@ -1,16 +1,16 @@
 /**
- * Drop Cat Go Studio — Studio Home
+ * Drop Cat Go Studio -- Studio Home
  * The front door: concept input + numbered pipeline walkthrough + recent work.
  * Routes the user's raw idea to sd-prompts via handoff.
  */
 import { el } from './components.js?v=20260507a';
 import { handoff } from './handoff.js?v=20260422a';
 
-// ── Module state (reset on each init) ──────────────────────────────────────
+// -- Module state (reset on each init) --------------------------------------
 let _svcInterval = null;
 let _stepCards   = [];   // [{step, dot, msg}]
 
-// ── Pipeline step definitions ─────────────────────────────────────────────
+// -- Pipeline step definitions ---------------------------------------------
 const STEPS = [
   {
     num: '01', icon: '', label: 'Generate Images',
@@ -19,9 +19,9 @@ const STEPS = [
     svcLabels: {
       running:        'Forge SD ready',
       not_running:    'Forge offline',
-      starting:       'Forge starting…',
+      starting:       'Forge starting...',
       not_configured: 'Not configured',
-      unknown:        'Checking…',
+      unknown:        'Checking...',
     },
   },
   {
@@ -33,7 +33,7 @@ const STEPS = [
       ready:          'WanGP configured',
       not_running:    'WanGP offline',
       not_configured: 'Set path in Settings',
-      unknown:        'Checking…',
+      unknown:        'Checking...',
     },
   },
   {
@@ -45,7 +45,7 @@ const STEPS = [
       ready:          'WanGP configured',
       not_running:    'WanGP offline',
       not_configured: 'Set path in Settings',
-      unknown:        'Checking…',
+      unknown:        'Checking...',
     },
   },
   {
@@ -55,14 +55,14 @@ const STEPS = [
     svcLabels: {
       running:        'ACE-Step ready',
       not_running:    'ACE-Step offline',
-      starting:       'ACE-Step starting…',
+      starting:       'ACE-Step starting...',
       not_configured: 'Set path in Settings',
-      unknown:        'Checking…',
+      unknown:        'Checking...',
     },
   },
 ];
 
-// ── Init ──────────────────────────────────────────────────────────────────
+// -- Init ------------------------------------------------------------------
 export function init(panel) {
   panel.innerHTML = '';
 
@@ -82,7 +82,7 @@ export function init(panel) {
   _svcInterval = setInterval(_pollServices, 8000);
 }
 
-// ── Hero ──────────────────────────────────────────────────────────────────
+// -- Hero ------------------------------------------------------------------
 function _buildHero(root) {
   const hero = el('div', { class: 'pipeline-hero' });
   root.appendChild(hero);
@@ -94,7 +94,7 @@ function _buildHero(root) {
   inner.appendChild(el('h1', { class: 'pipeline-hero-title', text: 'What do you want to create?' }));
   inner.appendChild(el('p', {
     class: 'pipeline-hero-sub',
-    text: 'Type your idea below and the AI will write the prompt, generate the images, animate the video, and add the music — one step at a time.',
+    text: 'Type your idea below and the AI will write the prompt, generate the images, animate the video, and add the music -- one step at a time.',
   }));
 
   const wrap = el('div', { class: 'pipeline-concept-wrap' });
@@ -103,7 +103,7 @@ function _buildHero(root) {
   const conceptTA = el('textarea', {
     class: 'pipeline-concept-ta',
     rows: '3',
-    placeholder: 'e.g. "a lone astronaut discovering an alien jungle at dusk"  ·  Ctrl+Enter to start',
+    placeholder: 'e.g. "a lone astronaut discovering an alien jungle at dusk"  .  Ctrl+Enter to start',
   });
   wrap.appendChild(conceptTA);
 
@@ -142,7 +142,7 @@ function _launchConcept(text) {
   document.querySelector('[data-tab="sd-prompts"]')?.click();
 }
 
-// ── Pipeline steps ────────────────────────────────────────────────────────
+// -- Pipeline steps --------------------------------------------------------
 function _buildSteps(root) {
   const section = el('div', { class: 'pipeline-steps-section' });
   root.appendChild(section);
@@ -150,7 +150,7 @@ function _buildSteps(root) {
   // Section heading
   const heading = el('div', { class: 'pipeline-section-heading' });
   heading.appendChild(el('span', { text: 'THE PIPELINE' }));
-  heading.appendChild(el('span', { class: 'pipeline-section-sub', text: '— do these in order, or jump to any step' }));
+  heading.appendChild(el('span', { class: 'pipeline-section-sub', text: '-- do these in order, or jump to any step' }));
   section.appendChild(heading);
 
   const row = el('div', { class: 'pipeline-steps-row' });
@@ -159,7 +159,7 @@ function _buildSteps(root) {
   STEPS.forEach((step, i) => {
     // Connector arrow between cards
     if (i > 0) {
-      row.appendChild(el('div', { class: 'pipeline-step-arrow', 'aria-hidden': 'true', text: '→' }));
+      row.appendChild(el('div', { class: 'pipeline-step-arrow', 'aria-hidden': 'true', text: '->' }));
     }
 
     const card = el('div', {
@@ -182,14 +182,14 @@ function _buildSteps(root) {
     // Service status row
     const svcRow = el('div', { class: 'pipeline-step-svc' });
     const dot = el('span', { class: 'dot unknown', 'aria-hidden': 'true' });
-    const msg = el('span', { class: 'pipeline-step-svc-msg', text: 'Checking…' });
+    const msg = el('span', { class: 'pipeline-step-svc-msg', text: 'Checking...' });
     svcRow.appendChild(dot);
     svcRow.appendChild(msg);
     card.appendChild(svcRow);
 
     const openBtn = el('button', {
       class: 'btn btn-sm pipeline-step-open',
-      text: 'Open →',
+      text: 'Open ->',
       // Prevent card click from double-firing
       onclick(e) { e.stopPropagation(); document.querySelector(`[data-tab="${step.tab}"]`)?.click(); },
     });
@@ -199,7 +199,7 @@ function _buildSteps(root) {
   });
 }
 
-// ── Recent work ─────────────────────────────────────────────────────────────
+// -- Recent work -------------------------------------------------------------
 async function _buildRecent(root) {
   const section = el('div', { class: 'pipeline-recent-section' });
   root.appendChild(section);
@@ -224,7 +224,7 @@ async function _buildRecent(root) {
     if (!items.length) {
       grid.appendChild(el('div', {
         class: 'pipeline-recent-empty',
-        text: '…  Nothing yet — your generations will appear here.',
+        text: '...  Nothing yet -- your generations will appear here.',
       }));
       return;
     }
@@ -238,7 +238,7 @@ async function _buildRecent(root) {
         'aria-label': `Open ${item.prompt ? '"' + item.prompt.slice(0, 60) + '"' : 'this item'} in gallery`,
       });
 
-      // Click → open gallery detail overlay
+      // Click -> open gallery detail overlay
       const _openItem = () => {
         window.dispatchEvent(new CustomEvent('gallery:open-item', { detail: { id: item.id } }));
       };
@@ -275,7 +275,7 @@ async function _buildRecent(root) {
   }
 }
 
-// ── Service status polling ─────────────────────────────────────────────────
+// -- Service status polling -------------------------------------------------
 async function _pollServices() {
   if (!_stepCards.length) return;
   try {

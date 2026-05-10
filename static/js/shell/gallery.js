@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Persistent generation gallery (WS2).
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
@@ -159,7 +159,7 @@ function _renderPreview() {
     area.querySelector(`[data-preview-action="${i}"]`)?.addEventListener('click', a.onClick);
   });
 
-  // Hide the search toolbar when preview is active — history is below
+  // Hide the search toolbar when preview is active -- history is below
   if (toolbar) toolbar.style.display = 'none';
 }
 
@@ -353,7 +353,7 @@ function _openDetail(item) {
         ${item.created_at ? `<div class="gallery-meta-block"><strong>Created</strong><span>${new Date(item.created_at).toLocaleString()}</span></div>` : ''}
         ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-          ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">→ Make Video</button>` : ''}
+          ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">-> Make Video</button>` : ''}
           <a href="${_esc(item.url)}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
@@ -369,7 +369,7 @@ function _openDetail(item) {
     overlay.classList.remove('open');
     document.getElementById('btn-gallery-close')?.click();
     document.querySelector('.rail-tab[data-tab="express"]')?.click();
-    toast('Image loaded — click Create!', 'info');
+    toast('Image loaded -- click Create!', 'info');
   });
   overlay.querySelector('#gd-load-settings')?.addEventListener('click', () => {
     _loadItemSettings(item);
@@ -391,7 +391,7 @@ function _openDetail(item) {
     } else {
       _loadItemSettings(item);
     }
-    toast('Branched — tweak and re-generate', 'info');
+    toast('Branched -- tweak and re-generate', 'info');
   });
   overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
     if (!confirm('Delete this file permanently? This cannot be undone.')) return;

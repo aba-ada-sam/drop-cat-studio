@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Command palette (WS1 + WS9).
  * Ctrl+K to open. Fuzzy search across tabs, actions, presets.
  * Free-text queries also surface an "Ask AI" row that sends the query to
@@ -49,7 +49,7 @@ function _filter(query) {
     _filtered = [...matches, {
       label: `Ask AI: "${_lastQuery}"`,
       group: 'AI',
-      icon: '&#10022;',  // ✦
+      icon: '&#10022;',  // *
       hint: 'Natural-language tweak for this tab',
       async: true,
       action: () => askAI(_lastQuery),
@@ -81,7 +81,7 @@ function _filter(query) {
       aiItems.push({
         label: 'Clear AI history',
         group: 'Recent AI',
-        icon: '&#10005;',  // ×
+        icon: '&#10005;',  // x
         hint: `${history.length} stored`,
         action: () => { clearHistory(); _filter(''); },
       });
@@ -103,7 +103,7 @@ function _setBusy(busy, labelText) {
     container.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.style.cssText = 'padding:24px 16px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--accent);font-size:.9rem';
-    wrap.innerHTML = `<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span><span>${labelText || 'Thinking…'}</span>`;
+    wrap.innerHTML = `<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></span><span>${labelText || 'Thinking...'}</span>`;
     container.appendChild(wrap);
   }
 }
@@ -185,7 +185,7 @@ function _execute(item) {
 async function _runItem(item) {
   if (!item) return;
   if (item.async) {
-    _setBusy(true, 'Thinking…');
+    _setBusy(true, 'Thinking...');
     try { await _execute(item); }
     finally { _setBusy(false); close(); }
     return;

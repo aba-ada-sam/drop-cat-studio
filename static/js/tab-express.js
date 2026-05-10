@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Express mode.
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
@@ -22,7 +22,7 @@ export function init(panel) {
   const root = el('div', { style: 'max-width:680px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:20px;' });
   panel.appendChild(root);
 
-  // ── Output resolution state ───────────────────────────────────────────────
+  // -- Output resolution state -----------------------------------------------
   const RATIOS = [
     { label: '16:9', value: '16:9', rw: 16, rh: 9  },
     { label: '9:16', value: '9:16', rw: 9,  rh: 16 },
@@ -90,7 +90,7 @@ export function init(panel) {
 
   function _refreshOutput() {
     [_outW, _outH] = _computeDims(_ratio, _qualityPx);
-    if (_dimsLabel) _dimsLabel.textContent = `${_outW} × ${_outH}`;
+    if (_dimsLabel) _dimsLabel.textContent = `${_outW} x ${_outH}`;
     if (_warnEl) _warnEl.style.display = (_outW >= 1080 || _outH >= 1080) ? '' : 'none';
   }
 
@@ -132,13 +132,13 @@ export function init(panel) {
     _announceModel();
   }).catch(() => toast('Could not load video models -- using defaults', 'error'));
 
-  // ── Heading ───────────────────────────────────────────────────────────────
+  // -- Heading ---------------------------------------------------------------
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
     el('div', { style: 'font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px;', text: 'Create a video' }),
     el('div', { style: 'font-size:.85rem; color:var(--text-3);', text: 'Drop an image, describe what you want, click Create.' }),
   ]));
 
-  // ── Image drop zone ───────────────────────────────────────────────────────
+  // -- Image drop zone -------------------------------------------------------
   const imgInput = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
   root.appendChild(imgInput);
 
@@ -150,7 +150,7 @@ export function init(panel) {
   ]);
   const clearImgBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
-    title: 'Clear image', text: '×',
+    title: 'Clear image', text: 'x',
   });
   const dropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:160px; display:flex; align-items:center; justify-content:center;' }, [preview, dropHint, clearImgBtn]);
   root.appendChild(dropZone);
@@ -249,7 +249,7 @@ export function init(panel) {
   }
   document.addEventListener('paste', _pasteImage);
 
-  // ── Creative brief inputs + brainstorm ───────────────────────────────────
+  // -- Creative brief inputs + brainstorm -----------------------------------
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
@@ -286,7 +286,7 @@ export function init(panel) {
   function _genBtn(title) {
     return el('button', {
       style: 'flex-shrink:0; font-size:.72rem; padding:2px 7px; border:1px solid var(--border-2); border-radius:5px; background:transparent; color:var(--accent); cursor:pointer; white-space:nowrap;',
-      title, text: '✦ Generate',
+      title, text: '* Generate',
     });
   }
 
@@ -312,13 +312,13 @@ export function init(panel) {
   }
   lyricGenBtn.addEventListener('click', () => _runGen(lyricGenBtn, 'Generate a brief lyric direction for music that matches this image', lyricInput));
 
-  // ── Creative brief ────────────────────────────────────────────────────────
+  // -- Creative brief --------------------------------------------------------
   const talkReplyEl = el('div', { style: 'display:none; font-size:.78rem; color:var(--text-3); line-height:1.5; font-style:italic;' });
 
   const sparkBtn = el('button', {
     style: 'flex-shrink:0; font-size:.78rem; padding:4px 11px; border:1px solid var(--accent); border-radius:6px; background:transparent; color:var(--accent); cursor:pointer; white-space:nowrap; font-weight:600;',
     title: 'Auto-fill idea and music vibe from your photo using AI',
-    text: '✦ Spark from photo',
+    text: '* Spark from photo',
   });
 
   sparkBtn.addEventListener('click', async () => {
@@ -361,7 +361,7 @@ export function init(panel) {
     talkReplyEl,
   ]));
 
-  // ── Output settings ───────────────────────────────────────────────────────
+  // -- Output settings -------------------------------------------------------
   const CHIP_BASE     = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
   const CHIP_ON       = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
   const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
@@ -381,7 +381,7 @@ export function init(panel) {
     return { row, chips };
   }
 
-  const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '1032 × 580' });
+  const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: '1032 x 580' });
   _dimsLabel = dimsLabel;
   const warnEl = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.1); border:1px solid rgba(232,160,0,.3); border-radius:6px; padding:6px 10px;',
@@ -499,7 +499,7 @@ export function init(panel) {
     ]),
   ]));
 
-  // ── Multi-video story ─────────────────────────────────────────────────────
+  // -- Multi-video story -----------------------------------------------------
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
   let _multiVideo      = true;
@@ -618,12 +618,12 @@ export function init(panel) {
     _refreshClipInfo();
   });
 
-  // ── Loop state ────────────────────────────────────────────────────────────
+  // -- Loop state ------------------------------------------------------------
   let _looping    = false;
   let _varyPrompt = false;
   let _loopCount  = 0;
 
-  // ── Queue-depth tracking for Create button ────────────────────────────────
+  // -- Queue-depth tracking for Create button --------------------------------
   let _pendingCount = 0;
   function _refreshCreateBtn() {
     createBtn.disabled = false;
@@ -638,7 +638,7 @@ export function init(panel) {
     pollJob(job_id, null, done, done);
   }
 
-  // ── Create + Loop button row ──────────────────────────────────────────────
+  // -- Create + Loop button row ----------------------------------------------
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Create Story',
@@ -663,7 +663,7 @@ export function init(panel) {
   root.appendChild(varyRow);
   varyChk.addEventListener('change', () => { _varyPrompt = varyChk.checked; });
 
-  // ── Progress + result area ────────────────────────────────────────────────
+  // -- Progress + result area ------------------------------------------------
   const progressWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   const progressBar  = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
   const progressFill = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
@@ -677,7 +677,7 @@ export function init(panel) {
   const resultVideo = el('video', { controls: '', style: 'width:100%; border-radius:8px; background:#000;' });
   const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap;' });
   const newBtn  = el('button', { class: 'btn btn-sm', text: '+ New video' });
-  const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos →' });
+  const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos ->' });
   const muteBtn = el('button', { class: 'btn btn-sm', text: '🔊 Mute', title: 'Toggle mute' });
   muteBtn.addEventListener('click', () => {
     resultVideo.muted = !resultVideo.muted;
@@ -734,7 +734,7 @@ export function init(panel) {
   const advLink = el('div', { style: 'text-align:center; margin-top:-10px;' });
   const advBtn  = el('button', {
     style: 'background:none; border:none; cursor:pointer; font-size:.75rem; color:var(--text-3); padding:4px 8px;',
-    text: 'Want more control?  Open Create Videos →',
+    text: 'Want more control?  Open Create Videos ->',
   });
   advLink.appendChild(advBtn);
   root.appendChild(advLink);
@@ -746,7 +746,7 @@ export function init(panel) {
   let _jobId = null;
   let _activePoller = null;  // stop() handle -- ensures only one watcher runs at a time
 
-  // ── Core generation ───────────────────────────────────────────────────────
+  // -- Core generation -------------------------------------------------------
   // Returns Promise<boolean> -- true = queued/success, false = failure
   async function _generateOne(fromLoop = false) {
     // Optionally vary the prompt on loop iterations
@@ -865,7 +865,7 @@ export function init(panel) {
     });
   }
 
-  // ── Loop runner ───────────────────────────────────────────────────────────
+  // -- Loop runner -----------------------------------------------------------
   async function _runLoop() {
     while (_looping) {
       _loopCount++;
@@ -901,14 +901,14 @@ export function init(panel) {
       if (!_imagePath && !ideaInput.value.trim()) { toast('Drop an image or type a video idea first', 'error'); return; }
       _looping = true;
       _loopCount = 0;
-      loopBtn.textContent = '■  Stop';
+      loopBtn.textContent = '*  Stop';
       loopBtn.classList.add('btn-primary');
       varyRow.style.display = 'flex';
       _runLoop();
     }
   });
 
-  // ── Multi-video generation ────────────────────────────────────────────────
+  // -- Multi-video generation ------------------------------------------------
   async function _generateMulti() {
     let motionPrompt = ideaInput.value.trim();
 
@@ -977,7 +977,7 @@ export function init(panel) {
     }
   }
 
-  // ── Create (single run or multi-video) ───────────────────────────────────
+  // -- Create (single run or multi-video) -----------------------------------
   createBtn.addEventListener('click', async () => {
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';

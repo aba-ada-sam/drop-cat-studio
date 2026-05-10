@@ -114,7 +114,7 @@ def generate_video(
         num_frames += 1  # WanGP requires odd frame count
 
     # Hard-cap to model's max_sec: LTX-2 at 481 frames triggers 2-window mode
-    # (doubles generation time). The odd-adjustment above can push 480 → 481.
+    # (doubles generation time). The odd-adjustment above can push 480 -> 481.
     max_sec = model_info.get("max_sec", 19)
     frame_cap = int(max_sec * fps)
     if frame_cap % 2 == 0:
@@ -391,7 +391,7 @@ def _generate_via_subprocess(
             stripped = line.strip()
             if stripped and log_fn:
                 log_fn(f"[info] {stripped}")
-            # Parse tqdm step output: "3/30 [00:15<..." → progress_fn(3, 30)
+            # Parse tqdm step output: "3/30 [00:15<..." -> progress_fn(3, 30)
             if progress_fn and stripped:
                 m = _TQDM_STEP_RE.search(stripped)
                 if m:

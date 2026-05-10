@@ -1,10 +1,10 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Main shell controller.
  * Owns: tab routing, service polling, split pane, gallery,
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
-// tab-imports.js removed — import is handled per-tab
+// tab-imports.js removed -- import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260510b';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260508c';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260510a';
@@ -22,7 +22,7 @@ import './shell/ai-intent.js?v=20260503h';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260421c';
 
-// ── Tab module map ──────────────────────────────────────────────────────────
+// -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {
   'express':           initExpress,
   'pipeline':          initPipeline,
@@ -46,7 +46,7 @@ const TAB_HANDOFF = {
 };
 const _tabInitialized = new Set();
 
-// ── Pipeline breadcrumb ───────────────────────────────────────────────────────
+// -- Pipeline breadcrumb -------------------------------------------------------
 // Injected into Generate Images and Create Videos panels.
 // Audio lives inside Create Videos; Batch Processing is its own standalone tool.
 const PIPELINE_STEPS = [
@@ -98,7 +98,7 @@ function _buildPipelineBar(activeTabId) {
   return bar;
 }
 
-// ── Splash ──────────────────────────────────────────────────────────────────
+// -- Splash ------------------------------------------------------------------
 const SPLASH_BLOCKING_STATES = new Set(['unknown', 'starting']);
 const SPLASH_LOADING_STATES  = new Set(['unknown', 'starting']);
 
@@ -258,7 +258,7 @@ async function runSplash() {
   }
 }
 
-// ── State ───────────────────────────────────────────────────────────────────
+// -- State -------------------------------------------------------------------
 const state = {
   activeTab:    'sd-prompts',
   logOpen:      false,
@@ -277,7 +277,7 @@ document.addEventListener('dcs:video-model', e => {
   _applyVideoPillState(_tabVideoModel || _configVideoModel);
 });
 
-// ── Tab routing ─────────────────────────────────────────────────────────────
+// -- Tab routing -------------------------------------------------------------
 function switchTab(tabId) {
   state.activeTab = tabId;
   if (state.galleryOpen) _galleryClose();
@@ -291,7 +291,7 @@ function switchTab(tabId) {
   // Keep gallery button state in sync with overlay state
   document.getElementById('btn-gallery-rail')?.classList.toggle('active', state.galleryOpen);
 
-  // Update panels — pause any playing videos in panels being hidden
+  // Update panels -- pause any playing videos in panels being hidden
   document.querySelectorAll('.tab-panel').forEach(panel => {
     const becoming = panel.id === `panel-${tabId}`;
     if (!becoming) panel.querySelectorAll('video').forEach(v => v.pause());
@@ -332,7 +332,7 @@ function switchTab(tabId) {
   if (handoffData && TAB_HANDOFF[tabId]) TAB_HANDOFF[tabId](handoffData);
 }
 
-// ── Service polling ─────────────────────────────────────────────────────────
+// -- Service polling ---------------------------------------------------------
 const SERVICE_MESSAGES = {
   acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- set path in Settings' },
   forge:   { not_running: 'Not detected -- start Forge with --api flag', starting: 'Starting (~60s)...', not_configured: 'Not configured' },
@@ -429,7 +429,7 @@ function _applyImagePillState(provider, hasOpenAI) {
   }
 }
 
-// ── Service panel ───────────────────────────────────────────────────────────
+// -- Service panel -----------------------------------------------------------
 function openServicePanel() {
   document.getElementById('service-panel-overlay')?.classList.add('open');
   renderServicePanel();
@@ -499,7 +499,7 @@ function renderServicePanel() {
   }
 }
 
-// ── Log polling ─────────────────────────────────────────────────────────────
+// -- Log polling -------------------------------------------------------------
 async function pollLogs() {
   if (!state.logOpen) return;
   try {
@@ -516,11 +516,11 @@ async function pollLogs() {
 }
 
 
-// ── Modals ──────────────────────────────────────────────────────────────────
+// -- Modals ------------------------------------------------------------------
 function openModal(id)  { document.getElementById(id)?.classList.add('open');    }
 function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 
-// ── Settings ────────────────────────────────────────────────────────────────
+// -- Settings ----------------------------------------------------------------
 async function loadConfig() {
   try {
     state.config = await apiFetch('/api/config', { context: 'loadConfig' });
@@ -567,8 +567,8 @@ function _applyLLMState(llm) {
   const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
   if (badge) {
     badge.className = 'ai-badge ' + (isCloud ? 'ai-cloud' : hasAny ? 'ai-local' : 'ai-none');
-    badge.textContent = isCloud ? `✦ AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
-                                 : effective === 'ollama' ? '✦ AI: Local' : '✦ AI';
+    badge.textContent = isCloud ? `* AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
+                                 : effective === 'ollama' ? '* AI: Local' : '* AI';
   }
 
   // Text pill dot + label
@@ -634,7 +634,7 @@ async function validatePath(type) {
   } catch (_) {}
 }
 
-// ── Service actions ─────────────────────────────────────────────────────────
+// -- Service actions ---------------------------------------------------------
 async function svcAction(action, name) {
   const label = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
   toast(`${label} ${name}...`, 'info');
@@ -645,7 +645,7 @@ async function svcAction(action, name) {
   setTimeout(pollServices, 1000);
 }
 
-// ── Gallery overlay ──────────────────────────────────────────────────────────
+// -- Gallery overlay ----------------------------------------------------------
 function _galleryOpen() {
   const ov  = document.getElementById('gallery-overlay');
   if (!ov) return;
@@ -667,7 +667,7 @@ function _galleryToggle() {
   state.galleryOpen ? _galleryClose() : _galleryOpen();
 }
 
-// ── AI-type header pills ──────────────────────────────────────────────────────
+// -- AI-type header pills ------------------------------------------------------
 function initAIPills() {
   const TYPES = ['text', 'image', 'video', 'sound'];
   let _openType = null;
@@ -680,7 +680,7 @@ function initAIPills() {
   async function renderMenu(type) {
     const menu = document.getElementById(`ap-${type}-menu`);
     if (!menu) return;
-    menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading…</div>`;
+    menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading...</div>`;
 
     if (type === 'text')  { await _renderTextMenu(menu); }
     if (type === 'image') { await _renderImageMenu(menu); }
@@ -694,7 +694,7 @@ function initAIPills() {
     const current = llm.provider || 'auto';
     const PROVIDERS = [
       { value: 'auto',      label: 'Auto',      hint: 'Best available' },
-      { value: 'anthropic', label: 'Anthropic', hint: 'Claude — fast & smart' },
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude -- fast & smart' },
       { value: 'openai',    label: 'OpenAI',    hint: 'GPT-4o' },
       { value: 'ollama',    label: 'Ollama',    hint: 'Local / private' },
     ];
@@ -709,13 +709,13 @@ function initAIPills() {
         const fresh = await apiFetch('/api/llm/config', { context: 'pill.text.refresh' }).catch(() => ({}));
         _applyLLMState(fresh);
         closeAllMenus();
-        toast(`Text AI → ${p.label}`, 'success');
+        toast(`Text AI -> ${p.label}`, 'success');
       });
       menu.appendChild(row);
     }
     menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
     const link = document.createElement('button');
-    link.className = 'ap-menu-link'; link.textContent = '⚙ Settings →';
+    link.className = 'ap-menu-link'; link.textContent = '⚙ Settings ->';
     link.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); closeAllMenus(); });
     menu.appendChild(link);
   }
@@ -730,7 +730,7 @@ function initAIPills() {
 
     const PROVIDERS = [
       { value: 'forge',  label: 'Forge SD',      hint: 'Local Stable Diffusion' },
-      { value: 'openai', label: 'OpenAI DALL-E',  hint: hasOpenAI ? 'DALL-E 3 — key ready' : 'Needs OpenAI key in Settings' },
+      { value: 'openai', label: 'OpenAI DALL-E',  hint: hasOpenAI ? 'DALL-E 3 -- key ready' : 'Needs OpenAI key in Settings' },
     ];
     menu.innerHTML = '<div class="ap-menu-title">Image</div>';
     for (const p of PROVIDERS) {
@@ -742,26 +742,26 @@ function initAIPills() {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: p.value }), context: 'pill.image.save' }).catch(() => {});
         _applyImagePillState(p.value, hasOpenAI);
         closeAllMenus();
-        toast(`Image → ${p.label}`, 'success');
+        toast(`Image -> ${p.label}`, 'success');
       });
       menu.appendChild(row);
     }
     menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
     if (current === 'forge') {
-      const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '—';
+      const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '--';
       menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>`);
       const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
       acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="forge" data-act="start">Start</button>
         <button class="btn btn-sm ap-ss" data-svc="forge" data-act="stop">Stop</button>
         ${forgeSvc.url ? `<a href="${escHtml(forgeSvc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
-        <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+        <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
       acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
       acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
       menu.appendChild(acts);
     } else {
       const link = document.createElement('button');
       link.className = 'ap-menu-link'; link.style.cssText = 'padding:6px 12px;display:block;';
-      link.textContent = '⚙ Configure OpenAI key in Settings →';
+      link.textContent = '⚙ Configure OpenAI key in Settings ->';
       link.addEventListener('click', () => { loadConfig(); openModal('modal-settings'); closeAllMenus(); });
       menu.appendChild(link);
     }
@@ -775,10 +775,10 @@ function initAIPills() {
     const currentModel = _tabVideoModel || configData.wan_model || 'LTX-2 Dev19B Distilled';
     const svc = _svcState.wangp || {};
 
-    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(svc.state||'—')}</span></div>
+    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(svc.state||'--')}</span></div>
       <div class="ap-menu-subtitle">Select model</div>`;
     for (const [name, info] of Object.entries(models)) {
-      const res = info.res ? `${info.res[0]}×${info.res[1]}` : '';
+      const res = info.res ? `${info.res[0]}x${info.res[1]}` : '';
       const row = document.createElement('label');
       row.className = 'ap-menu-option';
       row.innerHTML = `<input type="radio" name="ap-video-m" value="${escHtml(name)}"${name === currentModel ? ' checked' : ''}>
@@ -787,7 +787,7 @@ function initAIPills() {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ wan_model: name }), context: 'pill.video.save' }).catch(() => {});
         _applyVideoPillState(name);
         closeAllMenus();
-        toast(`Video model → ${name}`, 'success');
+        toast(`Video model -> ${name}`, 'success');
       });
       menu.appendChild(row);
     }
@@ -795,7 +795,7 @@ function initAIPills() {
     const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="wangp" data-act="start">Start</button>
       <button class="btn btn-sm ap-ss" data-svc="wangp" data-act="stop">Stop</button>
-      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
     acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
     acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
     menu.appendChild(acts);
@@ -809,11 +809,11 @@ function initAIPills() {
     const isLTX = currentVideoModel.toLowerCase().includes('ltx');
     const svc = _svcState.acestep || {};
     const st = svc.state || 'unknown';
-    const msg = SERVICE_MESSAGES.acestep?.[svc.state] || svc.message || svc.state || '—';
+    const msg = SERVICE_MESSAGES.acestep?.[svc.state] || svc.message || svc.state || '--';
 
     const AUDIO_OPTIONS = [
       { value: 'acestep', label: 'ACE-Step', hint: 'Full AI music + lyrics generation' },
-      ...(isLTX ? [{ value: 'ltx_native', label: 'LTX-2 native audio', hint: 'Built-in WanGP MMAudio — no ACE-Step needed' }] : []),
+      ...(isLTX ? [{ value: 'ltx_native', label: 'LTX-2 native audio', hint: 'Built-in WanGP MMAudio -- no ACE-Step needed' }] : []),
     ];
 
     menu.innerHTML = '<div class="ap-menu-title">Sound</div><div class="ap-menu-subtitle">Audio generation engine</div>';
@@ -826,7 +826,7 @@ function initAIPills() {
         await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ audio_provider: opt.value }), context: 'pill.sound.save' }).catch(() => {});
         _applySoundPillState(opt.value);
         closeAllMenus();
-        toast(`Audio → ${opt.label}`, 'success');
+        toast(`Audio -> ${opt.label}`, 'success');
       });
       menu.appendChild(row);
     }
@@ -838,7 +838,7 @@ function initAIPills() {
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="acestep" data-act="start">Start</button>
       <button class="btn btn-sm ap-ss" data-svc="acestep" data-act="stop">Stop</button>
       ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
-      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
     acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
     acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
     menu.appendChild(acts);
@@ -847,7 +847,7 @@ function initAIPills() {
   function _renderSvcMenu(menu, svcName, label, hint) {
     const svc = _svcState[svcName] || {};
     const st = svc.state || 'unknown';
-    const msg = SERVICE_MESSAGES[svcName]?.[svc.state] || svc.message || svc.state || '—';
+    const msg = SERVICE_MESSAGES[svcName]?.[svc.state] || svc.message || svc.state || '--';
     menu.innerHTML = `<div class="ap-menu-title">${label} <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(st)}</span></div>
       <div class="ap-menu-subtitle">${hint}</div>
       <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 10px;line-height:1.5;">${escHtml(msg)}</div>
@@ -856,7 +856,7 @@ function initAIPills() {
     acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="start">Start</button>
       <button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="stop">Stop</button>
       ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
-      <button class="ap-menu-link" style="margin-left:auto">Details →</button>`;
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
     acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
     acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
     menu.appendChild(acts);
@@ -878,7 +878,7 @@ function initAIPills() {
 }
 
 
-// ── Rail collapse ─────────────────────────────────────────────────────────────
+// -- Rail collapse -------------------------------------------------------------
 function initRailToggle() {
   const rail = document.getElementById('app-rail');
   const btn  = document.getElementById('rail-toggle');
@@ -892,7 +892,7 @@ function initRailToggle() {
   });
 }
 
-// ── Keyboard shortcuts registration ─────────────────────────────────────────
+// -- Keyboard shortcuts registration -----------------------------------------
 function initShortcuts() {
   const SHORTCUTS = [
     { key: 'k', ctrl: true, global: true, action: () => openPalette(), description: 'Command palette' },
@@ -929,7 +929,7 @@ function initShortcuts() {
   }
 }
 
-// ── Command palette items ─────────────────────────────────────────────────────
+// -- Command palette items -----------------------------------------------------
 function initPaletteItems() {
   registerItems([
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
@@ -947,7 +947,7 @@ function initPaletteItems() {
   ]);
 }
 
-// ── Utilities ───────────────────────────────────────────────────────────────
+// -- Utilities ---------------------------------------------------------------
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
@@ -955,7 +955,7 @@ function escHtml(s) {
 }
 
 
-// ── Client-side error logging ────────────────────────────────────────────────
+// -- Client-side error logging ------------------------------------------------
 function _reportClientError(message, source, lineno) {
   fetch('/api/logs/client', {
     method: 'POST',
@@ -1043,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target.id === 'service-panel-overlay') closeServicePanel();
   });
 
-  // Log toggle — closed by default, preference persisted in localStorage
+  // Log toggle -- closed by default, preference persisted in localStorage
   const logToggle  = document.getElementById('log-toggle');
   const logContent = document.getElementById('log-content');
   state.logOpen = false;
@@ -1058,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Modals
   document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
 
-  // Global mute toggle — silences every video element on the page
+  // Global mute toggle -- silences every video element on the page
   let _globalMuted = false;
   document.getElementById('btn-mute-all')?.addEventListener('click', () => {
     _globalMuted = !_globalMuted;
@@ -1120,9 +1120,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
 
-  // ── Sidebar job feed ──────────────────────────────────────────────────────
+  // -- Sidebar job feed ------------------------------------------------------
   const _feedEl = document.getElementById('job-feed');
-  const _feedCards    = new Map(); // job_id → card element
+  const _feedCards    = new Map(); // job_id -> card element
   const _feedDone     = [];        // completed job ids, newest-first (capped at 5)
   const _feedDismissed = new Set(); // job ids the user explicitly closed
 
@@ -1178,7 +1178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const dismiss = document.createElement('button');
     dismiss.className = 'jf-dismiss';
-    dismiss.textContent = '×';
+    dismiss.textContent = 'x';
     dismiss.title = 'Dismiss';
     dismiss.addEventListener('click', e => {
       e.stopPropagation();
@@ -1218,7 +1218,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (job.status === 'running') {
       card.classList.add('jf-running');
       card._bar.style.width = pct + '%';
-      card._sta.textContent = job.message || 'Running…';
+      card._sta.textContent = job.message || 'Running...';
     } else if (job.status === 'queued') {
       card.classList.add('jf-queued');
       // width set to 100% by CSS; animation handled by .jf-queued .jf-bar
@@ -1270,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (el) { el.remove(); _feedCards.delete(old); }
         }
         // Remove the active card for this job before adding the done card
-        // (prevents the same job appearing twice during the active→done transition)
+        // (prevents the same job appearing twice during the active->done transition)
         const existing = _feedCards.get(job.id);
         if (existing) existing.remove();
         const card = _makeCard(job);
@@ -1285,7 +1285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!keep.has(id)) { el.remove(); _feedCards.delete(id); }
       }
 
-      // Update Queue hint (only when Queue tab is not open — tab-queue.js owns it then)
+      // Update Queue hint (only when Queue tab is not open -- tab-queue.js owns it then)
       if (!document.querySelector('.rail-tab.active[data-tab="queue"]')) {
         const hint = document.getElementById('queue-rail-hint');
         if (hint) {

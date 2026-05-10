@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Create Videos
  * Pick a generated image, write a motion prompt, get a video.
  */
@@ -102,7 +102,7 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:860px; margin:0 auto;' });
   panel.appendChild(root);
 
-  // ── Start image / video upload ────────────────────────────────────────────
+  // -- Start image / video upload --------------------------------------------
   const uploadCard = el('div', { class: 'card', style: 'padding:14px; display:flex; align-items:center; gap:10px;' });
   root.appendChild(uploadCard);
   uploadCard.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Start Image or Video' }));
@@ -127,7 +127,7 @@ export function init(panel) {
     fileInput.value = '';
   });
 
-  // ── Selected media preview ─────────────────────────────────────────────────
+  // -- Selected media preview -------------------------------------------------
   const previewCard = el('div', { class: 'drop-zone', style: 'display:none; position:relative; overflow:hidden; padding:0;' });
   root.appendChild(previewCard);
 
@@ -135,7 +135,7 @@ export function init(panel) {
   const previewVid   = el('video', { controls: '', style: 'display:none; width:100%; max-height:260px; border-radius:8px; background:#000;' });
   const previewClear = el('button', {
     style: 'position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
-    title: 'Clear', text: '×',
+    title: 'Clear', text: 'x',
   });
   previewCard.appendChild(previewImg);
   previewCard.appendChild(previewVid);
@@ -233,7 +233,7 @@ export function init(panel) {
     receiveHandoff(ph);
   }
 
-  // ── Start video (video-to-video) ──────────────────────────────────────────
+  // -- Start video (video-to-video) ------------------------------------------
   let _startVideoPath = null;
   const videoToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
   root.appendChild(videoToggleRow);
@@ -247,7 +247,7 @@ export function init(panel) {
   const videoFileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none' });
   videoCard.appendChild(videoFileInput);
   const videoOpenBtn = el('button', { class: 'btn btn-sm', text: 'Choose video...' });
-  const videoClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear', style: 'display:none;' });
+  const videoClearBtn = el('button', { class: 'btn btn-sm', text: 'x Clear', style: 'display:none;' });
   const videoName = el('div', { style: 'font-size:.78rem; color:var(--text-2); margin-top:6px;' });
   videoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [videoOpenBtn, videoClearBtn]));
   videoCard.appendChild(videoName);
@@ -268,7 +268,7 @@ export function init(panel) {
     if (!videoChk.checked) { _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none'; }
   });
 
-  // ── End image (optional morph) ────────────────────────────────────────────
+  // -- End image (optional morph) --------------------------------------------
   const endToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
   root.appendChild(endToggleRow);
 
@@ -286,7 +286,7 @@ export function init(panel) {
 
   const endPreview = el('img', { style: 'display:none; width:120px; height:80px; object-fit:cover; border-radius:6px; margin-bottom:6px;' });
   endCard.appendChild(endPreview);
-  const endClearBtn = el('button', { class: 'btn btn-sm', text: '✕ Clear end image', style: 'display:none; font-size:.72rem; margin-bottom:8px;',
+  const endClearBtn = el('button', { class: 'btn btn-sm', text: 'x Clear end image', style: 'display:none; font-size:.72rem; margin-bottom:8px;',
     onclick() { _endImagePath = null; endPreview.style.display = 'none'; endPreview.src = ''; endClearBtn.style.display = 'none'; },
   });
   endCard.appendChild(endClearBtn);
@@ -321,7 +321,7 @@ export function init(panel) {
     }
   });
 
-  // ── Motion prompt ─────────────────────────────────────────────────────────
+  // -- Motion prompt ---------------------------------------------------------
   const promptCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(promptCard);
   promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
@@ -344,9 +344,9 @@ export function init(panel) {
   ]);
   promptCard.appendChild(promptStatus);
 
-  // ── Create Story row ──────────────────────────────────────────────────────
+  // -- Create Story row ------------------------------------------------------
   const storyRow = el('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
-  const storyBtn = el('button', { class: 'btn btn-sm btn-primary', text: '✦ Create Story', title: 'Generate a motion prompt from your image using AI' });
+  const storyBtn = el('button', { class: 'btn btn-sm btn-primary', text: '* Create Story', title: 'Generate a motion prompt from your image using AI' });
   storyRow.appendChild(storyBtn);
   promptCard.appendChild(storyRow);
 
@@ -385,7 +385,7 @@ export function init(panel) {
       promptStatusMsg.textContent = 'AI prompt timed out -- using default. Edit it or click Create Story to retry.';
       promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
       storyBtn.disabled = false;
-      storyBtn.textContent = '✦ Create Story';
+      storyBtn.textContent = '* Create Story';
     }, 45000);
 
     try {
@@ -421,7 +421,7 @@ export function init(panel) {
           promptStatusMsg.textContent = 'Generating motion prompt from image...';
         }
         storyBtn.disabled = false;
-        storyBtn.textContent = '✦ Create Story';
+        storyBtn.textContent = '* Create Story';
         _autoPromptAbort = null;
       }
     }
@@ -445,7 +445,7 @@ export function init(panel) {
     _autoGeneratePrompt(visionPath, true);
   });
 
-  // ── Prompt refinement row ──────────────────────────────────────────────────
+  // -- Prompt refinement row --------------------------------------------------
   const refineRow = el('div', { style: 'display:none; gap:6px; align-items:center; margin-top:6px;' });
   promptCard.appendChild(refineRow);
 
@@ -516,7 +516,7 @@ export function init(panel) {
     _refinePrompt();
   });
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // -- Settings --------------------------------------------------------------
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(settingsCard);
   settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Settings' }));
@@ -539,7 +539,7 @@ export function init(panel) {
 
   const durSlider = createSlider(settingsCard, { label: 'Duration (seconds)', min: 2, max: 20, step: 1, value: 5 });
 
-  // ── Aspect ratio + resolution ─────────────────────────────────────────────
+  // -- Aspect ratio + resolution ---------------------------------------------
   const FV_RATIOS = [
     { label: '16:9', value: '16:9', rw: 16, rh: 9  },
     { label: '9:16', value: '9:16', rw: 9,  rh: 16 },
@@ -653,7 +653,7 @@ export function init(panel) {
     modelSel.dispatchEvent(new Event('change'));
   }).catch(() => toast('Could not load video models -- using defaults', 'error'));
 
-  // ── Audio ─────────────────────────────────────────────────────────────────
+  // -- Audio -----------------------------------------------------------------
   const audioCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(audioCard);
 
@@ -670,7 +670,7 @@ export function init(panel) {
   const musicIn = el('input', { type: 'text', style: 'flex:1;',
     placeholder: 'Music style -- genre, mood, tempo, instruments (blank = AI picks from video)',
   });
-  const musicSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', title: 'AI suggests a music style from your motion prompt', style: 'flex-shrink:0;' });
+  const musicSuggestBtn = el('button', { class: 'btn btn-sm', text: '* Suggest', title: 'AI suggests a music style from your motion prompt', style: 'flex-shrink:0;' });
   audioBody.appendChild(el('div', { style: 'margin-bottom:8px;' }, [
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     el('div', { style: 'display:flex; gap:6px;' }, [musicIn, musicSuggestBtn]),
@@ -722,10 +722,10 @@ export function init(panel) {
       if (parsed?.lyric_direction && !instrChk.checked) lyricGuideTA.value = parsed.lyric_direction;
       else if (!parsed && data.lyric_direction) lyricGuideTA.value = data.lyric_direction;
     } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
-    finally { musicSuggestBtn.disabled = false; musicSuggestBtn.textContent = '✦ Suggest'; }
+    finally { musicSuggestBtn.disabled = false; musicSuggestBtn.textContent = '* Suggest'; }
   });
 
-  // ── Real-time sync tool ────────────────────────────────────────────────────
+  // -- Real-time sync tool ----------------------------------------------------
   // Plays a muted <video> for visual + separate <audio> element offset by the
   // slider value. Adjusts in real-time while playing; "Lock In + Export" bakes
   // the offset to disk via /api/fun/sync-audio.
@@ -820,7 +820,7 @@ export function init(panel) {
     return wrap;
   }
 
-  // ── Multi-video story ──────────────────────────────────────────────────────
+  // -- Multi-video story ------------------------------------------------------
   let _multiVideo  = false;
   let _multiClips  = 4;
   let _motionStyle = 'calm';
@@ -885,7 +885,7 @@ export function init(panel) {
     _refreshMultiTotal();
   });
 
-  // ── Generate ──────────────────────────────────────────────────────────────
+  // -- Generate --------------------------------------------------------------
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Generate Video',
@@ -980,7 +980,7 @@ export function init(panel) {
       _autoPromptAbort.abort();
       _autoPromptAbort = null;
       storyBtn.disabled = false;
-      storyBtn.textContent = '✦ Create Story';
+      storyBtn.textContent = '* Create Story';
     }
     promptStatus.style.display = 'none';
 
@@ -1048,7 +1048,7 @@ export function init(panel) {
               const redoMusicIn  = el('input', { type: 'text', style: 'flex:1; font-size:.82rem;',
                 placeholder: 'Music style (blank = AI picks from video)',
               });
-              const redoSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', style: 'flex-shrink:0;' });
+              const redoSuggestBtn = el('button', { class: 'btn btn-sm', text: '* Suggest', style: 'flex-shrink:0;' });
               redoCard.appendChild(el('div', { style: 'margin-bottom:6px;' }, [
                 el('label', { text: 'Music Prompt', style: 'display:block; font-size:.75rem; color:var(--text-3); margin-bottom:3px;' }),
                 el('div', { style: 'display:flex; gap:6px;' }, [redoMusicIn, redoSuggestBtn]),
@@ -1107,7 +1107,7 @@ export function init(panel) {
                   if (data.music_prompt) redoMusicIn.value = data.music_prompt;
                   if (data.lyric_direction && !redoInstrChk.checked) redoLyricIn.value = data.lyric_direction;
                 } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
-                finally { redoSuggestBtn.disabled = false; redoSuggestBtn.textContent = '✦ Suggest'; }
+                finally { redoSuggestBtn.disabled = false; redoSuggestBtn.textContent = '* Suggest'; }
               });
 
               redoBtn.addEventListener('click', async () => {
@@ -1174,7 +1174,7 @@ export function init(panel) {
     }
   });
 
-  // ── Add Audio to Any Video ─────────────────────────────────────────────────
+  // -- Add Audio to Any Video -------------------------------------------------
   // Lets the user add AI-generated music to any video -- newly generated, uploaded,
   // or anything from the gallery -- without running a new video generation.
   const extAudioToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:4px;' });
@@ -1265,7 +1265,7 @@ export function init(panel) {
   const extMusicIn = el('input', { type: 'text', style: 'flex:1;',
     placeholder: 'Music style (blank = AI picks from video)',
   });
-  const extSuggestBtn = el('button', { class: 'btn btn-sm', text: '✦ Suggest', style: 'flex-shrink:0;' });
+  const extSuggestBtn = el('button', { class: 'btn btn-sm', text: '* Suggest', style: 'flex-shrink:0;' });
   extAudioSection.appendChild(el('div', { style: 'margin-bottom:8px;' }, [
     el('label', { text: 'Music Prompt', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     el('div', { style: 'display:flex; gap:6px;' }, [extMusicIn, extSuggestBtn]),
@@ -1300,7 +1300,7 @@ export function init(panel) {
       if (data.music_prompt) extMusicIn.value = data.music_prompt;
       if (data.lyric_direction && !extInstrChk.checked) extLyricTA.value = data.lyric_direction;
     } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
-    finally { extSuggestBtn.disabled = false; extSuggestBtn.textContent = '✦ Suggest'; }
+    finally { extSuggestBtn.disabled = false; extSuggestBtn.textContent = '* Suggest'; }
   });
 
   const extGenBtn  = el('button', { class: 'btn btn-primary', text: 'Generate Audio', style: 'width:100%;' });
@@ -1363,7 +1363,7 @@ export function init(panel) {
     } catch (e) { extGenBtn.disabled = false; extProgRow.style.display = 'none'; toast(e.message, 'error'); }
   });
 
-  // ── Palette AI intent ─────────────────────────────────────────────────────
+  // -- Palette AI intent -----------------------------------------------------
   import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
     registerTabAI('create-videos', {
       getContext: () => ({

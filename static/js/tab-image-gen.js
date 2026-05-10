@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Image Generation tab.
  * Direct interface to Forge SD for txt2img and img2img.
  */
@@ -23,7 +23,7 @@ export function init(panel) {
   layout.appendChild(sidebar);
   layout.appendChild(mainArea);
 
-  // ── Forge Status ─────────────────────────────────────────────────────
+  // -- Forge Status -----------------------------------------------------
   const forgeBanner = el('div', { class: 'card', style: 'padding:10px; display:flex; align-items:center; gap:8px' });
   const forgeDot = el('span', { class: 'dot' });
   const forgeMsg = el('span', { style: 'font-size:.85rem', text: 'Checking Forge...' });
@@ -31,7 +31,7 @@ export function init(panel) {
   forgeBanner.appendChild(forgeMsg);
   sidebar.appendChild(forgeBanner);
 
-  // ── Prompt ───────────────────────────────────────────────────────────
+  // -- Prompt -----------------------------------------------------------
   const promptCard = el('div', { class: 'step-card' });
   sidebar.appendChild(promptCard);
   promptCard.appendChild(el('h3', { text: 'Prompt' }));
@@ -51,7 +51,7 @@ export function init(panel) {
   negArea.value = 'blurry, low quality, watermark, text, logo, ugly, deformed';
   promptCard.appendChild(negArea);
 
-  // ── Settings ─────────────────────────────────────────────────────────
+  // -- Settings ---------------------------------------------------------
   const settingsCard = el('div', { class: 'step-card' });
   sidebar.appendChild(settingsCard);
   settingsCard.appendChild(el('h3', { text: 'Settings' }));
@@ -133,7 +133,7 @@ export function init(panel) {
   }));
   settingsCard.appendChild(seedRow);
 
-  // ── HiRes Fix (collapsible) ──────────────────────────────────────────
+  // -- HiRes Fix (collapsible) ------------------------------------------
   const hrToggle = el('details', { style: 'margin-top:6px' });
   const hrSummary = el('summary', { style: 'cursor:pointer; font-size:.85rem; color:var(--text-2)', text: 'HiRes Fix' });
   hrToggle.appendChild(hrSummary);
@@ -156,7 +156,7 @@ export function init(panel) {
   hrUpscalerGroup.appendChild(hrUpscalerSelect);
   hrBody.appendChild(hrUpscalerGroup);
 
-  // ── Generate Button ──────────────────────────────────────────────────
+  // -- Generate Button --------------------------------------------------
   const genBtn = el('button', {
     class: 'btn btn-primary',
     text: 'Generate Image',
@@ -169,7 +169,7 @@ export function init(panel) {
   });
   sidebar.appendChild(progressMsg);
 
-  // ── Main Area: Image Display ─────────────────────────────────────────
+  // -- Main Area: Image Display -----------------------------------------
   const resultCard = el('div', { class: 'card', style: 'text-align:center' });
   mainArea.appendChild(resultCard);
 
@@ -218,7 +218,7 @@ export function init(panel) {
   actionRow.appendChild(btnSendSD);
   actionRow.appendChild(btnSendFun);
 
-  // ── Gallery (thumbnails of past generations) ─────────────────────────
+  // -- Gallery (thumbnails of past generations) -------------------------
   const galleryCard = el('div', { class: 'card' });
   mainArea.appendChild(galleryCard);
   galleryCard.appendChild(el('h3', { style: 'margin-bottom:8px', text: 'Gallery' }));
@@ -239,7 +239,7 @@ export function init(panel) {
   navRow.appendChild(nextBtn);
   resultCard.appendChild(navRow);
 
-  // ── Functions ─────────────────────────────────────────────────────────
+  // -- Functions ---------------------------------------------------------
 
   function showImage(idx) {
     if (idx < 0 || idx >= generatedImages.length) return;
@@ -339,7 +339,7 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // ── Generate ─────────────────────────────────────────────────────────
+  // -- Generate ---------------------------------------------------------
   let progressTimer = null;
 
   genBtn.addEventListener('click', async () => {

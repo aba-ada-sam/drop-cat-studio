@@ -26,6 +26,6 @@ def copy_to_inbox(path: str | None) -> None:
             dst = _INBOX / f"{src.stem}_{counter}{src.suffix}"
             counter += 1
         shutil.copy2(src, dst)
-        log.info("[inbox] %s → Inbox/%s", src.name, dst.name)
+        log.info("[inbox] %s -> Inbox/%s", src.name, dst.name)
     except Exception as e:
         log.warning("[inbox] Could not copy to Inbox: %s", e)

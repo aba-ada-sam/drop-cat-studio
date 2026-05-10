@@ -1,5 +1,5 @@
 """
-Drop Cat Go Studio — Circus Poster Logo Generator
+Drop Cat Go Studio -- Circus Poster Logo Generator
 Renders a full circus-style poster logo at multiple sizes and exports
 logo-512.png, logo-256.png, logo-192.png, favicon.ico
 """
@@ -10,7 +10,7 @@ import math, os, shutil
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 FONTS  = "C:/Windows/Fonts/"
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# -- Palette -------------------------------------------------------------------
 BG_DARK   = ( 10,   3,   3)   # near-black with red warmth
 BG_MID    = ( 28,   8,   8)   # deep burgundy
 CRIMSON   = (160,  16,  32)   # circus red (slightly desaturated for print look)
@@ -47,7 +47,7 @@ def draw_gradient_rect(draw, x0, y0, x1, y1, col_top, col_bot):
 
 
 def radial_vignette(img, strength=0.55):
-    """Darken edges — classic poster effect."""
+    """Darken edges -- classic poster effect."""
     w, h   = img.size
     cx, cy = w/2, h/2
     pix    = img.load()
@@ -132,14 +132,14 @@ def draw_scroll_banner(draw, cx, cy, w, h, fill, border, text, font, text_col):
 def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
     """
     Circus cat in top hat. Draw order (back to front):
-      hat crown shadow → hat crown → hat band → hat brim →
-      ears → head shadow → head → collar → eyes → nose → mouth → whiskers
+      hat crown shadow -> hat crown -> hat band -> hat brim ->
+      ears -> head shadow -> head -> collar -> eyes -> nose -> mouth -> whiskers
     """
     s   = size
     hr  = int(s * 0.36)          # head radius
 
-    HAT_W   = int(s * 0.30)      # crown width — narrower for taller look
-    HAT_H   = int(s * 0.46)      # crown height — taller hat
+    HAT_W   = int(s * 0.30)      # crown width -- narrower for taller look
+    HAT_H   = int(s * 0.46)      # crown height -- taller hat
     BRIM_W  = int(s * 0.60)      # brim width
     BRIM_H  = int(s * 0.07)      # brim thickness
     HAT_COL = (50, 20, 10)       # dark chocolate
@@ -159,7 +159,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
     draw.rectangle([crown_l+so, crown_t+so, crown_r+so, crown_b+so],
                    fill=(*DARK_WARM, 100))
 
-    # 2. Crown body — paint column by column for a subtle left-lit gradient
+    # 2. Crown body -- paint column by column for a subtle left-lit gradient
     for xi in range(crown_r - crown_l):
         t_val = xi / max(crown_r - crown_l - 1, 1)
         # Left face brighter, right face darker
@@ -176,7 +176,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
     draw.line([(crown_l+2, band_t),           (crown_r-2, band_t)],           fill=GOLD_B, width=max(1,int(s*0.007)))
     draw.line([(crown_l+2, band_t+band_h), (crown_r-2, band_t+band_h)], fill=GOLD_B, width=max(1,int(s*0.007)))
 
-    # 4. Brim (wide, flat — drawn after crown so it overlaps cleanly)
+    # 4. Brim (wide, flat -- drawn after crown so it overlaps cleanly)
     brim_l = cx - BRIM_W // 2
     draw.rounded_rectangle([brim_l, brim_t, brim_l+BRIM_W, brim_b],
                             radius=BRIM_H//2,
@@ -210,7 +210,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
     # 7. Head (covers ear bases and brim bottom edge for snug hat fit)
     draw.ellipse([cx-hr, cy-hr, cx+hr, cy+hr], fill=body)
 
-    # ── Film-strip collar ──
+    # -- Film-strip collar --
     col_h  = int(s * 0.14)
     col_y0 = cy + int(hr * 0.66)
     col_y1 = col_y0 + col_h
@@ -227,7 +227,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
         hy = (col_y0 + col_y1) // 2
         draw.ellipse([hx-hs, hy-hs, hx+hs, hy+hs], fill=BG_MID)
 
-    # ── Eyes ──
+    # -- Eyes --
     ey     = cy - int(hr * 0.12)
     for sx in [-1, 1]:
         ex  = cx + sx * int(hr * 0.42)
@@ -235,7 +235,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
         eh  = int(hr * 0.22)
         # White of eye
         draw.ellipse([ex-ew, ey-eh, ex+ew, ey+eh], fill=CREAM)
-        # Iris — vertical slit (cat eye)
+        # Iris -- vertical slit (cat eye)
         iw  = int(ew * 0.55)
         ih  = int(eh * 0.88)
         draw.ellipse([ex-iw, ey-ih, ex+iw, ey+ih], fill=accent)
@@ -247,19 +247,19 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
         draw.ellipse([ex+int(ew*.15)-cl, ey-int(eh*.35)-cl,
                       ex+int(ew*.15)+cl, ey-int(eh*.35)+cl], fill=CREAM)
 
-    # ── Nose ──
+    # -- Nose --
     ny = ey + int(hr * 0.40)
     ns = int(s * 0.05)
     draw.polygon([(cx, ny-ns*0.7), (cx-ns, ny+ns*0.5), (cx+ns, ny+ns*0.5)],
                  fill=CRIMSON_B)
 
-    # ── Mouth ──
+    # -- Mouth --
     mw = int(s * 0.12)
     my = ny + int(s * 0.04)
     draw.arc([cx-mw, my-mw//2, cx,      my+mw//2], start=180, end=270, fill=whisker_col, width=max(1,int(s*.018)))
     draw.arc([cx,    my-mw//2, cx+mw, my+mw//2], start=270, end=360, fill=whisker_col, width=max(1,int(s*.018)))
 
-    # ── Whiskers ──
+    # -- Whiskers --
     wlen = int(hr * 0.88)
     wt   = max(2, int(s * 0.025))
     for sx in [-1, 1]:
@@ -272,7 +272,7 @@ def draw_cat(draw, cx, cy, size, body, eye_bg, whisker_col, accent):
     # Hat already drawn above in correct z-order (steps 1-3)
 
 
-# ── Main logo function ─────────────────────────────────────────────────────────
+# -- Main logo function ---------------------------------------------------------
 
 def make_logo(size=512):
     img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -280,20 +280,20 @@ def make_logo(size=512):
     m    = int(size * 0.038)   # outer margin
     cx, cy = size//2, size//2
 
-    # ── Background gradient ──
+    # -- Background gradient --
     draw_gradient_rect(draw, m, m, size-m, size-m, BG_MID, BG_DARK)
 
-    # ── Corner ornaments ──
+    # -- Corner ornaments --
     co = int(size * 0.095)
     corners = [(m+co, m+co), (size-m-co, m+co),
                (m+co, size-m-co), (size-m-co, size-m-co)]
     for ccx, ccy in corners:
         corner_ornament(draw, ccx, ccy, int(size*0.048), GOLD, GOLD_B)
 
-    # ── Ornate double border ──
+    # -- Ornate double border --
     ornate_border(draw, m, m, size-m, size-m, GOLD, CRIMSON, lw=max(2, int(size*0.012)))
 
-    # ── Load fonts ──
+    # -- Load fonts --
     f_impact   = load_font("Impact.ttf",        int(size*0.115))
     f_title    = load_font("Impact.ttf",        int(size*0.092))
     f_sub      = load_font("ArialBd.ttf",       int(size*0.052))
@@ -301,24 +301,24 @@ def make_logo(size=512):
     f_italic   = load_font("Georgiab.ttf",       int(size*0.040))
     f_ital_sm  = load_font("Georgiab.ttf",       int(size*0.032))
 
-    # ── "Andrew's" banner scroll ──
+    # -- "Andrew's" banner scroll --
     banner_y  = m + int(size * 0.115)
     banner_h  = int(size * 0.076)
     banner_w  = int(size * 0.62)
     draw_scroll_banner(draw, cx, banner_y, banner_w, banner_h,
                        CRIMSON, GOLD, "Andrew's", f_italic, CREAM)
 
-    # ── Decorative star rows ──
+    # -- Decorative star rows --
     star_y1 = banner_y + banner_h//2 + int(size * 0.054)
     star_row(draw, cx, star_y1, 7, int(size*0.058), int(size*0.018), GOLD_B)
 
-    # ── Cat illustration ──
+    # -- Cat illustration --
     # Positioned so hat clears the star row and collar clears the title text
     cat_cy = cy + int(size * 0.08)
     cat_sz = int(size * 0.44)
     draw_cat(draw, cx, cat_cy, cat_sz, GOLD, BG_DARK, TAN, CRIMSON_B)
 
-    # ── Bottom text block ──
+    # -- Bottom text block --
     # "DROP CAT GO"
     title_y = size - m - int(size * 0.25)
 
@@ -326,7 +326,7 @@ def make_logo(size=512):
     for ox, oy in [(3,3),(2,2),(1,1)]:
         draw.text((cx+ox, title_y+oy), "DROP CAT GO",
                   font=f_impact, fill=(*DARK_WARM, 180), anchor="mm")
-    # Coloured pass — gradient effect via two offset layers
+    # Coloured pass -- gradient effect via two offset layers
     draw.text((cx+1, title_y+1), "DROP CAT GO",
               font=f_impact, fill=CRIMSON, anchor="mm")
     draw.text((cx,   title_y),   "DROP CAT GO",
@@ -350,18 +350,18 @@ def make_logo(size=512):
     draw.text((cx,   studio_y),   "S T U D I O",
               font=f_sub, fill=GOLD_B, anchor="mm")
 
-    # ── Thin bottom star row ──
+    # -- Thin bottom star row --
     draw.line([(m + int(size*.14), studio_y + int(size*.048)),
                (size-m-int(size*.14), studio_y + int(size*.048))],
               fill=(*GOLD, 60), width=1)
 
-    # ── Apply vignette ──
+    # -- Apply vignette --
     img = radial_vignette(img, strength=0.42)
 
     return img
 
 
-# ── Render & save ─────────────────────────────────────────────────────────────
+# -- Render & save -------------------------------------------------------------
 
 print("Rendering logo...")
 logo512 = make_logo(512)
@@ -376,7 +376,7 @@ logo192 = make_logo(192)
 logo192.save(os.path.join(STATIC, "logo-192.png"))
 print("  logo-192.png")
 
-# Multi-size .ico — 16, 32, 48, 64, 128, 256
+# Multi-size .ico -- 16, 32, 48, 64, 128, 256
 ico_sizes = [16, 32, 48, 64, 128, 256]
 ico_frames = []
 for s in ico_sizes:
@@ -396,10 +396,10 @@ ico_frames[0].save(
 )
 print("  favicon.ico  (multi-size: 16 32 48 64 128 256)")
 
-# ── Desktop icon: red circle with DCG monogram ──────────────────────────────
+# -- Desktop icon: red circle with DCG monogram ------------------------------
 
 def make_dcg_icon(size=256):
-    """Simple red circle with white DCG text — for desktop shortcut."""
+    """Simple red circle with white DCG text -- for desktop shortcut."""
     img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     RED  = (180, 20, 30)
@@ -416,6 +416,6 @@ make_dcg_icon(256).save(
     format="ICO",
     sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
 )
-print("  dropcat.ico  (red circle DCG — desktop shortcut)")
+print("  dropcat.ico  (red circle DCG -- desktop shortcut)")
 
 print("\nDone.")

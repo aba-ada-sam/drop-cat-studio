@@ -1,4 +1,4 @@
-"""Fun Videos API routes — /api/fun/*
+"""Fun Videos API routes -- /api/fun/*
 
 Photo -> AI video + audio pipeline with wildcard support.
 """
@@ -134,7 +134,7 @@ def _require_ai():
     if provider == "ollama":
         # Soft check: if Ollama is reachable, verify the model is installed.
         # If Ollama is temporarily unreachable (GPU pressure, etc.), don't
-        # pre-fail — let the actual LLM call handle retries.
+        # pre-fail -- let the actual LLM call handle retries.
         st = ollama_status()
         if st.get("available"):
             needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
@@ -258,7 +258,7 @@ async def refine_prompt(request: Request):
     system = (
         "You are a cinematic video prompt writer. "
         "Given an existing motion prompt and the user's feedback, "
-        "write an improved version. Return only the refined prompt text — no explanation, no quotes."
+        "write an improved version. Return only the refined prompt text -- no explanation, no quotes."
     )
     user_msg = f"Current prompt:\n{current_prompt}\n\nUser feedback:\n{feedback}\n\nWrite an improved prompt:"
 
@@ -467,12 +467,12 @@ async def brainstorm(request: Request):
     """Natural-language session that refines video idea + lyric direction (or SD prompt).
 
     Accepts:
-      image_path      – optional path to the source image for vision context
-      message         – user's latest message (required)
-      history         – [{role, content}] last N conversation turns
-      current_idea    – current idea / motion prompt text
-      current_lyric   – current lyric direction text
-      mode            – "video" (default) or "sd_prompt"
+      image_path      - optional path to the source image for vision context
+      message         - user's latest message (required)
+      history         - [{role, content}] last N conversation turns
+      current_idea    - current idea / motion prompt text
+      current_lyric   - current lyric direction text
+      mode            - "video" (default) or "sd_prompt"
     Returns JSON with updated fields plus a short reply sentence.
     """
     from app import get_llm_router
@@ -504,7 +504,7 @@ async def brainstorm(request: Request):
             "LYRIC DIRECTION: <=15 words. Format: \"[genre/energy], [lyric theme or voice]\". "
             "Pick something with real character -- match the mood and subject of the image. "
             "Examples: \"gypsy punk energy, sardonic lyrics about chaos\" | \"dark cabaret wit, ironic lyrics about vanity\" | \"dreamy lo-fi folk, wistful vocals\" | \"raw punk, confrontational\" | \"instrumental, no vocals\".\n\n"
-            "Always return BOTH fields with concrete values — never null, never empty strings. "
+            "Always return BOTH fields with concrete values -- never null, never empty strings. "
             "If the user asks to change only one field, keep the other consistent with the current context. "
             "Return ONLY valid JSON (no preamble, no explanation outside the JSON): "
             '{"idea": "...", "lyric_direction": "...", "reply": "one sentence what you changed"}'
@@ -575,11 +575,11 @@ async def add_music(request: Request):
     """Analyze an existing video and add ACE-Step generated music to it.
 
     Accepts:
-        video_path      — path to existing video file
-        music_prompt    — optional; if blank the LLM derives it from video frames
-        user_direction  — optional free-text guidelines fed to the LLM music director
-        instrumental    — bool (default True)
-        bpm             — optional int
+        video_path      -- path to existing video file
+        music_prompt    -- optional; if blank the LLM derives it from video frames
+        user_direction  -- optional free-text guidelines fed to the LLM music director
+        instrumental    -- bool (default True)
+        bpm             -- optional int
     """
     from app import get_job_manager, get_llm_router
     job_manager = get_job_manager()
@@ -707,9 +707,9 @@ async def suggest_music(request: Request):
     """LLM-derives a music prompt (and optional lyric direction) from video frames.
 
     Accepts:
-        video_path      — path to video file
-        user_direction  — optional free-text hint from the user
-        instrumental    — bool, default False
+        video_path      -- path to video file
+        user_direction  -- optional free-text hint from the user
+        instrumental    -- bool, default False
     Returns:
         { music_prompt, lyric_direction, bpm }
     """
@@ -753,8 +753,8 @@ async def sync_audio(request: Request):
     Negative offset_ms: audio starts earlier (advances the audio).
 
     Accepts:
-        video_path  — path to merged video file
-        offset_ms   — integer milliseconds, range -5000..5000
+        video_path  -- path to merged video file
+        offset_ms   -- integer milliseconds, range -5000..5000
     Returns:
         { output }
     """

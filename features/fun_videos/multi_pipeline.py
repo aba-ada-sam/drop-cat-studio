@@ -2,7 +2,7 @@
 
 Each clip uses the last frame of the previous clip as its start image, enforcing
 visual continuity across the full sequence.  Audio is a single ACE-Step pass over
-the concatenated video — never per-clip — so the music has a natural arc.
+the concatenated video -- never per-clip -- so the music has a natural arc.
 """
 import logging
 import os
@@ -44,7 +44,7 @@ _FALLBACK_PHASES_CALM = [
 ]
 
 
-# ── Story arc generation ──────────────────────────────────────────────────────
+# -- Story arc generation ------------------------------------------------------
 
 # Three system prompts:
 #   CALM    -- environment-only motion, zero subject movement, stabilizer phrase appended.
@@ -706,7 +706,7 @@ def _bridge_steps(video_steps: int, model_name: str) -> int:
     return max(12, video_steps // 2)
 
 
-# ── ffmpeg clip concatenation ─────────────────────────────────────────────────
+# -- ffmpeg clip concatenation -------------------------------------------------
 
 def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
     """Concatenate clips via ffmpeg concat demuxer, re-encoding to libx264.
@@ -755,10 +755,10 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
             pass
 
 
-# ── Prep phase (runs before GPU queue) ───────────────────────────────────────
+# -- Prep phase (runs before GPU queue) ---------------------------------------
 
 def run_multi_prep(job, photo_path, settings):
-    """Phase 0: Story arc + music direction — LLM only, no GPU.
+    """Phase 0: Story arc + music direction -- LLM only, no GPU.
 
     Runs outside the GPU queue concurrently with other queued jobs.
     Results are written into settings for run_multi_pipeline to consume.
@@ -779,7 +779,7 @@ def run_multi_prep(job, photo_path, settings):
     model_name       = settings.get("model_name", "")
     motion_style     = settings.get("motion_style") or None  # None -> auto-resolve per model
 
-    # ── Reject T2V models ─────────────────────────────────────────────────
+    # -- Reject T2V models -------------------------------------------------
     # Multi-video chains clip i's last frame as clip i+1's start image. T2V
     # models do not accept image inputs -- WanGP silently drops them and
     # every clip is generated from prompt text only, so there is no visual
@@ -793,7 +793,7 @@ def run_multi_prep(job, photo_path, settings):
             f"(Wan2.1-I2V-* or LTX-2 *)."
         )
 
-    # ── Story arc ─────────────────────────────────────────────────────────
+    # -- Story arc ---------------------------------------------------------
     # Each generated clip is later trimmed to _CHAIN_TRIM_RATIO of its
     # generated length so junctions are frame-exact. Plan ~12% longer so
     # the final played output lands close to the user's requested target.
@@ -824,7 +824,7 @@ def run_multi_prep(job, photo_path, settings):
         job.update(progress=10, message="Story arc ready, waiting for GPU...")
         return
 
-    # ── Music direction ────────────────────────────────────────────────────
+    # -- Music direction ----------------------------------------------------
     music_prompt = settings.get("music_prompt", "")
     if not music_prompt:
         job.update(progress=7, message="Getting music direction...")
@@ -851,7 +851,7 @@ def run_multi_prep(job, photo_path, settings):
         except Exception as e:
             log.warning("[multi] Music prep failed: %s", e)
 
-    # ── Lyrics ────────────────────────────────────────────────────────────
+    # -- Lyrics ------------------------------------------------------------
     if not instrumental and not settings.get("_prepped_lyrics") and music_prompt:
         job.update(progress=9, message="Writing lyrics...")
         try:
@@ -866,10 +866,10 @@ def run_multi_prep(job, photo_path, settings):
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
 
 
-# ── GPU phase ─────────────────────────────────────────────────────────────────
+# -- GPU phase -----------------------------------------------------------------
 
 def run_multi_pipeline(job, photo_path, settings):
-    """Multi-clip GPU pipeline: N chained clips → concat → audio → merge."""
+    """Multi-clip GPU pipeline: N chained clips -> concat -> audio -> merge."""
     from app import get_llm_router, gallery_push
     from features.fun_videos import analyzer, video_generator, audio_generator
     from services.forge_client import unload_checkpoint, reload_checkpoint
@@ -883,7 +883,7 @@ def run_multi_pipeline(job, photo_path, settings):
     def _stopped():
         return job.stop_event.is_set()
 
-    # ── Settings ──────────────────────────────────────────────────────────
+    # -- Settings ----------------------------------------------------------
     n_clips          = int(settings.get("num_clips", 4))
     clip_dur         = float(settings.get("clip_duration", settings.get("video_duration", 8.0)))
     model_name       = settings.get("model_name", "LTX-2 Dev19B Distilled")
@@ -947,7 +947,7 @@ def run_multi_pipeline(job, photo_path, settings):
         src_copy = job_dir / f"source{Path(photo_path).suffix}"
         shutil.copy2(photo_path, src_copy)
 
-    # ── Free VRAM before WanGP ────────────────────────────────────────────
+    # -- Free VRAM before WanGP --------------------------------------------
     forge_unloaded = unload_checkpoint()
     try:
       if not skip_audio:
@@ -959,7 +959,7 @@ def run_multi_pipeline(job, photo_path, settings):
         except Exception as _e:
             log.debug("ACE-Step pre-stop skipped: %s", _e)
 
-        # ── Phase 1: Generate clips sequentially ──────────────────────────────
+        # -- Phase 1: Generate clips sequentially ------------------------------
       # Clips chain: clip_1 starts from the source photo; clips 2+ start from
       # the last frame of the previous clip extracted as PNG (lossless).
       # _chain_anchor trims each clip to _CHAIN_TRIM_RATIO of its generated
@@ -1101,7 +1101,7 @@ def run_multi_pipeline(job, photo_path, settings):
       job.meta["clips_generated"] = len(clip_paths)
       job.meta["clip_paths"] = clip_paths
 
-      # ── Phase 2: Compile clips into one video ──────────────────────────────
+      # -- Phase 2: Compile clips into one video ------------------------------
       # Clips are chained (each starts from the previous clip's last frame),
       # so adjacent boundaries share the same frame. _chain_anchor aligned
       # each clip's end with the next clip's start image, so a hard-cut concat
@@ -1115,7 +1115,7 @@ def run_multi_pipeline(job, photo_path, settings):
           log.warning("[multi] Concat failed -- using first clip only")
           concat_path = clip_paths[0]
 
-      # ── Director passes (optional) ────────────────────────────────────────
+      # -- Director passes (optional) ----------------------------------------
       # Each pass analyzes the assembled video, re-generates weak clips, and
       # re-assembles. Audio is only generated on the final cut.
       if director_passes >= 1 and not _stopped():
@@ -1153,7 +1153,7 @@ def run_multi_pipeline(job, photo_path, settings):
 
       job.meta["concat_path"] = concat_path
 
-      # ── Phase 3: Audio ────────────────────────────────────────────────────
+      # -- Phase 3: Audio ----------------------------------------------------
       if skip_audio:
           job.output = concat_path
           from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
@@ -1242,7 +1242,7 @@ def run_multi_pipeline(job, photo_path, settings):
           job.message = f"Video saved ({len(clip_paths)} clips, no audio -- ACE-Step failed: {audio_err})"
           return
 
-      # ── Phase 4: Merge ────────────────────────────────────────────────────
+      # -- Phase 4: Merge ----------------------------------------------------
       job.update(progress=92, message="Merging video + audio...")
 
       model_tag  = model_name.split()[0].lower()
@@ -1251,7 +1251,7 @@ def run_multi_pipeline(job, photo_path, settings):
       merged = video_generator.merge_video_audio(concat_path, audio_path, final_path, log_fn=_log)
 
       if merged:
-          # ── Phase 5: Upscale (optional) ───────────────────────────────────────
+          # -- Phase 5: Upscale (optional) ---------------------------------------
           upscale_on     = settings.get("upscale", True)
           upscale_scale  = float(settings.get("upscale_scale", 2.0))
           upscale_method = settings.get("upscale_method", "ffmpeg")

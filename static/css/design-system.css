@@ -1,8 +1,8 @@
-/* ═══════════════════════════════════════════════════════════════════════════
+/* ===========================================================================
    Drop Cat Go Studio -- Circus / Burlesque Design System
-   ═══════════════════════════════════════════════════════════════════════════ */
+   =========================================================================== */
 
-/* ── Reset ────────────────────────────────────────────────────────────────── */
+/* -- Reset ------------------------------------------------------------------ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -11,8 +11,8 @@
   < 1400px  -> 16px  (standard 1080p/1440p)
   1400-1800 -> 17px  (large 1440p/4K)
   1800-2560 -> 18px  (4K / large ultrawide)
-  2560-3840 -> 19px  (49" ultrawide 3840×1080)
-  > 3840    -> 20px  (49" ultrawide 5120×1440)
+  2560-3840 -> 19px  (49" ultrawide 3840x1080)
+  > 3840    -> 20px  (49" ultrawide 5120x1440)
 */
 html { font-size: 16px; }
 @media (min-width: 1400px) { html { font-size: 17px; } }
@@ -32,7 +32,7 @@ body {
 }
 #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: transparent; }
 
-/* ── Drop Cat SVG splash animation ───────────────────────────────────────── */
+/* -- Drop Cat SVG splash animation ----------------------------------------- */
 .drop-cat-svg {
   width: 180px;
   height: 220px;
@@ -60,14 +60,14 @@ body {
   100% { transform: translateY(0)     scaleX(1)    scaleY(1); }
 }
 
-/* Speed lines — fade out as cat lands */
+/* Speed lines -- fade out as cat lands */
 #dc-lines {
   opacity: 1;
   animation: dc-lines-fade 0.3s ease-out 0.42s forwards;
 }
 @keyframes dc-lines-fade { to { opacity: 0; } }
 
-/* Shadow on ground — pops in at impact */
+/* Shadow on ground -- pops in at impact */
 #dc-shadow {
   transform-box: fill-box;
   transform-origin: center;
@@ -76,7 +76,7 @@ body {
 }
 @keyframes dc-shadow-in { to { transform: scaleX(1); } }
 
-/* Tail flick — starts after landing */
+/* Tail flick -- starts after landing */
 #dc-tail {
   transform-box: fill-box;
   transform-origin: 18px 0px;
@@ -88,7 +88,7 @@ body {
   70%      { transform: rotate(-10deg); }
 }
 
-/* Eye blink — triggered when JS adds .blinking to #eye-left / #eye-right */
+/* Eye blink -- triggered when JS adds .blinking to #eye-left / #eye-right */
 .dc-eye-lid {
   transform-box: fill-box;
   transform-origin: center top;
@@ -103,39 +103,39 @@ body {
   45%     { transform: scaleY(1); }
 }
 
-/* Cheshire smile — JS adds .smiling */
+/* Cheshire smile -- JS adds .smiling */
 #cheshire-smile { opacity: 0; transition: opacity 0.5s ease; }
 #cheshire-smile.smiling { opacity: 1; }
 
-/* ── Color Tokens ─────────────────────────────────────────────────────────── */
+/* -- Color Tokens ----------------------------------------------------------- */
 
 :root {
   color-scheme: light dark;
 
-  /* ── Circus / Burlesque accent — gold ── */
+  /* -- Circus / Burlesque accent -- gold -- */
   --accent:        #d4a017;
   --accent-2:      #e8c040;
   --accent-bg:     rgba(212,160,23,.13);
   --accent-border: rgba(212,160,23,.35);
 
-  /* ── Dark circus surfaces — near-black with warm crimson undertone ── */
+  /* -- Dark circus surfaces -- near-black with warm crimson undertone -- */
   --bg:          #0d0606;
   --bg-raised:   #120707;
   --surface:     #1a0a0a;
   --surface-2:   #220d0d;
   --surface-3:   #2c1010;
 
-  /* ── Borders — warm tinted ── */
+  /* -- Borders -- warm tinted -- */
   --border:      rgba(240,200,140,.08);
   --border-2:    rgba(240,200,140,.14);
   --border-3:    rgba(240,200,140,.22);
 
-  /* ── Text — cream ── */
+  /* -- Text -- cream -- */
   --text:        #f0e6d0;
   --text-2:      #a89070;
   --text-3:      #6a5040;
 
-  /* ── Semantic ── */
+  /* -- Semantic -- */
   --green:       #3dba6b;
   --green-bg:    rgba(61,186,107,.10);
   --red:         #e05252;
@@ -145,23 +145,23 @@ body {
   --amber:       #e8a840;
   --amber-bg:    rgba(232,168,64,.10);
 
-  /* ── Circus ── */
+  /* -- Circus -- */
   --circus-red:     #c41e3a;
   --circus-crimson: #6b0000;
 
-  /* ── Radii ── */
+  /* -- Radii -- */
   --r-sm:  5px;
   --r-md:  9px;
   --r-lg:  13px;
   --r-xl:  18px;
 
-  /* ── Shadows ── */
+  /* -- Shadows -- */
   --shadow-sm: 0 1px 4px rgba(0,0,0,.6);
   --shadow-md: 0 4px 16px rgba(0,0,0,.7);
   --shadow-lg: 0 8px 32px rgba(0,0,0,.8);
   --glow-accent: 0 0 18px var(--accent-bg);
 
-  /* ── Motion ── */
+  /* -- Motion -- */
   --ease-ui:     cubic-bezier(.2,0,0,1);
   --ease-out:    cubic-bezier(.16,1,.3,1);
   --ease-spring: cubic-bezier(.34,1.56,.64,1);
@@ -170,21 +170,21 @@ body {
   --dur-normal:  240ms;
   --dur-slow:    380ms;
 
-  /* ── Spacing scale ── */
+  /* -- Spacing scale -- */
   --space-1:  4px;
   --space-2:  8px;
   --space-3:  12px;
   --space-4:  16px;
   --space-5:  24px;
 
-  /* ── Layout dimensions ── */
+  /* -- Layout dimensions -- */
   --header-height: 40px;
   --rail-width: 200px;
   --rail-width-collapsed: 52px;
   --canvas-min-height: 300px;
   --split-ratio: 35%;
 
-  /* ── Typography scaling (for ultrawide) ── */
+  /* -- Typography scaling (for ultrawide) -- */
   --title-clamp: clamp(1.2rem, 5vw, 2rem);
   --heading-clamp: clamp(1rem, 4vw, 1.5rem);
   --label-clamp: clamp(0.8rem, 2vw, 0.95rem);
@@ -193,7 +193,7 @@ body {
   --space-7:  48px;
   --space-8:  64px;
 
-  /* ── Typography scale ── */
+  /* -- Typography scale -- */
   --text-xs:  0.75rem;   /* 12px */
   --text-sm:  0.875rem;  /* 14px */
   --text-md:  1rem;      /* 16px */
@@ -201,11 +201,11 @@ body {
   --text-xl:  1.5rem;    /* 24px */
   --text-2xl: 2rem;      /* 32px */
 
-  /* ── Focus ── */
+  /* -- Focus -- */
   --focus: var(--accent);
 }
 
-/* ── Typography ───────────────────────────────────────────────────────────── */
+/* -- Typography ------------------------------------------------------------- */
 
 h1 { font-size: 1.5rem; font-weight: 700; }
 h2 { font-size: 1.25rem; font-weight: 600; }
@@ -213,7 +213,7 @@ h3 { font-size: 1.05rem; font-weight: 600; color: var(--accent); }
 .text-muted { color: var(--text-3); }
 code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
 
-/* ── Splash Screen ────────────────────────────────────────────────────────── */
+/* -- Splash Screen ---------------------------------------------------------- */
 
 #splash {
   position: fixed;
@@ -251,7 +251,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   to   { opacity: 1; transform: none; }
 }
 
-/* Wrapper animates and casts glow — image inside is static */
+/* Wrapper animates and casts glow -- image inside is static */
 .splash-logo-wrap {
   position: relative;
   width: 300px; height: 300px;
@@ -271,13 +271,13 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   display: block;
 }
 
-/* Andrew's ribbon overlay — hidden; logo already has Andrew's baked into the ribbon */
+/* Andrew's ribbon overlay -- hidden; logo already has Andrew's baked into the ribbon */
 .splash-andrews-overlay {
   display: none;
 }
 
-/* Hat fill progress bar — fills the dark hat cylinder interior bottom-to-top */
-/* Coordinates from 512px source: x=210-285, y=125-215 → 300px scale (×0.586) */
+/* Hat fill progress bar -- fills the dark hat cylinder interior bottom-to-top */
+/* Coordinates from 512px source: x=210-285, y=125-215 -> 300px scale (x0.586) */
 .hat-fill-track {
   display: none;
 }
@@ -289,11 +289,11 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   transition: height 0.5s cubic-bezier(.22,1,.36,1);
 }
 
-/* Eye blink overlays — golden fur color sweeps over each eye */
+/* Eye blink overlays -- golden fur color sweeps over each eye */
 /* Measured from logo-512.png, scaled to the 300px splash wrap:
    LEFT  eye cream centroid = (130, 168), bbox x=116..144 y=158..178
    RIGHT eye cream centroid = (170, 168), bbox x=156..184 y=158..178
-   34×34 lids centered on each eye → left offsets 130-17=113, 170-17=153;
+   34x34 lids centered on each eye -> left offsets 130-17=113, 170-17=153;
    top offset 168-17=151. Origin=top so the lid opens downward from the brow. */
 .eye-lid {
   position: absolute;
@@ -313,7 +313,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 }
 .eye-lid.blinking { animation: cat-blink 0.55s ease-in-out both; }
 
-/* Cheshire grin — small curved arc inside the cat's face */
+/* Cheshire grin -- small curved arc inside the cat's face */
 .cheshire-smile {
   position: absolute;
   top: 196px;
@@ -440,7 +440,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .splash-skip-btn { padding: 8px 28px; font-size: .85rem; opacity: .85; }
 .splash-skip-btn:hover { opacity: 1; }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
+/* -- Header ---------------------------------------------------------------- */
 
 #app-header {
   background: var(--bg-raised);
@@ -529,7 +529,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   white-space: normal;
 }
 
-/* ── AI-type header pills ──────────────────────────────────────────────────── */
+/* -- AI-type header pills ---------------------------------------------------- */
 
 .ai-pills {
   display: flex;
@@ -640,7 +640,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 }
 .ap-menu-link:hover { color: var(--accent); }
 
-/* ── Service pills (legacy, kept for service panel dots) ───────────────────── */
+/* -- Service pills (legacy, kept for service panel dots) --------------------- */
 
 .service-pills {
   display: inline-flex;
@@ -697,7 +697,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   outline: none !important;
 }
 
-/* ── Icon buttons ─────────────────────────────────────────────────────────── */
+/* -- Icon buttons ----------------------------------------------------------- */
 
 .btn-icon {
   width: 36px; height: 36px;
@@ -728,7 +728,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .header-btn span { white-space: nowrap; }
 .header-btn:hover { background: var(--surface-2); color: var(--accent-2); }
 
-/* ── Buttons ──────────────────────────────────────────────────────────────── */
+/* -- Buttons ---------------------------------------------------------------- */
 
 .btn {
   padding: 9px 18px;
@@ -755,7 +755,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 }
 .btn-sm { padding: 5px 11px; font-size: .85rem; }
 
-/* ── Cards ────────────────────────────────────────────────────────────────── */
+/* -- Cards ------------------------------------------------------------------ */
 
 .card, .placeholder-card, .service-card {
   background: var(--surface);
@@ -774,7 +774,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .placeholder-card h2 { margin-bottom: 10px; color: var(--accent); }
 .placeholder-card p  { margin-bottom: 8px; color: var(--text-2); }
 
-/* ── Services grid ────────────────────────────────────────────────────────── */
+/* -- Services grid ---------------------------------------------------------- */
 
 .services-grid {
   display: grid;
@@ -793,7 +793,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 #system-info-card h3 { margin-bottom: 10px; }
 #system-info { font-size: .8rem; color: var(--text-2); }
 
-/* ── Forms ────────────────────────────────────────────────────────────────── */
+/* -- Forms ------------------------------------------------------------------ */
 
 .form-group { margin-bottom: 16px; }
 .form-group label {
@@ -824,7 +824,7 @@ select option { background: var(--surface-2); }
 .hint-text { font-size: .82rem; color: var(--text-3); font-weight: 400; }
 .masked-key { -webkit-text-security: disc; -moz-text-security: disc; text-security: disc; }
 
-/* ── Spinner ─────────────────────────────────────────────────────────────── */
+/* -- Spinner --------------------------------------------------------------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner {
   display: inline-block;
@@ -837,7 +837,7 @@ select option { background: var(--surface-2); }
   margin-right: 6px;
 }
 
-/* ── Modals ───────────────────────────────────────────────────────────────── */
+/* -- Modals ----------------------------------------------------------------- */
 
 .modal-overlay {
   display: none;
@@ -880,7 +880,7 @@ select option { background: var(--surface-2); }
 .modal-close:hover { color: var(--red); }
 .modal-body { padding: 18px 20px; }
 
-/* ── Settings sections ────────────────────────────────────────────────────── */
+/* -- Settings sections ------------------------------------------------------ */
 
 .settings-section { margin-bottom: 18px; }
 .settings-section-label {
@@ -894,7 +894,7 @@ select option { background: var(--surface-2); }
   padding-bottom: 4px;
 }
 
-/* ── Log panel ────────────────────────────────────────────────────────────── */
+/* -- Log panel -------------------------------------------------------------- */
 
 #log-panel {
   border-top: 1px solid var(--border);
@@ -938,7 +938,7 @@ select option { background: var(--surface-2); }
 .log-entry.info    { color: var(--text-2); }
 .log-entry.debug   { color: var(--text-3); }
 
-/* ── Toast ────────────────────────────────────────────────────────────────── */
+/* -- Toast ------------------------------------------------------------------ */
 
 #toast-wrap {
   position: fixed;
@@ -965,10 +965,10 @@ select option { background: var(--surface-2); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
-/* ── Utility ──────────────────────────────────────────────────────────────── */
+/* -- Utility ---------------------------------------------------------------- */
 .hidden { display: none !important; }
 
-/* ── Focus rings (WS12 a11y) ─────────────────────────────────────────────── */
+/* -- Focus rings (WS12 a11y) ----------------------------------------------- */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -976,7 +976,7 @@ select option { background: var(--surface-2); }
 /* Remove default outline only when we've replaced it */
 :focus:not(:focus-visible) { outline: none; }
 
-/* ── Button danger variant (canonical for remove/delete actions) ──────────── */
+/* -- Button danger variant (canonical for remove/delete actions) ------------ */
 .btn-danger {
   background: var(--red-bg);
   border-color: rgba(220,60,60,.4);
@@ -984,13 +984,13 @@ select option { background: var(--surface-2); }
 }
 .btn-danger:hover { background: rgba(220,60,60,.2); border-color: var(--red); }
 
-/* ── btn-icon size variants ───────────────────────────────────────────────── */
+/* -- btn-icon size variants ------------------------------------------------- */
 .btn-icon-sm { width: 28px; height: 28px; font-size: .8rem; }
 .btn-icon-xs { width: 22px; height: 22px; font-size: .75rem; }
 /* Color variants for icon buttons */
 .btn-icon-xs.btn-danger:hover { color: var(--red); background: var(--red-bg); }
 
-/* ── Error banner (shown when a tab fails to initialize) ─────────────────── */
+/* -- Error banner (shown when a tab fails to initialize) ------------------- */
 .error-banner {
   margin: 2rem auto;
   max-width: 520px;
@@ -1005,14 +1005,14 @@ select option { background: var(--surface-2); }
 }
 .error-banner small { opacity: .75; font-size: .8rem; }
 
-/* ── Main content ─────────────────────────────────────────────────────────── */
+/* -- Main content ----------------------------------------------------------- */
 
 #tab-content { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 .tab-error { color: var(--red); padding: 24px; font-size: .9rem; white-space: pre-wrap; }
 
-/* ── SD Studio Layout ────────────────────────────────────────────────────── */
+/* -- SD Studio Layout ------------------------------------------------------ */
 
 /* Two-column: prompts (flex:1) + settings+chat (fixed) */
 .sd-top-grid {
@@ -1110,7 +1110,7 @@ select option { background: var(--surface-2); }
   .sd-top-grid, .sd-out-grid { grid-template-columns: 1fr; }
 }
 
-/* ── Drop Zone ────────────────────────────────────────────────────────────── */
+/* -- Drop Zone -------------------------------------------------------------- */
 
 .drop-zone {
   border: 2px dashed var(--border-2);
@@ -1130,7 +1130,7 @@ select option { background: var(--surface-2); }
 .drop-zone-content svg { color: var(--text-3); margin-bottom: 7px; display: inline-block; }
 .drop-zone-content p { color: var(--text-2); font-size: .82rem; }
 
-/* ── Progress Card ────────────────────────────────────────────────────────── */
+/* -- Progress Card ---------------------------------------------------------- */
 
 .progress-card { padding: 14px; margin: 10px 0; }
 .progress-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -1147,7 +1147,7 @@ select option { background: var(--surface-2); }
 }
 .progress-pct { font-size: .72rem; color: var(--text-3); text-align: right; margin-top: 3px; }
 
-/* ── Video Player ─────────────────────────────────────────────────────────── */
+/* -- Video Player ----------------------------------------------------------- */
 
 .result-tabs {
   display: flex;
@@ -1193,7 +1193,7 @@ select option { background: var(--surface-2); }
 }
 .video-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 
-/* ── Slider ───────────────────────────────────────────────────────────────── */
+/* -- Slider ----------------------------------------------------------------- */
 
 .slider-group { margin-bottom: 14px; }
 .slider-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
@@ -1217,13 +1217,13 @@ select option { background: var(--surface-2); }
   box-shadow: 0 0 4px rgba(0,0,0,.4);
 }
 
-/* ── Checkbox ─────────────────────────────────────────────────────────────── */
+/* -- Checkbox --------------------------------------------------------------- */
 
 .checkbox-group { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
 .checkbox-group input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
 .checkbox-group label { font-size: .92rem; color: var(--text); cursor: pointer; margin-bottom: 0; }
 
-/* ── Wide screen app layout ───────────────────────────────────────────────── */
+/* -- Wide screen app layout ------------------------------------------------- */
 
 /*
   Responsive panel layout -- adapts from single column to 3-panel ultrawide:
@@ -1234,7 +1234,7 @@ select option { background: var(--surface-2); }
   > 2560    -> sidebar (460px) + main area + info panel (360px) [3 columns]
               The third column shows session files, queue status, service health
 
-  49" ultrawide (3840×1080 or 5120×1440) gets full 3-column treatment.
+  49" ultrawide (3840x1080 or 5120x1440) gets full 3-column treatment.
 */
 .wide-layout {
   display: grid;
@@ -1277,7 +1277,7 @@ select option { background: var(--surface-2); }
   }
 }
 
-/* ── Step Cards ───────────────────────────────────────────────────────────── */
+/* -- Step Cards ------------------------------------------------------------- */
 
 /* In wide layout, step-cards fills its sidebar column fully */
 .step-cards { display: flex; flex-direction: column; gap: 14px; }
@@ -1303,7 +1303,7 @@ select option { background: var(--surface-2); }
   flex-shrink: 0;
 }
 
-/* ── Prompt Cards ─────────────────────────────────────────────────────────── */
+/* -- Prompt Cards ----------------------------------------------------------- */
 
 .prompt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
 .prompt-card {
@@ -1351,7 +1351,7 @@ select option { background: var(--surface-2); }
 .prompts-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .prompts-header h3 { margin: 0; flex: 1; }
 
-/* ── Audio tabs ───────────────────────────────────────────────────────────── */
+/* -- Audio tabs ------------------------------------------------------------- */
 
 .audio-tabs { display: flex; gap: 2px; margin-bottom: 12px; flex-wrap: wrap; }
 .audio-tab {
@@ -1368,7 +1368,7 @@ select option { background: var(--surface-2); }
 .audio-content { display: none; }
 .audio-content.active { display: block; }
 
-/* ── Two-panel layout ─────────────────────────────────────────────────────── */
+/* -- Two-panel layout ------------------------------------------------------- */
 
 /* Adapts: equal halves -> sidebar+wide -> stacked */
 .two-panel {
@@ -1379,7 +1379,7 @@ select option { background: var(--surface-2); }
 @media (min-width: 1400px) { .two-panel { grid-template-columns: 380px 1fr; } }
 @media (max-width: 900px)  { .two-panel { grid-template-columns: 1fr; } }
 
-/* ── File list ────────────────────────────────────────────────────────────── */
+/* -- File list -------------------------------------------------------------- */
 
 .file-list { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; max-height: 50vh; overflow-y: auto; }
 .file-item {
@@ -1401,7 +1401,7 @@ select option { background: var(--surface-2); }
 }
 .file-item .remove:hover { color: var(--red); }
 
-/* ── Image preview ────────────────────────────────────────────────────────── */
+/* -- Image preview ---------------------------------------------------------- */
 
 .image-preview {
   max-width: 280px;
@@ -1412,7 +1412,7 @@ select option { background: var(--surface-2); }
   border: 1px solid var(--border);
 }
 
-/* ── Textareas ────────────────────────────────────────────────────────────── */
+/* -- Textareas -------------------------------------------------------------- */
 
 textarea {
   width: 100%;
@@ -1429,7 +1429,7 @@ textarea {
 }
 textarea:focus { border-color: var(--accent); }
 
-/* ── Prompt output (green text) ───────────────────────────────────────────── */
+/* -- Prompt output (green text) --------------------------------------------- */
 
 .prompt-output {
   width: 100%;
@@ -1454,7 +1454,7 @@ textarea:focus { border-color: var(--accent); }
 .adv-settings-body { display: none; margin-top: 10px; }
 .adv-settings-body.open { display: block; }
 
-/* ── ADetailer sweep cards ────────────────────────────────────────────────── */
+/* -- ADetailer sweep cards -------------------------------------------------- */
 .ad-sweep-card {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -1494,12 +1494,12 @@ textarea:focus { border-color: var(--accent); }
   min-height: 60px;
 }
 
-/* ── Tab icons ────────────────────────────────────────────────────────────── */
+/* -- Tab icons -------------------------------------------------------------- */
 
 .tab-icon    { width: 17px; height: 17px; vertical-align: middle; margin-right: 5px; border-radius: 3px; opacity: .85; }
 .tab-icon-sm { width: 15px; height: 15px; vertical-align: middle; margin-right: 6px; border-radius: 3px; }
 
-/* ── Help modal ───────────────────────────────────────────────────────────── */
+/* -- Help modal ------------------------------------------------------------- */
 
 .help-flow { display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; }
 .help-step {
@@ -1523,7 +1523,7 @@ textarea:focus { border-color: var(--accent); }
 .help-tips code { color: var(--green); font-family: 'Cascadia Code', monospace; font-size: .74rem; }
 
 
-/* ── AI Provider Big Toggle ───────────────────────────────────────────────── */
+/* -- AI Provider Big Toggle ------------------------------------------------- */
 
 .ai-provider-card {
   display: flex;
@@ -1613,7 +1613,7 @@ textarea:focus { border-color: var(--accent); }
 }
 
 
-/* ── Soundtrack card (Card 3) ─────────────────────────────────────────────── */
+/* -- Soundtrack card (Card 3) ----------------------------------------------- */
 
 /* ON/OFF row */
 .snd-toggle-row {
@@ -1658,7 +1658,7 @@ textarea:focus { border-color: var(--accent); }
   margin-top: 4px;
 }
 
-/* ── Genre grid ──────────────────────────────────────────────────────────── */
+/* -- Genre grid ------------------------------------------------------------ */
 
 .genre-grid {
   display: grid;
@@ -1692,7 +1692,7 @@ textarea:focus { border-color: var(--accent); }
 .genre-name { font-size: .64rem; font-weight: 700; color: var(--text-2); letter-spacing: .04em; text-align: center; }
 .genre-tile.on .genre-name { color: var(--accent); }
 
-/* ── Energy slider ───────────────────────────────────────────────────────── */
+/* -- Energy slider --------------------------------------------------------- */
 
 .energy-wrap {
   display: flex;
@@ -1724,7 +1724,7 @@ textarea:focus { border-color: var(--accent); }
 }
 .energy-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
 
-/* ── Vocals 3-way ────────────────────────────────────────────────────────── */
+/* -- Vocals 3-way ---------------------------------------------------------- */
 
 .vocals-row {
   display: grid;
@@ -1755,7 +1755,7 @@ textarea:focus { border-color: var(--accent); }
 .vocals-icon { font-size: 1.5rem; line-height: 1; }
 .vocals-name { font-size: .68rem; font-weight: 700; letter-spacing: .05em; }
 
-/* ── Tone chips ──────────────────────────────────────────────────────────── */
+/* -- Tone chips ------------------------------------------------------------ */
 
 .tone-section {
   display: flex;
@@ -1786,7 +1786,7 @@ textarea:focus { border-color: var(--accent); }
 .custom-lyrics-wrap { }
 .custom-lyrics-wrap textarea { min-height: 90px; }
 
-/* ── Soundtrack redesign -- section headers & divider ─────────────────────── */
+/* -- Soundtrack redesign -- section headers & divider ----------------------- */
 
 .snd-section-header {
   display: flex;
@@ -1828,7 +1828,7 @@ textarea:focus { border-color: var(--accent); }
 }
 .vocals-btn.on .vocals-sub { color: var(--accent); opacity: .75; }
 
-/* ── Lyric mood cards (replaces old .tone-chip buttons) ─────────────────── */
+/* -- Lyric mood cards (replaces old .tone-chip buttons) ------------------- */
 
 .tone-chip-grid {
   display: grid;
@@ -1873,7 +1873,7 @@ textarea:focus { border-color: var(--accent); }
   transition: opacity .2s;
 }
 
-/* ── Fun Videos player extras ────────────────────────────────────────────── */
+/* -- Fun Videos player extras ---------------------------------------------- */
 
 .fun-player-extras {
   padding: 12px 16px;
@@ -1924,7 +1924,7 @@ textarea:focus { border-color: var(--accent); }
 }
 
 
-/* ── Bridges tab ──────────────────────────────────────────────────────────── */
+/* -- Bridges tab ------------------------------------------------------------ */
 
 /* Text clip input row */
 .text-clip-row {
@@ -1999,7 +1999,7 @@ textarea:focus { border-color: var(--accent); }
   white-space: nowrap;
 }
 
-/* ── Transition mode tile grid ───────────────────────────────────────────── */
+/* -- Transition mode tile grid --------------------------------------------- */
 
 .mode-grid {
   display: grid;
@@ -2043,7 +2043,7 @@ textarea:focus { border-color: var(--accent); }
 }
 
 
-/* ── Input mode toggle (Photo / Text) ────────────────────────────────────── */
+/* -- Input mode toggle (Photo / Text) -------------------------------------- */
 .input-mode-toggle {
   display: flex;
   gap: 6px;
@@ -2071,7 +2071,7 @@ textarea:focus { border-color: var(--accent); }
   border: 1px solid var(--accent-border);
 }
 
-/* ── Shell layout (WS1 unified shell) ────────────────────────────────────── */
+/* -- Shell layout (WS1 unified shell) -------------------------------------- */
 
 #app-body {
   display: flex;
@@ -2081,7 +2081,7 @@ textarea:focus { border-color: var(--accent); }
   background: transparent;
 }
 
-/* Left rail — creative pipeline navigator */
+/* Left rail -- creative pipeline navigator */
 #app-rail {
   display: flex;
   flex-direction: column;
@@ -2140,7 +2140,7 @@ textarea:focus { border-color: var(--accent); }
 #app-rail.collapsed .rail-tab span { display: none; }
 #app-rail.collapsed .rail-tab { justify-content: center; padding: 12px; }
 
-/* ── Queue clear bar ─────────────────────────────────────────────────────── */
+/* -- Queue clear bar ------------------------------------------------------- */
 #queue-clear-bar {
   display: none;
   padding: 0 10px 4px;
@@ -2161,7 +2161,7 @@ textarea:focus { border-color: var(--accent); }
 #btn-clear-completed:hover { opacity: 1; color: var(--accent); }
 #app-rail.collapsed #queue-clear-bar { display: none !important; }
 
-/* ── Sidebar job feed ─────────────────────────────────────────────────────── */
+/* -- Sidebar job feed ------------------------------------------------------- */
 #job-feed {
   margin: 4px 6px;
   max-height: 320px;
@@ -2274,7 +2274,7 @@ textarea:focus { border-color: var(--accent); }
 }
 .rail-collapse-btn:hover { color: var(--text-2); }
 
-/* ── Pipeline breadcrumb bar ─────────────────────────────────────────────── */
+/* -- Pipeline breadcrumb bar ----------------------------------------------- */
 .pipeline-bar {
   display: flex;
   align-items: center;
@@ -2383,7 +2383,7 @@ textarea:focus { border-color: var(--accent); }
   min-width: 0;
   background: transparent;
 }
-/* Gallery overlay — full-height panel that covers the work area */
+/* Gallery overlay -- full-height panel that covers the work area */
 #gallery-overlay {
   display: none;
   position: absolute;
@@ -2433,7 +2433,7 @@ textarea:focus { border-color: var(--accent); }
 .gallery-empty svg { opacity: .25; }
 .gallery-empty p { font-size: var(--text-sm); line-height: 1.6; max-width: 220px; }
 
-/* ── Command palette (WS1) ────────────────────────────────────────────────── */
+/* -- Command palette (WS1) -------------------------------------------------- */
 
 #cmd-palette-overlay {
   display: none;
@@ -2533,7 +2533,7 @@ textarea:focus { border-color: var(--accent); }
   color: var(--text-2);
 }
 
-/* ── Shortcut cheat sheet modal ───────────────────────────────────────────── */
+/* -- Shortcut cheat sheet modal --------------------------------------------- */
 
 #modal-shortcuts .modal { width: 520px; }
 .shortcuts-grid {
@@ -2562,7 +2562,7 @@ textarea:focus { border-color: var(--accent); }
 }
 
 
-/* ── Service slide-over panel (WS4) ───────────────────────────────────────── */
+/* -- Service slide-over panel (WS4) ----------------------------------------- */
 
 #service-panel-overlay {
   display: none;
@@ -2633,10 +2633,10 @@ textarea:focus { border-color: var(--accent); }
 }
 .svc-detail-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-2) var(--space-4) var(--space-3); }
 
-/* dot states — extend with 'ok' alias for proven-alive vs 'ready' configured */
+/* dot states -- extend with 'ok' alias for proven-alive vs 'ready' configured */
 .dot.ok    { background: var(--green); box-shadow: 0 0 5px var(--green); }
 
-/* ── Gallery grid (WS2) ───────────────────────────────────────────────────── */
+/* -- Gallery grid (WS2) ----------------------------------------------------- */
 
 .gallery-grid {
   display: grid;
@@ -2739,7 +2739,7 @@ textarea:focus { border-color: var(--accent); }
 .gallery-meta-block strong { color: var(--text-2); display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 2px; }
 .gallery-meta-block span { color: var(--text); font-family: monospace; }
 
-/* ── Error log (WS7) ──────────────────────────────────────────────────────── */
+/* -- Error log (WS7) -------------------------------------------------------- */
 
 #error-log-overlay {
   display: none;
@@ -2782,7 +2782,7 @@ textarea:focus { border-color: var(--accent); }
 .error-log-entry .elog-ctx { color: var(--amber); margin-right: var(--space-2); }
 .error-log-entry .elog-msg { color: var(--red); }
 
-/* Enhanced toast (WS7) — extends original .toast, does NOT redeclare it */
+/* Enhanced toast (WS7) -- extends original .toast, does NOT redeclare it */
 .toast {
   position: relative;
   min-width: 240px;
@@ -2842,9 +2842,9 @@ textarea:focus { border-color: var(--accent); }
 }
 #btn-error-log.has-errors .error-badge { display: flex; }
 
-/* ── Responsive pass (WS11) ──────────────────────────────────────────────── */
+/* -- Responsive pass (WS11) ------------------------------------------------ */
 
-/* Rail only collapses on very narrow viewports (phones/tablets — not studio monitors) */
+/* Rail only collapses on very narrow viewports (phones/tablets -- not studio monitors) */
 @media (max-width: 900px) {
   #app-rail { width: 52px; }
   #app-rail .rail-section-label,
@@ -2875,8 +2875,8 @@ textarea:focus { border-color: var(--accent); }
 @media (min-width: 1600px) { .two-panel { grid-template-columns: 420px 1fr; } }
 @media (max-width: 1100px)  { .two-panel { grid-template-columns: 1fr; } }
 
-/* ── RESPONSIVE TYPOGRAPHY SCALING ────────────────────────────────────────── */
-/* Ensures readability from 1440p → 5120p without hardcoded sizes */
+/* -- RESPONSIVE TYPOGRAPHY SCALING ------------------------------------------ */
+/* Ensures readability from 1440p -> 5120p without hardcoded sizes */
 
 h1 { font-size: var(--title-clamp); font-weight: 700; margin-bottom: 0.5em; }
 h2 { font-size: var(--heading-clamp); font-weight: 700; margin-bottom: 0.6em; }
@@ -2910,8 +2910,8 @@ input, textarea, select {
 /* Section headers in collapsible sections */
 .section-header { font-size: clamp(0.85rem, 2vw, 1rem); }
 
-/* ── Prefers-reduced-motion ───────────────────────────────────────────────── */
-/* Scope ONLY to UI shell elements — splash animations are excluded intentionally */
+/* -- Prefers-reduced-motion ------------------------------------------------- */
+/* Scope ONLY to UI shell elements -- splash animations are excluded intentionally */
 @media (prefers-reduced-motion: reduce) {
   .toast, .modal-overlay, .modal, #cmd-palette, #service-panel,
   #error-log-panel, .gallery-item, .btn, .pill, .rail-tab,
@@ -2922,9 +2922,9 @@ input, textarea, select {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════════
-   Tab SD Prompts — Canvas-First Layout (Phase 1)
-   ══════════════════════════════════════════════════════════════════════════════ */
+/* ==============================================================================
+   Tab SD Prompts -- Canvas-First Layout (Phase 1)
+   ============================================================================== */
 
 .canvas-section {
   flex: 1;
@@ -3154,9 +3154,9 @@ input, textarea, select {
   border-bottom-color: var(--border-2);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════════
+/* ==============================================================================
    Step 1 front door (SD Prompts tab)
-   ══════════════════════════════════════════════════════════════════════════════ */
+   ============================================================================== */
 
 .step1-panel {
   border: 1px solid var(--accent-border);
@@ -3311,24 +3311,24 @@ input, textarea, select {
   100% { box-shadow: 0 0 0 0 rgba(212,160,23,0); }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════════
-   BETA POLISH — 2026-04-26
-   ══════════════════════════════════════════════════════════════════════════════ */
+/* ==============================================================================
+   BETA POLISH -- 2026-04-26
+   ============================================================================== */
 
-/* ── Text selection ────────────────────────────────────────────────────────── */
+/* -- Text selection ---------------------------------------------------------- */
 ::selection { background: var(--accent); color: var(--bg); }
 
-/* ── Placeholders ──────────────────────────────────────────────────────────── */
+/* -- Placeholders ------------------------------------------------------------ */
 ::placeholder { color: var(--text-3); opacity: 1; }
 
-/* ── Custom scrollbars ─────────────────────────────────────────────────────── */
+/* -- Custom scrollbars ------------------------------------------------------- */
 ::-webkit-scrollbar              { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track        { background: transparent; }
 ::-webkit-scrollbar-thumb        { background: var(--surface-3); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover  { background: var(--accent); }
 ::-webkit-scrollbar-corner       { background: transparent; }
 
-/* ── Disabled buttons ──────────────────────────────────────────────────────── */
+/* -- Disabled buttons -------------------------------------------------------- */
 .btn:disabled {
   opacity: .38;
   cursor: not-allowed;
@@ -3336,7 +3336,7 @@ input, textarea, select {
   filter: saturate(.4);
 }
 
-/* ── Tab panel fade-in on switch ───────────────────────────────────────────── */
+/* -- Tab panel fade-in on switch --------------------------------------------- */
 @keyframes panel-fade-in {
   from { opacity: 0; transform: translateY(5px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -3345,7 +3345,7 @@ input, textarea, select {
   animation: panel-fade-in 180ms var(--ease-out) both;
 }
 
-/* ── Generate button — enhanced hover glow ─────────────────────────────────── */
+/* -- Generate button -- enhanced hover glow ----------------------------------- */
 .btn-primary.btn-generate {
   transition: background var(--dur-fast), box-shadow var(--dur-base) var(--ease-out),
               transform var(--dur-base) var(--ease-out);
@@ -3359,7 +3359,7 @@ input, textarea, select {
   box-shadow: 0 2px 10px rgba(212,160,23,.35);
 }
 
-/* ── Gallery thumbnail strip ───────────────────────────────────────────────── */
+/* -- Gallery thumbnail strip ------------------------------------------------- */
 .gallery-thumb {
   height: 60px;
   width: 60px;
@@ -3375,7 +3375,7 @@ input, textarea, select {
   transform: scale(1.06);
 }
 
-/* ── Express drop zone — loaded state ─────────────────────────────────────── */
+/* -- Express drop zone -- loaded state --------------------------------------- */
 .drop-zone.drop-zone-loaded {
   border-style: solid;
   border-color: var(--accent);
@@ -3387,16 +3387,16 @@ input, textarea, select {
   box-shadow: none;
 }
 
-/* ── Rail: Gallery pushed to bottom ────────────────────────────────────────── */
+/* -- Rail: Gallery pushed to bottom ------------------------------------------ */
 #btn-gallery-rail {
   margin-top: auto;
   border-top: 1px solid var(--border);
 }
 
-/* ── Spinner — unified speed ───────────────────────────────────────────────── */
+/* -- Spinner -- unified speed ------------------------------------------------- */
 .spinner { animation-duration: .7s; }
 
-/* ── Card — subtle lift on hover (interactive cards only) ──────────────────── */
+/* -- Card -- subtle lift on hover (interactive cards only) -------------------- */
 .card.interactive {
   transition: transform var(--dur-fast), box-shadow var(--dur-fast);
 }
@@ -3405,7 +3405,7 @@ input, textarea, select {
   box-shadow: 0 4px 16px rgba(0,0,0,.5), inset 0 1px 0 rgba(212,160,23,.08);
 }
 
-/* ── Input — tighter label spacing in tab forms ────────────────────────────── */
+/* -- Input -- tighter label spacing in tab forms ------------------------------ */
 .card label + input,
 .card label + select,
 .card label + textarea {

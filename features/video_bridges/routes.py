@@ -1,4 +1,4 @@
-"""Video Bridges API routes — /api/bridges/*
+"""Video Bridges API routes -- /api/bridges/*
 
 Generate AI-powered transition videos between clips.
 """
@@ -93,7 +93,7 @@ async def analyze_media_endpoint(request: Request):
         raise HTTPException(400, "File not found")
 
     if get_job_manager().is_gpu_busy():
-        raise HTTPException(503, "GPU is busy with a video job — wait for it to finish before analyzing clips")
+        raise HTTPException(503, "GPU is busy with a video job -- wait for it to finish before analyzing clips")
 
     return await asyncio.to_thread(analyze_media, llm_router, path)
 
@@ -153,7 +153,7 @@ def _bridges_worker(job, items, settings):
 
     n = len(items)
 
-    # ── Pre-generate any text-to-video clips ──────────────────────────────
+    # -- Pre-generate any text-to-video clips ------------------------------
     from features.fun_videos.video_generator import generate_video as _gen_video
     for i, item in enumerate(items):
         if item.get("kind") != "text":
@@ -180,7 +180,7 @@ def _bridges_worker(job, items, settings):
         segment_paths[i] = result
         segment_kinds[i] = "video"
 
-    # Analyze any missing clips (skip text clips — they have no original media to analyze)
+    # Analyze any missing clips (skip text clips -- they have no original media to analyze)
     for i, analysis in enumerate(analyses):
         if _stopped():
             return

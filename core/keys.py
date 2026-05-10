@@ -51,7 +51,7 @@ def save_keys(**kwargs):
         cfg.save(updates)
 
 
-# ── Ollama helpers (unchanged) ────────────────────────────────────────────────
+# -- Ollama helpers (unchanged) ------------------------------------------------
 
 def get_ollama_host() -> str:
     return cfg.get("ollama_host") or "http://localhost:11434"

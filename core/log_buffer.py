@@ -53,7 +53,7 @@ def current_seq() -> int:
         return _seq
 
 
-# ── Logging handler ──────────────────────────────────────────────────────────
+# -- Logging handler ----------------------------------------------------------
 
 class BufferHandler(logging.Handler):
     """Python logging handler that writes to the shared ring buffer."""
@@ -82,7 +82,7 @@ def install_handler(logger_name: str | None = None, level: int = logging.DEBUG):
     return handler
 
 
-# ── Stdout/stderr capture ────────────────────────────────────────────────────
+# -- Stdout/stderr capture ----------------------------------------------------
 
 class StdoutTee(io.TextIOBase):
     """Tee stdout writes to both the original stream and the log buffer.

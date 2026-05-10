@@ -1,4 +1,4 @@
-"""Video Tools API routes — /api/tools/*
+"""Video Tools API routes -- /api/tools/*
 
 Batch video transforms: reverse, mirror, flip, speed, upscale, sharpen.
 Also includes the music mixer from Github Video Editor.
@@ -26,7 +26,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 async def add_paths(request: Request):
     """Register existing file paths (no upload needed).
 
-    Accepts paths to files already on disk — from other apps, folders, etc.
+    Accepts paths to files already on disk -- from other apps, folders, etc.
     Returns metadata (duration, resolution) for each valid file.
     """
     from core.ffmpeg_utils import probe_file
@@ -130,7 +130,7 @@ async def mix_music(request: Request):
     if not music_path or not os.path.isfile(music_path):
         raise HTTPException(400, "Music file not found")
 
-    # Validate volume dB values — sane range is -60 to +20 dB
+    # Validate volume dB values -- sane range is -60 to +20 dB
     settings = body.get("settings", {})
     try:
         music_vol = max(-60.0, min(20.0, float(settings.get("music_volume_db", -18.0))))

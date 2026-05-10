@@ -1,1 +1,1 @@
-# Drop Cat Go Studio — core infrastructure package
+# Drop Cat Go Studio -- core infrastructure package

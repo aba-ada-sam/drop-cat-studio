@@ -1,5 +1,5 @@
 /**
- * Drop Cat Go Studio — Shared API helpers.
+ * Drop Cat Go Studio -- Shared API helpers.
  * Fetch wrapper, file upload, and generic job polling.
  */
 
@@ -63,7 +63,7 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
         onError(job.error || job.message || `Job ${job.status}`);
         return;
       }
-      // Guard against null/unknown status — avoids 10-minute poll loop on server errors
+      // Guard against null/unknown status -- avoids 10-minute poll loop on server errors
       if (job.status && job.status !== 'running' && job.status !== 'queued' && job.status !== 'preparing') {
         onError(`Unexpected job status: ${job.status}`);
         return;

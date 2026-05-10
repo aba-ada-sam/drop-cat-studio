@@ -1,13 +1,13 @@
-﻿/**
- * Drop Cat Go Studio — Music Video tab.
- * Drop a song → AI analyzes BPM/key/energy → generates a full-length music video.
+/**
+ * Drop Cat Go Studio -- Music Video tab.
+ * Drop a song -> AI analyzes BPM/key/energy -> generates a full-length music video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260503a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 export function receiveHandoff(data) {
-  // no-op — this tab doesn't currently receive handoffs
+  // no-op -- this tab doesn't currently receive handoffs
 }
 
 export function init(panel) {
@@ -25,16 +25,16 @@ export function init(panel) {
   let _model         = 'LTX-2 Dev19B Distilled';
   let _clipDur       = 8;
   let _numClips      = 0;     // auto-calculated
-  let _qualityPx     = 360;   // Draft by default — fastest, still watchable on screen
+  let _qualityPx     = 360;   // Draft by default -- fastest, still watchable on screen
   let _outW          = 640;
   let _outH          = 352;
-  let _steps         = 4;     // LTX Distilled is designed for 4-8 steps — 30 is wasted time
+  let _steps         = 4;     // LTX Distilled is designed for 4-8 steps -- 30 is wasted time
   let _guidance      = 7.5;
   let _jobId         = null;
   let _analyzeSeq    = 0;   // incremented on each new analysis; stale responses check against this
-  let _lyricsTextarea = null;  // editable lyrics field — ref set by _renderAnalysis
+  let _lyricsTextarea = null;  // editable lyrics field -- ref set by _renderAnalysis
   let _loopMode      = false;
-  let _aiVariety     = true;  // on by default — every run gets a fresh visual theme
+  let _aiVariety     = true;  // on by default -- every run gets a fresh visual theme
   let _loopCount     = 0;
   let _stopAfter     = false;
   let _varietyIdx    = 0;
@@ -55,7 +55,7 @@ export function init(panel) {
   ];
 
   const QUALITIES = [
-    { label: 'Draft  360P', px: 360, maxSec: 19 },  // ~640×352 — fastest, ~35% fewer pixels than 480P
+    { label: 'Draft  360P', px: 360, maxSec: 19 },  // ~640x352 -- fastest, ~35% fewer pixels than 480P
     { label: '480P',        px: 480, maxSec: 19 },
     { label: '580P',        px: 580, maxSec: 19 },
     { label: '720P',        px: 720, maxSec: 14 },   // high res: cap clips shorter to avoid sliding window
@@ -77,11 +77,11 @@ export function init(panel) {
 
   // -- Song drop zone --------------------------------------------------------
   const audioInput    = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mpeg,.mpg', style: 'display:none' });
-  const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a, mpeg…)' });
+  const audioHint     = el('div', { style: 'color:var(--text-3); font-size:.88rem;', text: 'Drop your song here or click to browse (mp3, wav, flac, m4a, mpeg...)' });
   const audioPreview  = el('audio', { controls: '', style: 'display:none; width:100%; margin-top:8px;' });
   const audioClearBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
-    title: 'Remove song', text: '×',
+    title: 'Remove song', text: 'x',
   });
   const audioDropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;' },
     [audioHint, audioPreview, audioClearBtn]);
@@ -99,7 +99,7 @@ export function init(panel) {
       a.duration_display && { icon: '♪', text: a.duration_display },
       a.bpm              && { icon: '♩', text: `${a.bpm} BPM` },
       a.key              && { icon: '♯', text: `${a.key} ${a.mode || ''}`.trim() },
-      a.mood             && { icon: '✦', text: a.mood.charAt(0).toUpperCase() + a.mood.slice(1) },
+      a.mood             && { icon: '*', text: a.mood.charAt(0).toUpperCase() + a.mood.slice(1) },
       a.energy           && { icon: '⚡', text: `${a.energy} energy` },
     ].filter(Boolean);
 
@@ -120,7 +120,7 @@ export function init(panel) {
 
     const clipsNote = el('div', {
       style: 'font-size:.78rem; color:var(--text-3);',
-      text: `Suggested: ${a.suggested_num_clips} clips × ${a.suggested_clip_dur}s = ~${Math.round(a.suggested_num_clips * a.suggested_clip_dur)}s`,
+      text: `Suggested: ${a.suggested_num_clips} clips x ${a.suggested_clip_dur}s = ~${Math.round(a.suggested_num_clips * a.suggested_clip_dur)}s`,
     });
 
     analysisCard.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px;', text: 'Song analysis' }));
@@ -167,7 +167,7 @@ export function init(panel) {
       [['HIGH', '#e05c5c', 'explosive action'], ['MED', '#d4a017', 'dynamic motion'], ['LOW', '#5b9bd4', 'graceful/slow']].forEach(([lbl, col, desc]) => {
         legend.appendChild(el('span', {
           style: `font-size:.7rem; color:${col};`,
-          text: `■ ${lbl} — ${desc}`,
+          text: `* ${lbl} -- ${desc}`,
         }));
       });
 
@@ -184,7 +184,7 @@ export function init(panel) {
     });
     _lyricsTextarea.value = (a.lyrics_text || '').trim();
     analysisCard.appendChild(el('div', { style: 'display:flex; flex-direction:column; gap:4px; margin-top:4px;' }, [
-      el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Detected lyrics — edit to correct' }),
+      el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Detected lyrics -- edit to correct' }),
       _lyricsTextarea,
     ]));
 
@@ -203,7 +203,7 @@ export function init(panel) {
     const seq = ++_analyzeSeq;
     analysisCard.style.display = 'none';
     analysisCard.innerHTML = '';
-    analysisCard.appendChild(el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Analyzing song…' }));
+    analysisCard.appendChild(el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Analyzing song...' }));
     analysisCard.style.display = 'flex';
 
     try {
@@ -280,10 +280,10 @@ export function init(panel) {
   // -- Anchor image (optional) -----------------------------------------------
   const imgInput    = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
   const imgPreview  = el('img', { style: 'display:none; max-height:140px; object-fit:contain; border-radius:6px;' });
-  const imgHint     = el('div', { style: 'color:var(--text-3); font-size:.82rem; text-align:center;', text: 'Drop anchor image (optional — sets the visual style for all clips)' });
+  const imgHint     = el('div', { style: 'color:var(--text-3); font-size:.82rem; text-align:center;', text: 'Drop anchor image (optional -- sets the visual style for all clips)' });
   const imgClearBtn = el('button', {
     style: 'display:none; position:absolute; top:4px; right:4px; width:22px; height:22px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:13px; cursor:pointer; z-index:2; padding:0; line-height:1;',
-    text: '×',
+    text: 'x',
   });
   const imgDropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:70px; display:flex; align-items:center; justify-content:center;' },
     [imgPreview, imgHint, imgClearBtn]);
@@ -344,7 +344,7 @@ export function init(panel) {
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.9rem;',
-    placeholder: 'Describe the vibe, story, or visual style — or leave blank and AI will follow the song\'s energy.',
+    placeholder: 'Describe the vibe, story, or visual style -- or leave blank and AI will follow the song\'s energy.',
   });
   root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px;' }, [
     el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em;', text: 'Story idea (optional)' }),
@@ -367,7 +367,7 @@ export function init(panel) {
     btn.addEventListener('click', () => {
       _qualityPx = q.px;
       [_outW, _outH] = _computeDims(_qualityPx);
-      dimsLabel.textContent = `${_outW} × ${_outH}`;
+      dimsLabel.textContent = `${_outW} x ${_outH}`;
       // Enforce per-quality clip duration ceiling
       clipSlider.max = String(q.maxSec);
       if (_clipDur > q.maxSec) {
@@ -392,15 +392,15 @@ export function init(panel) {
   const guidLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:28px; text-align:right;', text: '7.5' });
   guidSlider.addEventListener('input', () => { _guidance = parseFloat(guidSlider.value); guidLabel.textContent = String(_guidance); });
 
-  const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: `${_outW} × ${_outH}` });
+  const dimsLabel = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600;', text: `${_outW} x ${_outH}` });
 
   // Clip count summary + time estimate
-  const clipSummary = el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Drop a song → number of clips is calculated automatically from song length ÷ per-clip length.' });
+  const clipSummary = el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Drop a song -> number of clips is calculated automatically from song length ÷ per-clip length.' });
   const timeWarn    = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent-warm, #e8a000); background:rgba(232,160,0,.08); border:1px solid rgba(232,160,0,.25); border-radius:6px; padding:8px 12px; line-height:1.5;',
   });
 
-  const MAX_CLIPS = 50;  // matches backend cap — 50 × 8s = 6.7 min of unique content at minimum clip length
+  const MAX_CLIPS = 50;  // matches backend cap -- 50 x 8s = 6.7 min of unique content at minimum clip length
 
   function _refreshClipCount() {
     if (!_audioDuration) {
@@ -409,7 +409,7 @@ export function init(panel) {
       timeWarn.style.display = 'none';
       return;
     }
-    // Generate exactly enough clips to cover the full song — no looping.
+    // Generate exactly enough clips to cover the full song -- no looping.
     // Use suggested_num_clips from analysis when available (BPM-aligned),
     // otherwise compute from raw duration ÷ clip length.
     const rawNeeded = Math.ceil(_audioDuration / _clipDur);
@@ -421,8 +421,8 @@ export function init(panel) {
     // Rough per-clip generation time: ~30s at Draft 360P, ~50s at higher quality
     const secsPerClip = _qualityPx <= 360 ? 30 : (_qualityPx <= 480 ? 40 : 55);
     const estMin = Math.round(_numClips * secsPerClip / 60);
-    const loops = rawNeeded > _numClips ? ` — song fills ${(rawNeeded / _numClips).toFixed(1)}× loop` : ' — no looping';
-    clipSummary.textContent = `${_numClips} clips cover ${songDisplay}${loops} — est. ~${estMin} min`;
+    const loops = rawNeeded > _numClips ? ` -- song fills ${(rawNeeded / _numClips).toFixed(1)}x loop` : ' -- no looping';
+    clipSummary.textContent = `${_numClips} clips cover ${songDisplay}${loops} -- est. ~${estMin} min`;
 
     timeWarn.style.display = 'none';
   }
@@ -456,7 +456,7 @@ export function init(panel) {
     return result;
   }
 
-  // Advanced settings — collapsed by default so the clean path is just drop + generate
+  // Advanced settings -- collapsed by default so the clean path is just drop + generate
   const _advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Per-clip length' }),
@@ -469,7 +469,7 @@ export function init(panel) {
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Steps' }),
       stepsSlider, stepsLabel,
-      el('span', { style: 'font-size:.7rem; color:var(--text-3); font-style:italic;', text: '(ignored by LTX-2 Distilled — model uses a fixed 8+3 schedule)' }),
+      el('span', { style: 'font-size:.7rem; color:var(--text-3); font-style:italic;', text: '(ignored by LTX-2 Distilled -- model uses a fixed 8+3 schedule)' }),
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Guidance' }),
@@ -504,7 +504,7 @@ export function init(panel) {
     class: 'btn',
     text: '＋ Add to Queue',
     style: 'display:none; width:100%; margin-top:6px; font-size:.9rem;',
-    title: 'Queue another generation with current settings — it will start after the active job finishes',
+    title: 'Queue another generation with current settings -- it will start after the active job finishes',
   });
   root.appendChild(createBtn);
   root.appendChild(queueBtn);
@@ -513,8 +513,8 @@ export function init(panel) {
   const _CHIP = 'border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:.8rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s,border-color .15s;';
   const _CHIP_ON = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
 
-  const loopBtn    = el('button', { style: _CHIP, title: 'Keep generating new music videos automatically — all saved to gallery', text: '∞  Loop' });
-  const varietyBtn = el('button', { style: _CHIP, title: 'AI picks a different visual theme each loop so every video looks unique', text: '✦  AI variety' });
+  const loopBtn    = el('button', { style: _CHIP, title: 'Keep generating new music videos automatically -- all saved to gallery', text: '∞  Loop' });
+  const varietyBtn = el('button', { style: _CHIP, title: 'AI picks a different visual theme each loop so every video looks unique', text: '*  AI variety' });
 
   const stopAfterBtn  = el('button', { class: 'btn btn-sm', style: 'display:none;', text: 'Stop after this' });
   const loopCountEl   = el('span',   { style: 'font-size:.78rem; color:var(--text-3);', text: '' });
@@ -535,7 +535,7 @@ export function init(panel) {
   stopAfterBtn.addEventListener('click', () => {
     _stopAfter = true;
     stopAfterBtn.style.display = 'none';
-    loopCountEl.textContent += ' — stopping after this one…';
+    loopCountEl.textContent += ' -- stopping after this one...';
   });
 
   // -- Progress + result -----------------------------------------------------
@@ -543,7 +543,7 @@ export function init(panel) {
   const progressBar  = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
   const progressFill = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
   const progressMsg  = el('div', { style: 'font-size:.8rem; color:var(--text-3); text-align:center;' });
-  const stopBtn      = el('button', { class: 'btn btn-sm', text: '■ Stop', style: 'align-self:center;' });
+  const stopBtn      = el('button', { class: 'btn btn-sm', text: '* Stop', style: 'align-self:center;' });
   progressBar.appendChild(progressFill);
   progressWrap.append(progressBar, progressMsg, stopBtn);
   root.appendChild(progressWrap);
@@ -602,7 +602,7 @@ export function init(panel) {
     _loopCount = 0;
     if (_jobId) {
       stopJob(_jobId).catch(() => {});
-      toast('Stopping — current clip will finish then generation halts', 'info');
+      toast('Stopping -- current clip will finish then generation halts', 'info');
     }
   });
 
@@ -611,7 +611,7 @@ export function init(panel) {
 
   function _watchJob(job_id, timeoutSec = 0) {
     if (_activePoller) { _activePoller.stop(); _activePoller = null; }
-    _showProgress(2, 'Planning story arc…');
+    _showProgress(2, 'Planning story arc...');
     stopBtn.style.display = '';
 
     // Derive maxPolls from server-reported timeout so long multi-clip jobs don't
@@ -626,7 +626,7 @@ export function init(panel) {
           if (j.status === 'queued') {
             const pos   = j.queue_position;
             const label = pos === 0 ? 'up next' : `position ${pos + 1}`;
-            _showProgress(2, `In queue — ${label}…`);
+            _showProgress(2, `In queue -- ${label}...`);
           } else {
             _showProgress(j.progress || 5, j.message || `${j.progress || 5}%`);
           }
@@ -639,7 +639,7 @@ export function init(panel) {
             _showResult(out);
           } else {
             _hideProgress();
-            toast('Job finished but produced no output — check the Queue tab for details', 'error');
+            toast('Job finished but produced no output -- check the Queue tab for details', 'error');
           }
           if (_loopMode && !_stopAfter) {
             // Kick off the next generation automatically. _submitJob is async so
@@ -699,7 +699,7 @@ export function init(panel) {
 
   async function _submitJob() {
     if (!_audioPath) { toast('Drop a song file first', 'error'); return; }
-    if (_numClips <= 0) { toast('Song duration could not be determined — try re-uploading the file', 'error'); return; }
+    if (_numClips <= 0) { toast('Song duration could not be determined -- try re-uploading the file', 'error'); return; }
 
     _loopCount++;
     _stopAfter = false;
@@ -709,7 +709,7 @@ export function init(panel) {
     if (_loopMode) {
       loopStatusRow.style.display = 'flex';
       stopAfterBtn.style.display  = '';
-      loopCountEl.textContent     = `Video ${_loopCount} generating…`;
+      loopCountEl.textContent     = `Video ${_loopCount} generating...`;
     }
 
     try {
@@ -726,7 +726,7 @@ export function init(panel) {
       loopStatusRow.style.display = 'none';
       _loopCount = 0;
       if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
-        toast('Queue is full — wait for the current job to finish', 'error');
+        toast('Queue is full -- wait for the current job to finish', 'error');
       } else {
         toast(e.message || 'Submission failed', 'error');
       }

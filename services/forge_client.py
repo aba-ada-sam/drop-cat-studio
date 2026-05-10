@@ -33,7 +33,7 @@ def _api_base() -> str:
     return f"{_forge_url()}/sdapi/v1"
 
 
-# ── Health / discovery ────────────────────────────────────────────────────────
+# -- Health / discovery --------------------------------------------------------
 
 def forge_alive() -> bool:
     try:
@@ -176,7 +176,7 @@ def interrupt() -> bool:
         return False
 
 
-# ── Extension helpers ─────────────────────────────────────────────────────────
+# -- Extension helpers ---------------------------------------------------------
 
 def build_adetailer_args(
     enabled: bool = True,
@@ -187,7 +187,7 @@ def build_adetailer_args(
     mask_blur: int = 4,
     denoising_strength: float = 0.4,
 ) -> dict:
-    """Build alwayson_scripts entry for ADetailer. Supports 1–4 sweeps.
+    """Build alwayson_scripts entry for ADetailer. Supports 1-4 sweeps.
 
     Each sweep dict may contain:
       model, confidence, mask_blur, denoise, inpaint_only_masked, padding,
@@ -231,7 +231,7 @@ def build_forge_couple_args(
     """Build alwayson_scripts entry for Forge Couple (regional prompting).
 
     When enabled, the prompt is split by separator into regional sections.
-    Default separator is newline — each line targets a spatial region.
+    Default separator is newline -- each line targets a spatial region.
 
     NOTE: When using Forge Couple with our 3-column SD prompts, join
     columns with '\\n' (not BREAK). The BREAK keyword is for standard
@@ -287,7 +287,7 @@ def build_ultimate_upscale_args(
     }
 
 
-# ── Generation ────────────────────────────────────────────────────────────────
+# -- Generation ----------------------------------------------------------------
 
 def txt2img(
     prompt: str,
@@ -426,7 +426,7 @@ def img2img(
     return _call_api("/img2img", payload, timeout=600)
 
 
-# ── Internal ──────────────────────────────────────────────────────────────────
+# -- Internal ------------------------------------------------------------------
 
 def _call_api(endpoint: str, payload: dict, timeout: int = 300) -> dict:
     """Make a POST call to the Forge API and normalize the response."""

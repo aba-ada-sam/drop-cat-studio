@@ -245,8 +245,8 @@ def sample_frames_temporal(
     """Sample frames across a video's full duration for AI analysis.
 
     Strategy (matches the original DropCatGo approach):
-      - duration ≤ max_frames seconds  → 1 frame per second (centred in each second)
-      - duration  > max_frames seconds → max_frames evenly-spaced frames
+      - duration <= max_frames seconds  -> 1 frame per second (centred in each second)
+      - duration  > max_frames seconds -> max_frames evenly-spaced frames
 
     This gives the AI a temporal view of the video so it can write a story
     that tracks what actually happens over time, not just a snapshot.
@@ -256,7 +256,7 @@ def sample_frames_temporal(
         return []
 
     if dur <= max_frames:
-        # 1 fps — centre of each second
+        # 1 fps -- centre of each second
         positions = [(i + 0.5) / dur for i in range(int(dur))]
     else:
         # evenly spaced, avoid the very first and last frame

@@ -1,5 +1,5 @@
 /**
- * Drop Cat Go Studio — Cross-tab handoff store.
+ * Drop Cat Go Studio -- Cross-tab handoff store.
  *
  * One pending handoff at a time. A tab "sends" by calling handoff(),
  * then navigates. The destination tab calls consumeHandoff() when it

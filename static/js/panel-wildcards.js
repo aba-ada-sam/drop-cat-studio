@@ -1,5 +1,5 @@
-﻿/**
- * Drop Cat Go Studio — Wildcard Manager panel.
+/**
+ * Drop Cat Go Studio -- Wildcard Manager panel.
  * AI-powered wildcard file curation: prune, expand, merge, audit.
  */
 import { api } from './api.js?v=20260505e';
@@ -11,7 +11,7 @@ export function init(panel) {
   const layout = el('div', { style: 'max-width:800px; margin:0 auto' });
   panel.appendChild(layout);
 
-  // ── File List ─────────────────────────────────────────────────────────
+  // -- File List ---------------------------------------------------------
   const listCard = el('div', { class: 'card', style: 'margin-bottom:16px' });
   layout.appendChild(listCard);
   listCard.appendChild(el('h3', { text: 'Wildcard Files' }));
@@ -54,7 +54,7 @@ export function init(panel) {
     });
   }
 
-  // ── Operations ────────────────────────────────────────────────────────
+  // -- Operations --------------------------------------------------------
   const opsCard = el('div', { class: 'card' });
   layout.appendChild(opsCard);
 
@@ -67,7 +67,7 @@ export function init(panel) {
   const ops = ['Prune', 'Expand', 'Audit'];
   let activeOp = 0;
 
-  // ── Prune panel ───────────────────────────────────────────────────────
+  // -- Prune panel -------------------------------------------------------
   const prunePanel = el('div', { class: 'audio-content active' });
   const pruneLevel = createSlider(prunePanel, { label: 'Aggressiveness', min: 1, max: 5, step: 1, value: 3 });
   const pruneBtn = el('button', { class: 'btn btn-primary', text: 'Prune Selected File' });
@@ -96,7 +96,7 @@ export function init(panel) {
     pruneBtn.disabled = false;
   });
 
-  // ── Expand panel ──────────────────────────────────────────────────────
+  // -- Expand panel ------------------------------------------------------
   const expandPanel = el('div', { class: 'audio-content' });
   const expandCount = createSlider(expandPanel, { label: 'New Entries', min: 5, max: 50, step: 5, value: 20 });
   const expandBtn = el('button', { class: 'btn btn-primary', text: 'Expand Selected File' });
@@ -123,7 +123,7 @@ export function init(panel) {
     expandBtn.disabled = false;
   });
 
-  // ── Audit panel ───────────────────────────────────────────────────────
+  // -- Audit panel -------------------------------------------------------
   const auditPanel = el('div', { class: 'audio-content' });
   const auditBtn = el('button', { class: 'btn btn-primary', text: 'Audit Entire Library' });
   auditPanel.appendChild(auditBtn);

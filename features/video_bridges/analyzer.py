@@ -9,7 +9,7 @@ import threading
 from core.llm_client import TIER_BALANCED, TIER_POWER, parse_json_response
 from core.ffmpeg_utils import extract_frame_b64
 
-# One Ollama/vision call at a time — prevents VRAM explosions when multiple
+# One Ollama/vision call at a time -- prevents VRAM explosions when multiple
 # clips are analyzed concurrently or analysis overlaps with WanGP generation.
 _vision_lock = threading.Lock()
 
@@ -34,19 +34,19 @@ Include 3-5 timeline entries at key moments."""
 
 BRIDGE_PROMPT_SYSTEM = """You are a visionary motion designer who writes prompts for AI video generation.
 Your specialty is finding unexpected visual connections between two scenes and describing creative
-transformations — shapes morphing into other shapes, colors bleeding between worlds, objects
+transformations -- shapes morphing into other shapes, colors bleeding between worlds, objects
 metamorphosing into something new. You never describe static scenes. You only describe motion,
-change, and transformation. Output ONLY the prompt text — no JSON, no markdown, no explanation."""
+change, and transformation. Output ONLY the prompt text -- no JSON, no markdown, no explanation."""
 
 TRANSITION_STYLES = {
-    "continuity": "smooth motion continuity — match speed, direction, and energy so the cut is invisible",
-    "cinematic": "cinematic camera movement with atmospheric transformation — push, pull, or arc through the scene change",
-    "kinetic": "high-energy directional motion — velocity carries visual elements from one scene into the next",
-    "surreal": "dreamlike morph — impossible physics, organic shape-shifting, reality bending between scenes",
-    "meld": "full melt morph — textures liquefy, surfaces warp and flow, one material becomes the other",
-    "morph": "full melt morph — textures liquefy, surfaces warp and flow, one material becomes the other",
-    "shape_match": "shape-and-color matching — contours align first, then texture and color fields transfer",
-    "fade": "minimal linear dissolve — preserve scene geometry, avoid extra stylistic effects",
+    "continuity": "smooth motion continuity -- match speed, direction, and energy so the cut is invisible",
+    "cinematic": "cinematic camera movement with atmospheric transformation -- push, pull, or arc through the scene change",
+    "kinetic": "high-energy directional motion -- velocity carries visual elements from one scene into the next",
+    "surreal": "dreamlike morph -- impossible physics, organic shape-shifting, reality bending between scenes",
+    "meld": "full melt morph -- textures liquefy, surfaces warp and flow, one material becomes the other",
+    "morph": "full melt morph -- textures liquefy, surfaces warp and flow, one material becomes the other",
+    "shape_match": "shape-and-color matching -- contours align first, then texture and color fields transfer",
+    "fade": "minimal linear dissolve -- preserve scene geometry, avoid extra stylistic effects",
 }
 
 

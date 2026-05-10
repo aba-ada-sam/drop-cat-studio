@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified WanGP subprocess client — generates a single I2V video clip.
+"""Unified WanGP subprocess client -- generates a single I2V video clip.
 
 Merged from the three copies in Fun-Videos, BRIDGES, and Github Video Editor.
 Called as a subprocess with WanGP's own Python environment.
@@ -141,8 +141,8 @@ def main():
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
     # Force off ALL post-processing passes saved in WanGP's settings file.
-    # setdefault above won't override already-present keys — explicit assignment required.
-    # This block is the single authoritative list — add any new WanGP pass here if it
+    # setdefault above won't override already-present keys -- explicit assignment required.
+    # This block is the single authoritative list -- add any new WanGP pass here if it
     # reappears, rather than discovering it one generation at a time.
     defaults["spatial_upsampling"]    = ""  # no Lanczos/VAE upscaling pass
     defaults["temporal_upsampling"]   = ""  # no RIFE frame interpolation pass

@@ -1,6 +1,6 @@
-"""Batch video transforms — reverse, mirror, flip, speed, upscale, sharpen.
+"""Batch video transforms -- reverse, mirror, flip, speed, upscale, sharpen.
 
-Ported from Video Reverser/video_reverser.py (Tkinter → REST).
+Ported from Video Reverser/video_reverser.py (Tkinter -> REST).
 The core logic is the ffmpeg filter chain builder.
 """
 import logging

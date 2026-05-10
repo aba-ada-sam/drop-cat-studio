@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Queue tab -- GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
@@ -53,7 +53,7 @@ function _buildShell() {
     id: 'queue-pause-btn',
     class: 'btn btn-sm',
     text: '⏸ Pause',
-    title: 'Finish current job then hold — no new jobs will start',
+    title: 'Finish current job then hold -- no new jobs will start',
   });
   pauseBtn.addEventListener('click', async () => {
     if (_paused) {
@@ -72,7 +72,7 @@ function _buildShell() {
   const cancelAllBtn = el('button', {
     id: 'queue-cancel-all-btn',
     class: 'btn btn-sm',
-    text: '✕ Cancel waiting',
+    text: 'x Cancel waiting',
     title: 'Cancel all queued jobs (current job keeps running)',
     style: 'display:none;',
   });
@@ -103,11 +103,11 @@ function _buildShell() {
     id: 'queue-save-btn',
     class: 'btn btn-sm',
     text: '💾 Save Queue',
-    title: 'Save waiting jobs to disk — restore them after a restart',
+    title: 'Save waiting jobs to disk -- restore them after a restart',
   });
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
-    saveBtn.textContent = '…';
+    saveBtn.textContent = '...';
     const r = await api('/api/jobs/save-queue', { method: 'POST' }).catch(() => null);
     saveBtn.disabled = false;
     if (r?.saved != null) {
@@ -127,7 +127,7 @@ function _buildShell() {
   });
   restoreBtn.addEventListener('click', async () => {
     restoreBtn.disabled = true;
-    restoreBtn.textContent = '…';
+    restoreBtn.textContent = '...';
     const r = await api('/api/jobs/restore-queue', { method: 'POST' }).catch(() => null);
     restoreBtn.disabled = false;
     restoreBtn.style.display = 'none';
@@ -160,7 +160,7 @@ function _buildShell() {
     id: 'queue-empty',
     style: 'display:none; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:8px; color:var(--text-3); font-size:.85rem;',
   });
-  empty.appendChild(el('div', { style: 'font-size:2rem;', text: '✓' }));
+  empty.appendChild(el('div', { style: 'font-size:2rem;', text: 'v' }));
   empty.appendChild(el('div', { text: 'Queue is clear' }));
   list.appendChild(empty);
 }
@@ -186,8 +186,8 @@ function _syncPauseBtn() {
   if (!btn) return;
   btn.textContent = _paused ? '▶ Resume' : '⏸ Pause';
   btn.title = _paused
-    ? 'Resume — start processing queued jobs again'
-    : 'Finish current job then hold — no new jobs will start';
+    ? 'Resume -- start processing queued jobs again'
+    : 'Finish current job then hold -- no new jobs will start';
   btn.style.background = _paused ? 'var(--accent)' : '';
   btn.style.color      = _paused ? 'var(--bg-base)' : '';
 }
@@ -220,7 +220,7 @@ function _updateRailHint(data) {
   const nr = data.running?.length || 0;
   const nq = data.queued?.length  || 0;
   if (nr === 0 && nq === 0)    hint.textContent = '(idle)';
-  else if (data.paused)        hint.textContent = `(paused${nq ? ` · ${nq} waiting` : ''})`;
+  else if (data.paused)        hint.textContent = `(paused${nq ? ` . ${nq} waiting` : ''})`;
   else if (nr > 0 && nq === 0) hint.textContent = '(generating)';
   else if (nr > 0)             hint.textContent = `(generating + ${nq} waiting)`;
   else                         hint.textContent = `(${nq} queued)`;
@@ -266,16 +266,16 @@ function _render(data) {
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';
 
-  // Re-render cards — preserve existing DOM nodes by job id to avoid flicker
+  // Re-render cards -- preserve existing DOM nodes by job id to avoid flicker
   const existing = new Map();
   list.querySelectorAll('[data-job-id]').forEach(n => existing.set(n.dataset.jobId, n));
 
   const ordered = [];
   if (running.length)   ordered.push({ head: _paused ? '▶  Running (last before pause)' : '▶  Now Generating', jobs: running, active: true });
-  if (queued.length)    ordered.push({ head: `⋯  Waiting · ${queued.length}${_paused ? '  —  PAUSED' : ''}`, jobs: queued, active: true });
+  if (queued.length)    ordered.push({ head: `...  Waiting . ${queued.length}${_paused ? '  --  PAUSED' : ''}`, jobs: queued, active: true });
   if (completed.length) {
     const nFailed = completed.filter(j => j.status !== 'done').length;
-    const head = nFailed > 0 ? `Finished · ${nFailed} failed` : 'Finished';
+    const head = nFailed > 0 ? `Finished . ${nFailed} failed` : 'Finished';
     ordered.push({ head, jobs: completed, active: false });
   }
 
@@ -398,15 +398,15 @@ function _jobCard(job, active, idx, total) {
       retryBtn.addEventListener('click', async e => {
         e.stopPropagation();
         retryBtn.disabled = true;
-        retryBtn.textContent = '…';
+        retryBtn.textContent = '...';
         const r = await api(`/api/jobs/${job.id}/retry`, { method: 'POST' }).catch(() => null);
-        if (r?.ok) { toast('Retrying…', 'info'); _poll(); }
+        if (r?.ok) { toast('Retrying...', 'info'); _poll(); }
         else { toast('Could not retry this job', 'error'); retryBtn.disabled = false; retryBtn.textContent = '↺ Retry'; }
       });
       actions.appendChild(retryBtn);
     }
     // Dismiss
-    const xBtn = el('button', { class: 'btn btn-sm', text: '✕', title: 'Dismiss', style: 'font-size:.8rem; padding:3px 8px; opacity:.55;' });
+    const xBtn = el('button', { class: 'btn btn-sm', text: 'x', title: 'Dismiss', style: 'font-size:.8rem; padding:3px 8px; opacity:.55;' });
     xBtn.addEventListener('click', async e => {
       e.stopPropagation();
       xBtn.disabled = true;
@@ -417,7 +417,7 @@ function _jobCard(job, active, idx, total) {
   } else if (active) {
     if (isQueued && idx > 0) {
       // Promote to front
-      const upBtn = el('button', { class: 'btn btn-sm', text: '↑ Next', title: 'Move to front of queue', style: 'font-size:.75rem; padding:3px 8px;' });
+      const upBtn = el('button', { class: 'btn btn-sm', text: '^ Next', title: 'Move to front of queue', style: 'font-size:.75rem; padding:3px 8px;' });
       upBtn.addEventListener('click', async e => {
         e.stopPropagation();
         await api(`/api/jobs/${job.id}/promote`, { method: 'POST' }).catch(() => {});
@@ -429,12 +429,12 @@ function _jobCard(job, active, idx, total) {
     // GPU subprocess takes 2-4s to actually stop on its next tqdm step, but
     // the user sees their click take effect immediately rather than a half-faded
     // card that lingers while WanGP finishes the current denoising step.
-    const cancelBtn = el('button', { class: 'btn btn-sm', text: '✕ Cancel', title: 'Cancel this job', style: 'font-size:.75rem; padding:3px 8px;' });
+    const cancelBtn = el('button', { class: 'btn btn-sm', text: 'x Cancel', title: 'Cancel this job', style: 'font-size:.75rem; padding:3px 8px;' });
     cancelBtn.addEventListener('click', async e => {
       e.stopPropagation();
       cancelBtn.disabled = true;
       card.remove();
-      toast(job.status === 'running' ? 'Cancelling… (GPU will free in a moment)' : 'Job cancelled', 'info');
+      toast(job.status === 'running' ? 'Cancelling... (GPU will free in a moment)' : 'Job cancelled', 'info');
       await api(`/api/jobs/${job.id}/stop`, { method: 'POST' }).catch(() => {});
     });
     actions.appendChild(cancelBtn);

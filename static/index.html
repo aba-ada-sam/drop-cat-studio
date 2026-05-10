@@ -62,7 +62,7 @@
         <div class="header-center">
           <div class="ai-pills" id="ai-pills">
             <div class="ai-pill" id="ap-text">
-              <button class="ai-pill-btn" title="Text AI provider — click to switch">
+              <button class="ai-pill-btn" title="Text AI provider -- click to switch">
                 <span class="dot unknown" id="ap-text-dot" aria-hidden="true"></span>
                 <span class="ap-label">Text</span>
                 <span class="ap-caret" aria-hidden="true">▾</span>
@@ -70,7 +70,7 @@
               <div class="ap-menu" id="ap-text-menu" hidden></div>
             </div>
             <div class="ai-pill" id="ap-image">
-              <button class="ai-pill-btn" title="Image generation — click to manage">
+              <button class="ai-pill-btn" title="Image generation -- click to manage">
                 <span class="dot unknown" id="ap-image-dot" aria-hidden="true"></span>
                 <span class="ap-label">Image</span>
                 <span class="ap-caret" aria-hidden="true">▾</span>
@@ -78,7 +78,7 @@
               <div class="ap-menu" id="ap-image-menu" hidden></div>
             </div>
             <div class="ai-pill" id="ap-video">
-              <button class="ai-pill-btn" title="Video generation model — click to switch">
+              <button class="ai-pill-btn" title="Video generation model -- click to switch">
                 <span class="dot unknown" id="ap-video-dot" aria-hidden="true"></span>
                 <span class="ap-label">Video</span>
                 <span class="ap-caret" aria-hidden="true">▾</span>
@@ -86,7 +86,7 @@
               <div class="ap-menu" id="ap-video-menu" hidden></div>
             </div>
             <div class="ai-pill" id="ap-sound">
-              <button class="ai-pill-btn" title="Sound / music generation — click to manage">
+              <button class="ai-pill-btn" title="Sound / music generation -- click to manage">
                 <span class="dot unknown" id="ap-sound-dot" aria-hidden="true"></span>
                 <span class="ap-label">Sound</span>
                 <span class="ap-caret" aria-hidden="true">▾</span>
@@ -116,27 +116,27 @@
       <nav id="app-rail" aria-label="Creative Pipeline">
 
         <!-- Express -->
-        <button class="rail-tab active" data-tab="express" title="Quick Video — drop image, describe idea, create video">
+        <button class="rail-tab active" data-tab="express" title="Quick Video -- drop image, describe idea, create video">
           <span>Quick Video</span>
           <span class="rail-tab-hint">Quick start</span>
         </button>
 
         <button class="rail-tab" data-tab="sd-prompts" title="Generate images from prompts">
           <span>Generate Images</span>
-          <span class="rail-tab-hint">Prompts → Images</span>
+          <span class="rail-tab-hint">Prompts -> Images</span>
         </button>
 
-        <button class="rail-tab" data-tab="create-videos" title="Create Videos — images to video with AI music">
+        <button class="rail-tab" data-tab="create-videos" title="Create Videos -- images to video with AI music">
           <span>Create Videos</span>
           <span class="rail-tab-hint">Video + Audio</span>
         </button>
 
-        <button class="rail-tab" data-tab="song-video" title="Music Video — drop a song, get a full-length video">
+        <button class="rail-tab" data-tab="song-video" title="Music Video -- drop a song, get a full-length video">
           <span>Music Video</span>
-          <span class="rail-tab-hint">Song → video</span>
+          <span class="rail-tab-hint">Song -> video</span>
         </button>
 
-        <button class="rail-tab" data-tab="bridges" title="Add Transitions — AI bridge clips between video clips">
+        <button class="rail-tab" data-tab="bridges" title="Add Transitions -- AI bridge clips between video clips">
           <span>Add Transitions</span>
           <span class="rail-tab-hint">Sequence builder</span>
         </button>
@@ -151,7 +151,7 @@
           <span class="rail-tab-hint">Premiere + AE</span>
         </button>
 
-        <button class="rail-tab" data-tab="queue" title="Job queue — running and pending generations">
+        <button class="rail-tab" data-tab="queue" title="Job queue -- running and pending generations">
           <span>Queue</span>
           <span class="rail-tab-hint" id="queue-rail-hint">(no items processing)</span>
         </button>
@@ -205,7 +205,7 @@
         <span>Activity Log</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         <span id="app-version" style="font-size:.6rem; color:var(--text-3); opacity:.55; margin-left:6px; font-weight:400; letter-spacing:.02em;"></span>
-        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full app log in browser — paste this to your AI when troubleshooting" onclick="event.stopPropagation()">&#128196; copy for AI</a>
+        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full app log in browser -- paste this to your AI when troubleshooting" onclick="event.stopPropagation()">&#128196; copy for AI</a>
       </button>
       <div class="log-content" id="log-content">
         <div class="log-entries" id="log-entries" aria-live="polite" aria-atomic="false"></div>
@@ -214,7 +214,7 @@
 
   </div><!-- /#app -->
 
-  <!-- ── OVERLAYS ──────────────────────────────────────────────────────────── -->
+  <!-- -- OVERLAYS ------------------------------------------------------------ -->
 
   <!-- Command palette -->
   <div id="cmd-palette-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
@@ -301,7 +301,7 @@
           <div class="form-group">
             <label for="cfg-llm_provider">Provider</label>
             <select id="cfg-llm_provider">
-              <option value="auto">Auto — Anthropic → OpenAI → Ollama (best available)</option>
+              <option value="auto">Auto -- Anthropic -> OpenAI -> Ollama (best available)</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
               <option value="ollama">Ollama (Local)</option>

@@ -1,4 +1,4 @@
-"""OpenAI DALL-E image generation — SFW only (enforced by OpenAI policy)."""
+"""OpenAI DALL-E image generation -- SFW only (enforced by OpenAI policy)."""
 import base64
 import logging
 import time
@@ -18,7 +18,7 @@ def generate(prompt: str, aspect: str = "1:1", quality: str = "standard") -> tup
     from core.keys import get_key
     api_key = get_key("openai")
     if not api_key:
-        return None, "No OpenAI API key — add it in Settings"
+        return None, "No OpenAI API key -- add it in Settings"
 
     size = SIZES.get(aspect, "1024x1024")
 

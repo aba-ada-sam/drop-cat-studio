@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- Preset / recipe system (WS8).
  * Save/restore full tab configurations. Per-tab getSettings()/applySettings().
  * Presets persisted to /api/presets (disk-backed SQLite on server).

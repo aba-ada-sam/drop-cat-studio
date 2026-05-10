@@ -1,7 +1,7 @@
 """Smoke tests for Drop Cat Go Studio.
 
 Runs end-to-end against an in-process TestClient. No external services are
-exercised — LLM calls, WanGP, Forge, ACE-Step are all skipped or mocked.
+exercised -- LLM calls, WanGP, Forge, ACE-Step are all skipped or mocked.
 
 Usage:
     python tests/smoke.py          # prints each test + pass/fail, exits nonzero on any failure
@@ -63,13 +63,13 @@ def _test(name: str, fn):
 
 
 def main() -> int:
-    print("\nDrop Cat Go Studio — smoke tests\n" + "=" * 48)
+    print("\nDrop Cat Go Studio -- smoke tests\n" + "=" * 48)
 
-    # ── Import smoke ──────────────────────────────────────────────────────
+    # -- Import smoke ------------------------------------------------------
     print("\n[imports]")
 
     def import_app():
-        import app  # noqa: F401 — exercises module-level side effects
+        import app  # noqa: F401 -- exercises module-level side effects
     _test("import app", import_app)
 
     def import_features():
@@ -85,7 +85,7 @@ def main() -> int:
         from core import nsfw_sanitizer  # noqa: F401
     _test("import core", import_core)
 
-    # ── HTTP smoke (in-process via TestClient) ────────────────────────────
+    # -- HTTP smoke (in-process via TestClient) ----------------------------
     print("\n[http]")
 
     _setup_isolated_paths()
@@ -113,7 +113,7 @@ def main() -> int:
             assert "export" in r.text or "import" in r.text, "app.js looks empty"
         _test("GET /static/js/app.js", static_serves)
 
-        # ── AI intent validation (no LLM call — 400 paths) ────────────────
+        # -- AI intent validation (no LLM call -- 400 paths) ----------------
         def ai_intent_empty_query():
             r = client.post("/api/ai-intent", json={"tab": "sd-prompts", "query": ""})
             assert r.status_code == 400, r.status_code
@@ -124,7 +124,7 @@ def main() -> int:
             assert r.status_code == 400, r.status_code
         _test("POST /api/ai-intent bogus tab -> 400", ai_intent_bogus_tab)
 
-        # ── Gallery round-trip ────────────────────────────────────────────
+        # -- Gallery round-trip --------------------------------------------
         def gallery_roundtrip():
             payload = {
                 "tab": "sd-prompts",
@@ -147,7 +147,7 @@ def main() -> int:
             assert r.status_code == 200, r.status_code
         _test("gallery POST/GET/DELETE round-trip", gallery_roundtrip)
 
-        # ── Presets round-trip ────────────────────────────────────────────
+        # -- Presets round-trip --------------------------------------------
         def presets_roundtrip():
             payload = {
                 "tab": "sd-prompts",
@@ -166,13 +166,13 @@ def main() -> int:
             assert r.status_code == 200, r.status_code
         _test("presets POST/GET/DELETE round-trip", presets_roundtrip)
 
-        # ── Prompt enhance validation ─────────────────────────────────────
+        # -- Prompt enhance validation -------------------------------------
         def enhance_empty_idea():
             r = client.post("/api/prompts/enhance", json={"idea": "", "provider": "local"})
             assert r.status_code == 400, r.status_code
         _test("POST /api/prompts/enhance empty idea -> 400", enhance_empty_idea)
 
-        # ── Wildcards endpoint ────────────────────────────────────────────
+        # -- Wildcards endpoint --------------------------------------------
         def wildcards_list():
             r = client.get("/api/prompts/wildcards")
             assert r.status_code == 200, r.status_code
@@ -183,7 +183,7 @@ def main() -> int:
             assert "camera" in payload_s or "mood" in payload_s, "no inline wildcards surfaced"
         _test("GET /api/prompts/wildcards", wildcards_list)
 
-    # ── Summary ───────────────────────────────────────────────────────────
+    # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")
     if _FAILED:

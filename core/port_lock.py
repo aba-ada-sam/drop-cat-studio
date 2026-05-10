@@ -39,7 +39,7 @@ def _port_free(port: int) -> bool:
 def find_free_port(start: int = PORT_START, tries: int = PORT_TRIES) -> int:
     """Return the first free TCP port in [start, start+tries).
 
-    Raises RuntimeError if the whole range is occupied — highly unlikely,
+    Raises RuntimeError if the whole range is occupied -- highly unlikely,
     but honest failure beats silently colliding with another app.
     """
     for offset in range(tries):
@@ -59,7 +59,7 @@ def write_port_file(port: int) -> None:
         tmp.write_text(json.dumps(data), encoding="utf-8")
         os.replace(tmp, PORT_FILE)
     except Exception as e:
-        log.warning("port_lock: couldn't write %s (%s) — launchers may default to 7860", PORT_FILE, e)
+        log.warning("port_lock: couldn't write %s (%s) -- launchers may default to 7860", PORT_FILE, e)
 
 
 def read_port_file() -> int | None:

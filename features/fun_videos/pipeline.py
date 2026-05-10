@@ -26,7 +26,7 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
     """Sample video frames optimised for music/lyric analysis.
 
     Cloud vision APIs (Anthropic, OpenAI) handle 8 frames at 256px cleanly.
-    Ollama context windows are tight — cap at 3 frames so we don't blow them.
+    Ollama context windows are tight -- cap at 3 frames so we don't blow them.
     256px is plenty for mood, color, and motion analysis; fine detail wastes tokens.
     """
     is_ollama = llm_router._provider() == "ollama"
@@ -58,7 +58,7 @@ def _finalize_prompt(prompt: str, model_name: str, motion_style: str | None = No
 
 
 def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
-    """Center-crop + resize src image to exactly target_w × target_h.
+    """Center-crop + resize src image to exactly target_w x target_h.
 
     WanGP's LTX-2 VAE encoder fails or loops at step 0 when the input image
     dimensions differ from the output resolution.  Pre-matching them here
@@ -74,18 +74,18 @@ def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
         tr = target_w / target_h
         ir = iw / ih
         if abs(ir - tr) > 0.02:
-            if ir > tr:            # wider — trim sides
+            if ir > tr:            # wider -- trim sides
                 nw = int(ih * tr)
                 x  = (iw - nw) // 2
                 img = img.crop((x, 0, x + nw, ih))
-            else:                   # taller — trim top/bottom
+            else:                   # taller -- trim top/bottom
                 nh = int(iw / tr)
                 y  = (ih - nh) // 2
                 img = img.crop((0, y, iw, y + nh))
         img = img.resize((target_w, target_h), _Img.LANCZOS)
         out = job_dir / "input_prep.jpg"
         img.save(str(out), "JPEG", quality=95)
-        log.info("Input image resized %dx%d → %dx%d for WanGP", iw, ih, target_w, target_h)
+        log.info("Input image resized %dx%d -> %dx%d for WanGP", iw, ih, target_w, target_h)
         return str(out)
     except Exception as e:
         log.warning("Image prep failed, using original: %s", e)
@@ -96,7 +96,7 @@ def _prep_photo(src: str, target_w: int, target_h: int, job_dir: Path) -> str:
 
 
 def run_prep(job, photo_path, settings):
-    """Phase 0: AI pre-analysis — LLM calls only, no GPU.
+    """Phase 0: AI pre-analysis -- LLM calls only, no GPU.
 
     Runs outside the GPU queue so it executes concurrently while the GPU
     is busy with a prior job. Results are written into settings so that
@@ -116,7 +116,7 @@ def run_prep(job, photo_path, settings):
 
     video_prompt = settings.get("video_prompt", "")
 
-    # Always auto-generate a kinetic video prompt when the user hasn't written one —
+    # Always auto-generate a kinetic video prompt when the user hasn't written one --
     # applies to all modes (audio, video-only, MMAudio). Without this, blank prompts
     # produce frozen/static clips regardless of audio settings.
     if not video_prompt:
@@ -135,7 +135,7 @@ def run_prep(job, photo_path, settings):
             log.warning("[warning] Auto prompt failed: %s", e)
 
     if not needs_audio or (music_prompt and instrumental):
-        return  # no audio prep needed — video prompt is already set above
+        return  # no audio prep needed -- video prompt is already set above
 
     job.update(progress=5, message="Getting music direction...")
     try:
@@ -224,7 +224,7 @@ def run_pipeline(job, photo_path, settings):
     if photo_path:
         slug = Path(photo_path).stem[:20].replace(" ", "_")
     else:
-        # Text-to-video mode — slug from prompt
+        # Text-to-video mode -- slug from prompt
         video_prompt_raw = settings.get("video_prompt", "")
         slug = "t2v_" + "".join(c if c.isalnum() else "_" for c in video_prompt_raw[:16]).strip("_")
     job_dir = OUTPUT_DIR / ts / f"{slug}_{job.id}"
@@ -252,7 +252,7 @@ def run_pipeline(job, photo_path, settings):
     def _stopped():
         return job.stop_event.is_set()
 
-    # Copy source photo (optional — None for text-to-video)
+    # Copy source photo (optional -- None for text-to-video)
     if photo_path:
         src_copy = job_dir / f"source{Path(photo_path).suffix}"
         shutil.copy2(photo_path, src_copy)
@@ -264,7 +264,7 @@ def run_pipeline(job, photo_path, settings):
     if use_wildcards and music_prompt:
         music_prompt = expand(music_prompt, fs_root)
 
-    # ── Phase 0: Pre-analysis — ALL Ollama calls happen HERE, before WanGP ──
+    # -- Phase 0: Pre-analysis -- ALL Ollama calls happen HERE, before WanGP --
     # Running Ollama concurrently with WanGP causes VRAM thrashing: both models
     # fight for the same GPU memory and denoising steps balloon from 3s to 15s+.
     # By finishing all AI analysis on the SOURCE IMAGE before WanGP starts we
@@ -299,7 +299,7 @@ def run_pipeline(job, photo_path, settings):
     if _stopped():
         return
 
-    # ── Phase 1: Video Generation ────────────────────────────────────────
+    # -- Phase 1: Video Generation ----------------------------------------
     # Free all VRAM before WanGP starts: unload Forge SD AND kill ACE-Step.
     # ACE-Step holds ~12 GB VRAM when idle; WanGP needs the full 16 GB.
     # ACE-Step is restarted after Phase 1 and loads during Phase 2.
@@ -364,9 +364,9 @@ def run_pipeline(job, photo_path, settings):
         _video_succeeded = bool(video_path)
     finally:
         if forge_unloaded_for_video:
-            # Only reload Forge immediately if audio won't follow — when ACE-Step
+            # Only reload Forge immediately if audio won't follow -- when ACE-Step
             # is coming next, keep Forge unloaded so we avoid a pointless
-            # reload→unload cycle (saves ~6s and a VRAM spike).
+            # reload->unload cycle (saves ~6s and a VRAM spike).
             audio_will_follow = _video_succeeded and not skip_audio and not use_mmaudio
             if not audio_will_follow:
                 reload_checkpoint()
@@ -380,7 +380,7 @@ def run_pipeline(job, photo_path, settings):
             threading.Thread(target=_svc.restart_service, args=("wangp",), daemon=True).start()
             raise RuntimeError(
                 "CUDA out of memory -- WanGP is restarting. "
-                "Try fewer steps (≤30), shorter duration (≤8s), or a smaller model, then generate again."
+                "Try fewer steps (<=30), shorter duration (<=8s), or a smaller model, then generate again."
             )
         raise RuntimeError(f"Video generation failed: {raw}")
 
@@ -388,7 +388,7 @@ def run_pipeline(job, photo_path, settings):
     job.meta["video_path"] = video_path
     job.meta["video_prompt"] = video_prompt
 
-    # Start ACE-Step NOW — WanGP has released the GPU, so ACE-Step gets full VRAM.
+    # Start ACE-Step NOW -- WanGP has released the GPU, so ACE-Step gets full VRAM.
     # Phase 2 (music prompt via Ollama, ~30s) runs while ACE-Step loads.
     if not skip_audio and not use_mmaudio:
         try:
@@ -399,7 +399,7 @@ def run_pipeline(job, photo_path, settings):
         except Exception as _e:
             log.debug("ACE-Step post-video warm skipped: %s", _e)
 
-    # ── Early exit for video-only ────────────────────────────────────────
+    # -- Early exit for video-only ----------------------------------------
     if skip_audio:
         job.output = video_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
@@ -407,8 +407,8 @@ def run_pipeline(job, photo_path, settings):
         _gallery(video_path)
         return
 
-    # ── LTX-2 native audio (MMAudio) ─────────────────────────────────────
-    # WanGP already embedded audio via MMAudio — skip ACE-Step entirely.
+    # -- LTX-2 native audio (MMAudio) -------------------------------------
+    # WanGP already embedded audio via MMAudio -- skip ACE-Step entirely.
     if use_mmaudio:
         job.output = video_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
@@ -421,7 +421,7 @@ def run_pipeline(job, photo_path, settings):
             log.warning("session.add_file failed: %s", e)
         return
 
-    # ── Phase 2: Music Prompt Generation ─────────────────────────────────
+    # -- Phase 2: Music Prompt Generation ---------------------------------
     # Skip if pre-analysis (Phase 0) already produced a music prompt.
     if not music_prompt:
         job.update(progress=65, message="Analyzing video for music...")
@@ -442,12 +442,12 @@ def run_pipeline(job, photo_path, settings):
     if use_wildcards and music_prompt:
         music_prompt = expand(music_prompt, fs_root)
 
-    # ── Phase 2b: Auto-generate lyrics if needed ──────────────────────────
+    # -- Phase 2b: Auto-generate lyrics if needed --------------------------
     # Skip if pre-analysis (Phase 0) already produced lyrics.
     if not instrumental and not lyrics:
         job.update(progress=68, message="Writing lyrics...")
         try:
-            # Reuse a single frame sample for lyrics — no need to re-sample
+            # Reuse a single frame sample for lyrics -- no need to re-sample
             frames = _sample_music_frames(video_path, llm_router)
             if frames:
                 lyrics = analyzer.generate_lyrics(llm_router, frames, music_prompt, lyric_direction or user_direction)
@@ -460,10 +460,10 @@ def run_pipeline(job, photo_path, settings):
         lyrics = "[verse]\nSomething moves through the frame\nNothing stays the same\n[chorus]\nLife in motion\nSlipping through the frame"
         _log("[info] Using fallback lyrics")
 
-    # ── Phase 3: Audio Generation ────────────────────────────────────────
+    # -- Phase 3: Audio Generation ----------------------------------------
     job.update(progress=70, message="Generating audio...")
     # Forge may already be unloaded (we skipped the reload after WanGP to save
-    # time). Call unload anyway — it's idempotent and ensures a clean state.
+    # time). Call unload anyway -- it's idempotent and ensures a clean state.
     # Track whether it was running so we know to reload at the end.
     forge_was_unloaded = forge_unloaded_for_video or unload_checkpoint()
 
@@ -508,7 +508,7 @@ def run_pipeline(job, photo_path, settings):
     job.meta["audio_path"] = audio_path
     job.meta["music_prompt"] = music_prompt
 
-    # ── Phase 4: Merge ───────────────────────────────────────────────────
+    # -- Phase 4: Merge ---------------------------------------------------
     job.update(progress=90, message="Merging video + audio...")
 
     model_tag = settings.get("model_name", "ltx2").split()[0].lower()
@@ -518,7 +518,7 @@ def run_pipeline(job, photo_path, settings):
 
     from core.session import get_current as get_session
     if merged:
-        # ── Phase 5: Upscale (optional) ───────────────────────────────────────
+        # -- Phase 5: Upscale (optional) ---------------------------------------
         upscale_on     = settings.get("upscale", True)
         upscale_scale  = float(settings.get("upscale_scale", 2.0))
         upscale_method = settings.get("upscale_method", "ffmpeg")

@@ -21,7 +21,7 @@ export class RegionEditor {
     this._init();
   }
 
-  // ── Public API ───────────────────────────────────────────────────────────────
+  // -- Public API ---------------------------------------------------------------
 
   setFromGrid(rows, cols, direction) {
     this._rows = rows;
@@ -40,7 +40,7 @@ export class RegionEditor {
     this._render();
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────────────
+  // -- Init ---------------------------------------------------------------------
 
   _init() {
     this._buildRegions();
@@ -153,7 +153,7 @@ export class RegionEditor {
       }
     }
 
-    // Draggable divider lines (simplified — visual guides)
+    // Draggable divider lines (simplified -- visual guides)
     if (this._dir === 'Horizontal' && this._cols > 1) {
       for (let c = 1; c < this._cols; c++) {
         const lineX = c / this._cols * svgW;

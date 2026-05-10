@@ -1,5 +1,5 @@
 """
-Music Mixer — FFmpeg-based audio mixing utility.
+Music Mixer -- FFmpeg-based audio mixing utility.
 Mixes background music under video audio (ducked at -18dBFS relative to dialogue).
 Loops music if shorter than video. Trims if longer.
 """
@@ -135,7 +135,7 @@ def mix_music_under_video(
         #   - If video has audio: mix music + video audio with amix
         #   - If no video audio: just add music as-is
 
-        music_vol = 10 ** (music_volume_db / 20.0)  # dB → linear
+        music_vol = 10 ** (music_volume_db / 20.0)  # dB -> linear
         dialogue_vol = 10 ** (dialogue_volume_db / 20.0)
 
         if has_video_audio:
@@ -157,7 +157,7 @@ def mix_music_under_video(
                 tmp_out,
             ]
         else:
-            # No original audio — just add music
+            # No original audio -- just add music
             filter_complex = (
                 f"[1:a]volume={music_vol:.4f},atrim=0:{video_dur:.3f},asetpts=PTS-STARTPTS[music]"
             )

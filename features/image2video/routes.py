@@ -1,4 +1,4 @@
-"""Image-to-Video API routes — /api/i2v/*
+"""Image-to-Video API routes -- /api/i2v/*
 
 Ken Burns slideshow generator. Upload images, configure motion/duration,
 generate combined or separate videos.
@@ -58,7 +58,7 @@ def _normalize_spec(item) -> dict:
     }
 
 
-# ── Upload ───────────────────────────────────────────────────────────────────
+# -- Upload -------------------------------------------------------------------
 
 @router.post("/upload")
 async def upload_images(files: list[UploadFile] = File(...)):
@@ -74,7 +74,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
     return {"images": saved}
 
 
-# ── Folder scan ──────────────────────────────────────────────────────────────
+# -- Folder scan --------------------------------------------------------------
 
 @router.post("/scan_folder")
 async def scan_folder(request: Request):
@@ -98,7 +98,7 @@ async def serve_image(path: str = Query(...)):
     return FileResponse(str(p))
 
 
-# ── Generate ─────────────────────────────────────────────────────────────────
+# -- Generate -----------------------------------------------------------------
 
 def _i2v_worker(job, image_specs, settings):
     """Background worker for image-to-video generation."""

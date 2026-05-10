@@ -18,7 +18,7 @@ let _tasks    = [];      // current planned task list
 let _jobId    = null;
 let _polling  = false;
 
-// ── Init ─────────────────────────────────────────────────────────────────────
+// -- Init ---------------------------------------------------------------------
 
 export function init(panel) {
   _panel = panel;
@@ -28,7 +28,7 @@ export function init(panel) {
   setInterval(_checkStatus, 10000);
 }
 
-// ── Status ────────────────────────────────────────────────────────────────────
+// -- Status --------------------------------------------------------------------
 
 async function _checkStatus() {
   try {
@@ -50,7 +50,7 @@ function _updatePill(id, connected, label) {
   txt.textContent = label + (connected ? '' : ' -- panel not open');
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// -- Render --------------------------------------------------------------------
 
 function _render() {
   _panel.innerHTML = '';
@@ -147,7 +147,7 @@ function _makePill(id, label) {
   return pill;
 }
 
-// ── Plan ─────────────────────────────────────────────────────────────────────
+// -- Plan ---------------------------------------------------------------------
 
 async function _onPlan() {
   const goal = (_panel.querySelector('#adobe-goal')?.value || '').trim();
@@ -210,7 +210,7 @@ function _hidePlan() {
   if (s) s.style.display = 'none';
 }
 
-// ── Run ──────────────────────────────────────────────────────────────────────
+// -- Run ----------------------------------------------------------------------
 
 async function _onRun() {
   if (!_tasks.length) { toast('Generate a plan first', 'warning'); return; }
@@ -270,7 +270,7 @@ function _pollProgress(jobId) {
   );
 }
 
-// ── Step icon updates ─────────────────────────────────────────────────────────
+// -- Step icon updates ---------------------------------------------------------
 
 const _STATUS_ICON = {
   ok:      { symbol: 'OK',   color: '#4caf50' },
@@ -299,7 +299,7 @@ function _updateStepIcon(i, status) {
   bullet.textContent      = info.symbol;
 }
 
-// ── Results panel ────────────────────────────────────────────────────────────
+// -- Results panel ------------------------------------------------------------
 
 function _showResults(results) {
   const section = _panel.querySelector('#adobe-results-section');
@@ -331,7 +331,7 @@ function _hideResults() {
   if (s) s.style.display = 'none';
 }
 
-// ── Util ──────────────────────────────────────────────────────────────────────
+// -- Util ----------------------------------------------------------------------
 
 function _appTag(app) {
   const isPr = (app || '').toLowerCase().startsWith('prem') || app === 'pr' || app === 'ppro';

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Drop Cat Go Studio -- palette-driven AI intent.
  * Each tab registers {getContext, applySettings} on init. When the user types
  * free text in the command palette and picks "Ask AI", we dispatch to the
@@ -71,7 +71,7 @@ export function undoLast() {
   }
   const applier = _appliers[entry.tabId];
   if (!applier) {
-    toast(`Can't undo — ${entry.tabId} tab isn't available`, 'info');
+    toast(`Can't undo -- ${entry.tabId} tab isn't available`, 'info');
     return false;
   }
   try {
@@ -122,7 +122,7 @@ export async function askAI(query) {
     const summary = applied.length <= 3
       ? applied.join(', ')
       : `${applied.length} settings`;
-    toast(`${res.reply || 'Done'} (${summary}) — Ctrl+K → Undo to revert`, 'success', { duration: 6000 });
+    toast(`${res.reply || 'Done'} (${summary}) -- Ctrl+K -> Undo to revert`, 'success', { duration: 6000 });
   } catch (e) {
     toast(e.message || 'AI request failed', 'error');
   }

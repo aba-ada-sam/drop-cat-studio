@@ -18,7 +18,7 @@ if exist ".dcs-port" (
     )
 )
 
-:: No .dcs-port — scan the likely range and kill whatever's listening.
+:: No .dcs-port -- scan the likely range and kill whatever's listening.
 :: This is a fallback only; normally the .dcs-port path hits.
 set KILLED=0
 for /l %%P in (7860,1,7879) do (

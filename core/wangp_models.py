@@ -1,4 +1,4 @@
-"""Shared WanGP model definitions — single source of truth.
+"""Shared WanGP model definitions -- single source of truth.
 
 Previously duplicated (and diverging) between services/wan_bridge_client.py and
 services/wangp_worker.py. Both files now import from here. (BUG-02 / FLW-04)
@@ -100,7 +100,7 @@ SAFE_DEFAULTS: dict = {
     "sliding_window_size": 129,   # WanGP UI default; only activates if video > this frame count
     "sliding_window_overlap": 17,
     "sliding_window_discard_last_frames": 0,
-    # Keys accessed directly via inputs["key"] in wgp.py — must be present or KeyError
+    # Keys accessed directly via inputs["key"] in wgp.py -- must be present or KeyError
     "multi_images_gen_type": 0,
     "image_quality": "",
     "video_quality": "",

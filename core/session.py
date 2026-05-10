@@ -1,4 +1,4 @@
-"""Project/session state management — tracks files flowing between features.
+"""Project/session state management -- tracks files flowing between features.
 
 A session is a working context where uploads and outputs are shared.
 When Fun Videos generates a clip, it auto-appears in Bridges' input picker.
@@ -52,7 +52,7 @@ class Session:
 
     @property
     def dir(self) -> Path:
-        # BUG-10: no side effects — just return the path.
+        # BUG-10: no side effects -- just return the path.
         return self._dir
 
     def add_file(self, filename: str, kind: str, source: str, **meta):
@@ -130,7 +130,7 @@ class Session:
             return None
 
 
-# ── Session manager (singleton) ──────────────────────────────────────────────
+# -- Session manager (singleton) ----------------------------------------------
 # BUG-09: initialize eagerly at module load to eliminate the check-then-set
 # race condition under asyncio concurrency.
 _current_session: Session = Session()

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Persistent WanGP worker — loads the model ONCE and serves generation requests.
+"""Persistent WanGP worker -- loads the model ONCE and serves generation requests.
 
 Runs as a long-lived subprocess with WanGP's Python environment.
 Copied from DropCatGo-Fun-Videos_w_Audio/wangp_worker.py with import path
 updated to use core.wangp_runtime.
 
 Exposes a tiny HTTP server:
-  GET  /health    → {"ok": true, "model": "..."}
-  POST /generate  → submit a generation job (JSON body)
-  GET  /status    → current generation status
+  GET  /health    -> {"ok": true, "model": "..."}
+  POST /generate  -> submit a generation job (JSON body)
+  GET  /status    -> current generation status
 """
 
 import argparse
@@ -30,16 +30,16 @@ if PROJECT_DIR not in sys.path:
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-# ── Model mapping (BUG-02/FLW-04: import from single source of truth) ────────
+# -- Model mapping (BUG-02/FLW-04: import from single source of truth) --------
 
 try:
     from core.wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
 except ImportError:
-    # Fallback if run before sys.path is configured — shouldn't happen in practice
+    # Fallback if run before sys.path is configured -- shouldn't happen in practice
     from wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
 
 
-# ── Global state ─────────────────────────────────────────────────────────────
+# -- Global state -------------------------------------------------------------
 
 wgp = None
 app_path = None
@@ -47,7 +47,7 @@ current_model = None
 _lock = threading.Lock()
 _job_status = {"busy": False, "progress": "", "step": 0, "total_steps": 0, "result": None, "error": None}
 
-# Monotonic generation counter — incremented on each accepted /generate.
+# Monotonic generation counter -- incremented on each accepted /generate.
 # DCS pollers embed the expected token so stale threads can't steal a new job's result.
 _generation_token = 0
 
@@ -112,7 +112,7 @@ def _get_status_snapshot() -> dict:
         return snap
 
 
-# ── Generation logic ─────────────────────────────────────────────────────────
+# -- Generation logic ---------------------------------------------------------
 
 def _do_generate(params: dict) -> dict:
     global current_model
@@ -176,7 +176,7 @@ def _do_generate(params: dict) -> dict:
         defaults.setdefault(k, v)
     # Force off ALL post-processing passes that WanGP saves to its settings file.
     # setdefault cannot override already-present keys, so explicit assignment is required.
-    # This block is the single authoritative list — add any new WanGP pass here if it
+    # This block is the single authoritative list -- add any new WanGP pass here if it
     # reappears, rather than discovering it one generation at a time.
     defaults["spatial_upsampling"]   = ""   # no Lanczos/VAE upscaling pass
     defaults["temporal_upsampling"]  = ""   # no RIFE frame interpolation pass
@@ -210,7 +210,7 @@ def _do_generate(params: dict) -> dict:
     if activated_loras:
         defaults["activated_loras"] = activated_loras
         defaults["loras_multipliers"] = loras_multipliers
-    # Input mode — video-to-video takes priority over image inputs
+    # Input mode -- video-to-video takes priority over image inputs
     # WanGP expects video_source as a plain string path, not a list
     if start_videos:
         defaults["video_source"]      = start_videos[0]
@@ -225,7 +225,7 @@ def _do_generate(params: dict) -> dict:
             "SE" if start_images and end_images else ""
         )
 
-    # server_config alone isn't enough — WanGP copies save_path into module-level
+    # server_config alone isn't enough -- WanGP copies save_path into module-level
     # variables at import time. Override those directly so files land in output_dir.
     os.makedirs(output_dir, exist_ok=True)
     wgp.server_config["save_path"] = output_dir
@@ -336,7 +336,7 @@ def _do_generate(params: dict) -> dict:
     return {"ok": True, "output": output_path, "error": None}
 
 
-# ── HTTP server ──────────────────────────────────────────────────────────────
+# -- HTTP server --------------------------------------------------------------
 
 class WorkerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -421,7 +421,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, 404)
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 def main():
     global wgp, app_path
@@ -542,7 +542,7 @@ def main():
 
     # BUG-03: ThreadingHTTPServer lets /status polls and /generate run concurrently
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkerHandler)
-    print(f"[worker] Ready — listening on port {args.port}", flush=True)
+    print(f"[worker] Ready -- listening on port {args.port}", flush=True)
 
     try:
         server.serve_forever()

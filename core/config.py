@@ -14,7 +14,7 @@ from pathlib import Path
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS: dict = {
-    # ── Global (shared across features) ──────────────────────────────────
+    # -- Global (shared across features) ----------------------------------
     "debug_mode": False,            # show service terminal windows when True
     "gpu_job_timeout_seconds": 1800, # max seconds before a GPU job is killed (30 min)
     "gpu_queue_max_depth": 200,      # max jobs waiting in the GPU queue
@@ -24,18 +24,18 @@ DEFAULTS: dict = {
     "resolution": "480p",
     "acestep_root": "",
 
-    # ── LLM Provider ─────────────────────────────────────────────────────
+    # -- LLM Provider -----------------------------------------------------
     "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
     "anthropic_key": "",
     "openai_key": "",
 
-    # ── Image Provider ────────────────────────────────────────────────────
+    # -- Image Provider ----------------------------------------------------
     "image_provider": "forge",        # forge | openai
 
-    # ── Audio Provider ────────────────────────────────────────────────────
+    # -- Audio Provider ----------------------------------------------------
     "audio_provider": "acestep",      # acestep | ltx_native (LTX-2 MMAudio)
 
-    # ── Image-to-Video (i2v_) ────────────────────────────────────────────
+    # -- Image-to-Video (i2v_) --------------------------------------------
     "i2v_ken_burns_zoom": 5,        # 0-20 %
     "i2v_img_dur": 3.0,
     "i2v_fade_dur": 0.5,
@@ -47,7 +47,7 @@ DEFAULTS: dict = {
     "i2v_crf": 18,
     "i2v_fps": 30,
 
-    # ── Fun Videos (fun_) ────────────────────────────────────────────────
+    # -- Fun Videos (fun_) ------------------------------------------------
     "fun_multi_num_clips": 2,          # default clip count for multi-video story
     "fun_multi_clip_duration": 5.0,    # default seconds per clip in multi-video mode
     "fun_director_passes": 0,          # 0=off, 1=one review pass, 2=two review passes
@@ -62,7 +62,7 @@ DEFAULTS: dict = {
     "fun_num_prompts": 4,
     "fun_creativity": 8.0,
 
-    # ── Video Bridges (bridge_) ──────────────────────────────────────────
+    # -- Video Bridges (bridge_) ------------------------------------------
     "bridge_duration": 10.0,
     "bridge_image_duration": 2.5,
     "bridge_steps": 20,
@@ -78,7 +78,7 @@ DEFAULTS: dict = {
     "bridge_allow_fallback": True,
     "bridge_auto_analyze": True,
 
-    # ── SD Prompts (sd_) ─────────────────────────────────────────────────
+    # -- SD Prompts (sd_) -------------------------------------------------
     "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
     "forge_url": "http://127.0.0.1:7861",
@@ -95,12 +95,12 @@ DEFAULTS: dict = {
     "sd_step1_default_suffix":   "",
     "sd_step1_default_provider": "local",    # "local" (Ollama) | "cloud" (Anthropic/OpenAI)
 
-    # ── Video Tools (tools_) ─────────────────────────────────────────────
+    # -- Video Tools (tools_) ---------------------------------------------
     "tools_crf": 18,
     "tools_out_format": "mp4",
     "tools_out_dir": "",
 
-    # ── Ollama (local AI — no API keys required) ─────────────────────────
+    # -- Ollama (local AI -- no API keys required) -------------------------
     # qwen3-vl supports vision (images) and text; swap for any installed model.
     "ollama_host":           "http://localhost:11434",
     "ollama_fast_model":     "qwen3-vl:8b",
@@ -108,7 +108,7 @@ DEFAULTS: dict = {
     "ollama_power_model":    "qwen3-vl:30b",
     "ollama_vision_model":   "qwen3-vl:8b",
 
-    # ── AI model aliases (mapped to Ollama) ───────────────────────────────
+    # -- AI model aliases (mapped to Ollama) -------------------------------
     "ai_model_fast":     "qwen3-vl:8b",
     "ai_model_balanced": "qwen3-vl:8b",
     "ai_model_power":    "qwen3-vl:30b",
@@ -134,7 +134,7 @@ def _validate_config(data: dict) -> dict:
         # int/float are interchangeable
         if expected in (int, float) and isinstance(value, (int, float)):
             continue
-        _log.warning("[Config] Key '%s' expected %s, got %s (%r) — using default",
+        _log.warning("[Config] Key '%s' expected %s, got %s (%r) -- using default",
                      key, expected.__name__, type(value).__name__, value)
         data[key] = DEFAULTS[key]
     return data
@@ -199,7 +199,7 @@ def set_val(key: str, value):
     save({key: value})
 
 
-# ── WanGP path helpers ───────────────────────────────────────────────────────
+# -- WanGP path helpers -------------------------------------------------------
 
 WAN_INDICATORS = ["app.py", "wan_video", "wgp.py", "wgp"]
 
@@ -229,17 +229,17 @@ def validate_wan2gp(path: str) -> tuple[bool, str]:
     if not p.exists():
         return False, f"Directory not found: {path}"
     if (p / "wgp.py").exists():
-        return True, "OK — found wgp.py"
+        return True, "OK -- found wgp.py"
     has_indicator = any((p / ind).exists() for ind in WAN_INDICATORS)
     if not has_indicator:
         return False, (
             f"Does not look like a Wan2GP directory "
             f"(expected wgp.py or one of: {', '.join(WAN_INDICATORS)})"
         )
-    return True, "OK — Wan2GP directory found"
+    return True, "OK -- Wan2GP directory found"
 
 
-# ── ACE-Step path helpers ────────────────────────────────────────────────────
+# -- ACE-Step path helpers ----------------------------------------------------
 
 def get_acestep_root() -> Path | None:
     """Return ACE-Step root as Path if configured and exists, else None."""
@@ -270,7 +270,7 @@ def validate_acestep(path: str) -> tuple[bool, str]:
     # Accept venv-based OR uv-based installs
     python = p / ".venv" / "Scripts" / "python.exe"
     if not python.exists() and not shutil.which("uv"):
-        return False, "Neither .venv\\Scripts\\python.exe nor 'uv' found — cannot start ACE-Step"
+        return False, "Neither .venv\\Scripts\\python.exe nor 'uv' found -- cannot start ACE-Step"
     return True, f"ACE-Step found at: {p}"
 
 
@@ -292,10 +292,10 @@ def auto_detect_acestep() -> str | None:
     return None
 
 
-# ── Config migration from old apps ──────────────────────────────────────────
+# -- Config migration from old apps ------------------------------------------
 
 _MIGRATION_MAP = {
-    # Fun-Videos keys → unified keys
+    # Fun-Videos keys -> unified keys
     "video_duration": "fun_video_duration",
     "video_steps": "fun_video_steps",
     "video_guidance": "fun_video_guidance",
@@ -305,7 +305,7 @@ _MIGRATION_MAP = {
     "audio_format": "fun_audio_format",
     "audio_instrumental": "fun_audio_instrumental",
     "num_prompts": "fun_num_prompts",
-    # Image2Video keys → unified keys
+    # Image2Video keys -> unified keys
     "ken_burns_zoom": "i2v_ken_burns_zoom",
     "img_dur": "i2v_img_dur",
     "fade_dur": "i2v_fade_dur",
@@ -321,7 +321,7 @@ _MIGRATION_MAP = {
 def migrate_from_old_apps():
     """Import settings from original app config files (run once on first start)."""
     if CONFIG_FILE.exists():
-        return  # already have a config — don't overwrite
+        return  # already have a config -- don't overwrite
 
     migrated: dict = {}
     ai_editors = CONFIG_FILE.parent.parent  # AI Editors directory

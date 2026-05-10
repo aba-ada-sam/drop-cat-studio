@@ -1,5 +1,5 @@
 @echo off
-:: Drop Cat Go Studio — Electron launcher
+:: Drop Cat Go Studio -- Electron launcher
 :: Starts the Python server in the background, then opens the Electron window.
 
 setlocal

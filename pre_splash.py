@@ -1,4 +1,4 @@
-"""pre_splash.py — Immediate startup indicator for Drop Cat Go Studio.
+"""pre_splash.py -- Immediate startup indicator for Drop Cat Go Studio.
 
 Launched by launch.bat before anything else (git pull, Python server start).
 Shows a branded borderless window in under a second so Andrew knows his
@@ -30,7 +30,7 @@ def _poll(root: tk.Tk, status: tk.StringVar) -> None:
             try:
                 data = json.loads(PORT_FILE.read_text(encoding="utf-8"))
                 if data.get("port"):
-                    root.after(0, lambda: status.set("Opening browser…"))
+                    root.after(0, lambda: status.set("Opening browser..."))
                     time.sleep(0.7)
                     root.after(0, root.destroy)
                     return
@@ -76,7 +76,7 @@ def main() -> None:
     # Title block
     tk.Label(root, text="Drop Cat Go Studio",
              bg=BG, fg=GOLD, font=("Segoe UI", 19, "bold")).pack(pady=(22, 2))
-    tk.Label(root, text="Andrew’s AI Video Production",
+    tk.Label(root, text="Andrew's AI Video Production",
              bg=BG, fg=CREAM, font=("Segoe UI", 10)).pack()
 
     # Spinner canvas
@@ -94,7 +94,7 @@ def main() -> None:
     _spin()
 
     # Status line
-    status = tk.StringVar(value="Starting up…")
+    status = tk.StringVar(value="Starting up...")
     tk.Label(root, textvariable=status,
              bg=BG, fg=DIM, font=("Segoe UI", 9)).pack()
 

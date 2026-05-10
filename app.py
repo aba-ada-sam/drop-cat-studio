@@ -1,4 +1,4 @@
-"""Drop Cat Go Studio — Unified Video Production App.
+"""Drop Cat Go Studio -- Unified Video Production App.
 
 Single FastAPI server combining Fun Videos, Video Bridges, SD Prompts,
 Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
@@ -11,7 +11,7 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
-# Single-instance guard — only when run as the server entry point, not when
+# Single-instance guard -- only when run as the server entry point, not when
 # imported by tests or other modules. Uses os._exit so atexit/lifespan don't run.
 if _sys.modules.get("__main__") is _sys.modules.get("app"):
     import ctypes as _ctypes, os as _os
@@ -46,7 +46,7 @@ from core.llm_client import LLMClient
 from core.llm_router import LLMRouter, TIER_BALANCED, TIER_FAST
 from services import manager as svc
 
-# ── Logging setup ────────────────────────────────────────────────────────────
+# -- Logging setup ------------------------------------------------------------
 
 _LOG_DIR  = Path(__file__).resolve().parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
@@ -67,8 +67,8 @@ log = logging.getLogger("dropcat")
 log_buffer.install_handler(level=logging.DEBUG)
 log_buffer.capture_stdout()
 
-# ── Globals (initialized in lifespan) ────────────────────────────────────────
-# Use a mutable dict — dict item mutation is always visible module-wide without
+# -- Globals (initialized in lifespan) ----------------------------------------
+# Use a mutable dict -- dict item mutation is always visible module-wide without
 # relying on 'global' inside async generators (broken in Python 3.10 asynccontextmanager).
 
 _g: dict = {
@@ -101,7 +101,7 @@ def _read_git_version() -> str:
             ["git", "log", "-1", "--format=%h"],
             cwd=str(APP_DIR), text=True, stderr=_sp.DEVNULL, timeout=5,
         ).strip()
-        return f"{date} · {sha}" if date and sha else "unknown"
+        return f"{date} . {sha}" if date and sha else "unknown"
     except Exception:
         return "unknown"
 
@@ -109,7 +109,7 @@ def _read_git_version() -> str:
 APP_VERSION = _read_git_version()
 
 
-# ── Lifespan ─────────────────────────────────────────────────────────────────
+# -- Lifespan -----------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -154,7 +154,7 @@ async def lifespan(app: FastAPI):
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 
-    # Periodic job cleanup — purge completed/errored jobs older than 24h
+    # Periodic job cleanup -- purge completed/errored jobs older than 24h
     def _cleanup_jobs():
         import time as _time
         while True:
@@ -176,7 +176,7 @@ async def lifespan(app: FastAPI):
     port_lock.clear_port_file()
 
 
-# ── App ──────────────────────────────────────────────────────────────────────
+# -- App ----------------------------------------------------------------------
 
 app = FastAPI(title="Drop Cat Go Studio", lifespan=lifespan)
 
@@ -205,13 +205,13 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 # StaticFiles path joining on Windows breaks for nested subdirectories.
 
 
-# ── Global accessors (use these in features instead of direct import) ─────────
+# -- Global accessors (use these in features instead of direct import) ---------
 
 def get_llm_router():
     """Return the initialized LLMRouter."""
     r = _g["llm_router"]
     if r is None:
-        raise RuntimeError("LLM router not initialized — app not fully started")
+        raise RuntimeError("LLM router not initialized -- app not fully started")
     return r
 
 
@@ -219,11 +219,11 @@ def get_job_manager():
     """Return the initialized JobManager."""
     jm = _g["job_manager"]
     if jm is None:
-        raise RuntimeError("Job manager not initialized — app not fully started")
+        raise RuntimeError("Job manager not initialized -- app not fully started")
     return jm
 
 
-# ── Global routes ────────────────────────────────────────────────────────────
+# -- Global routes ------------------------------------------------------------
 
 _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
@@ -260,7 +260,7 @@ async def serve_sw():
     return FileResponse(str(STATIC_DIR / "sw.js"), media_type="application/javascript")
 
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# -- Config -------------------------------------------------------------------
 
 @app.get("/api/config")
 async def get_config():
@@ -291,7 +291,7 @@ async def validate_acestep(request: Request):
     return {"ok": ok, "message": msg}
 
 
-# ── Ollama config ─────────────────────────────────────────────────────────────
+# -- Ollama config -------------------------------------------------------------
 
 @app.get("/api/ollama/models")
 async def ollama_models():
@@ -326,7 +326,7 @@ async def keys_status():
     return keys.status()
 
 
-# ── LLM provider config ───────────────────────────────────────────────────────
+# -- LLM provider config -------------------------------------------------------
 
 @app.get("/api/llm/config")
 async def get_llm_config():
@@ -367,7 +367,7 @@ async def save_llm_config(request: Request):
     return await get_llm_config()
 
 
-# ── Services ─────────────────────────────────────────────────────────────────
+# -- Services -----------------------------------------------------------------
 
 @app.get("/api/services")
 async def services_status():
@@ -418,7 +418,7 @@ async def restart_app():
     return {"ok": True, "message": "Restarting -- reconnect in ~10 seconds"}
 
 
-# ── Logs ─────────────────────────────────────────────────────────────────────
+# -- Logs ---------------------------------------------------------------------
 
 @app.get("/api/logs")
 async def get_logs(since: int = 0):
@@ -446,7 +446,7 @@ async def get_log_file(lines: int = 200):
     """Return the last N lines from the persistent log file as plain text."""
     from fastapi.responses import PlainTextResponse
     if not _LOG_FILE.exists():
-        return PlainTextResponse("Log file not found yet — restart the app.\n")
+        return PlainTextResponse("Log file not found yet -- restart the app.\n")
     try:
         all_lines = _LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         tail = "\n".join(all_lines[-lines:])
@@ -455,7 +455,7 @@ async def get_log_file(lines: int = 200):
         return PlainTextResponse(f"Error reading log file: {e}\n")
 
 
-# ── Jobs ─────────────────────────────────────────────────────────────────────
+# -- Jobs ---------------------------------------------------------------------
 
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
@@ -755,7 +755,7 @@ async def extract_frame_endpoint(request: Request):
 
     b64 = extract_frame_b64(str(vid_path), position=position)
     if not b64:
-        raise HTTPException(status_code=500, detail="Frame extraction failed — check ffmpeg")
+        raise HTTPException(status_code=500, detail="Frame extraction failed -- check ffmpeg")
 
     frames_dir = OUTPUT_DIR / "frames"
     frames_dir.mkdir(exist_ok=True)
@@ -787,8 +787,8 @@ async def delete_output(request: Request):
     try:
         if delete_folder:
             # BUG-06: use explicit depth check instead of the old inverted logic.
-            # depth == 2 → output/date/jobfolder/file.mp4  (delete jobfolder)
-            # depth == 1 → output/jobfolder/file.mp4        (delete jobfolder)
+            # depth == 2 -> output/date/jobfolder/file.mp4  (delete jobfolder)
+            # depth == 1 -> output/jobfolder/file.mp4        (delete jobfolder)
             job_dir = file_path.parent
             try:
                 depth = len(file_path.relative_to(out_root).parts)
@@ -797,7 +797,7 @@ async def delete_output(request: Request):
             if depth >= 2 and str(job_dir).startswith(str(out_root)) and job_dir != out_root:
                 _shutil.rmtree(str(job_dir), ignore_errors=True)
             else:
-                return JSONResponse({"error": "Cannot delete — unexpected depth"}, status_code=400)
+                return JSONResponse({"error": "Cannot delete -- unexpected depth"}, status_code=400)
         else:
             file_path.unlink(missing_ok=True)
         return {"ok": True}
@@ -813,7 +813,7 @@ async def queue_status():
     return _g["job_manager"].queue_status()
 
 
-# ── Wildcards ────────────────────────────────────────────────────────────────
+# -- Wildcards ----------------------------------------------------------------
 
 @app.get("/api/wildcards")
 async def get_wildcards():
@@ -829,7 +829,7 @@ async def expand_wildcards(request: Request):
     return {"expanded": wildcards.expand(text, fs_root)}
 
 
-# ── Session ──────────────────────────────────────────────────────────────────
+# -- Session ------------------------------------------------------------------
 
 @app.get("/api/session")
 async def get_session_info():
@@ -870,7 +870,7 @@ async def switch_session(session_id: str):
     return JSONResponse({"error": "Session not found"}, 404)
 
 
-# ── Windows theme ────────────────────────────────────────────────────────────
+# -- Windows theme ------------------------------------------------------------
 
 @app.get("/api/theme")
 async def windows_theme():
@@ -893,7 +893,7 @@ async def windows_theme():
     return {"accent": accent, "dark": dark}
 
 
-# ── System info ──────────────────────────────────────────────────────────────
+# -- System info --------------------------------------------------------------
 
 @app.get("/api/system")
 async def system_info():
@@ -909,7 +909,7 @@ async def system_info():
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 
 
-# ── AI intent (palette-driven) ───────────────────────────────────────────────
+# -- AI intent (palette-driven) -----------------------------------------------
 
 _AI_INTENT_TABS: dict[str, dict] = {
     "sd-prompts": {
@@ -1035,7 +1035,7 @@ async def ai_intent(request: Request):
         settings = settings_raw
     else:
         settings = {k: v for k, v in parsed.items() if k != "reply"}
-    # Drop junk keys we don't accept for this tab — the JS applier ignores
+    # Drop junk keys we don't accept for this tab -- the JS applier ignores
     # unknown keys too, but filtering server-side keeps the toast count honest.
     allowed = _allowed_intent_keys(tab)
     settings = {k: v for k, v in settings.items() if k in allowed}
@@ -1050,7 +1050,7 @@ async def ai_intent(request: Request):
     return {"reply": reply, "settings": settings, "provider_used": provider_used}
 
 
-# ── Feature routers ──────────────────────────────────────────────────────────
+# -- Feature routers ----------------------------------------------------------
 from features.image2video.routes import router as i2v_router
 from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
@@ -1068,7 +1068,7 @@ app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
 app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 
 
-# ── Presets (WS8) ────────────────────────────────────────────────────────────
+# -- Presets (WS8) ------------------------------------------------------------
 
 _PRESETS_DB = APP_DIR / "presets.db"
 
@@ -1145,7 +1145,7 @@ async def preset_delete(preset_id: str):
     return {"ok": True}
 
 
-# ── Gallery (WS2) ────────────────────────────────────────────────────────────
+# -- Gallery (WS2) ------------------------------------------------------------
 
 _GALLERY_DB = APP_DIR / "gallery.db"
 
@@ -1305,15 +1305,15 @@ async def gallery_delete(item_id: str):
     return {"ok": True}
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+# -- Entry point --------------------------------------------------------------
 
 class _NoiseFilter(logging.Filter):
     """Drop high-frequency polling and harmless TCP noise from all log handlers.
 
     Two categories of noise:
-    1. HTTP access-log entries from endpoints that poll every 1-3s — no
+    1. HTTP access-log entries from endpoints that poll every 1-3s -- no
        diagnostic value and drown out real events.
-    2. ConnectionResetError / WinError 10054 — asyncio TCP teardown when
+    2. ConnectionResetError / WinError 10054 -- asyncio TCP teardown when
        Chrome closes a video-stream connection.  Not an error; fires a
        10-line traceback for every 206 Partial Content response.
     """
