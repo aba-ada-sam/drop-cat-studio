@@ -1266,10 +1266,10 @@ def run_multi_pipeline(job, photo_path, settings):
         return
 
     if not audio_path:
-        _log(f"[warning] Audio failed: {audio_err} — returning video only")
+        _log(f"[warning] Audio failed: {audio_err} -- video saved without audio")
         job.output = concat_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Multi-video done ({len(clip_paths)} clips, audio failed)"
+        job.message = f"Video saved ({len(clip_paths)} clips, no audio -- ACE-Step failed: {audio_err})"
         return
 
     # ── Phase 4: Merge ────────────────────────────────────────────────────
@@ -1334,18 +1334,19 @@ def run_multi_pipeline(job, photo_path, settings):
         except Exception as e:
             log.warning("session.add_file failed: %s", e)
 
-        # Clean up raw clip intermediates — only the merged file is needed
-        for cp in clip_paths:
-            if cp != merged:
+        # Clean up ALL intermediates -- only the merged file is needed.
+        # Director re-shoots leave orphaned clip_*_p{N}_*.mp4, concat_p{N}_*.mp4,
+        # frame_p{N}_*.png, and review-frame rv_*.jpg files behind that the
+        # narrow clip_paths sweep would miss. Glob each pattern instead.
+        merged_abs = os.path.abspath(merged)
+        for pattern in ("clip_*.mp4", "concat_*.mp4", "frame_*.png", "rv_*.jpg"):
+            for stale in job_dir.glob(pattern):
                 try:
-                    os.remove(cp)
+                    if os.path.abspath(str(stale)) == merged_abs:
+                        continue
+                    stale.unlink()
                 except Exception:
                     pass
-        if concat_path not in (merged, *clip_paths):
-            try:
-                os.remove(concat_path)
-            except Exception:
-                pass
     else:
         job.output = concat_path
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
