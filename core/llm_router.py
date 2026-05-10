@@ -199,6 +199,7 @@ class LLMRouter:
 
     def _call_with_retry(self, fn, max_attempts: int = 3, provider: str | None = None) -> str:
         last_exc = None
+        actual_provider = provider or self._provider()
         for attempt in range(max_attempts):
             try:
                 result = fn()
@@ -211,7 +212,8 @@ class LLMRouter:
                 exc_type = type(exc).__name__
                 # Never retry permanent errors (wrong key, model not found).
                 if any(t in exc_type for t in ("AuthenticationError", "NotFoundError",
-                                               "PermissionDeniedError", "InvalidRequestError")):
+                                               "PermissionDeniedError", "InvalidRequestError",
+                                               "BadRequestError")):
                     log.error("LLM permanent error (will not retry): %s", exc)
                     raise
                 # Never retry timeouts for Ollama -- the model is already running; a
@@ -222,7 +224,6 @@ class LLMRouter:
                 # wrongly let force_provider="ollama" calls retry through 3x backoff.
                 is_timeout = ("timeout" in exc_str or "timed out" in exc_str
                               or "ReadTimeout" in exc_type or "ConnectTimeout" in exc_type)
-                actual_provider = provider or self._provider()
                 if is_timeout and actual_provider == "ollama":
                     log.warning("Ollama timeout (no retry -- Ollama is busy): %s", exc)
                     raise
@@ -242,5 +243,5 @@ class LLMRouter:
                     )
                     time.sleep(wait)
         raise RuntimeError(
-            f"LLM ({self._provider()}) failed after {max_attempts} attempts: {last_exc}"
+            f"LLM ({actual_provider}) failed after {max_attempts} attempts: {last_exc}"
         ) from last_exc
