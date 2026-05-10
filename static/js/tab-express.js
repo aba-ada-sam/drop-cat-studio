@@ -43,21 +43,23 @@ export function init(panel) {
     'LTX-2 Dev13B':           ['16:9', '9:16', '1:1', '4:3', '3:4'],
   };
 
-  // Per-model optimal defaults.
-  // LTX-2 Distilled is a distilled model (like SDXL-Lightning) -- its denoising
-  // schedule is compressed into 4-8 steps. Running 20+ steps overshoots the
-  // schedule and degrades quality. CFG 3 matches its low-guidance training regime.
-  // Wan2.1 models are standard diffusion -- they need 25 steps and higher CFG.
+  // Per-model optimal defaults. These are a fallback only -- the live values
+  // come from /api/fun/models (server-side MODELS in video_generator.py) and
+  // override these the moment the API responds. Keep these in sync as a safety
+  // net for the brief moment between UI build and the API call returning.
+  // LTX-2 Distilled: distilled two-stage schedule, 4-8 steps optimal (>8 regresses).
+  // LTX-2 Dev13B: full schedule, 40 steps optimal (25 undersamples).
+  // Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot, 25 steps standard.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 12, guidance: 3.0, duration: 5 },
-    'LTX-2 Dev13B':           { steps: 25, guidance: 3.5, duration: 5 },
-    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 5 },
-    'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 5 },
-    'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 5 },
-    'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 5 },
+    'LTX-2 Dev19B Distilled': { steps: 8,  guidance: 3.0, duration: 6 },
+    'LTX-2 Dev13B':           { steps: 40, guidance: 3.5, duration: 6 },
+    'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 6 },
+    'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 6 },
+    'Wan2.1-T2V-14B':         { steps: 25, guidance: 5.5, duration: 6 },
+    'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 6 },
   };
   let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 5;
+  let _duration   = 6;
   let _allModels  = {};
   let _ratio      = '16:9';
   let _qualityId  = 'fast';
@@ -444,18 +446,30 @@ export function init(panel) {
   });
 
   function _applyModelDefaults(modelName) {
-    const d = MODEL_DEFAULTS[modelName];
-    if (!d) return;
+    // Prefer live server values (server-side MODELS dict) over hardcoded
+    // fallbacks. The server uses keys: steps, guidance, default_dur.
+    const live = _allModels[modelName] || {};
+    const fallback = MODEL_DEFAULTS[modelName] || {};
+    const steps    = live.steps    ?? fallback.steps;
+    const guidance = live.guidance ?? fallback.guidance;
+    const duration = live.default_dur ?? fallback.duration;
+    if (steps == null && guidance == null && duration == null) return;
     const tierMax = QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20;
-    _guidance = d.guidance;
-    guidSlider.value = String(_guidance);
-    guidLabel.textContent = String(_guidance);
-    _steps = d.steps;
-    stepsSlider.value = String(_steps);
-    stepsLabel.textContent = String(_steps);
-    _duration = Math.min(d.duration, tierMax);
-    durSlider.value = String(_duration);
-    durLabel.textContent = `${_duration}s`;
+    if (guidance != null) {
+      _guidance = guidance;
+      guidSlider.value = String(_guidance);
+      guidLabel.textContent = String(_guidance);
+    }
+    if (steps != null) {
+      _steps = steps;
+      stepsSlider.value = String(_steps);
+      stepsLabel.textContent = String(_steps);
+    }
+    if (duration != null) {
+      _duration = Math.min(duration, tierMax);
+      durSlider.value = String(_duration);
+      durLabel.textContent = `${_duration}s`;
+    }
   }
 
   const { row: qualRow } = _makeChipGroup(
