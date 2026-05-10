@@ -20,7 +20,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.request import urlopen
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -80,10 +79,10 @@ def clear_port_file() -> None:
         pass
 
 
-def server_responds(port: int, timeout: float = 1.5) -> bool:
+def server_responds(port: int, timeout: float = 0.3) -> bool:
     try:
-        with urlopen(f"http://127.0.0.1:{port}/api/system", timeout=timeout) as r:
-            return r.status == 200
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
     except Exception:
         return False
 
