@@ -206,7 +206,12 @@ def generate_audio(
     payload = {
         "prompt": effective_prompt,
         "lyrics": effective_lyrics,
-        "chunk_mask_mode": "none",
+        # ACE-Step 1.5 dropped 'none' from chunk_mask_mode -- it now only
+        # accepts 'explicit' or 'auto' (pydantic literal validation rejects
+        # 'none' with HTTP 500). 'auto' is the closest behavioral match: lets
+        # ACE-Step decide chunking by itself, same effective output as 'none'
+        # for our short single-block tracks.
+        "chunk_mask_mode": "auto",
         "thinking": False,
         "audio_duration": duration,
         "audio_format": audio_format,
