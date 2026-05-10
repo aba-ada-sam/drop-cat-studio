@@ -122,23 +122,28 @@ If no style is given, use dry wit and light irony (Randy Newman / Flight of the 
 CRITICAL TIMING RULE: ACE-Step begins your lyrics on beat 1, bar 1.
 The FIRST word must be the FIRST thing sung -- no empty sections, no instrumental intros.
 
-Format -- exactly THREE sections, EXACTLY TWO LINES EACH (no more, no less):
+Format -- exactly THREE sections, EXACTLY TWO LINES of REAL CONTENT EACH.
+Each non-marker line must be an actual lyric: real words a human will sing.
+Do NOT emit placeholder text, section markers alone, syllable counts, or notes
+in parentheses. Write the actual song.
+
+EXAMPLE for a dark cabaret song about a city evening:
 [verse]
-Line 1 (7-9 syllables)
-Line 2 (7-9 syllables)
+Streetlamps blink in the rain
+Every shadow knows my name
 [chorus]
-Line 1 (6-9 syllables)
-Line 2 (6-9 syllables)
+Spin me round on the wire
+Dance me close to the fire
 [verse]
-Line 1 (7-9 syllables)
-Line 2 (7-9 syllables)
+Midnight wears a velvet glove
+Holds me down and calls it love
 
 STRICT RULES:
-- Exactly 3 sections, exactly 2 lines per section = 6 lines total
-- NEVER write 3 or 4 lines in a section -- 2 lines only
+- Exactly 3 sections, exactly 2 content lines per section = 6 content lines total
+- Verse lines 7-9 syllables, chorus lines 6-9 syllables (count syllables silently, never write the counts)
 - Loose rhyme: AABB or ABAB
-- Under 50 words total -- ACE-Step needs room to breathe between sections
-- Return ONLY the raw lyrics text -- no JSON, no quotes, no explanation, no section numbering"""
+- Under 50 words total of actual lyric content -- ACE-Step needs room to breathe
+- Return ONLY the raw lyrics text -- no JSON, no quotes, no explanation, no section numbering, no placeholder text"""
 
 
 def generate_video_prompt_auto(router, user_direction: str = "", subject_hint: str = "") -> str:
@@ -329,9 +334,34 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
             # and writes lines that actually rhyme and have wit.
             tier=TIER_BALANCED,
             system=LYRICS_SYSTEM,
-            max_tokens=200,  # ~150 tokens output keeps ACE-Step under its KV block limit
+            max_tokens=300,  # bumped from 200: 6 content lines + 3 markers + occasional
+                              # preamble fits in 300 with margin; 200 was tight when the
+                              # model echoed any structure before the actual lyrics.
         )
-        return text.strip() if text else ""
+        result = (text or "").strip()
+        log.info("[lyrics] LLM returned %d chars: %r", len(result), result[:200])
+
+        # Sanity check: detect markers-only / placeholder-only output. When the
+        # model echoes the system-prompt skeleton without filling in real lyric
+        # lines, ACE-Step sings nothing and we ship a silent vocal track. Treat
+        # that case as a failure so the caller's fallback lyrics get used.
+        import re as _re_v
+        non_marker_lines = [
+            ln.strip() for ln in result.splitlines()
+            if ln.strip() and not _re_v.match(r"^\s*\[[^\]]+\]\s*$", ln.strip())
+        ]
+        # Also flag literal placeholder text from the template ("Line 1 (...)", etc.)
+        placeholder_re = _re_v.compile(r"^\s*line\s*\d+\s*\(", _re_v.IGNORECASE)
+        real_lines = [ln for ln in non_marker_lines if not placeholder_re.match(ln)]
+        if len(real_lines) < 2:
+            log.warning(
+                "[lyrics] LLM returned %d real content lines (need >= 2) -- "
+                "treating as failure so the pipeline fallback kicks in. Raw: %r",
+                len(real_lines), result[:300],
+            )
+            return ""
+
+        return result
     except Exception as e:
         log.warning("Lyrics generation failed: %s", e)
         return ""
