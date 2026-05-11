@@ -94,9 +94,9 @@ function _render() {
   // -- Plan button --
   const planBtn = el('button', {
     id: 'adobe-plan-btn',
-    className: 'btn btn-primary',
+    class: 'btn btn-primary',
     style: 'align-self:flex-start;flex-shrink:0',
-    textContent: 'Make a Plan',
+    text: 'Make a Plan',
     onclick: _onPlan,
   });
   _panel.appendChild(planBtn);
@@ -140,8 +140,8 @@ function _makePill(id, label) {
            'background:var(--surface-2);border:1px solid var(--border-1);border-radius:20px;' +
            'font-size:.75rem;color:var(--text-muted)'
   });
-  const dot = el('span', { className: 'adobe-dot disconnected' });
-  const lbl = el('span', { className: 'adobe-pill-label', textContent: label });
+  const dot = el('span', { class: 'adobe-dot disconnected' });
+  const lbl = el('span', { class: 'adobe-pill-label', text: label });
   pill.appendChild(dot);
   pill.appendChild(lbl);
   return pill;
