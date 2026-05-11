@@ -578,8 +578,9 @@ export function init(panel) {
   // the Express tab. Single-clip mode is still available by unchecking.
   let _multiVideo      = true;
   let _targetSecs      = 16;
-  // Music off by default for speed; user can flip on per-job
-  let _addMusic        = false;
+  // Quick Video is built around music + lyrics. Default ON; user can untick
+  // to ship a silent clip when iterating on the visuals alone.
+  let _addMusic        = true;
   let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
   let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
@@ -647,9 +648,10 @@ export function init(panel) {
     style: 'font-size:.73rem; color:var(--text-3); line-height:1.5; padding:4px 0;',
     text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Audio spans the whole piece.',
   }));
-  // Music toggle -- off by default so default jobs are silent + fast
+  // Music + lyrics toggle. ON by default -- this is the headline feature.
+  // Untick to ship a silent clip when iterating on visuals only.
   const musicChk = el('input', {
-    type: 'checkbox', id: 'express-add-music',
+    type: 'checkbox', id: 'express-music',
     style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;',
   });
   musicChk.checked = _addMusic;
@@ -657,9 +659,9 @@ export function init(panel) {
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     musicChk,
     el('label', {
-      for: 'express-add-music',
+      for: 'express-music',
       style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;',
-      text: 'Add music (adds ~30-60s)',
+      text: 'Music with lyrics (untick for silent clip)',
     }),
   ]));
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
