@@ -355,41 +355,52 @@ _AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea
 
 You have five choices. Pick the ONE that fits best.
 
-  action
-    Wan2.1 I2V 480P. For REAL PHOTOS of people, animals, or objects doing
-    kinetic things -- talking, gesturing, moving, dancing. Strong subject
-    anchoring for photographic sources. DO NOT use for paintings, illustrations,
-    fantasy art, or subjects made of complex organic/fantastical materials.
-
-  action_hd
-    Wan2.1 I2V 720P. Same as 'action' but higher resolution. Pick ONLY when
-    the user explicitly asks for HD/sharp/professional output AND the source
-    is a real photo with kinetic intent.
-
-  story_action
-    Wan I2V 480P with dynamic motion. For PAINTED, ILLUSTRATED, FANTASY, or
-    STYLIZED images where the subject should move. Also use for any multi-clip
-    (3+ clips) job with a complex or detailed subject, even if the source is
-    a real photo. Wan I2V anchors the subject well for motion across clips.
+IMPORTANT BIAS: prefer 'calm' or 'long_story' (LTX) unless the prompt
+EXPLICITLY requires kinetic body motion. The user pays a 5-10x time
+penalty for the 'action' choices, so use them only when calm motion
+would clearly fail the scene. Atmospheric movement, environmental
+effects (wind, water, light, fabric, smoke, hair sway), and slow
+breathing-photograph energy all belong in calm/long_story.
 
   calm
-    LTX-2 Distilled. Subject does NOT move -- only environment moves (light
-    shifting, steam rising, water rippling). For atmospheric/still-life ideas
-    only: a misty landscape, a quiet object, an explicitly "breathing
-    photograph" mood. Do NOT pick just because the photo is a portrait.
+    LTX-2 Distilled. PREFERRED CHOICE in most cases. Subject moves
+    SUBTLY -- breathing, slight head turn, fabric drift -- while
+    environment animates: light shifting, steam rising, water rippling,
+    leaves trembling, fabric in wind. Picks for: portraits, landscapes,
+    objects, mood pieces, anything that is not a pure 'X is sprinting'
+    action shot. Fast (~30s/clip).
 
   long_story
-    LTX-2 Distilled, subject still. For multi-clip atmospheric stories where
-    the scene must be preserved and nothing should move.
+    LTX-2 Distilled, same calm character, for multi-clip ATMOSPHERIC
+    stories where the scene must be preserved across clips. Pick this
+    over 'calm' when the user wants a 3+ clip narrative with mood.
+    Fast (~30s/clip).
 
-CRITICAL RULE: If the source image looks like a painting, illustration, digital
-art, fantasy scene, or contains a subject made of non-photographic material
-(plants, fire, crystal, smoke, leaves, fantasy textures, etc.) -- pick
-'story_action' if the idea involves motion, or 'calm' if the idea is still.
-NEVER pick 'action' or 'action_hd' for painted/illustrated sources.
+  action
+    Wan2.1 I2V 480P. For REAL PHOTOS where the subject must do an
+    EXPLICITLY KINETIC action that calm motion cannot fake: sprinting,
+    leaping, throwing a punch, dancing energetically. The prompt must
+    contain action verbs (sprint, run, jump, slam, hit, throw, leap,
+    dance, kick). SLOW: ~3-5 min/clip on a 16GB card. Use only when
+    necessary.
 
-When in doubt and the source is a real photo, pick 'action'.
-When in doubt and the source is illustrated/painted, pick 'story_action'.
+  action_hd
+    Wan2.1 I2V 720P. Same as 'action' but 720p output. Pick ONLY when
+    user explicitly asks for HD/sharp output. SLOWER: ~5-8 min/clip.
+
+  story_action
+    Wan I2V 480P with dynamic motion across multiple clips. For
+    multi-clip stories where every clip needs kinetic action that
+    calm motion cannot render. Same VRAM and time cost as 'action'.
+
+DECISION TREE:
+  1. Does the prompt contain explicit kinetic action verbs that calm
+     motion cannot reasonably fake (sprint, leap, slam, jump, dance,
+     run, kick)? -> action / story_action / action_hd.
+  2. Otherwise -> calm / long_story.
+
+When in doubt: pick 'calm' (single clip) or 'long_story' (multi-clip).
+Speed matters more than maximum motion for most users.
 
 Return ONLY this JSON, no other text:
 {"pick": "action" | "action_hd" | "story_action" | "calm" | "long_story", "reason": "one short sentence"}
