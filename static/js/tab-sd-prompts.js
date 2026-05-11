@@ -680,6 +680,17 @@ export function init(panel) {
     thumbGrid.querySelectorAll('.sd-thumb').forEach((t, i) => {
       t.style.outline = i === idx ? '2px solid var(--accent)' : 'none';
     });
+
+    // Auto-queue this image as a handoff for Create Videos. The handoff
+    // store is one-slot and gets overwritten on every showImage call, so
+    // whichever image is currently displayed is what flows through when
+    // the user navigates to Create Videos -- via either the dedicated
+    // "Make Videos" button OR the side-rail Create Videos button. Without
+    // this, clicking the side rail switched tabs to an empty Create
+    // Videos panel and the user had to re-upload.
+    if (img.path) {
+      handoff('create-videos', { type: 'image', path: img.path });
+    }
   }
 
   function addThumb(entry) {
