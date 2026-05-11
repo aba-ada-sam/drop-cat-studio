@@ -13,12 +13,33 @@ let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from rend
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
 
+// localStorage key for persisting dismissed IDs across page reloads / app restarts.
+const _DISMISSED_KEY = 'dcs-dismissed-jobs';
+
+function _loadDismissed() {
+  try {
+    const raw = localStorage.getItem(_DISMISSED_KEY);
+    if (raw) JSON.parse(raw).forEach(id => _dismissedIds.add(id));
+  } catch (_) {}
+}
+
+function _persistDismissed() {
+  try {
+    if (_dismissedIds.size === 0) {
+      localStorage.removeItem(_DISMISSED_KEY);
+    } else {
+      localStorage.setItem(_DISMISSED_KEY, JSON.stringify([..._dismissedIds]));
+    }
+  } catch (_) {}
+}
+
 // -- Public --------------------------------------------------------------------
 
 export function init(panel) {
   _root = panel;
   _root.innerHTML = '';
   _root.style.cssText = 'display:flex; flex-direction:column; height:100%; overflow:hidden;';
+  _loadDismissed();
   _injectStyles();
   _buildShell();
   _poll();
@@ -98,6 +119,7 @@ function _buildShell() {
     // Mark all currently-shown completed jobs as dismissed immediately so
     // they vanish from the list without waiting for the next poll cycle.
     for (const j of (_lastData.completed || [])) _dismissedIds.add(j.id);
+    _persistDismissed();
     _render(_lastData);
     await api('/api/jobs', { method: 'DELETE' }).catch(() => toast('Failed to clear finished jobs', 'error'));
     clearBtn.disabled = false;
@@ -256,12 +278,14 @@ function _render(data) {
   const completed = data.completed || [];
 
   // Prune _dismissedIds: once the server stops returning a job it is truly
-  // gone, so we can forget the local suppression entry.
+  // gone, so we can forget the local suppression entry (and the localStorage slot).
   if (_dismissedIds.size) {
     const serverIds = new Set([...running, ...queued, ...completed].map(j => j.id));
+    let pruned = false;
     for (const id of [..._dismissedIds]) {
-      if (!serverIds.has(id)) _dismissedIds.delete(id);
+      if (!serverIds.has(id)) { _dismissedIds.delete(id); pruned = true; }
     }
+    if (pruned) _persistDismissed();
   }
 
   // Hide dismissed completed jobs immediately -- don't wait for server ack.
@@ -429,7 +453,9 @@ function _jobCard(job, active, idx, total) {
       xBtn.disabled = true;
       // Suppress immediately so the 2-second poll can't bring the card back
       // while the DELETE round-trip is in-flight (stale DOM reference bug).
+      // Persist to localStorage so it also survives a page reload / app restart.
       _dismissedIds.add(job.id);
+      _persistDismissed();
       card.remove();
       await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => {});
     });
