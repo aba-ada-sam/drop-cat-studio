@@ -13,6 +13,11 @@ let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from rend
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
 
+// Jobs that finished before this page loaded are old history -- hide them
+// automatically so reopening the browser gives a clean queue view.
+// Jobs that finish AFTER page load are shown normally until dismissed.
+const _PAGE_LOAD_TIME = Date.now() / 1000;  // unix seconds, matches server timestamps
+
 // localStorage key for persisting dismissed IDs across page reloads / app restarts.
 const _DISMISSED_KEY = 'dcs-dismissed-jobs';
 
@@ -289,7 +294,10 @@ function _render(data) {
   }
 
   // Hide dismissed completed jobs immediately -- don't wait for server ack.
-  const visibleCompleted = completed.filter(j => !_dismissedIds.has(j.id));
+  // Also hide jobs that finished before this page loaded -- they are old history;
+  // the gallery has them, the queue doesn't need to resurface them on every open.
+  const visibleCompleted = completed.filter(j =>
+    !_dismissedIds.has(j.id) && (!j.finished_at || j.finished_at >= _PAGE_LOAD_TIME));
   const total = running.length + queued.length + visibleCompleted.length;
 
   // Show/hide toolbar buttons
@@ -376,9 +384,11 @@ function _jobCard(job, active, idx, total) {
     style: 'width:64px; height:42px; flex-shrink:0; border-radius:5px; background:var(--surface-3); overflow:hidden; display:flex; align-items:center; justify-content:center;',
   });
   const srcImg  = job.meta?.source_image;
-  const outPath = isDone ? _bestOutput(job) : null;
-  const isVidOut = outPath && /\.(mp4|webm|mov)$/i.test(outPath);
-  const thumbSrc = (!isVidOut && outPath)
+  // Show output thumbnail whenever output exists (not just on done) so stopped/
+  // errored jobs with partial output show what was actually generated.
+  // The /api/thumbnail endpoint handles both images and videos (ffmpeg frame grab).
+  const outPath = _bestOutput(job);
+  const thumbSrc = outPath
     ? `/api/thumbnail?path=${encodeURIComponent(outPath)}&size=120`
     : srcImg ? `/api/thumbnail?path=${encodeURIComponent(srcImg)}&size=120` : null;
   if (thumbSrc) {
