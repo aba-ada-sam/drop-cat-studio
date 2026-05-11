@@ -328,11 +328,21 @@ async def refine_prompt(request: Request):
 
 _PICK_TO_MODEL = {
     "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
-    "action_hd":    ("Wan2.1-I2V-14B-720P",    "dynamic"),
-    "story_action": ("Wan2.1-I2V-14B-480P",    "dynamic"),
+    "action":       ("LTX-2 Dev19B Distilled", "dynamic"),
+    "action_hd":    ("LTX-2 Dev19B Distilled", "dynamic"),
+    "story_action": ("LTX-2 Dev19B Distilled", "dynamic"),
     "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
 }
+# Hardware reality on 16GB VRAM cards (RTX 5080, etc.):
+#   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step
+#   * Wan2.1-I2V-14B          int8 ~ 16 GB -- doesn't fit, streams from RAM
+#                                              (~5-15s/step, hangs with compile)
+#   * LTX-2 Dev13B            int8 ~ 13 GB -- borderline, times out cold
+# Auto-pick maps EVERY pick to LTX-2 Distilled until we ship a VRAM-aware
+# router that knows which cards can host Wan I2V. Power users who want Wan I2V
+# can turn off auto-pick and pick it manually -- the slow streaming path is
+# preserved, just no longer selected automatically. The motion_style ('dynamic'
+# vs 'calm') still varies per pick so LTX adapts its denoising character.
 
 _AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea.
 
@@ -399,7 +409,7 @@ def _auto_pick_model(
     idea_clean = (idea or "").strip()
     if not idea_clean and not photo_b64:
         # No idea, no photo -- can't classify. Ship motion-by-default.
-        return ("Wan2.1-I2V-14B-480P", "dynamic", "no idea -- action default")
+        return ("LTX-2 Dev19B Distilled", "dynamic", "no idea -- LTX default (fits 16GB VRAM)")
 
     user_msg = (
         f"User idea: {idea_clean or '(no explicit idea given)'}\n"
@@ -471,7 +481,7 @@ def _auto_pick_model(
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
     # Step 3: hard fallback -- Wan I2V 480P works on all supported hardware.
-    return ("Wan2.1-I2V-14B-480P", "dynamic", "fallback-action")
+    return ("LTX-2 Dev19B Distilled", "dynamic", "fallback-LTX (fits 16GB VRAM)")
 
 
 @router.post("/make-it")
