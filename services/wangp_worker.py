@@ -257,7 +257,10 @@ def _do_generate(params: dict) -> dict:
     wgp.process_prompt_and_add_tasks(state, 0, model_type)
     queue = wgp.get_gen_info(state).get("queue", [])
     if not queue:
-        return {"ok": False, "output": None, "error": "WanGP did not create any tasks"}
+        return {"ok": False, "output": None,
+                "error": "WanGP rejected the generation request -- this usually means a parameter is out "
+                         "of range for the chosen model. Check that steps >= 4 for LTX Distilled or "
+                         ">= 20 for Wan I2V and Dev13B."}
 
     # Arm the tqdm hook so inference steps update _job_status in real time
     global _step_hook

@@ -175,6 +175,37 @@ The worker runs as a persistent subprocess on port 7899. DCS communicates via HT
 - **Error capture:** `process_tasks_cli` in WanGP returns `False` when `generate_video` raises internally. The actual error is printed to worker stdout but only visible if the drain thread is active. The worker monkey-patches `builtins.print` during `process_tasks_cli` to capture `[ERROR]` / traceback lines and exposes them in the `/status` error field — so the real WanGP error propagates back to the job failure message.
 - **SAFE_DEFAULTS** in `core/wangp_models.py` is the single source of truth for required WanGP input keys. When WanGP is updated (Pinokio pulls), new keys may appear in `models/_settings.json`; add them to `SAFE_DEFAULTS` if WanGP raises `KeyError` on them.
 - **VRAM profile** in `C:\pinokio\api\wan.git\app\wgp_config.json`: keep `profile / video_profile / image_profile = 3` (LowRAM_HighVRAM_Medium -- full model in VRAM with int8 quant). The WanGP default is **4** (LowRAM_LowVRAM_Slow) which streams model layers from system RAM per step -- on Andrew's 16GB RTX 5080 this drops step time from ~14s to ~3-4s (3-5x speedup). Profile 4 is correct for 6-8GB cards only. If a Pinokio update overwrites this back to 4, flip it back to 3.
+- **`compile: "transformer"`** in the same `wgp_config.json`: enables `torch.compile` on the diffusion transformer via mmgp. First generation after worker startup pays a ~30-90s compile cost, then each subsequent step in that worker session is 20-40% faster. Compatible with int8 quantization and sage2 attention on Blackwell (sm_120). If a future Pinokio update breaks compile (NotImplementedError, dynamo trace failure), revert to `""` and file an upstream issue.
+- **`vae_config: 1`** in the same file: forces the largest VAE tile size (256/32) which is designed for >= 24GB cards but works on 16GB after int8 quantization frees up headroom. Saves ~5-8s of VAE decode per clip. If WanGP OOMs during the decode phase, drop back to `0` (auto by VRAM) or `2` (medium tiles).
+- **`attention_mode: "auto"`** auto-picks sage2 on sm_120 (RTX 5080). Do NOT switch to `xformers` or `sdpa` -- both are slower. Don't enable `sage3` (manual install, quality risk).
+
+### GPU orchestrator (`core/gpu_orchestrator.py`)
+
+Single coordinator for which service owns the GPU at any moment. WanGP (8-13GB), ACE-Step (6-8GB), Forge (4-6GB), and Ollama (4-8GB) cannot coexist on 16GB VRAM; loading two at once forces one into CPU offloading mode (catastrophic slowdown).
+
+Usage from pipelines:
+```python
+from core.gpu_orchestrator import gpu
+gpu.acquire("wangp", reason="multi-clip 5 clips")    # evicts anything else, ensures wangp alive
+# ... do GPU work ...
+gpu.acquire("acestep", reason="music gen")           # evicts wangp, starts acestep
+```
+
+The orchestrator owns eviction policy: WanGP/ACE-Step are killed via `stop_service`; Forge is "unloaded" (checkpoint dropped, server stays alive); Ollama gets `keep_alive=0` pings to free its models. A held service stays loaded across same-service calls -- only different-service `acquire` triggers eviction.
+
+Endpoints: `GET /api/gpu/status` returns `{current, history[]}`. `POST /api/gpu/release` force-evicts everything.
+
+The pre-orchestrator pattern of scattered `unload_checkpoint()` + `stop_service("acestep")` + `start_acestep` calls in each pipeline has been removed. Don't add them back; route through the orchestrator.
+
+### Per-model step floors
+
+`/api/fun/make-it` and `/api/fun/make-it-multi` apply a server-side floor on `steps` AFTER auto-pick has chosen the actual model. The UI slider value was tuned for whatever model was visible in the dropdown, but auto-pick can swap models, so the floor protects against e.g. sending 4 steps to Wan I2V (which produces a blob below 20). See `_MODEL_MIN_STEPS_SINGLE` / `_MODEL_MIN_STEPS` in `features/fun_videos/routes.py`. Bumps are logged as `[make-it] step floor: ui=4 -> 20 for Wan2.1-I2V-14B-480P`.
+
+### Ollama is opt-in (not the auto fallback)
+
+`llm_router._provider()` in `auto` mode resolves Anthropic -> OpenAI -> error. Ollama is NEVER chosen automatically. The user must either explicitly set `llm_provider = "ollama"` in Settings, or check **Allow Ollama as a local fallback** (`allow_ollama_fallback = true` in config). The fallback flag only kicks in when no cloud key is configured.
+
+Vision call sites that used to hard-code `force_provider="ollama"` (the NSFW-safe path) have been removed. Vision now follows the configured provider; cloud APIs refuse explicit NSFW but the failure is now user-visible instead of silently routing to a slow local model.
 
 ### `_resolve_path` caveat (`features/fun_videos/routes.py`)
 

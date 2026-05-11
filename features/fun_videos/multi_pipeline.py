@@ -818,18 +818,6 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     return True, new_dur
 
 
-def _bridge_steps(video_steps: int, model_name: str) -> int:
-    """Return an appropriate step count for 2-second bridge clips.
-
-    LTX-2 Distilled is trained for 4-8 steps; running 12+ steps overshoots its
-    compressed denoising schedule and produces degraded output.
-    Wan models need at least 12 steps to produce coherent short clips.
-    """
-    if "ltx" in model_name.lower():
-        return min(video_steps, 8)
-    return max(12, video_steps // 2)
-
-
 # -- ffmpeg clip concatenation -------------------------------------------------
 
 def _concat_clips(clip_paths: list[str], out_path: str) -> bool:

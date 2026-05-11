@@ -312,7 +312,8 @@ def _generate_via_worker(
         time.sleep(2)
 
     if log_fn:
-        log_fn("[error] Worker generation timed out (600s)")
+        log_fn("[error] Video generation took too long (over 10 minutes). "
+               "Try a shorter clip duration, fewer denoise steps, or smaller resolution.")
     return None
 
 
