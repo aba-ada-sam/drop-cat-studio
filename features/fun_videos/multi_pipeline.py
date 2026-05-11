@@ -219,8 +219,10 @@ No crescendo. No escalation. Pure scene preservation.\
 def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -> str:
     is_ltx = "ltx" in (model_name or "").lower()
     is_ltx_dev13 = "dev13" in (model_name or "").lower()
-    # Resolve default per model family when not explicitly chosen
-    resolved = motion_style or ("calm" if is_ltx else "dynamic")
+    # Resolve default per model family when not explicitly chosen.
+    # Dev13B defaults to dynamic (40 steps, handles real motion).
+    # Other LTX models (Distilled, 8 steps) default to calm.
+    resolved = motion_style or ("dynamic" if is_ltx_dev13 else ("calm" if is_ltx else "dynamic"))
     if resolved == "calm":
         return _STORY_ARC_CALM
     if is_ltx:
@@ -255,7 +257,7 @@ def _generate_story_arc(
     """
     is_ltx = "ltx" in (model_name or "").lower()
     is_ltx_dev13 = "dev13" in (model_name or "").lower()
-    resolved_style = motion_style or ("calm" if is_ltx else "dynamic")
+    resolved_style = motion_style or ("dynamic" if is_ltx_dev13 else ("calm" if is_ltx else "dynamic"))
     if resolved_style == "calm":
         default_idea = "Create a calm breathing-photograph short film, environment-only motion, subject completely still"
     elif is_ltx and is_ltx_dev13:
