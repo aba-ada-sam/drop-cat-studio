@@ -326,11 +326,24 @@ async def refine_prompt(request: Request):
 # T2V models are intentionally NOT in the auto-pick set: every Express/Fun-Videos
 # job has a photo, so I2V is always the right family. T2V stays manual-only.
 
+# SAFETY: every auto-pick bucket resolves to LTX-2 Distilled (fits 16GB
+# cleanly). Wan I2V 14B at int8 is 15.87 GB which is larger than the
+# 13 GB safety budget WanGP allows on a 16GB card -- attempting it
+# causes the GPU to thrash at 100% util and 97% VRAM, dragging the
+# whole machine to a halt. We will NOT let auto-pick reach for Wan
+# until this DCS install detects a 20GB+ card. Power users who want
+# Wan I2V can disable auto-pick in the Express tab and pick it from
+# the dropdown manually.
+#
+# Motion style still varies by bucket; LTX Distilled handles all of
+# them via its calm denoising character. Even prompts that read as
+# action (sprint, leap) render as atmospheric motion -- not the
+# spastic AI slop we saw when LTX was in 'dynamic' mode.
 _PICK_TO_MODEL = {
     "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
-    "action_hd":    ("Wan2.1-I2V-14B-720P",    "dynamic"),
-    "story_action": ("Wan2.1-I2V-14B-480P",    "dynamic"),
+    "action":       ("LTX-2 Dev19B Distilled", "calm"),
+    "action_hd":    ("LTX-2 Dev19B Distilled", "calm"),
+    "story_action": ("LTX-2 Dev19B Distilled", "calm"),
     "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
 }
 # Hardware reality on 16GB VRAM cards (RTX 5080):
@@ -427,7 +440,7 @@ def _auto_pick_model(
     idea_clean = (idea or "").strip()
     if not idea_clean and not photo_b64:
         # No idea, no photo -- can't classify. Ship motion-by-default.
-        return ("Wan2.1-I2V-14B-480P", "dynamic", "no idea -- Wan I2V action default")
+        return ("LTX-2 Dev19B Distilled", "calm", "no idea -- LTX safe default (Wan I2V won't fit 16GB)")
 
     user_msg = (
         f"User idea: {idea_clean or '(no explicit idea given)'}\n"
@@ -499,7 +512,7 @@ def _auto_pick_model(
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
     # Step 3: hard fallback -- Wan I2V 480P works on all supported hardware.
-    return ("Wan2.1-I2V-14B-480P", "dynamic", "fallback-action")
+    return ("LTX-2 Dev19B Distilled", "calm", "fallback-LTX (Wan I2V blocked on 16GB)")
 
 
 @router.post("/make-it")
