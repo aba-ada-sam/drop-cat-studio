@@ -154,6 +154,34 @@ ARC: each clip = same scene, one different micro-detail. Vary which prop,
 which fabric element, which background feature moves. No crescendo.\
 """
 
+_STORY_ARC_LTX_ACTION = _STORY_ARC_BASE + """
+
+ENERGY: deliberate physical motion. LTX-2 Dev13B runs 40 denoising steps and
+can hold a complex subject through real movement -- strides, gestures, turns.
+Prompts should be 45-65 words. Every clip must name the subject's exact visual
+markers so the model re-anchors on each frame.
+
+PROMPT SHAPE (mandatory every clip):
+  1. SUBJECT (12-18 words): exact visual markers from the photo -- colour,
+     material, size, style. For fantasy/painted subjects name the artistic style
+     ("moss-covered giant", "painted illustration style"). Never omit this.
+  2. ONE MAIN MOTION (20-30 words): a single deliberate physical action.
+     Prefer clear, filmable actions: a stride, a lean, arms swinging, a turn of
+     the head. Avoid vague energy words -- describe what the body DOES.
+  3. SCENE ANCHOR (10-14 words): setting + lighting + visual style, restated
+     every clip so the background does not drift.
+  4. CAMERA NOTE (4-5 words, LAST): "wide shot, fixed camera" or similar.
+
+ALLOWED MOTION: strides, steps, leans, turns, reaches, gestures, swings arms,
+  tilts head, shifts weight, crouches, stands up, looks around. Moderate pace.
+BANNED: erupts, slams, explodes, thrashes, roars, blasts -- these cause too
+  much displacement and lose identity even at 40 steps.
+BANNED: inventing subjects or props not in the photo.
+
+CLIP COUNT vs PACING: 2-3 clips = single action arc. 4-5 clips = build and
+  hold. Do not escalate to a climax -- keep energy steady and legible.\
+"""
+
 _STORY_ARC_CALM = _STORY_ARC_BASE + """
 
 ENERGY: scene-hold mode. The subject does not move. Motion comes ONLY from the
@@ -190,12 +218,16 @@ No crescendo. No escalation. Pure scene preservation.\
 
 def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -> str:
     is_ltx = "ltx" in (model_name or "").lower()
+    is_ltx_dev13 = "dev13" in (model_name or "").lower()
     # Resolve default per model family when not explicitly chosen
     resolved = motion_style or ("calm" if is_ltx else "dynamic")
     if resolved == "calm":
         return _STORY_ARC_CALM
     if is_ltx:
-        return _STORY_ARC_GENTLE
+        # Dev13B runs 40 steps -- can handle real motion.
+        # Distilled runs 8 steps -- micro-motion only (GENTLE).
+        if is_ltx_dev13:
+            return _STORY_ARC_LTX_ACTION
     return _STORY_ARC_KINETIC
 
 

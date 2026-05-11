@@ -324,48 +324,60 @@ async def refine_prompt(request: Request):
 # job has a photo, so I2V is always the right family. T2V stays manual-only.
 
 _PICK_TO_MODEL = {
-    "calm":       ("LTX-2 Dev19B Distilled", "calm"),
-    "action":     ("Wan2.1-I2V-14B-480P",    "dynamic"),
-    "action_hd":  ("Wan2.1-I2V-14B-720P",    "dynamic"),
-    "long_story": ("LTX-2 Dev13B",           "calm"),
+    "calm":         ("LTX-2 Dev19B Distilled", "calm"),
+    "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
+    "action_hd":    ("Wan2.1-I2V-14B-720P",    "dynamic"),
+    "story_action": ("LTX-2 Dev13B",            "dynamic"),
+    "long_story":   ("LTX-2 Dev13B",            "calm"),
 }
 
 _AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea.
 
-You have four choices. Pick the ONE that fits the idea best.
+You have five choices. Pick the ONE that fits best.
 
   action
-    Wan2.1 I2V 480P. Best for: any subject that should ACT, MOVE, GESTURE, or
-    DO something -- people talking, animals moving, anchors anchoring, dancers
-    dancing, kinetic motion of any kind. Facial expressions changing, body
-    moving, props in use. This is the right pick whenever the photo shows a
-    subject who would plausibly be doing something rather than posing.
+    Wan2.1 I2V 480P. For REAL PHOTOS of people, animals, or objects doing
+    kinetic things -- talking, gesturing, moving, dancing. Strong subject
+    anchoring for photographic sources. DO NOT use for paintings, illustrations,
+    fantasy art, or subjects made of complex organic/fantastical materials.
 
   action_hd
-    Wan2.1 I2V 720P. Same as 'action' but 720p. Pick ONLY when the user
-    explicitly asks for HD / high-quality / delivery / sharp / professional
-    output AND the idea is kinetic.
+    Wan2.1 I2V 720P. Same as 'action' but higher resolution. Pick ONLY when
+    the user explicitly asks for HD/sharp/professional output AND the source
+    is a real photo with kinetic intent.
+
+  story_action
+    LTX-2 Dev13B with motion. The right pick for PAINTED, ILLUSTRATED,
+    FANTASY, or STYLIZED images where the subject should still move. LTX has
+    far stronger image conditioning than Wan -- it keeps painted giants,
+    fantasy creatures, illustrated characters, and complex organic subjects
+    looking like themselves across multiple clips. Wan destroys stylized
+    subjects into blobs by the second or third clip. Also use this for any
+    multi-clip (3+ clips) job with a complex or detailed subject, even if the
+    source is a real photo.
 
   calm
-    LTX-2 Distilled. The subject does NOT move at all. Only environment moves
-    (light shifting, steam rising, curtains stirring, water rippling). Pick
-    this ONLY for clearly atmospheric or still-life ideas: a misty landscape,
-    a sunset, a quiet object on a table, a "breathing photograph" mood the
-    user has explicitly asked for. Do NOT pick this just because the photo is
-    a portrait -- portraits of people / characters / animals almost always
-    want the subject to move.
+    LTX-2 Distilled. Subject does NOT move -- only environment moves (light
+    shifting, steam rising, water rippling). For atmospheric/still-life ideas
+    only: a misty landscape, a quiet object, an explicitly "breathing
+    photograph" mood. Do NOT pick just because the photo is a portrait.
 
   long_story
-    LTX-2 Dev13B. Pick ONLY for explicit still-life multi-clip stories of 4+
-    clips where the scene must be preserved across the whole story. Same
-    no-subject-motion rule as 'calm'. Almost never the right pick.
+    LTX-2 Dev13B, subject still. For multi-clip atmospheric stories where
+    the scene must be preserved and nothing should move.
 
-When in doubt, pick 'action'. A user generating a video almost always wants
-motion. Stationary clips are the worst possible failure mode -- if the user
-wanted a still image they would not be generating a video.
+CRITICAL RULE: If the source image looks like a painting, illustration, digital
+art, fantasy scene, or contains a subject made of non-photographic material
+(plants, fire, crystal, smoke, leaves, fantasy textures, etc.) -- pick
+'story_action' if the idea involves motion, or 'calm' if the idea is still.
+NEVER pick 'action' or 'action_hd' for painted/illustrated sources. Wan models
+cannot hold complex stylized subjects across clips.
+
+When in doubt and the source is a real photo, pick 'action'.
+When in doubt and the source is illustrated/painted, pick 'story_action'.
 
 Return ONLY this JSON, no other text:
-{"pick": "action" | "action_hd" | "calm" | "long_story", "reason": "one short sentence"}
+{"pick": "action" | "action_hd" | "story_action" | "calm" | "long_story", "reason": "one short sentence"}
 """
 
 
@@ -407,6 +419,19 @@ def _auto_pick_model(
             return (pick, reason or pick)
         return None
 
+    def _apply_clip_guard(pick: str, reason: str) -> tuple[str, str]:
+        """Wan I2V (action/action_hd) deteriorates badly across 4+ chained clips.
+        Identity drift compounds each generation -- complex subjects dissolve into
+        blobs by clip 3. Downgrade to LTX Dev13B (story_action) which has much
+        stronger image conditioning and survives longer chains cleanly."""
+        if pick in ("action", "action_hd") and n_clips >= 4:
+            log.info(
+                "[auto-pick] clip-count guard: %d clips with Wan I2V -> story_action (LTX Dev13B)",
+                n_clips,
+            )
+            return ("story_action", f"Wan drifts across {n_clips} clips -- LTX Dev13B preserves identity")
+        return (pick, reason)
+
     # Step 1: vision call via Ollama (NSFW-safe, photo stays on-device).
     if photo_b64:
         try:
@@ -419,6 +444,7 @@ def _auto_pick_model(
             parsed = _try_parse(text or "")
             if parsed:
                 pick, reason = parsed
+                pick, reason = _apply_clip_guard(pick, reason)
                 model, motion = _PICK_TO_MODEL[pick]
                 log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason)
                 return (model, motion, reason)
@@ -439,6 +465,7 @@ def _auto_pick_model(
         parsed = _try_parse(text or "")
         if parsed:
             pick, reason = parsed
+            pick, reason = _apply_clip_guard(pick, reason)
             model, motion = _PICK_TO_MODEL[pick]
             log.info("[auto-pick] '%s' -> %s (%s) -- %s [text fallback]", idea_clean[:60], model, motion, reason)
             return (model, motion, reason)
@@ -446,8 +473,10 @@ def _auto_pick_model(
     except Exception as e:
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
-    # Step 3: hard fallback -- ship motion. 'action' = Wan I2V 480P + dynamic.
-    # Anything that produces movement beats a ken-burns slideshow.
+    # Step 3: hard fallback -- ship motion, but still respect the clip guard.
+    # For short jobs (<4 clips) action is fine; for long chains use story_action.
+    if n_clips >= 4:
+        return ("LTX-2 Dev13B", "dynamic", "fallback-story_action")
     return ("Wan2.1-I2V-14B-480P", "dynamic", "fallback-action")
 
 
