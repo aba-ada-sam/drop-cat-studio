@@ -285,6 +285,16 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
     # Salvage: pull any quoted or sentence-length strings from the raw response and
     # treat them as prompts. Better than a blank error screen.
     import re as _re
+    # Conversational openers that Ollama sometimes emits before JSON -- these are
+    # NOT motion prompts. If the entire response is this kind of filler, the salvage
+    # would return garbage text (e.g. "Got it, let's break this down.") into the
+    # Motion Prompt field. Skip them.
+    _FILLER_PREFIXES = (
+        'got it', 'sure', "i'll", "i will", 'let me', 'ok,', 'okay',
+        'i can', 'certainly', 'of course', 'absolutely', 'great,',
+        'i understand', "here's", "here are", 'happy to', 'no problem',
+        'of course', 'sounds good', 'understood',
+    )
     salvaged = []
     # Look for "prompt": "..." patterns first
     for m in _re.finditer(r'"prompt"\s*:\s*"([^"]{20,})"', last_text):
@@ -294,9 +304,20 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
         for chunk in _re.split(r'\n{2,}|(?<=[.!?])\s+(?=[A-Z])', last_text):
             chunk = chunk.strip().strip('"').strip("'")
             if 20 < len(chunk) < 400:
-                salvaged.append(chunk)
+                lower = chunk.lower()
+                if not any(lower.startswith(p) for p in _FILLER_PREFIXES):
+                    salvaged.append(chunk)
+
+    # If salvage found nothing useful, fall back to text-only prompt generation.
+    # This avoids putting conversational AI preamble into the Video Prompt field.
     if not salvaged:
-        salvaged = [last_text[:300].strip()]
+        log.warning("Salvage found nothing usable -- falling back to text-only auto-prompt")
+        fallback = generate_video_prompt_auto(router, user_direction)
+        if fallback:
+            return {"prompts": [
+                {"label": "Auto", "prompt": fallback, "mood": "dynamic", "style": "kinetic"}
+            ] * num_prompts}
+        raise RuntimeError("LLM returned unparseable response -- not able to generate video prompts")
 
     log.warning("Using salvaged prompts from raw response (%d found)", len(salvaged))
     return {

@@ -324,7 +324,7 @@ export function init(panel) {
   // -- Motion prompt ---------------------------------------------------------
   const promptCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(promptCard);
-  promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Motion Prompt' }));
+  promptCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:4px;', text: 'Video Prompt' }));
   promptCard.appendChild(el('div', { style: 'font-size:.74rem; color:var(--text-3); margin-bottom:8px;',
     text: 'Describe the action -- what does the subject DO? Camera moves are secondary.' }));
   const PROMPT_PLACEHOLDER = 'e.g. "Throws head back laughing, hair whipping sideways, hands clap wildly, energy radiates outward, camera pulls back to reveal full burst of motion"';
@@ -334,7 +334,7 @@ export function init(panel) {
   promptCard.appendChild(promptTA);
 
   const promptSpinner = el('span', { style: 'display:inline-block; width:10px; height:10px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0;' });
-  const promptStatusMsg = el('span', { text: 'Generating motion prompt from image...' });
+  const promptStatusMsg = el('span', { text: 'Generating video prompt from image...' });
   const promptStatus = el('div', {
     style: 'display:none; font-size:.75rem; color:var(--accent); margin-top:5px; align-items:center; gap:6px;',
   }, [
@@ -382,7 +382,7 @@ export function init(panel) {
       _autoPromptAbort?.abort();
       _fallback();
       promptSpinner.style.display = 'none';
-      promptStatusMsg.textContent = 'AI prompt timed out -- using default. Edit it or click Create Story to retry.';
+      promptStatusMsg.textContent = 'AI video prompt timed out -- using default. Edit it or click Create Story to retry.';
       promptStatus.style.cssText = 'display:flex; font-size:.75rem; color:var(--text-3); margin-top:5px; align-items:center; gap:6px;';
       storyBtn.disabled = false;
       storyBtn.textContent = '* Create Story';
