@@ -1064,6 +1064,8 @@ export function init(panel) {
           output_width:    _outW,
           output_height:   _outH,
           auto_pick_model: _autoPick,
+          // LTX defaults calm; Wan is dynamic. auto_pick_model overrides server-side when ON.
+          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
         }),
       });
       _jobId = job_id;
