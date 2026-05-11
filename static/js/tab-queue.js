@@ -9,6 +9,7 @@ import { el, pathToUrl } from './components.js?v=20260507a';
 let _root        = null;
 let _pollTimer   = null;
 let _knownIds    = new Set();
+let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from render until server confirms deletion
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
 
@@ -94,6 +95,10 @@ function _buildShell() {
   });
   clearBtn.addEventListener('click', async () => {
     clearBtn.disabled = true;
+    // Mark all currently-shown completed jobs as dismissed immediately so
+    // they vanish from the list without waiting for the next poll cycle.
+    for (const j of (_lastData.completed || [])) _dismissedIds.add(j.id);
+    _render(_lastData);
     await api('/api/jobs', { method: 'DELETE' }).catch(() => toast('Failed to clear finished jobs', 'error'));
     clearBtn.disabled = false;
     _poll();
@@ -249,7 +254,19 @@ function _render(data) {
   const running   = data.running   || [];
   const queued    = data.queued    || [];
   const completed = data.completed || [];
-  const total = running.length + queued.length + completed.length;
+
+  // Prune _dismissedIds: once the server stops returning a job it is truly
+  // gone, so we can forget the local suppression entry.
+  if (_dismissedIds.size) {
+    const serverIds = new Set([...running, ...queued, ...completed].map(j => j.id));
+    for (const id of [..._dismissedIds]) {
+      if (!serverIds.has(id)) _dismissedIds.delete(id);
+    }
+  }
+
+  // Hide dismissed completed jobs immediately -- don't wait for server ack.
+  const visibleCompleted = completed.filter(j => !_dismissedIds.has(j.id));
+  const total = running.length + queued.length + visibleCompleted.length;
 
   // Show/hide toolbar buttons
   const cancelAllBtn = document.getElementById('queue-cancel-all-btn');
@@ -257,7 +274,7 @@ function _render(data) {
   const saveBtn      = document.getElementById('queue-save-btn');
   const restoreBtn   = document.getElementById('queue-restore-btn');
   if (cancelAllBtn) cancelAllBtn.style.display = queued.length > 0 ? '' : 'none';
-  if (clearBtn)     clearBtn.style.display     = completed.length > 0 ? '' : 'none';
+  if (clearBtn)     clearBtn.style.display     = visibleCompleted.length > 0 ? '' : 'none';
   if (saveBtn)      saveBtn.style.display      = '';
   // Hide restore button when jobs are already live; retry check when queue is empty.
   if (restoreBtn && total > 0) restoreBtn.style.display = 'none';
@@ -271,12 +288,12 @@ function _render(data) {
   list.querySelectorAll('[data-job-id]').forEach(n => existing.set(n.dataset.jobId, n));
 
   const ordered = [];
-  if (running.length)   ordered.push({ head: _paused ? '▶  Running (last before pause)' : '▶  Now Generating', jobs: running, active: true });
-  if (queued.length)    ordered.push({ head: `...  Waiting . ${queued.length}${_paused ? '  --  PAUSED' : ''}`, jobs: queued, active: true });
-  if (completed.length) {
-    const nFailed = completed.filter(j => j.status !== 'done').length;
+  if (running.length)         ordered.push({ head: _paused ? '▶  Running (last before pause)' : '▶  Now Generating', jobs: running, active: true });
+  if (queued.length)          ordered.push({ head: `...  Waiting . ${queued.length}${_paused ? '  --  PAUSED' : ''}`, jobs: queued, active: true });
+  if (visibleCompleted.length) {
+    const nFailed = visibleCompleted.filter(j => j.status !== 'done').length;
     const head = nFailed > 0 ? `Finished . ${nFailed} failed` : 'Finished';
-    ordered.push({ head, jobs: completed, active: false });
+    ordered.push({ head, jobs: visibleCompleted, active: false });
   }
 
   list.innerHTML = '';
@@ -410,8 +427,11 @@ function _jobCard(job, active, idx, total) {
     xBtn.addEventListener('click', async e => {
       e.stopPropagation();
       xBtn.disabled = true;
-      await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => {});
+      // Suppress immediately so the 2-second poll can't bring the card back
+      // while the DELETE round-trip is in-flight (stale DOM reference bug).
+      _dismissedIds.add(job.id);
       card.remove();
+      await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => {});
     });
     actions.appendChild(xBtn);
   } else if (active) {
