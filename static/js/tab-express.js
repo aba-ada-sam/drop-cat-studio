@@ -730,6 +730,23 @@ export function init(panel) {
     pollJob(job_id, null, done, done);
   }
 
+  // -- TURBO button ----------------------------------------------------------
+  // One-click 60-90s preview. Forces LTX-Distilled at 4 steps, 4s, 480x480,
+  // no music, no auto-pick. Bypasses the AI prompt-writing prep entirely --
+  // uses whatever's in the textboxes or a generic default.
+  const turboBtn = el('button', {
+    class: 'btn',
+    style: 'width:100%; padding:13px; font-size:1rem; font-weight:700; letter-spacing:.06em; ' +
+           'background:linear-gradient(135deg,#d4a017 0%,#c41e3a 100%); color:#fff; border:none; ' +
+           'box-shadow:0 2px 8px rgba(212,160,23,.25); cursor:pointer; margin-bottom:8px;',
+    title: 'Fastest possible preview -- LTX-Distilled, 1 clip, 4 seconds, no music. ~60-90s.',
+  });
+  turboBtn.innerHTML =
+    '<span style="font-size:1.1rem;">&#9889;</span> &nbsp;TURBO PREVIEW' +
+    '<span style="font-weight:400; opacity:.85; font-size:.82rem; margin-left:10px;">' +
+    '~60-90s &middot; 1 clip &middot; no music &middot; low-res</span>';
+  root.appendChild(turboBtn);
+
   // -- Create + Loop button row ----------------------------------------------
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
@@ -1100,6 +1117,68 @@ export function init(panel) {
       return false;
     }
   }
+
+  // -- TURBO handler (single-clip, hard-coded fastest profile) --------------
+  async function _generateTurbo() {
+    if (!_imagePath && !ideaInput.value.trim()) {
+      dropZone.style.borderColor = 'var(--red)';
+      setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
+      toast('Drop an image or type a video idea first', 'error');
+      return false;
+    }
+    const motionPrompt = ideaInput.value.trim()
+      || 'gentle ambient motion, atmospheric scene, subject preserved';
+    try {
+      const { job_id } = await api('/api/fun/make-it', {
+        method: 'POST',
+        body: JSON.stringify({
+          photo_path: _imagePath,
+          video_prompt: motionPrompt,
+          music_prompt: '',
+          lyric_direction: '',
+          user_direction: 'turbo preview -- coherent over polished',
+          // Hard-coded TURBO profile. Server-side step floor (LTX min 4)
+          // and clip_dur cap (5s) are both satisfied here -- no surprises.
+          model: 'LTX-2 Dev19B Distilled',
+          duration: 4,
+          steps: 4,
+          guidance: 3.0,
+          seed: -1,
+          skip_audio: true,
+          instrumental: false,
+          output_width: 480,
+          output_height: 480,
+          // Do NOT let the server swap in Wan (which needs 20+ steps -> ~3.5min/clip)
+          auto_pick_model: false,
+          motion_style: 'calm',
+        }),
+      });
+      _jobId = job_id;
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
+      _watchJob(job_id);
+      return true;
+    } catch (e) {
+      if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
+        toast('Queue is full -- wait for the current video to finish', 'error');
+      } else {
+        toast(e.message, 'error');
+      }
+      return false;
+    }
+  }
+
+  turboBtn.addEventListener('click', async () => {
+    _loopCount = 0;
+    _showProgress(1, 'TURBO: queuing...');
+    const ok = await _generateTurbo();
+    if (ok && _jobId) {
+      _pendingCount++;
+      _refreshCreateBtn();
+      _trackDone(_jobId);
+    } else {
+      _hideProgress();
+    }
+  });
 
   // -- Create (single run or multi-video) -----------------------------------
   createBtn.addEventListener('click', async () => {
