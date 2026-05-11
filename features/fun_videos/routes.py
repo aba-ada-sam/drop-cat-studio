@@ -531,6 +531,23 @@ async def make_it(request: Request):
     # None so the pipeline can derive it from the model family at finalize time.
     resolved_motion = auto_picked_motion or body.get("motion_style") or None
 
+    # Apply per-model step floor (auto-pick may have changed the model since
+    # the UI rendered the steps slider).
+    _MODEL_MIN_STEPS_SINGLE = {
+        "LTX-2 Dev19B Distilled": 4,
+        "LTX-2 Dev13B":            20,
+        "Wan2.1-I2V-14B-480P":     20,
+        "Wan2.1-I2V-14B-720P":     20,
+        "Wan2.1-T2V-14B":          20,
+        "Wan2.1-T2V-1.3B":         15,
+    }
+    _ui_steps_s = int(body.get("steps", config.get("fun_video_steps", 30)))
+    _min_s = _MODEL_MIN_STEPS_SINGLE.get(requested_model, 20)
+    _final_steps_s = max(_ui_steps_s, _min_s)
+    if _final_steps_s != _ui_steps_s:
+        log.info("[make-it] step floor: ui=%d -> %d for %s",
+                 _ui_steps_s, _final_steps_s, requested_model)
+
     settings = {
         "video_prompt": body.get("video_prompt", ""),
         "music_prompt": body.get("music_prompt", ""),
@@ -543,7 +560,7 @@ async def make_it(request: Request):
         "resolution": body.get("resolution", config.get("resolution", "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),
-        "video_steps": body.get("steps", config.get("fun_video_steps", 30)),
+        "video_steps": _final_steps_s,
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
         "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 8)),
@@ -647,6 +664,26 @@ async def make_it_multi(request: Request):
         log.info("[make-it-multi] auto-pick chose %s (%s, %d clips) -- %s",
                  picked_model, picked_motion, n_clips, pick_reason)
 
+    # Per-model step minimums. Auto-pick can change the model from what the UI
+    # configured, so we recompute the step count here using the picked model's
+    # actual sweet spot rather than blindly trusting the slider value (which
+    # was tuned for whatever model the user had selected manually). LTX
+    # Distilled needs 4-8; Wan I2V needs 20-25 minimum or output is a blob.
+    _MODEL_MIN_STEPS = {
+        "LTX-2 Dev19B Distilled": 4,
+        "LTX-2 Dev13B":            20,
+        "Wan2.1-I2V-14B-480P":     20,
+        "Wan2.1-I2V-14B-720P":     20,
+        "Wan2.1-T2V-14B":          20,
+        "Wan2.1-T2V-1.3B":         15,
+    }
+    _ui_steps = int(body.get("steps", config.get("fun_video_steps", 30)))
+    _min_for_model = _MODEL_MIN_STEPS.get(requested_model, 20)
+    _final_steps = max(_ui_steps, _min_for_model)
+    if _final_steps != _ui_steps:
+        log.info("[make-it-multi] step floor: ui=%d -> %d for %s",
+                 _ui_steps, _final_steps, requested_model)
+
     settings = {
         "video_prompt":    body.get("video_prompt", ""),
         "music_prompt":    body.get("music_prompt", ""),
@@ -658,7 +695,7 @@ async def make_it_multi(request: Request):
         "resolution":      body.get("resolution", config.get("resolution",       "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),
-        "video_steps":     body.get("steps",         config.get("fun_video_steps",    30)),
+        "video_steps":     _final_steps,
         "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
         "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    20)),
