@@ -710,7 +710,14 @@ def stop_service(name: str) -> tuple[bool, str | None]:
         if not killed:
             _kill_by_port(ACESTEP_PORT, "ACE-Step")
         _acestep_proc = None
-        _set_status("acestep", state="not_running", message="ACE-Step stopped", pid=None)
+        # After stopping, go back to "ready" if the path is configured so the UI
+        # shows "starts automatically" instead of the misleading "set path in Settings".
+        if cfg.get_acestep_root():
+            _set_status("acestep", state="ready",
+                        message="ACE-Step stopped -- will restart automatically when music is needed", pid=None)
+        else:
+            _set_status("acestep", state="not_configured",
+                        message="ACE-Step stopped -- set path in Settings", pid=None)
         return True, None
 
     if name == "forge":

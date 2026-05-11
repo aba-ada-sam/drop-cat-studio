@@ -334,7 +334,7 @@ function switchTab(tabId) {
 
 // -- Service polling ---------------------------------------------------------
 const SERVICE_MESSAGES = {
-  acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- set path in Settings' },
+  acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- click Start to load music model' },
   forge:   { not_running: 'Not detected -- start Forge with --api flag', starting: 'Starting (~60s)...', not_configured: 'Not configured' },
   wangp:   { not_configured: 'Not configured -- set WanGP path in Settings', ready: 'Configured -- worker starts on first use' },
 };
