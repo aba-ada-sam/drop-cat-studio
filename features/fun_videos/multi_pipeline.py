@@ -258,6 +258,31 @@ def _generate_story_arc(
     is_ltx = "ltx" in (model_name or "").lower()
     is_ltx_dev13 = "dev13" in (model_name or "").lower()
     resolved_style = motion_style or ("dynamic" if is_ltx_dev13 else ("calm" if is_ltx else "dynamic"))
+
+    # SCENE-HOLD EXTENSION (LTX-calm only):
+    # Chained generation in LTX-calm mode is good at extending ONE shot, not
+    # at telling a narrative across different shots. If we ask the LLM for N
+    # different prompts (morning / afternoon / evening), the prompt weight in
+    # calm-mode denoising overrides the chained start image, and the subject
+    # visibly drifts each clip. Instead: use the user's idea verbatim as ALL
+    # N prompts and let the chain-anchor (last-frame-of-clip-N becomes start-
+    # frame-of-clip-N+1) carry continuity. Result: a single extended
+    # atmospheric shot of the SAME subject in the SAME scene, breathing for
+    # the requested total duration.
+    if is_ltx and resolved_style == "calm":
+        if progress_fn:
+            progress_fn("Locking scene for coherent extension...")
+        scene_prompt = (initial_idea or "").strip() or (
+            "atmospheric scene, subject preserved exactly as in the photo, "
+            "gentle environmental motion (light shift, fabric drift, leaves stir), "
+            "static camera, photorealistic style"
+        )
+        clips = [{"prompt": scene_prompt, "duration": float(default_clip_dur)}
+                 for _ in range(n_clips)]
+        log.info("[multi] Scene-hold extension: %d clips of the same shot, "
+                 "prompt='%s...'", n_clips, scene_prompt[:60])
+        return clips, "scene-hold"
+
     if resolved_style == "calm":
         default_idea = "Create a calm breathing-photograph short film, environment-only motion, subject completely still"
     elif is_ltx and is_ltx_dev13:

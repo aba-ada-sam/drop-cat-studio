@@ -587,13 +587,13 @@ export function init(panel) {
     ]),
   ]));
 
-  // -- Multi-video story -----------------------------------------------------
-  // Default OFF on 16GB cards: chaining clips through LTX-Distilled calm mode
-  // compounds subject drift across clips, and Wan I2V (which would do this
-  // properly) doesn't fit our 16GB VRAM ceiling. A single longer clip with
-  // music is the reliable shipping path until we detect a 24GB+ card.
-  let _multiVideo      = false;
-  let _targetSecs      = 16;
+  // -- Multi-video (scene-hold extension) ------------------------------------
+  // Default ON: server now uses SAME prompt for every clip and lets the
+  // chain anchor (last-frame -> next-clip-start) carry continuity. This is
+  // 'extend one shot into a longer atmospheric video', not 'narrative arc'.
+  // The narrative arc path drifts on 16GB and is reserved for Wan I2V (24GB+).
+  let _multiVideo      = true;
+  let _targetSecs      = 24;
   // Quick Video is built around music + lyrics. Default ON; user can untick
   // to ship a silent clip when iterating on the visuals alone.
   let _addMusic        = true;
@@ -721,9 +721,9 @@ export function init(panel) {
       el('label', {
         for: 'express-multi-video',
         style: 'font-size:.88rem; font-weight:600; cursor:pointer; user-select:none; color:var(--text);',
-        text: 'Multi-video story',
+        text: 'Extend scene',
       }),
-      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- experimental on 16GB cards: clips may drift across subjects' }),
+      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- chain multiple short clips of the same scene into a longer atmospheric video' }),
     ]),
     multiSettingsDetails,
   ]);
@@ -735,7 +735,7 @@ export function init(panel) {
     // controls inside are meaningless for single-clip mode.
     multiSettingsDetails.style.display = _multiVideo ? '' : 'none';
     if (!_looping) {
-      createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
+      createBtn.textContent = _multiVideo ? 'Create Extended Video' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
     }
     _refreshClipInfo();
   });
@@ -750,7 +750,7 @@ export function init(panel) {
   function _refreshCreateBtn() {
     createBtn.disabled = false;
     if (_multiVideo) {
-      createBtn.textContent = 'Create Story';
+      createBtn.textContent = 'Create Extended Video';
     } else {
       createBtn.textContent = _pendingCount > 0 ? '+ Add to Queue' : 'Create';
     }
@@ -763,7 +763,7 @@ export function init(panel) {
   // -- Create + Loop button row ----------------------------------------------
   const createBtn = el('button', {
     class: 'btn btn-primary btn-generate',
-    text: 'Create Story',
+    text: 'Create Extended Video',
     style: 'flex:1; font-size:1.1rem; padding:14px; font-weight:700; letter-spacing:.04em;',
   });
   const loopBtn = el('button', {
