@@ -48,6 +48,16 @@ export function init(panel) {
     openaiSettings.style.display = b === 'openai' ? '' : 'none';
     if (b === 'openai') genBtn.disabled = false;
     else if (!forgeStatus?.alive) genBtn.disabled = true;
+    // Smart wildcards is Forge-only -- DALL-E receives the prompt as plain
+    // text and would treat __token__ literally. Hide the toggle when the
+    // active backend is OpenAI and force-uncheck it so a stale checked state
+    // can't leak into a compose call.
+    if (wcContainer) {
+      wcContainer.style.display = b === 'forge' ? '' : 'none';
+      if (b !== 'forge' && wildcardToggle.checked) {
+        wildcardToggle.checked = false;
+      }
+    }
   }
 
   // -- Talk to me ------------------------------------------------------------
@@ -136,7 +146,14 @@ export function init(panel) {
   });
   const wildcardToggle = el('input', { type: 'checkbox', id: 'sd-smart-wc', checked: false, style: 'cursor:pointer' });
   const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });
-  composeRow.append(composeBtn, suffixInput, wildcardToggle, wcLabel);
+  // Wrap the toggle + label so we can hide them as a unit when the active
+  // backend doesn't support wildcards. OpenAI DALL-E receives the prompt
+  // text directly -- __tokens__ would go through as literal characters and
+  // confuse the model. Smart wildcards is Forge/SD-only.
+  const wcContainer = el('span', {
+    style: 'display:flex; align-items:center; gap:4px;',
+  }, [wildcardToggle, wcLabel]);
+  composeRow.append(composeBtn, suffixInput, wcContainer);
 
   // -- Forge settings wrapper (status + all forge-specific controls) ---------
   const forgeSettings = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });

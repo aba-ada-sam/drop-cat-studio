@@ -762,6 +762,16 @@ async def openai_generate(request: Request):
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(400, "Prompt required")
+
+    # Defense in depth: the UI hides the Smart Wildcards toggle when OpenAI
+    # is the active backend, but a prompt composed earlier (Forge backend,
+    # wildcards on) and then submitted under OpenAI would still contain raw
+    # __token__ syntax. DALL-E treats those as literal characters and the
+    # generated image is wrong. Expand wildcards server-side regardless of
+    # backend so the prompt that hits the image model is always clean text.
+    wc_dir = _get_wildcards_dir()
+    prompt = wc_expand(prompt, wc_dir)
+
     safe_prompt = _sanitize(prompt)
 
     path, err = await asyncio.to_thread(_gen, safe_prompt, body.get("aspect", "1:1"), body.get("quality", "standard"))
