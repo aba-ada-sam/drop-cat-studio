@@ -57,7 +57,7 @@ export function init(panel) {
   // LTX-2 Dev13B: full schedule, 40 steps optimal (25 undersamples).
   // Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot, 25 steps standard.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 6,  guidance: 3.0, duration: 5 },
+    'LTX-2 Dev19B Distilled': { steps: 4,  guidance: 3.0, duration: 4 },
     'LTX-2 Dev13B':           { steps: 40, guidance: 3.5, duration: 6 },
     'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 6 },
     'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 6 },
@@ -65,7 +65,7 @@ export function init(panel) {
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 6 },
   };
   let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 5;
+  let _duration   = 4;
   let _allModels  = {};
   let _ratio      = '16:9';
   let _qualityId  = 'fast';
@@ -577,7 +577,9 @@ export function init(panel) {
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
   let _multiVideo      = true;
-  let _targetSecs      = 25;
+  let _targetSecs      = 16;
+  // Music off by default for speed; user can flip on per-job
+  let _addMusic        = false;
   let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
   let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
@@ -645,6 +647,21 @@ export function init(panel) {
     style: 'font-size:.73rem; color:var(--text-3); line-height:1.5; padding:4px 0;',
     text: 'AI writes a story arc, each clip starts from the last frame of the previous one. Audio spans the whole piece.',
   }));
+  // Music toggle -- off by default so default jobs are silent + fast
+  const musicChk = el('input', {
+    type: 'checkbox', id: 'express-add-music',
+    style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;',
+  });
+  musicChk.checked = _addMusic;
+  musicChk.addEventListener('change', () => { _addMusic = musicChk.checked; });
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+    musicChk,
+    el('label', {
+      for: 'express-add-music',
+      style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;',
+      text: 'Add music (adds ~30-60s)',
+    }),
+  ]));
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     upscaleChk,
     el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
@@ -896,7 +913,7 @@ export function init(panel) {
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
           lyric_direction: lyricInput.value.trim(), user_direction: 'character-driven, specific energy, not generic',
           model: _model, duration: _duration,
-          steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
+          steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false,
           output_width: _outW, output_height: _outH,
           auto_pick_model: _autoPick,
           // LTX Distilled (Photo Mood) defaults calm; Wan chips are dynamic.
@@ -1059,7 +1076,7 @@ export function init(panel) {
           steps:           _steps,
           guidance:        _guidance,
           seed:            -1,
-          skip_audio:      false,
+          skip_audio:      !_addMusic,
           instrumental:    false,
           output_width:    _outW,
           output_height:   _outH,
