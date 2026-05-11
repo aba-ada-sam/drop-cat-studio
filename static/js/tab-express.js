@@ -279,7 +279,7 @@ export function init(panel) {
   const ideaInput = el('textarea', {
     rows: '3',
     style: 'width:100%; resize:vertical; font-size:.95rem;',
-    placeholder: 'What should happen? Mood, action, style -- or click Spark to generate from your photo.',
+    placeholder: 'Describe your video in one or two sentences -- or leave blank and click Spark to let AI write it from your photo.',
   });
   const lyricInput = el('input', {
     type: 'text',
@@ -377,19 +377,29 @@ export function init(panel) {
     }
   });
 
-  root.appendChild(el('div', { class: 'card', style: 'padding:14px; display:flex; flex-direction:column; gap:10px;' }, [
-    el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
-      el('div', { style: 'font-size:.75rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em;', text: 'Creative brief' }),
-      sparkBtn,
-    ]),
-    ideaInput,
-    el('div', { style: 'display:flex; flex-direction:column; gap:4px;' }, [
+  // Music vibe is auto-generated from the creative brief if left blank, so
+  // it lives behind a "Customize music" expander -- novices never see it.
+  const musicVibeBlock = el('details', { style: 'margin-top:2px;' }, [
+    el('summary', {
+      style: 'cursor:pointer; font-size:.72rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none; list-style:none;',
+      text: '+  Customize music vibe (auto-generated if left blank)',
+    }),
+    el('div', { style: 'display:flex; flex-direction:column; gap:4px; margin-top:6px;' }, [
       el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
         el('div', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Music vibe' }),
         lyricGenBtn,
       ]),
       lyricInput,
     ]),
+  ]);
+
+  root.appendChild(el('div', { class: 'card', style: 'padding:14px; display:flex; flex-direction:column; gap:10px;' }, [
+    el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
+      el('div', { style: 'font-size:.75rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em;', text: 'Creative brief' }),
+      sparkBtn,
+    ]),
+    ideaInput,
+    musicVibeBlock,
     talkReplyEl,
   ]));
 
@@ -561,15 +571,19 @@ export function init(panel) {
     ]),
     warnEl,
   ]);
-  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px; display:flex; flex-direction:column; gap:10px;' }, [
-    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
-      el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Duration' }),
-      durSlider,
-      durLabel,
-    ]),
+  // Duration + per-clip + render advanced are all under one collapsed
+  // expander -- novices don't need to set duration, the default works.
+  root.appendChild(el('div', { class: 'card', style: 'padding:12px 14px;' }, [
     el('details', {}, [
-      el('summary', { style: 'cursor:pointer; font-size:.75rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none;', text: 'Advanced settings' }),
-      advancedInner,
+      el('summary', { style: 'cursor:pointer; font-size:.75rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none;', text: '+  Advanced settings (duration, model, quality, aspect ratio)' }),
+      el('div', { style: 'display:flex; flex-direction:column; gap:10px; margin-top:8px;' }, [
+        el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+          el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Per-clip duration' }),
+          durSlider,
+          durLabel,
+        ]),
+        advancedInner,
+      ]),
     ]),
   ]));
 
@@ -687,6 +701,18 @@ export function init(panel) {
     el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: '- AI reviews and re-shoots weak clips' }),
   ]));
 
+  // Novice-friendly: hide the per-clip / director / upscale tweaks behind a
+  // "Customize" expander. The defaults already produce a good multi-clip
+  // story with music + lyrics, so the casual flow is: drop image, brief,
+  // click Create Story.
+  const multiSettingsDetails = el('details', { style: 'margin-top:8px;' }, [
+    el('summary', {
+      style: 'cursor:pointer; font-size:.72rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none; list-style:none;',
+      text: '+  Customize story (length, music, director)',
+    }),
+    multiSettings,
+  ]);
+
   const multiCard = el('div', { class: 'card', style: 'padding:12px 14px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
       multiChk,
@@ -695,15 +721,17 @@ export function init(panel) {
         style: 'font-size:.88rem; font-weight:600; cursor:pointer; user-select:none; color:var(--text);',
         text: 'Multi-video story',
       }),
-      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- chain clips into a narrative' }),
+      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- chain clips into a narrative with music + lyrics' }),
     ]),
-    multiSettings,
+    multiSettingsDetails,
   ]);
   root.appendChild(multiCard);
 
   multiChk.addEventListener('change', () => {
     _multiVideo = multiChk.checked;
-    multiSettings.style.display = _multiVideo ? 'flex' : 'none';
+    // Hide the whole Customize expander when multi-video is off -- the
+    // controls inside are meaningless for single-clip mode.
+    multiSettingsDetails.style.display = _multiVideo ? '' : 'none';
     if (!_looping) {
       createBtn.textContent = _multiVideo ? 'Create Story' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
     }
