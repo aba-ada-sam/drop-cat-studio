@@ -604,7 +604,9 @@ async def make_it(request: Request):
         "video_steps": _final_steps_s,
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
-        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 8)),
+        # 27 steps is the floor for clearly-sung vocals from ACE-Step. Below
+        # ~20 the model produces music beds without intelligible singing.
+        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 27)),
         "audio_guidance": body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental": body.get("instrumental", config.get("fun_audio_instrumental", True)),
         "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
@@ -739,7 +741,8 @@ async def make_it_multi(request: Request):
         "video_steps":     _final_steps,
         "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
-        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    20)),
+        # 27 steps is the floor for intelligible sung vocals from ACE-Step.
+        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    27)),
         "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
         "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
         "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
@@ -983,7 +986,7 @@ async def add_music(request: Request):
         "instrumental":    body.get("instrumental", False),
         "bpm":             body.get("bpm"),
         "audio_format":    "mp3",
-        "audio_steps":     8,
+        "audio_steps":     27,  # below ~20 ACE-Step renders music bed without intelligible vocals
         "audio_guidance":  7.0,
     }
 
@@ -1046,7 +1049,7 @@ async def add_music(request: Request):
             output_dir=str(_Path(vpath).parent),
             audio_format=cfg_settings.get("audio_format", "mp3"),
             bpm=cfg_settings.get("bpm"),
-            steps=int(cfg_settings.get("audio_steps", 8)),
+            steps=int(cfg_settings.get("audio_steps", 27)),
             guidance=float(cfg_settings.get("audio_guidance", 7.0)),
             seed=-1,
             lyrics=lyrics,

@@ -953,6 +953,10 @@ def run_multi_prep(job, photo_path, settings):
     elif arc_method == "text":
         log.info("[multi] Story arc via text-only (%d clips): %s", n_clips, arc_prompts)
         job.update(message="Story arc planned (photo analysis unavailable, used text)")
+    elif arc_method == "scene-hold":
+        log.info("[multi] Scene-hold extension (%d clips, same prompt each): %s",
+                 n_clips, arc_prompts[0] if arc_prompts else "")
+        job.update(message="Extending single shot across clips (no narrative drift)")
     else:
         log.warning("[multi] Story arc using built-in fallback: %s", arc_prompts)
         job.update(message="Story arc using default motion phases -- AI planning unavailable")
