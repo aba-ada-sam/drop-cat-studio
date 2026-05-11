@@ -57,7 +57,7 @@ export function init(panel) {
   // LTX-2 Dev13B: full schedule, 40 steps optimal (25 undersamples).
   // Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot, 25 steps standard.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 4,  guidance: 3.0, duration: 4 },
+    'LTX-2 Dev19B Distilled': { steps: 6,  guidance: 3.0, duration: 8 },
     'LTX-2 Dev13B':           { steps: 40, guidance: 3.5, duration: 6 },
     'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 6 },
     'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 6 },
@@ -65,7 +65,7 @@ export function init(panel) {
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 6 },
   };
   let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 4;
+  let _duration   = 8;
   let _allModels  = {};
   let _ratio      = '16:9';
   let _qualityId  = 'fast';
@@ -588,9 +588,11 @@ export function init(panel) {
   ]));
 
   // -- Multi-video story -----------------------------------------------------
-  // Default ON: multi-clip stories with a coherent arc are the headline output of
-  // the Express tab. Single-clip mode is still available by unchecking.
-  let _multiVideo      = true;
+  // Default OFF on 16GB cards: chaining clips through LTX-Distilled calm mode
+  // compounds subject drift across clips, and Wan I2V (which would do this
+  // properly) doesn't fit our 16GB VRAM ceiling. A single longer clip with
+  // music is the reliable shipping path until we detect a 24GB+ card.
+  let _multiVideo      = false;
   let _targetSecs      = 16;
   // Quick Video is built around music + lyrics. Default ON; user can untick
   // to ship a silent clip when iterating on the visuals alone.
@@ -721,7 +723,7 @@ export function init(panel) {
         style: 'font-size:.88rem; font-weight:600; cursor:pointer; user-select:none; color:var(--text);',
         text: 'Multi-video story',
       }),
-      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- chain clips into a narrative with music + lyrics' }),
+      el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: '- experimental on 16GB cards: clips may drift across subjects' }),
     ]),
     multiSettingsDetails,
   ]);
