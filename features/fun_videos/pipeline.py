@@ -326,7 +326,14 @@ def run_pipeline(job, photo_path, settings):
         pct = 10 + int(step / total_steps * 48) if total_steps > 0 else 10
         job.update(progress=pct, message=f"Generating video... step {step}/{total_steps}")
 
-    video_prompt = _finalize_prompt(video_prompt, settings.get("model_name", ""))
+    _model_name_here = settings.get("model_name", "")
+    # Derive motion_style from settings; fall back to model-family default (calm
+    # for LTX, dynamic for Wan) so the right prompt suffix is ALWAYS applied.
+    # This mirrors the same fallback in multi_pipeline.py line 994.
+    _motion_style_here = settings.get("motion_style") or (
+        "calm" if "ltx" in _model_name_here.lower() else "dynamic"
+    )
+    video_prompt = _finalize_prompt(video_prompt, _model_name_here, _motion_style_here)
 
     ow = settings.get("override_width")
     oh = settings.get("override_height")

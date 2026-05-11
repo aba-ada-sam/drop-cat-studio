@@ -899,6 +899,9 @@ export function init(panel) {
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: false, instrumental: false,
           output_width: _outW, output_height: _outH,
           auto_pick_model: _autoPick,
+          // LTX Distilled (Photo Mood) defaults calm; Wan chips are dynamic.
+          // auto_pick_model overrides this server-side when ON.
+          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
         }),
       });
       _jobId = job_id;

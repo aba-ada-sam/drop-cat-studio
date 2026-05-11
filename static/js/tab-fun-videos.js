@@ -227,11 +227,9 @@ export function init(panel) {
   }
   _applyVideoFn = _applyVideo;
 
-  // Drain any handoff that arrived before this tab was initialized
-  if (_pendingHandoff) {
-    const ph = _pendingHandoff; _pendingHandoff = null;
-    receiveHandoff(ph);
-  }
+  // NOTE: _pendingHandoff drain is below, AFTER the extended _applyStart is
+  // installed (line ~432). If drained here, only the base _applyStart runs --
+  // auto-prompt generation would be skipped on the first cross-tab navigation.
 
   // -- Start video (video-to-video) ------------------------------------------
   let _startVideoPath = null;
@@ -434,6 +432,14 @@ export function init(panel) {
     _autoGeneratePrompt(path);
     refineRow.style.display = 'flex';
   };
+
+  // Drain any handoff that arrived before this tab was initialized.
+  // MUST be here -- AFTER the extended _applyStart above is installed -- so
+  // cross-tab image navigation correctly triggers auto-prompt generation.
+  if (_pendingHandoff) {
+    const ph = _pendingHandoff; _pendingHandoff = null;
+    receiveHandoff(ph);
+  }
 
   storyBtn.addEventListener('click', () => {
     const visionPath = _startImagePath || _videoFramePath;
@@ -985,6 +991,10 @@ export function init(panel) {
       output_width:     _fvOutW,
       output_height:    _fvOutH,
       auto_pick_model:  _autoPick,
+      // Send motion_style for single-clip so the pipeline applies the right prompt
+      // suffix (calm -> "subject completely still"; dynamic -> kinetic verbs).
+      // auto_pick_model overrides this server-side when ON.
+      motion_style:     _motionStyle,
     };
   }
 

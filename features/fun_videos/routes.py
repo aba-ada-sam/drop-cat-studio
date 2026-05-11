@@ -503,6 +503,11 @@ async def make_it(request: Request):
             f"Pick an I2V model (Wan2.1-I2V-* or LTX-2 *), or remove the photo to run text-only.",
         )
 
+    # motion_style: auto_picked_motion wins when auto-pick ran; otherwise use what
+    # the client sent (e.g. the Create Videos motion style chips); fall back to
+    # None so the pipeline can derive it from the model family at finalize time.
+    resolved_motion = auto_picked_motion or body.get("motion_style") or None
+
     settings = {
         "video_prompt": body.get("video_prompt", ""),
         "music_prompt": body.get("music_prompt", ""),
@@ -511,6 +516,7 @@ async def make_it(request: Request):
         "use_wildcards": body.get("use_wildcards", False),
         "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
         "model_name": requested_model,
+        "motion_style": resolved_motion,
         "resolution": body.get("resolution", config.get("resolution", "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),
@@ -1002,11 +1008,24 @@ async def suggest_music(request: Request):
         bpm = result.get("bpm")
 
         lyric_direction = ""
-        if not instrumental:
+        if not instrumental and music_prompt:
+            # Generate a SHORT lyric direction hint (3-10 words), NOT full lyrics.
+            # Previously called generate_lyrics() and took the first line, which
+            # returned "[verse]" -- a section marker, not a direction hint.
             try:
-                lyric_direction = analyzer.generate_lyrics(llm_router, [], music_prompt, user_direction)
-                # Return just the direction hint, not full lyrics
-                lyric_direction = (lyric_direction or "").split("\n")[0][:120]
+                from core.llm_client import TIER_FAST
+                hint_prompt = (
+                    f'Music style: "{music_prompt}"'
+                    + (f'\nCreative direction: "{user_direction}"' if user_direction else "")
+                    + "\n\nWrite a 5-10 word lyric direction hint: theme + mood + voice style."
+                    " Format: \"[theme], [mood/energy], [voice]\". Example: \"loss and longing, bittersweet, conversational\"."
+                    " Return ONLY the hint -- no quotes, no explanation."
+                )
+                hint = llm_router.route(
+                    [{"role": "user", "content": hint_prompt}],
+                    tier=TIER_FAST, max_tokens=40,
+                )
+                lyric_direction = (hint or "").strip().strip('"').strip("'")[:120]
             except Exception:
                 pass
 
