@@ -995,7 +995,6 @@ def run_multi_pipeline(job, photo_path, settings):
     """Multi-clip GPU pipeline: N chained clips -> concat -> audio -> merge."""
     from app import get_llm_router, gallery_push
     from features.fun_videos import analyzer, video_generator, audio_generator
-    from services.forge_client import unload_checkpoint, reload_checkpoint
     llm_router = get_llm_router()
 
     def _log(msg):
@@ -1066,17 +1065,12 @@ def run_multi_pipeline(job, photo_path, settings):
         src_copy = job_dir / f"source{Path(photo_path).suffix}"
         shutil.copy2(photo_path, src_copy)
 
-    # -- Free VRAM before WanGP --------------------------------------------
-    forge_unloaded = unload_checkpoint()
+    # -- GPU: acquire WanGP exclusively (orchestrator evicts everything else) -
+    from core.gpu_orchestrator import gpu
+    gpu.acquire("wangp", reason=f"multi-clip {n_clips} clips")
+    # Legacy flag kept for the reload-checkpoint path below
+    forge_unloaded = True
     try:
-      if not skip_audio:
-        try:
-            from services.manager import stop_service, acestep_alive
-            if acestep_alive():
-                log.info("[multi] Stopping ACE-Step to free VRAM for WanGP")
-                stop_service("acestep")
-        except Exception as _e:
-            log.debug("ACE-Step pre-stop skipped: %s", _e)
 
         # -- Phase 1: Generate clips sequentially ------------------------------
       # Clips chain: clip_1 starts from the source photo; clips 2+ start from
@@ -1280,13 +1274,8 @@ def run_multi_pipeline(job, photo_path, settings):
           return
 
       # Warm up ACE-Step while we do analysis
-      try:
-          from services.manager import start_acestep, acestep_alive
-          if not acestep_alive():
-              threading.Thread(target=start_acestep, daemon=True).start()
-              log.info("[multi] ACE-Step warm-up started after WanGP phase")
-      except Exception as _e:
-          log.debug("ACE-Step warm-up skipped: %s", _e)
+      # -- GPU: hand off from WanGP to ACE-Step (orchestrator evicts WanGP) --
+      gpu.acquire("acestep", reason="music gen after WanGP phase")
 
       if not music_prompt:
           job.update(progress=78, message="Analyzing video for music direction...")
@@ -1446,8 +1435,6 @@ def run_multi_pipeline(job, photo_path, settings):
           except Exception:
               pass
     finally:
-        if forge_unloaded:
-            try:
-                reload_checkpoint()
-            except Exception as _re:
-                log.debug("forge reload after multi-pipeline failed: %s", _re)
+        # Orchestrator owns Forge state -- next SD-prompts request will acquire
+        # Forge and trigger a reload. No need to manually restore here.
+        pass

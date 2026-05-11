@@ -944,8 +944,9 @@ async def add_music(request: Request):
 
         job.update(progress=20, message="Generating music...")
 
-        from services.forge_client import unload_checkpoint, reload_checkpoint
-        forge_was_unloaded = unload_checkpoint()
+        # Orchestrator: acquire ACE-Step (evicts Forge / WanGP / Ollama).
+        from core.gpu_orchestrator import gpu
+        gpu.acquire("acestep", reason="add-audio job")
 
         video_dur = probe_duration(vpath)
         audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
@@ -954,24 +955,20 @@ async def add_music(request: Request):
             job.update(progress=20 + min(60, int(elapsed_s / audio_dur * 60)),
                        message=f"Generating music... {elapsed_s:.0f}s elapsed")
 
-        try:
-            audio_path, audio_err = audio_generator.generate_audio(
-                prompt=music_prompt,
-                duration=audio_dur,
-                output_dir=str(_Path(vpath).parent),
-                audio_format=cfg_settings.get("audio_format", "mp3"),
-                bpm=cfg_settings.get("bpm"),
-                steps=int(cfg_settings.get("audio_steps", 8)),
-                guidance=float(cfg_settings.get("audio_guidance", 7.0)),
-                seed=-1,
-                lyrics=lyrics,
-                instrumental=instrumental,
-                stop_event=job.stop_event,
-                progress_cb=_audio_progress,
-            )
-        finally:
-            if forge_was_unloaded:
-                reload_checkpoint()
+        audio_path, audio_err = audio_generator.generate_audio(
+            prompt=music_prompt,
+            duration=audio_dur,
+            output_dir=str(_Path(vpath).parent),
+            audio_format=cfg_settings.get("audio_format", "mp3"),
+            bpm=cfg_settings.get("bpm"),
+            steps=int(cfg_settings.get("audio_steps", 8)),
+            guidance=float(cfg_settings.get("audio_guidance", 7.0)),
+            seed=-1,
+            lyrics=lyrics,
+            instrumental=instrumental,
+            stop_event=job.stop_event,
+            progress_cb=_audio_progress,
+        )
 
         if job.stop_event.is_set():
             return

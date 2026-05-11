@@ -587,6 +587,9 @@ async def forge_txt2img(request: Request):
     from services.forge_client import (
         txt2img, build_adetailer_args, build_forge_couple_args,
     )
+    # Orchestrator: acquire Forge (evicts WanGP/ACE-Step/Ollama if loaded).
+    from core.gpu_orchestrator import gpu
+    gpu.acquire("forge", reason="txt2img")
 
     body = await request.json()
 

@@ -374,6 +374,21 @@ async def services_status():
     return JSONResponse(content=svc.get_status(), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/gpu/status")
+async def gpu_status():
+    """Which service currently owns the GPU + recent eviction history."""
+    from core.gpu_orchestrator import gpu
+    return JSONResponse(content=gpu.status(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/gpu/release")
+async def gpu_release_all():
+    """Force-evict every GPU service. Frees VRAM for other applications."""
+    from core.gpu_orchestrator import gpu
+    gpu.release_all()
+    return {"ok": True, "current": gpu.current}
+
+
 @app.post("/api/services/start/{name}")
 async def start_service(name: str):
     starters = {

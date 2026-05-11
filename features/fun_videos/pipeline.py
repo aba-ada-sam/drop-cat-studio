@@ -306,19 +306,10 @@ def run_pipeline(job, photo_path, settings):
 
     # -- Phase 1: Video Generation ----------------------------------------
     # Free all VRAM before WanGP starts: unload Forge SD AND kill ACE-Step.
-    # ACE-Step holds ~12 GB VRAM when idle; WanGP needs the full 16 GB.
-    # ACE-Step is restarted after Phase 1 and loads during Phase 2.
-    from services.forge_client import unload_checkpoint, reload_checkpoint
-    forge_unloaded_for_video = unload_checkpoint()
-
-    if not skip_audio and not use_mmaudio_early:
-        try:
-            from services.manager import stop_service, acestep_alive
-            if acestep_alive():
-                log.info("[info] Stopping ACE-Step to free VRAM for WanGP")
-                stop_service("acestep")
-        except Exception as _e:
-            log.debug("ACE-Step pre-stop skipped: %s", _e)
+    # -- GPU: acquire WanGP exclusively (orchestrator evicts Forge + ACE-Step) -
+    from core.gpu_orchestrator import gpu
+    gpu.acquire("wangp", reason="single-clip video gen")
+    forge_unloaded_for_video = True  # kept for compatibility with downstream
 
     job.update(progress=10, message="Generating video...")
 
@@ -382,13 +373,8 @@ def run_pipeline(job, photo_path, settings):
         )
         _video_succeeded = bool(video_path)
     finally:
-        if forge_unloaded_for_video:
-            # Only reload Forge immediately if audio won't follow -- when ACE-Step
-            # is coming next, keep Forge unloaded so we avoid a pointless
-            # reload->unload cycle (saves ~6s and a VRAM spike).
-            audio_will_follow = _video_succeeded and not skip_audio and not use_mmaudio
-            if not audio_will_follow:
-                reload_checkpoint()
+        # Orchestrator owns Forge state; next SD-prompts request reacquires it.
+        pass
 
     if _stopped():
         return
@@ -411,12 +397,11 @@ def run_pipeline(job, photo_path, settings):
     # Phase 2 (music prompt via Ollama, ~30s) runs while ACE-Step loads.
     if not skip_audio and not use_mmaudio:
         try:
-            from services.manager import start_acestep, acestep_alive
-            if not acestep_alive():
-                threading.Thread(target=start_acestep, daemon=True).start()
-                log.info("[info] ACE-Step warm-up started after video generation")
+            # GPU handoff: WanGP -> ACE-Step. Orchestrator evicts WanGP.
+            from core.gpu_orchestrator import gpu
+            gpu.acquire("acestep", reason="audio gen after video")
         except Exception as _e:
-            log.debug("ACE-Step post-video warm skipped: %s", _e)
+            log.debug("ACE-Step acquire skipped: %s", _e)
 
     # -- Early exit for video-only ----------------------------------------
     if skip_audio:
@@ -484,7 +469,8 @@ def run_pipeline(job, photo_path, settings):
     # Forge may already be unloaded (we skipped the reload after WanGP to save
     # time). Call unload anyway -- it's idempotent and ensures a clean state.
     # Track whether it was running so we know to reload at the end.
-    forge_was_unloaded = forge_unloaded_for_video or unload_checkpoint()
+    # Orchestrator already evicted Forge when WanGP was acquired upstream.
+    forge_was_unloaded = True
 
     video_dur = probe_duration(video_path)
     audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
@@ -509,8 +495,8 @@ def run_pipeline(job, photo_path, settings):
             progress_cb=_audio_progress,
         )
     finally:
-        if forge_was_unloaded:
-            reload_checkpoint()
+        # Orchestrator handles Forge state; no manual reload here.
+        pass
 
     if _stopped():
         return
