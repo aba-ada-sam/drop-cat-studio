@@ -309,7 +309,6 @@ def run_pipeline(job, photo_path, settings):
     # -- GPU: acquire WanGP exclusively (orchestrator evicts Forge + ACE-Step) -
     from core.gpu_orchestrator import gpu
     gpu.acquire("wangp", reason="single-clip video gen")
-    forge_unloaded_for_video = True  # kept for compatibility with downstream
 
     job.update(progress=10, message="Generating video...")
 
@@ -340,41 +339,35 @@ def run_pipeline(job, photo_path, settings):
             _tw, _th = _native
         photo_path = _prep_photo(photo_path, _tw, _th, job_dir)
 
-    _video_succeeded = False
-    try:
-        _mn = settings.get("model_name", "LTX-2 Dev19B Distilled")
-        _steps = int(settings.get("video_steps", 30))
-        # LTX-2 Distilled: cap at 8 (beyond 8 regresses on compressed schedule).
-        # LTX-2 Dev13B: WanGP enforces minimum 20 for ltxv_13B.
-        if "ltx" in _mn.lower() and "distilled" in _mn.lower():
-            _steps = min(_steps, 8)
-        elif "ltx" in _mn.lower():
-            _steps = max(_steps, 20)
-        video_path = video_generator.generate_video(
-            image_path=photo_path,
-            prompt=video_prompt,
-            out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
-            duration=float(settings.get("video_duration", 14.0)),
-            model_name=_mn,
-            resolution=settings.get("resolution", "580p"),
-            override_width=int(ow) if ow else None,
-            override_height=int(oh) if oh else None,
-            mmaudio=use_mmaudio,
-            steps=_steps,
-            guidance=float(settings.get("video_guidance", 7.5)),
-            seed=int(settings.get("video_seed", -1)),
-            end_image_path=settings.get("end_photo_path"),
-            start_video_path=settings.get("start_video_path"),
-            loras=settings.get("loras", []),
-            negative_prompt=video_generator.negative_prompt_for(_mn),
-            stop_check=_stopped,
-            log_fn=_log,
-            progress_fn=_video_progress,
-        )
-        _video_succeeded = bool(video_path)
-    finally:
-        # Orchestrator owns Forge state; next SD-prompts request reacquires it.
-        pass
+    _mn = settings.get("model_name", "LTX-2 Dev19B Distilled")
+    _steps = int(settings.get("video_steps", 30))
+    # LTX-2 Distilled: cap at 8 (beyond 8 regresses on compressed schedule).
+    # LTX-2 Dev13B: WanGP enforces minimum 20 for ltxv_13B.
+    if "ltx" in _mn.lower() and "distilled" in _mn.lower():
+        _steps = min(_steps, 8)
+    elif "ltx" in _mn.lower():
+        _steps = max(_steps, 20)
+    video_path = video_generator.generate_video(
+        image_path=photo_path,
+        prompt=video_prompt,
+        out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
+        duration=float(settings.get("video_duration", 14.0)),
+        model_name=_mn,
+        resolution=settings.get("resolution", "580p"),
+        override_width=int(ow) if ow else None,
+        override_height=int(oh) if oh else None,
+        mmaudio=use_mmaudio,
+        steps=_steps,
+        guidance=float(settings.get("video_guidance", 7.5)),
+        seed=int(settings.get("video_seed", -1)),
+        end_image_path=settings.get("end_photo_path"),
+        start_video_path=settings.get("start_video_path"),
+        loras=settings.get("loras", []),
+        negative_prompt=video_generator.negative_prompt_for(_mn),
+        stop_check=_stopped,
+        log_fn=_log,
+        progress_fn=_video_progress,
+    )
 
     if _stopped():
         return
@@ -466,12 +459,9 @@ def run_pipeline(job, photo_path, settings):
 
     # -- Phase 3: Audio Generation ----------------------------------------
     job.update(progress=70, message="Generating audio...")
-    # Forge may already be unloaded (we skipped the reload after WanGP to save
-    # time). Call unload anyway -- it's idempotent and ensures a clean state.
-    # Track whether it was running so we know to reload at the end.
-    # Orchestrator already evicted Forge when WanGP was acquired upstream.
-    forge_was_unloaded = True
-
+    # Orchestrator already evicted Forge when WanGP was acquired upstream;
+    # the subsequent gpu.acquire("acestep") evicted WanGP and brought ACE-Step
+    # into VRAM, so the GPU is correctly arranged for audio generation here.
     video_dur = probe_duration(video_path)
     audio_dur = min(video_dur + 2.0, 120.0) if video_dur > 0 else 30.0
 
@@ -479,24 +469,20 @@ def run_pipeline(job, photo_path, settings):
         job.update(progress=70 + min(14, elapsed_s // 10),
                    message=f"Generating audio... {elapsed_s}s elapsed")
 
-    try:
-        audio_path, audio_err = audio_generator.generate_audio(
-            prompt=music_prompt,
-            duration=audio_dur,
-            output_dir=str(job_dir),
-            audio_format=settings.get("audio_format", "mp3"),
-            bpm=settings.get("bpm"),
-            steps=int(settings.get("audio_steps", 8)),
-            guidance=float(settings.get("audio_guidance", 7.0)),
-            seed=-1,
-            lyrics=lyrics,
-            instrumental=instrumental,
-            stop_event=job.stop_event,
-            progress_cb=_audio_progress,
-        )
-    finally:
-        # Orchestrator handles Forge state; no manual reload here.
-        pass
+    audio_path, audio_err = audio_generator.generate_audio(
+        prompt=music_prompt,
+        duration=audio_dur,
+        output_dir=str(job_dir),
+        audio_format=settings.get("audio_format", "mp3"),
+        bpm=settings.get("bpm"),
+        steps=int(settings.get("audio_steps", 8)),
+        guidance=float(settings.get("audio_guidance", 7.0)),
+        seed=-1,
+        lyrics=lyrics,
+        instrumental=instrumental,
+        stop_event=job.stop_event,
+        progress_cb=_audio_progress,
+    )
 
     if _stopped():
         return

@@ -1069,8 +1069,6 @@ def run_multi_pipeline(job, photo_path, settings):
     # -- GPU: acquire WanGP exclusively (orchestrator evicts everything else) -
     from core.gpu_orchestrator import gpu
     gpu.acquire("wangp", reason=f"multi-clip {n_clips} clips")
-    # Legacy flag kept for the reload-checkpoint path below
-    forge_unloaded = True
     try:
 
         # -- Phase 1: Generate clips sequentially ------------------------------
