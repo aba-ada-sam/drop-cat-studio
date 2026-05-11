@@ -1127,6 +1127,39 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
 
+  // -- GPU indicator pill: which service currently owns the GPU --------------
+  const _gpuLabelMap = {
+    wangp:   { label: 'GPU: Video',  color: '#d4a017' },
+    acestep: { label: 'GPU: Sound',  color: '#c41e3a' },
+    forge:   { label: 'GPU: Image',  color: '#5fa8d3' },
+    ollama:  { label: 'GPU: LLM',    color: '#7eb86c' },
+  };
+  async function pollGpuIndicator() {
+    try {
+      const r = await fetch('/api/gpu/status', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      const dot = document.getElementById('gpu-indicator-dot');
+      const lbl = document.getElementById('gpu-indicator-label');
+      if (!dot || !lbl) return;
+      const meta = data.current ? _gpuLabelMap[data.current] : null;
+      if (meta) {
+        dot.style.background = meta.color;
+        lbl.textContent = meta.label;
+        const hist = (data.history || []).slice(-3).reverse()
+          .map(h => `${h.from || 'none'} -> ${h.to} (${h.reason || 'no reason'}, ${h.ms}ms)`).join('\n');
+        document.getElementById('gpu-indicator').title =
+          `Currently held by ${data.current}.` + (hist ? `\n\nRecent transitions:\n${hist}` : '');
+      } else {
+        dot.style.background = '#555';
+        lbl.textContent = 'GPU: idle';
+        document.getElementById('gpu-indicator').title = 'No service is holding the GPU right now.';
+      }
+    } catch (_) { /* silent -- indicator is read-only diagnostic */ }
+  }
+  pollGpuIndicator();
+  setInterval(pollGpuIndicator, 3000);
+
   // -- Sidebar job feed ------------------------------------------------------
   const _feedEl = document.getElementById('job-feed');
   const _feedCards    = new Map(); // job_id -> card element

@@ -97,6 +97,13 @@
         </div>
 
         <div class="header-right">
+          <div id="gpu-indicator" title="Which service currently holds the GPU"
+               style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:var(--surface-2);
+                      border:1px solid var(--border-1);border-radius:14px;font-size:.72rem;
+                      color:var(--text-muted);margin-right:8px;cursor:help;user-select:none;">
+            <span id="gpu-indicator-dot" style="width:6px;height:6px;border-radius:50%;background:#555;"></span>
+            <span id="gpu-indicator-label">GPU: idle</span>
+          </div>
           <button class="btn-icon header-btn" id="btn-mute-all" title="Mute / unmute all videos">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
             <span id="mute-label">Mute</span>
@@ -384,6 +391,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260511j"></script>
+  <script type="module" src="/static/js/app.js?v=20260511k"></script>
 </body>
 </html>

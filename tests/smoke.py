@@ -183,6 +183,19 @@ def main() -> int:
             assert "camera" in payload_s or "mood" in payload_s, "no inline wildcards surfaced"
         _test("GET /api/prompts/wildcards", wildcards_list)
 
+        # -- GPU orchestrator status endpoint ------------------------------
+        def gpu_status_shape():
+            r = client.get("/api/gpu/status")
+            assert r.status_code == 200, r.status_code
+            data = r.json()
+            assert isinstance(data, dict), f"expected dict, got {type(data).__name__}"
+            assert "current" in data, "missing 'current' key"
+            assert "history" in data, "missing 'history' key"
+            assert isinstance(data["history"], list), "history must be list"
+            assert data["current"] is None or data["current"] in ("wangp", "acestep", "forge", "ollama"), \
+                f"unexpected current value: {data['current']!r}"
+        _test("GET /api/gpu/status returns expected shape", gpu_status_shape)
+
     # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")
