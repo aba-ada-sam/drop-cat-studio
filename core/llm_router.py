@@ -42,18 +42,33 @@ class LLMRouter:
         self._stats = {"ok": 0, "errors": 0, "retries": 0}
 
     def _provider(self, force: str | None = None) -> str:
+        """Resolve which LLM provider to use for this call.
+
+        Ollama is opt-in: callers may still pass force='ollama' (e.g. a privacy-
+        conscious path), but in auto-mode Ollama is only chosen when no cloud
+        key is configured AND the user has explicitly enabled the fallback in
+        Settings. Otherwise we surface a hard error so the user knows to
+        configure a cloud key or enable Ollama -- no silent local routing.
+        """
         if force in ("anthropic", "openai", "ollama"):
             return force
         p = cfg.get("llm_provider") or "auto"
         if p != "auto":
             return p
-        # Auto: prefer cloud APIs when keys are present (much faster than local Ollama)
+        # Auto: cloud first, in preference order
         from core.keys import get_key
         if get_key("anthropic"):
             return "anthropic"
         if get_key("openai"):
             return "openai"
-        return "ollama"
+        # No cloud key. Only fall back to Ollama if user has opted in.
+        if cfg.get("allow_ollama_fallback"):
+            return "ollama"
+        raise RuntimeError(
+            "No cloud LLM key configured and Ollama fallback is disabled. "
+            "Add an Anthropic or OpenAI key in Settings, or enable "
+            "'Allow Ollama fallback' to use local models."
+        )
 
     def route(
         self,

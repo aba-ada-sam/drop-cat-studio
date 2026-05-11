@@ -294,7 +294,7 @@ async def refine_prompt(request: Request):
             from core.llm_client import encode_image_b64
             b64 = encode_image_b64(image_path)
             if b64:
-                return llm_router.route_vision(user_msg, [b64], tier=TIER_FAST, system=system, max_tokens=200, force_provider="ollama")
+                return llm_router.route_vision(user_msg, [b64], tier=TIER_FAST, system=system, max_tokens=200)
         return llm_router.route([{"role": "user", "content": user_msg}], tier=TIER_FAST, system=system, max_tokens=200)
 
     try:
@@ -428,15 +428,16 @@ def _auto_pick_model(
             return ("action", f"Wan 720P drifts across {n_clips} clips -- 480P is more stable")
         return (pick, reason)
 
-    # Step 1: vision call via Ollama (NSFW-safe, photo stays on-device).
+    # Step 1: vision call (cloud-first; only goes to Ollama if user enabled
+    # the fallback in Settings or explicitly chose Ollama as the provider).
     if photo_b64:
         try:
             text = llm_router.route_vision(
                 user_msg, [photo_b64],
                 tier=TIER_FAST, system=_AUTO_PICK_SYSTEM, max_tokens=120,
-                force_provider="ollama", format_json=True,
+                format_json=True,
             )
-            log.info("[auto-pick] ollama vision returned %d chars: %r", len(text or ""), (text or "")[:200])
+            log.info("[auto-pick] vision returned %d chars: %r", len(text or ""), (text or "")[:200])
             parsed = _try_parse(text or "")
             if parsed:
                 pick, reason = parsed

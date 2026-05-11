@@ -28,6 +28,12 @@ DEFAULTS: dict = {
     "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
     "anthropic_key": "",
     "openai_key": "",
+    # Ollama is OFF by default. It's only used when the user explicitly opts in:
+    #   * llm_provider == "ollama" (explicit selection), OR
+    #   * allow_ollama_fallback == True AND no cloud key is configured
+    # Vision calls that historically defaulted to Ollama (NSFW-safe) now route to
+    # cloud unless this flag is on and Ollama is reachable.
+    "allow_ollama_fallback": False,
 
     # -- Image Provider ----------------------------------------------------
     "image_provider": "forge",        # forge | openai

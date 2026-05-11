@@ -324,7 +324,8 @@ def _generate_story_arc(
             result.append(dict(result[len(result) % src]))
         return result
 
-    # -- Step 1a: Ollama vision (local -- photo stays on-device) --
+    # -- Step 1a: vision call (cloud-first; uses Ollama only if user enabled
+    # the fallback in Settings).
     frames = []
     if photo_path and os.path.isfile(photo_path):
         b64 = encode_image_b64(photo_path)
@@ -338,12 +339,12 @@ def _generate_story_arc(
             text = llm_router.route_vision(
                 user_msg, frames,
                 tier=TIER_BALANCED, system=system_prompt, max_tokens=1200,
-                force_provider="ollama", format_json=True,
+                format_json=True,
             )
             result = _parse_clips(text)
             if result:
                 return result, "vision"
-            log.warning("[multi] Story arc Ollama vision returned unparseable response -- trying cloud vision")
+            log.warning("[multi] Story arc vision returned unparseable response -- trying text-only fallback")
         except Exception as e:
             log.warning("[multi] Story arc Ollama vision failed (%s) -- trying cloud vision", e)
 

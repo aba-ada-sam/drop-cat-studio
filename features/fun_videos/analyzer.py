@@ -193,7 +193,7 @@ def analyze_photo(router, image_b64: str) -> dict:
             [image_b64],
             tier=TIER_BALANCED,
             system=ANALYSIS_SYSTEM,
-            force_provider="ollama",  # user images may be NSFW; cloud APIs refuse them
+            # Use the configured provider; Ollama no longer auto-selected here.
             format_json=True,
         )
         result = parse_json_response(text)
@@ -257,7 +257,7 @@ Generate exactly {num_prompts} prompts, each with different mood, camera work, a
             tier=tier,
             max_tokens=actual_max_tokens,
             system=VIDEO_PROMPT_SYSTEM,
-            force_provider=force_provider or "ollama",  # user images may be NSFW
+            force_provider=force_provider,  # honor explicit override; otherwise route normally
             format_json=True,
         )
         result = parse_json_response(last_text)

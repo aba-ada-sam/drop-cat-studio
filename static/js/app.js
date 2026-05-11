@@ -526,7 +526,9 @@ async function loadConfig() {
     state.config = await apiFetch('/api/config', { context: 'loadConfig' });
     for (const [key, val] of Object.entries(state.config)) {
       const el = document.getElementById(`cfg-${key}`);
-      if (el) el.value = val;
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!val;
+      else el.value = val;
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
     _applyLLMState(llm);
@@ -591,6 +593,11 @@ async function saveSettings() {
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
       if (el) body[key] = el.value;
+    }
+    // Boolean toggles (checkboxes)
+    for (const key of ['allow_ollama_fallback']) {
+      const el = document.getElementById(`cfg-${key}`);
+      if (el) body[key] = !!el.checked;
     }
     await apiFetch('/api/config', { method: 'POST', body: JSON.stringify(body), context: 'saveSettings' });
     const ollamaBody = {};

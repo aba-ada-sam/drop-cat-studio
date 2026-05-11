@@ -301,12 +301,19 @@
           <div class="form-group">
             <label for="cfg-llm_provider">Provider</label>
             <select id="cfg-llm_provider">
-              <option value="auto">Auto -- Anthropic -> OpenAI -> Ollama (best available)</option>
+              <option value="auto">Auto -- Anthropic -> OpenAI (cloud only)</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
               <option value="ollama">Ollama (Local)</option>
             </select>
             <span class="hint-text" id="ai-effective-hint"></span>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-allow_ollama_fallback" style="width:auto">
+              <span>Allow Ollama as a local fallback when no cloud key is configured</span>
+            </label>
+            <span class="hint-text">Off by default. When enabled, Auto mode falls back to local Ollama if no Anthropic/OpenAI key is set. Vision calls still prefer cloud unless this is on AND Ollama is the active provider.</span>
           </div>
           <div class="form-group">
             <label for="cfg-anthropic_key">Anthropic API Key</label>
@@ -377,6 +384,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260510s"></script>
+  <script type="module" src="/static/js/app.js?v=20260511a"></script>
 </body>
 </html>
