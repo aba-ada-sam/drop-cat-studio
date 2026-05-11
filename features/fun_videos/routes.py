@@ -606,7 +606,11 @@ async def make_it_multi(request: Request):
         raise HTTPException(400, "Provide either a photo or a video prompt")
 
     config = cfg.load()
-    clip_dur = max(4.0, min(20.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 5.0)))))
+    # Hard cap at 5.0s per clip: 5s * 25fps = 125 frames, below WanGP's 129-frame
+    # sliding window threshold. Anything >= 5.17s triggers a 2-window split which
+    # roughly doubles per-clip generation time. n_clips grows instead -- a 30s
+    # story becomes 6 fast clips instead of 5 slow ones.
+    clip_dur = max(4.0, min(5.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 5.0)))))
     # If target_story_length is given, derive n_clips from it; otherwise use num_clips directly
     target_secs = body.get("target_story_length")
     if target_secs is not None:

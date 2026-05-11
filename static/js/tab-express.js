@@ -57,7 +57,7 @@ export function init(panel) {
   // LTX-2 Dev13B: full schedule, 40 steps optimal (25 undersamples).
   // Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot, 25 steps standard.
   const MODEL_DEFAULTS = {
-    'LTX-2 Dev19B Distilled': { steps: 8,  guidance: 3.0, duration: 6 },
+    'LTX-2 Dev19B Distilled': { steps: 6,  guidance: 3.0, duration: 5 },
     'LTX-2 Dev13B':           { steps: 40, guidance: 3.5, duration: 6 },
     'Wan2.1-I2V-14B-480P':    { steps: 25, guidance: 4.5, duration: 6 },
     'Wan2.1-I2V-14B-720P':    { steps: 25, guidance: 4.5, duration: 6 },
@@ -65,7 +65,7 @@ export function init(panel) {
     'Wan2.1-T2V-1.3B':        { steps: 20, guidance: 5.0, duration: 6 },
   };
   let _model      = 'LTX-2 Dev19B Distilled';
-  let _duration   = 6;
+  let _duration   = 5;
   let _allModels  = {};
   let _ratio      = '16:9';
   let _qualityId  = 'fast';
@@ -577,7 +577,7 @@ export function init(panel) {
   // Default ON: multi-clip stories with a coherent arc are the headline output of
   // the Express tab. Single-clip mode is still available by unchecking.
   let _multiVideo      = true;
-  let _targetSecs      = 30;
+  let _targetSecs      = 25;
   let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
   let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
