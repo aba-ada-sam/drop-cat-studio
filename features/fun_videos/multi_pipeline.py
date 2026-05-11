@@ -228,6 +228,7 @@ def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -
         # Distilled runs 8 steps -- micro-motion only (GENTLE).
         if is_ltx_dev13:
             return _STORY_ARC_LTX_ACTION
+        return _STORY_ARC_GENTLE
     return _STORY_ARC_KINETIC
 
 
@@ -253,18 +254,26 @@ def _generate_story_arc(
       3. Built-in fallback phases prefixed with user idea (last resort, always works)
     """
     is_ltx = "ltx" in (model_name or "").lower()
+    is_ltx_dev13 = "dev13" in (model_name or "").lower()
     resolved_style = motion_style or ("calm" if is_ltx else "dynamic")
     if resolved_style == "calm":
         default_idea = "Create a calm breathing-photograph short film, environment-only motion, subject completely still"
+    elif is_ltx and is_ltx_dev13:
+        default_idea = "Create a short film with deliberate physical motion, subject moves with clear filmable actions, scene preserved"
     elif is_ltx:
         default_idea = "Create a calm observational short film, subtle continuous motion, scene preserved"
     else:
         default_idea = "Create an exciting action-packed short film"
     idea_text = (initial_idea or "").strip() or default_idea
     total_secs = target_total_secs or (n_clips * default_clip_dur)
-    style_hint = {"calm": "CALM -- environment-only motion, subject completely still"}.get(
-        resolved_style, "LTX -- use gentle motion only" if is_ltx else "Wan I2V -- kinetic action OK"
-    )
+    if resolved_style == "calm":
+        style_hint = "CALM -- environment-only motion, subject completely still"
+    elif is_ltx and is_ltx_dev13:
+        style_hint = "LTX Dev13B -- deliberate physical motion OK (strides, gestures, turns), strong image conditioning"
+    elif is_ltx:
+        style_hint = "LTX Distilled -- gentle micro-motion only, avoid large subject movement"
+    else:
+        style_hint = "Wan I2V -- kinetic action OK"
     # In calm mode, prefix the idea with a hard reminder so the LLM overrides any
     # kinetic words the user (or a JS default) may have included in the prompt.
     # The system prompt already bans "erupts, slams" etc., but a repeated prompt-level
