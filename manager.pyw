@@ -425,7 +425,14 @@ def _show_crash_ui(srv: "ServerManager", exit_code: int) -> None:
     root = tk.Tk()
     root.overrideredirect(True)
     root.configure(bg="#0d0606")
+    # Pop above everything so the user notices, but release topmost on focus
+    # change or after 2s so it doesn't trap their workflow.
     root.attributes("-topmost", True)
+    def _drop_topmost(_e=None):
+        try: root.attributes("-topmost", False)
+        except tk.TclError: pass
+    root.bind("<FocusOut>", _drop_topmost)
+    root.after(2000, _drop_topmost)
 
     W, H = 340, 200
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -547,9 +554,16 @@ def show_splash(srv: ServerManager) -> None:
     root = tk.Tk()
     root.overrideredirect(True)
     root.configure(bg="#0d0606")
+    # Pop above everything on initial paint so the user sees the splash, but
+    # release topmost as soon as they click any other window. Also drop after
+    # 2s as a fallback in case FocusOut doesn't fire on this overrideredirect
+    # window (Windows is inconsistent here).
     root.attributes("-topmost", True)
-    # Drop always-on-top after 5s so it can't permanently block other work
-    root.after(5000, lambda: root.attributes("-topmost", False))
+    def _drop_topmost(_e=None):
+        try: root.attributes("-topmost", False)
+        except tk.TclError: pass
+    root.bind("<FocusOut>", _drop_topmost)
+    root.after(2000, _drop_topmost)
 
     W, H = 320, 180
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
