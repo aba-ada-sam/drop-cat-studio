@@ -1017,9 +1017,12 @@ def run_multi_pipeline(job, photo_path, settings):
     guidance         = float(settings.get("video_guidance", 7.5))
     # LTX-2 Distilled: two-stage compressed schedule. Optimal 4-8 steps; beyond 8 regresses.
     # Guidance above 3.5 over-saturates the compressed schedule.
+    # LTX-2 Dev13B: WanGP enforces a hard minimum of 20 steps for ltxv_13B.
     if "ltx" in model_name.lower() and "distilled" in model_name.lower():
         steps    = min(steps, 8)
         guidance = min(guidance, 3.5)
+    elif "ltx" in model_name.lower():
+        steps = max(steps, 20)
     seed             = int(settings.get("video_seed", -1))
     skip_audio       = settings.get("skip_audio", False)
     instrumental     = settings.get("instrumental", False)

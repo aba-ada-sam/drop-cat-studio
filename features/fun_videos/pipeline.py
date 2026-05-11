@@ -352,6 +352,13 @@ def run_pipeline(job, photo_path, settings):
     _video_succeeded = False
     try:
         _mn = settings.get("model_name", "LTX-2 Dev19B Distilled")
+        _steps = int(settings.get("video_steps", 30))
+        # LTX-2 Distilled: cap at 8 (beyond 8 regresses on compressed schedule).
+        # LTX-2 Dev13B: WanGP enforces minimum 20 for ltxv_13B.
+        if "ltx" in _mn.lower() and "distilled" in _mn.lower():
+            _steps = min(_steps, 8)
+        elif "ltx" in _mn.lower():
+            _steps = max(_steps, 20)
         video_path = video_generator.generate_video(
             image_path=photo_path,
             prompt=video_prompt,
@@ -362,7 +369,7 @@ def run_pipeline(job, photo_path, settings):
             override_width=int(ow) if ow else None,
             override_height=int(oh) if oh else None,
             mmaudio=use_mmaudio,
-            steps=int(settings.get("video_steps", 30)),
+            steps=_steps,
             guidance=float(settings.get("video_guidance", 7.5)),
             seed=int(settings.get("video_seed", -1)),
             end_image_path=settings.get("end_photo_path"),

@@ -140,6 +140,12 @@ def _do_generate(params: dict) -> dict:
     model_type = resolve_model_name(model_name)
     current_model = model_name
 
+    # WanGP enforces a hard minimum of 20 steps for ltxv_13B (LTX-2 Dev13B).
+    # Guard here as a safety net in case callers don't enforce it themselves.
+    if model_type == "ltxv_13B" and steps < 20:
+        print(f"[worker] ltxv_13B requires >=20 steps (got {steps}) -- raising to 20", flush=True)
+        steps = 20
+
     state = _build_state(model_type)
 
     start_images = []
