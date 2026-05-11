@@ -328,21 +328,28 @@ async def refine_prompt(request: Request):
 
 _PICK_TO_MODEL = {
     "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    "action":       ("LTX-2 Dev19B Distilled", "dynamic"),
-    "action_hd":    ("LTX-2 Dev19B Distilled", "dynamic"),
-    "story_action": ("LTX-2 Dev19B Distilled", "dynamic"),
+    "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
+    "action_hd":    ("Wan2.1-I2V-14B-720P",    "dynamic"),
+    "story_action": ("Wan2.1-I2V-14B-480P",    "dynamic"),
     "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
 }
-# Hardware reality on 16GB VRAM cards (RTX 5080, etc.):
-#   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step
-#   * Wan2.1-I2V-14B          int8 ~ 16 GB -- doesn't fit, streams from RAM
-#                                              (~5-15s/step, hangs with compile)
-#   * LTX-2 Dev13B            int8 ~ 13 GB -- borderline, times out cold
-# Auto-pick maps EVERY pick to LTX-2 Distilled until we ship a VRAM-aware
-# router that knows which cards can host Wan I2V. Power users who want Wan I2V
-# can turn off auto-pick and pick it manually -- the slow streaming path is
-# preserved, just no longer selected automatically. The motion_style ('dynamic'
-# vs 'calm') still varies per pick so LTX adapts its denoising character.
+# Hardware reality on 16GB VRAM cards (RTX 5080):
+#   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step,
+#                                              CALM motion only (atmospheric).
+#                                              In dynamic mode on action prompts
+#                                              it produces spastic micro-jitter.
+#   * Wan2.1-I2V-14B          int8 ~ 16 GB -- doesn't fit in 13GB budget,
+#                                              streams 22% of layers from RAM.
+#                                              ~5-15s/step (slow), but real
+#                                              kinetic motion that holds the
+#                                              subject through action verbs.
+#                                              MUST run with compile = "" or
+#                                              the recompile loop hangs.
+# Action buckets route to Wan I2V because the visual result on action prompts
+# is the only thing that matters; users will trade time for a coherent video
+# over a fast spastic one. Atmospheric buckets stay on LTX because that's its
+# native mode AND it's 5-10x faster. The user-visible knob remains the same:
+# auto-pick on -> system picks based on prompt energy.
 
 _AUTO_PICK_SYSTEM = """You are picking the best AI video model for a user's idea.
 
@@ -409,7 +416,7 @@ def _auto_pick_model(
     idea_clean = (idea or "").strip()
     if not idea_clean and not photo_b64:
         # No idea, no photo -- can't classify. Ship motion-by-default.
-        return ("LTX-2 Dev19B Distilled", "dynamic", "no idea -- LTX default (fits 16GB VRAM)")
+        return ("Wan2.1-I2V-14B-480P", "dynamic", "no idea -- Wan I2V action default")
 
     user_msg = (
         f"User idea: {idea_clean or '(no explicit idea given)'}\n"
@@ -481,7 +488,7 @@ def _auto_pick_model(
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
     # Step 3: hard fallback -- Wan I2V 480P works on all supported hardware.
-    return ("LTX-2 Dev19B Distilled", "dynamic", "fallback-LTX (fits 16GB VRAM)")
+    return ("Wan2.1-I2V-14B-480P", "dynamic", "fallback-action")
 
 
 @router.post("/make-it")
@@ -722,10 +729,16 @@ async def make_it_multi(request: Request):
         "motion_style":         requested_motion,
     }
 
+    # Surface the chosen model + expected pace in the label so users see what
+    # they're getting before sitting through a 20-minute Wan I2V run unaware.
+    _model_short = (
+        "Wan I2V (slow, kinetic)" if "wan" in requested_model.lower() else
+        "LTX (fast, atmospheric)"
+    )
     if photo_path:
-        label = f"Story ({n_clips} clips): {Path(photo_path).stem[:16]}"
+        label = f"Story ({n_clips} clips, {_model_short}): {Path(photo_path).stem[:16]}"
     else:
-        label = f"Story ({n_clips} clips): {settings.get('video_prompt', '')[:20]}"
+        label = f"Story ({n_clips} clips, {_model_short}): {settings.get('video_prompt', '')[:20]}"
 
     try:
         job = job_manager.submit_with_prep(
