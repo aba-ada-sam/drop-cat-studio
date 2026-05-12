@@ -1065,9 +1065,13 @@ export function init(panel) {
           _activeJobId = null;
           if (j.output) {
             const outputs = Array.isArray(j.output) ? j.output : [j.output];
-            // outputs[0] is always the final video (merged with audio, or raw if no audio).
-            // meta.video_path holds the silent raw WanGP video for downstream tools.
-            _rawPath  = (j.meta && j.meta.video_path) || outputs[0];
+            // outputs[0] is the final video (merged with audio + upscaled if enabled).
+            // _rawPath used to point at meta.video_path (the silent intermediate WanGP
+            // output) but the post-process pipeline deletes that file after the mux/
+            // upscale steps, leaving downstream 'Add Audio'/'Add Music' buttons hitting
+            // a 404. The final video carries audio anyway, and downstream tools demux
+            // when they need a silent copy -- safer to always reach for outputs[0].
+            _rawPath  = outputs[0];
             _mixPath  = outputs.length > 1 ? outputs[1] : null;
             const bestPath = _mixPath || outputs[0];
 
