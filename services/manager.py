@@ -278,9 +278,14 @@ def start_acestep() -> tuple[bool, str | None]:
         # actually sings the lyrics we pass in. The SFT model must be
         # downloaded first: `acestep-download --model acestep-v15-sft`.
         # If SFT isn't on disk, ACE-Step falls back to whatever is available.
+        #
+        # CRITICAL: ACE-Step's api_server.py reads ACESTEP_CONFIG_PATH for
+        # the DiT model name. The SERVICE_MODE_DIT_MODEL env var only
+        # affects the acestep_v15_pipeline.py CLI entry point, NOT the API
+        # server we launch. See acestep/api/startup_model_init.py:68.
         sft_path = acestep_root / "checkpoints" / "acestep-v15-sft"
         if sft_path.is_dir():
-            env["SERVICE_MODE_DIT_MODEL"] = "acestep-v15-sft"
+            env["ACESTEP_CONFIG_PATH"] = "acestep-v15-sft"
             log.info("ACE-Step DiT model: acestep-v15-sft (vocals-capable)")
         else:
             log.warning("ACE-Step SFT checkpoint not found at %s -- vocals will be "
