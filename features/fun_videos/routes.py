@@ -27,6 +27,21 @@ VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
 MAX_IMAGE_MB = 15
 
 
+def _clean_user_path(p: str) -> str:
+    """Strip whitespace and surrounding quotes from a user-pasted path.
+
+    Windows Explorer's 'Copy as path' wraps the path in double quotes
+    (e.g. '"C:\\Users\\andre\\Desktop\\my folder"'). PowerShell users
+    sometimes paste with single quotes. Without this scrub the path is
+    treated as relative and Path.resolve() concatenates it onto the
+    server's CWD -- producing a 'Not a folder:' error against a string
+    like 'C:\\DropCat-Studio\\"C:\\Users\\andre\\...' which is exactly
+    what Andrew hit on 2026-05-12 trying to point Loop Folder at a
+    desktop folder.
+    """
+    return (p or "").strip().strip('"').strip("'").strip()
+
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -150,6 +165,7 @@ async def list_folder(path: str = ""):
     Raises 400 if the path is missing, not a directory, or contains
     no recognised images. Hidden files and subdirectories are skipped.
     """
+    path = _clean_user_path(path)
     if not path:
         raise HTTPException(400, "Missing 'path' query parameter")
 
@@ -203,7 +219,7 @@ async def folder_loop_start(request: Request):
     from features.fun_videos import folder_loop
     body = await request.json()
 
-    folder = body.get("folder", "")
+    folder = _clean_user_path(body.get("folder", ""))
     if not folder:
         raise HTTPException(400, "Missing 'folder'")
 

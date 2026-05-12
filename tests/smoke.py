@@ -204,6 +204,16 @@ def main() -> int:
             # Bogus path -> 400
             r = client.get("/api/fun/list-folder?path=/no/such/folder/exists/here")
             assert r.status_code == 400, f"bad path expected 400, got {r.status_code}"
+            # Path wrapped in double quotes (Windows 'Copy as path') -> 400
+            # because the underlying folder doesn't exist, NOT because of the
+            # quotes. The error message must mention the unquoted form so we
+            # know _clean_user_path ran. Andrew 2026-05-12 hit this on a real
+            # quoted path; regression-locking the strip behaviour.
+            quoted = '"C:\\Users\\andre\\Desktop\\fake-no-such-folder"'
+            r = client.get(f"/api/fun/list-folder?path={quoted}")
+            assert r.status_code == 400, r.status_code
+            detail = r.json().get("detail", "")
+            assert '"' not in detail, f"quotes leaked into error detail: {detail!r}"
         _test("GET /api/fun/list-folder validates input", list_folder_validation)
 
         # -- Folder loop endpoints contract --------------------------------
