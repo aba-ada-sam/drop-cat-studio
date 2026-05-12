@@ -197,6 +197,10 @@ Endpoints: `GET /api/gpu/status` returns `{current, history[]}`. `POST /api/gpu/
 
 The pre-orchestrator pattern of scattered `unload_checkpoint()` + `stop_service("acestep")` + `start_acestep` calls in each pipeline has been removed. Don't add them back; route through the orchestrator.
 
+**KNOWN BUG (not yet fixed):** `services/manager.py:_watchdog_loop` auto-restarts WanGP and ACE-Step when their subprocesses die unexpectedly. That respawn path **bypasses the orchestrator**, so the restarted service can end up loaded alongside whatever else currently holds the GPU -- 11 GB WanGP + 4.7 GB ACE-Step on a 16 GB card produces VRAM thrashing and indefinite "Step 0/8" hangs. Observed on 2026-05-11 after a `/api/services/restart/wangp` call cascaded through the Job Object and killed ACE-Step, which the watchdog then resurrected silently. Fix should route watchdog respawns through `gpu.acquire(name)` so the orchestrator can decide whether to evict the current holder first.
+
+**OPERATIONAL RULE -- DO NOT RESTART WANGP MID-SESSION.** Restarting `/api/services/restart/wangp` while a user job is in flight kills the worker the job is talking to; DCS-side polling never realizes its request was orphaned and the job sits at "Step 0/8" forever. Config changes that require a WanGP restart (compile, profile, vae_config in `wgp_config.json`) should be staged and applied between sessions, not while the user has jobs queued or running. The `compile` experiment on 2026-05-11 made this lesson very expensive in real time.
+
 ### Per-model step floors
 
 `/api/fun/make-it` and `/api/fun/make-it-multi` apply a server-side floor on `steps` AFTER auto-pick has chosen the actual model. The UI slider value was tuned for whatever model was visible in the dropdown, but auto-pick can swap models, so the floor protects against e.g. sending 4 steps to Wan I2V (which produces a blob below 20). See `_MODEL_MIN_STEPS_SINGLE` / `_MODEL_MIN_STEPS` in `features/fun_videos/routes.py`. Bumps are logged as `[make-it] step floor: ui=4 -> 20 for Wan2.1-I2V-14B-480P`.
