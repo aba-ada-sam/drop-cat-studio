@@ -391,17 +391,30 @@ async def gpu_release_all():
 
 @app.post("/api/services/start/{name}")
 async def start_service(name: str):
-    starters = {
-        "wangp": svc.start_wangp_worker,
-        "acestep": svc.start_acestep,
-        "forge": svc.start_forge,
-        "ollama": svc.start_ollama,
-    }
-    fn = starters.get(name)
-    if not fn:
+    # GPU-using services MUST go through the orchestrator so the current
+    # VRAM holder is evicted before the new service loads its model on top.
+    # Without this, clicking 'Start Forge' while WanGP is in VRAM causes
+    # two CUDA contexts to collide and crash app.py (observed 2026-05-11).
+    if name not in ("wangp", "acestep", "forge", "ollama"):
         return JSONResponse({"error": f"Unknown service: {name}"}, 404)
-    # Run in background thread -- services can take minutes to start
-    threading.Thread(target=fn, daemon=True).start()
+
+    def _safe_start():
+        try:
+            from core.gpu_orchestrator import gpu
+            gpu.acquire(name, reason="manual service start from UI")
+        except Exception as e:
+            log.error("[services] start %s via orchestrator failed: %s", name, e)
+            # Fall back to direct start so user isn't blocked if orchestrator hits a bug
+            starters = {
+                "wangp": svc.start_wangp_worker,
+                "acestep": svc.start_acestep,
+                "forge": svc.start_forge,
+                "ollama": svc.start_ollama,
+            }
+            try: starters[name]()
+            except Exception as e2: log.error("[services] direct fallback also failed: %s", e2)
+
+    threading.Thread(target=_safe_start, daemon=True).start()
     return {"ok": True, "message": f"Starting {name}..."}
 
 
