@@ -1126,114 +1126,106 @@ export function init(panel) {
     }
   });
 
-  // -- Loop Folder: iterate every image in a folder once -------------------
-  // Sister feature to Loop. Where Loop re-runs the SAME image with new
-  // seeds, Loop Folder walks through a directory in alphabetical order,
-  // running ONE generation per image with the current settings. Each new
-  // image triggers the same _autoSelectRatio + scene-hold + auto-pick
-  // flow as if the user had dropped it manually.
-  let _folderLooping = false;
-  let _folderImages  = [];
-  let _folderIndex   = 0;
-  let _folderPath    = localStorage.getItem('dcs-loop-folder') || '';
+  // -- Loop Folder: server-side runner tied to a browser heartbeat ---------
+  //
+  // The actual loop runs in the server (features/fun_videos/folder_loop.py),
+  // submitting one job at a time through the existing job manager. This
+  // tab just (a) starts the loop, (b) polls /status to update the UI,
+  // (c) sends a Stop request when the user clicks.
+  //
+  // The poll IS the heartbeat. If the server stops getting /status calls
+  // for ~60s (e.g., browser tab closed), it stops the loop automatically.
+  // We deliberately do NOT persist server state across DCS restarts --
+  // background processes that survive a closed browser are a footgun.
+  //
+  // What this gets us over the old client-side loop:
+  //   * Survives transient browser-tab throttling
+  //   * Continues past per-image failures (logs them; doesn't abort)
+  //   * Resumes UI on page refresh if a loop is still alive server-side
+  //
+  // What it intentionally does NOT do:
+  //   * Survive a closed browser tab (heartbeat dies, loop stops)
+  //   * Survive a DCS restart (state is in-process only)
 
-  function _stopFolderLoop() {
-    _folderLooping = false;
-    loopFolderBtn.textContent = 'Loop Folder';
-    loopFolderBtn.classList.remove('btn-primary');
-  }
+  let _folderPath      = localStorage.getItem('dcs-loop-folder') || '';
+  let _folderActive    = false;
+  let _folderPollTimer = null;
 
-  // Set _imagePath + visible preview to a given absolute file path. Reuses
-  // _applyImage so _autoSelectRatio fires once the thumbnail loads (matches
-  // the manual drop flow). Returns a promise that resolves after the
-  // image's natural dimensions are known so ratio settles before submit.
-  async function _setImageFromPath(absPath) {
-    const previewUrl = `/api/thumbnail?path=${encodeURIComponent(absPath)}&size=800`;
-    return new Promise((resolve) => {
-      const probe = new Image();
-      probe.onload = () => {
-        _applyImage(absPath, previewUrl);
-        // _applyImage attaches its own onload that fires _autoSelectRatio.
-        // We've already loaded via probe, so let one tick pass for the
-        // ratio refresh to settle, then resolve.
-        setTimeout(resolve, 50);
-      };
-      probe.onerror = () => { resolve(); };  // best-effort: still try to generate
-      probe.src = previewUrl;
-    });
-  }
-
-  async function _runFolderLoop() {
-    let lap = 1;  // how many passes through the folder we've done
-    while (_folderLooping) {
-      while (_folderLooping && _folderIndex < _folderImages.length) {
-        const img = _folderImages[_folderIndex];
-        _folderIndex++;
-        _loopCount++;
-        const lapTag = folderRepeatChk.checked ? ` lap ${lap}` : '';
-        loopFolderBtn.textContent =
-          `Stop (${_folderIndex}/${_folderImages.length}${lapTag})`;
-
-        // Load this image and let ratio + dimensions adjust before we submit.
-        await _setImageFromPath(img.path);
-        if (!_folderLooping) break;
-
-        // We LEAVE ideaInput / lyricInput alone so a single typed direction
-        // can be applied to every image in the folder. _applyImage already
-        // resets prompt history when the path changes.
-
-        const submitted = _multiVideo
-          ? await _generateMulti()
-          : await _generateOne(false);
-        if (!submitted) {
-          _stopFolderLoop();
-          toast(`Loop Folder stopped at ${img.name} -- submit failed`, 'error');
-          return;
-        }
-        const ok = await _watchJob(_jobId);
-        if (!ok) {
-          _stopFolderLoop();
-          toast(`Loop Folder stopped at ${img.name} -- generation failed`, 'error');
-          return;
-        }
-        if (!_folderLooping) break;
-        // brief pause so the user sees the result before the next image kicks in
-        await new Promise(r => setTimeout(r, 2500));
-      }
-
-      // End of one pass through the folder.
-      if (!_folderLooping) break;
-
-      if (folderRepeatChk.checked) {
-        // Repeat-forever mode: start a new lap from image 0.
-        lap++;
-        _folderIndex = 0;
-        toast(`Loop Folder lap ${lap}: restarting from the first image`, 'info');
-        // brief pause between laps so the user can see the boundary
-        await new Promise(r => setTimeout(r, 2500));
-        continue;
-      }
-
-      // Single-pass mode: we reached the end of the folder cleanly.
-      _stopFolderLoop();
-      toast(`Loop Folder done -- ${_folderImages.length} images processed`, 'success');
-      return;
+  function _renderFolderStatus(snap) {
+    _folderActive = !!snap.active;
+    if (_folderActive) {
+      const lapTag = (snap.repeat && snap.lap > 1) ? ` lap ${snap.lap}` : '';
+      loopFolderBtn.textContent = `Stop (${snap.index}/${snap.total}${lapTag})`;
+      loopFolderBtn.classList.add('btn-primary');
+    } else {
+      loopFolderBtn.textContent = 'Loop Folder';
+      loopFolderBtn.classList.remove('btn-primary');
     }
   }
 
-  // Named handler so both the bottom 'Loop Folder' button and the inline
-  // 'pick a folder of photos' link in the drop zone can trigger it.
+  async function _pollFolderStatus() {
+    try {
+      const snap = await api('/api/fun/folder-loop/status');
+      _renderFolderStatus(snap);
+      if (!snap.active) {
+        // Loop ended -- stop polling and report
+        if (_folderPollTimer) { clearInterval(_folderPollTimer); _folderPollTimer = null; }
+        const msg = `Loop Folder ${snap.status}: ${snap.succeeded} done, ${snap.failed} failed`;
+        if (snap.status === 'done')        toast(msg, 'success');
+        else if (snap.status === 'stopped') toast(msg, 'info');
+        else if (snap.status === 'error')   toast(msg, 'error');
+      }
+    } catch (e) {
+      // Transient network blips shouldn't toast-spam; just log.
+      // Note: if the polling fails persistently the SERVER will hit the
+      // heartbeat timeout and stop the loop on its own.
+      console.warn('[folder-loop] status poll failed:', e && e.message);
+    }
+  }
+
+  // Build the same body shape _generateMulti / _generateOne would send,
+  // minus photo_path (server replaces it per image) and we leave
+  // video_prompt empty when the user hasn't typed an idea so the pipeline
+  // brainstorms per image. If the user HAS typed something, every image
+  // gets the same direction.
+  function _collectFolderLoopSettings() {
+    const isLtx = _model.toLowerCase().includes('ltx');
+    return {
+      video_prompt:        ideaInput.value.trim(),
+      music_prompt:        '',
+      lyric_direction:     lyricInput.value.trim(),
+      user_direction:      'cinematic narrative, story continuity',
+      model:               _model,
+      duration:            _duration,       // single-clip path
+      clip_duration:       _duration,       // multi-clip path
+      num_clips:           _numClips,
+      target_story_length: _targetSecs,
+      upscale:             _upscaleOn,
+      upscale_scale:       _upscaleScale,
+      upscale_method:      _upscaleMethod,
+      director_passes:     _directorPasses,
+      steps:               _steps,
+      guidance:            _guidance,
+      seed:                -1,
+      skip_audio:          !_addMusic,
+      instrumental:        false,
+      output_width:        _outW,
+      output_height:       _outH,
+      auto_pick_model:     _autoPick,
+      motion_style:        isLtx ? _motionIntensity : 'dynamic',
+    };
+  }
+
   async function _startLoopFolder() {
-    if (_folderLooping) {
-      _stopFolderLoop();
-      if (_jobId) stopJob(_jobId).catch(() => {});
-      toast('Loop Folder stopped', 'info');
+    if (_folderActive) {
+      // Loop is running -- request stop
+      try { await api('/api/fun/folder-loop/stop', { method: 'POST' }); } catch (_) {}
+      toast('Loop Folder: stop requested', 'info');
+      // Keep polling -- next tick will show active=false and the poll will clean up
       return;
     }
 
-    // Ask for a folder path. Native prompt is ugly but instant; nicer
-    // picker is a follow-up. Default to whatever was used last session,
-    // or the parent directory of the currently loaded image if any.
+    // Default folder: last used, or parent dir of currently-loaded image
     let defaultPath = _folderPath;
     if (!defaultPath && _imagePath) {
       const sep = _imagePath.includes('\\') ? '\\' : '/';
@@ -1246,24 +1238,26 @@ export function init(panel) {
     if (!folder) return;
 
     try {
-      const data = await api(`/api/fun/list-folder?path=${encodeURIComponent(folder)}`);
-      if (!data || !Array.isArray(data.images) || data.images.length === 0) {
-        toast('No images found in that folder', 'error');
-        return;
-      }
-      _folderImages = data.images;
-      _folderIndex  = 0;
-      _folderPath   = data.folder;
+      const snap = await api('/api/fun/folder-loop/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          folder,
+          settings:    _collectFolderLoopSettings(),
+          multi_video: _multiVideo,
+          repeat:      folderRepeatChk.checked,
+        }),
+      });
+      _folderPath = snap.folder;
       localStorage.setItem('dcs-loop-folder', _folderPath);
+      toast(`Loop Folder: ${snap.total} images queued from ${snap.folder}`, 'info');
+      _renderFolderStatus(snap);
 
-      _folderLooping = true;
-      _loopCount = 0;
-      loopFolderBtn.classList.add('btn-primary');
-      loopFolderBtn.textContent = `Stop (0/${_folderImages.length})`;
-      toast(`Loop Folder: ${_folderImages.length} images queued from ${data.folder}`, 'info');
-      _runFolderLoop();
+      // Begin polling. THIS POLL IS THE HEARTBEAT. If we stop polling for
+      // ~60s the server-side loop ends itself; that's by design.
+      if (_folderPollTimer) clearInterval(_folderPollTimer);
+      _folderPollTimer = setInterval(_pollFolderStatus, 5000);
     } catch (e) {
-      toast(e.message || 'Could not list folder', 'error');
+      toast((e && e.message) || 'Could not start folder loop', 'error');
     }
   }
 
@@ -1275,6 +1269,21 @@ export function init(panel) {
     e.stopPropagation();
     _startLoopFolder();
   });
+
+  // On tab init: check if a folder loop is already running on the server
+  // (happens if the user refreshed within ~60s of activity). Restore the
+  // UI and resume polling so the heartbeat doesn't lapse.
+  (async () => {
+    try {
+      const snap = await api('/api/fun/folder-loop/status');
+      if (snap.active) {
+        _renderFolderStatus(snap);
+        if (_folderPollTimer) clearInterval(_folderPollTimer);
+        _folderPollTimer = setInterval(_pollFolderStatus, 5000);
+        toast(`Resumed folder loop view: ${snap.index}/${snap.total}`, 'info');
+      }
+    } catch (_) {}
+  })();
 
   // -- Multi-video generation ------------------------------------------------
   async function _generateMulti() {

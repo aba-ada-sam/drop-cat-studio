@@ -184,6 +184,73 @@ async def list_folder(path: str = ""):
     return {"folder": str(folder), "images": images}
 
 
+@router.post("/folder-loop/start")
+async def folder_loop_start(request: Request):
+    """Start a server-side folder loop.
+
+    Body:
+      folder:   absolute path to the folder
+      settings: full settings dict (same shape /make-it or /make-it-multi
+                accepts; photo_path is supplied per-image by the loop)
+      multi_video: bool -- True routes through /api/fun/make-it-multi pipeline,
+                          False through /api/fun/make-it pipeline
+      repeat:   bool -- True restarts at image 0 after the last image
+
+    The loop is tied to a heartbeat from the browser: if /status is
+    not polled for ~60s, the loop self-stops. This is intentional --
+    closing the browser tab must kill the loop. See folder_loop.py.
+    """
+    from features.fun_videos import folder_loop
+    body = await request.json()
+
+    folder = body.get("folder", "")
+    if not folder:
+        raise HTTPException(400, "Missing 'folder'")
+
+    # Reuse the same listing logic the GET endpoint uses so we filter to
+    # IMAGE_EXTS and sort alphabetically consistently.
+    folder_path = Path(folder).expanduser().resolve()
+    if not folder_path.is_dir():
+        raise HTTPException(400, f"Not a folder: {folder_path}")
+    images: list[dict] = []
+    for entry in sorted(folder_path.iterdir(), key=lambda p: p.name.lower()):
+        if entry.is_file() and not entry.name.startswith(".") \
+                and entry.suffix.lower() in IMAGE_EXTS:
+            images.append({"path": str(entry), "name": entry.name})
+    if not images:
+        raise HTTPException(400, f"No images found in {folder_path}")
+
+    settings = body.get("settings") or {}
+    if not isinstance(settings, dict):
+        raise HTTPException(400, "'settings' must be an object")
+
+    multi_video = bool(body.get("multi_video", True))
+    repeat = bool(body.get("repeat", False))
+    endpoint = "/api/fun/make-it-multi" if multi_video else "/api/fun/make-it"
+
+    snap = folder_loop.start(str(folder_path), images, settings, endpoint, repeat)
+    return snap
+
+
+@router.get("/folder-loop/status")
+async def folder_loop_status():
+    """Snapshot of the current folder-loop state.
+
+    POLLING THIS ENDPOINT ACTS AS A HEARTBEAT. If polls stop for ~60s,
+    the loop terminates itself. Client must poll regularly while the
+    loop should be alive.
+    """
+    from features.fun_videos import folder_loop
+    return folder_loop.status()
+
+
+@router.post("/folder-loop/stop")
+async def folder_loop_stop():
+    """Signal the loop to stop at the next checkpoint."""
+    from features.fun_videos import folder_loop
+    return folder_loop.stop()
+
+
 @router.post("/upload-video")
 async def upload_video(files: list[UploadFile] = File(...)):
     """Upload a video file to use as WanGP video-to-video source."""

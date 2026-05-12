@@ -206,6 +206,29 @@ def main() -> int:
             assert r.status_code == 400, f"bad path expected 400, got {r.status_code}"
         _test("GET /api/fun/list-folder validates input", list_folder_validation)
 
+        # -- Folder loop endpoints contract --------------------------------
+        def folder_loop_status_shape():
+            r = client.get("/api/fun/folder-loop/status")
+            assert r.status_code == 200, r.status_code
+            d = r.json()
+            for k in ("active", "total", "index", "lap", "succeeded", "failed",
+                     "status", "heartbeat_timeout_sec"):
+                assert k in d, f"missing key {k!r} in status snapshot"
+            assert isinstance(d["active"], bool)
+            assert d["status"] in ("idle", "running", "stopping", "stopped",
+                                   "done", "error")
+        _test("GET /api/fun/folder-loop/status shape", folder_loop_status_shape)
+
+        def folder_loop_start_validates():
+            # No folder -> 400
+            r = client.post("/api/fun/folder-loop/start", json={})
+            assert r.status_code == 400, r.status_code
+            # Bogus folder -> 400
+            r = client.post("/api/fun/folder-loop/start",
+                            json={"folder": "/no/such/path/xyz"})
+            assert r.status_code == 400, r.status_code
+        _test("POST /api/fun/folder-loop/start validates input", folder_loop_start_validates)
+
     # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")
