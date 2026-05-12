@@ -939,6 +939,19 @@ async def brainstorm(request: Request):
     except Exception:
         data = {}
 
+    # If the LLM didn't return parseable JSON, that means either it refused
+    # the request or it spoke in plain prose. Log the raw response so we can
+    # see exactly what 'go away' looked like next time. Truncated to 600
+    # chars to keep the log readable.
+    if not data:
+        log.warning("[brainstorm] LLM returned non-JSON response (likely a refusal "
+                    "or plain prose). Mode=%s, message=%r. Raw response: %s",
+                    mode, message[:120], (result or "")[:600])
+    else:
+        log.info("[brainstorm] mode=%s reply=%r idea=%r lyric=%r",
+                 mode, str(data.get("reply") or "")[:80],
+                 bool(data.get("idea")), bool(data.get("lyric_direction")))
+
     if mode == "sd_prompt":
         return {
             "prompt": data.get("prompt") or None,
