@@ -156,9 +156,25 @@ export function init(panel) {
 
   let _imagePath = null;
   const preview = el('img', { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
+  // pickFolderLink is an inline action inside the drop zone so users see
+  // 'or pick a folder' alongside the single-photo affordance. Clicking it
+  // routes through the same prompt+iteration logic as the Loop Folder
+  // button at the bottom of the form. pointer-events on dropHint stay
+  // 'none' so drags pass through to dropZone; the link gets its own
+  // pointer events so it's clickable.
+  const pickFolderLink = el('a', {
+    href: '#',
+    style: 'font-size:.78rem; color:var(--accent); text-decoration:underline; cursor:pointer; pointer-events:auto;',
+    text: 'pick a folder of photos',
+  });
   const dropHint = el('div', { style: 'display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none;' }, [
     el('div', { style: 'font-size:1rem; font-weight:600; color:var(--text-2);', text: 'Drop a photo here' }),
-    el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'or paste from clipboard (Ctrl+V) or click to browse' }),
+    el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'or paste from clipboard (Ctrl+V) or click to browse a file' }),
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:2px;' }, [
+      el('span', { text: 'Working on a batch? ' }),
+      pickFolderLink,
+      el('span', { text: ' to run one generation per image.' }),
+    ]),
   ]);
   const clearImgBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
@@ -1166,7 +1182,9 @@ export function init(panel) {
     }
   }
 
-  loopFolderBtn.addEventListener('click', async () => {
+  // Named handler so both the bottom 'Loop Folder' button and the inline
+  // 'pick a folder of photos' link in the drop zone can trigger it.
+  async function _startLoopFolder() {
     if (_folderLooping) {
       _stopFolderLoop();
       if (_jobId) stopJob(_jobId).catch(() => {});
@@ -1208,6 +1226,15 @@ export function init(panel) {
     } catch (e) {
       toast(e.message || 'Could not list folder', 'error');
     }
+  }
+
+  loopFolderBtn.addEventListener('click', _startLoopFolder);
+  pickFolderLink.addEventListener('click', (e) => {
+    // Drop zone has its own click handler that opens the image file picker;
+    // stop propagation so a click on the link doesn't ALSO open that picker.
+    e.preventDefault();
+    e.stopPropagation();
+    _startLoopFolder();
   });
 
   // -- Multi-video generation ------------------------------------------------
