@@ -819,6 +819,29 @@ export function init(panel) {
   });
   root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn, loopFolderBtn]));
 
+  // Loop Folder modifier: repeat forever vs stop after one pass.
+  // Persisted in localStorage so the setting carries across sessions.
+  const folderRepeatChk = el('input', {
+    type: 'checkbox',
+    id: 'express-folder-repeat',
+    style: 'cursor:pointer; width:13px; height:13px;',
+  });
+  folderRepeatChk.checked = localStorage.getItem('dcs-loop-folder-repeat') === '1';
+  folderRepeatChk.addEventListener('change', () => {
+    localStorage.setItem('dcs-loop-folder-repeat', folderRepeatChk.checked ? '1' : '0');
+  });
+  const folderRepeatRow = el('div', {
+    style: 'display:flex; align-items:center; gap:6px; padding:6px 2px 0; font-size:.74rem; color:var(--text-3);',
+  }, [
+    folderRepeatChk,
+    el('label', {
+      for: 'express-folder-repeat',
+      style: 'cursor:pointer; user-select:none;',
+      text: 'Loop Folder: repeat forever (restart from the first image after the last; click Stop to break out)',
+    }),
+  ]);
+  root.appendChild(folderRepeatRow);
+
   // Vary-prompt toggle (only visible when loop is active)
   const varyChk   = el('input', { type: 'checkbox', id: 'express-vary-prompt', style: 'cursor:pointer;' });
   const varyRow   = el('div', {
@@ -1141,44 +1164,60 @@ export function init(panel) {
   }
 
   async function _runFolderLoop() {
-    while (_folderLooping && _folderIndex < _folderImages.length) {
-      const img = _folderImages[_folderIndex];
-      _folderIndex++;
-      _loopCount++;
-      loopFolderBtn.textContent = `Stop (${_folderIndex}/${_folderImages.length})`;
+    let lap = 1;  // how many passes through the folder we've done
+    while (_folderLooping) {
+      while (_folderLooping && _folderIndex < _folderImages.length) {
+        const img = _folderImages[_folderIndex];
+        _folderIndex++;
+        _loopCount++;
+        const lapTag = folderRepeatChk.checked ? ` lap ${lap}` : '';
+        loopFolderBtn.textContent =
+          `Stop (${_folderIndex}/${_folderImages.length}${lapTag})`;
 
-      // Load this image and let ratio + dimensions adjust before we submit.
-      await _setImageFromPath(img.path);
+        // Load this image and let ratio + dimensions adjust before we submit.
+        await _setImageFromPath(img.path);
+        if (!_folderLooping) break;
+
+        // We LEAVE ideaInput / lyricInput alone so a single typed direction
+        // can be applied to every image in the folder. _applyImage already
+        // resets prompt history when the path changes.
+
+        const submitted = _multiVideo
+          ? await _generateMulti()
+          : await _generateOne(false);
+        if (!submitted) {
+          _stopFolderLoop();
+          toast(`Loop Folder stopped at ${img.name} -- submit failed`, 'error');
+          return;
+        }
+        const ok = await _watchJob(_jobId);
+        if (!ok) {
+          _stopFolderLoop();
+          toast(`Loop Folder stopped at ${img.name} -- generation failed`, 'error');
+          return;
+        }
+        if (!_folderLooping) break;
+        // brief pause so the user sees the result before the next image kicks in
+        await new Promise(r => setTimeout(r, 2500));
+      }
+
+      // End of one pass through the folder.
       if (!_folderLooping) break;
 
-      // Clear prompt history so each image gets a fresh AI brainstorm
-      // (the same thing _applyImage does on a new path, but explicit here
-      // in case the user typed something that should not bleed across).
-      // Comment intentionally: we LEAVE ideaInput / lyricInput alone so a
-      // single typed direction can be applied to every image in the folder.
+      if (folderRepeatChk.checked) {
+        // Repeat-forever mode: start a new lap from image 0.
+        lap++;
+        _folderIndex = 0;
+        toast(`Loop Folder lap ${lap}: restarting from the first image`, 'info');
+        // brief pause between laps so the user can see the boundary
+        await new Promise(r => setTimeout(r, 2500));
+        continue;
+      }
 
-      const submitted = _multiVideo
-        ? await _generateMulti()
-        : await _generateOne(false);
-      if (!submitted) {
-        _stopFolderLoop();
-        toast(`Loop Folder stopped at ${img.name} -- submit failed`, 'error');
-        break;
-      }
-      const ok = await _watchJob(_jobId);
-      if (!ok) {
-        _stopFolderLoop();
-        toast(`Loop Folder stopped at ${img.name} -- generation failed`, 'error');
-        break;
-      }
-      if (!_folderLooping) break;
-      // brief pause so the user sees the result before the next image kicks in
-      await new Promise(r => setTimeout(r, 2500));
-    }
-    if (_folderLooping) {
-      // Reached end of folder cleanly
+      // Single-pass mode: we reached the end of the folder cleanly.
       _stopFolderLoop();
       toast(`Loop Folder done -- ${_folderImages.length} images processed`, 'success');
+      return;
     }
   }
 
