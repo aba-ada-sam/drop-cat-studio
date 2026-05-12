@@ -272,6 +272,20 @@ def start_acestep() -> tuple[bool, str | None]:
         env["PYTHONUNBUFFERED"] = "1"
         env["ACESTEP_NO_INIT"] = "false"
         env["ACESTEP_INIT_LLM"] = "auto"
+        # Force the SFT (Supervised Fine-Tuned) checkpoint instead of the
+        # default turbo variant. Turbo is distilled to 8 steps and produces
+        # music beds without intelligible vocals -- SFT accepts 20+ steps and
+        # actually sings the lyrics we pass in. The SFT model must be
+        # downloaded first: `acestep-download --model acestep-v15-sft`.
+        # If SFT isn't on disk, ACE-Step falls back to whatever is available.
+        sft_path = acestep_root / "checkpoints" / "acestep-v15-sft"
+        if sft_path.is_dir():
+            env["SERVICE_MODE_DIT_MODEL"] = "acestep-v15-sft"
+            log.info("ACE-Step DiT model: acestep-v15-sft (vocals-capable)")
+        else:
+            log.warning("ACE-Step SFT checkpoint not found at %s -- vocals will be "
+                        "muted on Turbo. Download: acestep-download --model acestep-v15-sft",
+                        sft_path)
         existing_pp = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = str(acestep_root) + (os.pathsep + existing_pp if existing_pp else "")
 
