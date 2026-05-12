@@ -597,6 +597,11 @@ export function init(panel) {
   // Quick Video is built around music + lyrics. Default ON; user can untick
   // to ship a silent clip when iterating on the visuals alone.
   let _addMusic        = true;
+  // Subject motion intensity for LTX scene-hold extension:
+  //   'calm'   -> subject completely still, only environment moves (Ken Burns)
+  //   'gentle' -> subject moves subtly (head turn, breath, gesture) + env
+  // Default 'gentle' because 'calm' produced the Ken Burns complaint.
+  let _motionIntensity = 'gentle';
   let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
   let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
@@ -701,6 +706,24 @@ export function init(panel) {
     el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Director' }),
     directorRow,
     el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: '- AI reviews and re-shoots weak clips' }),
+  ]));
+
+  // Motion intensity selector: how much the subject is allowed to move.
+  // 'calm'   = subject still, only environment moves (most identity-stable)
+  // 'gentle' = subject moves subtly (head turn, breath, gesture) + env
+  const MOTION_OPTIONS = [
+    { label: 'Calm',   value: 'calm',   tip: 'Subject stays still. Only environment moves (light, fabric, particles). Best identity preservation; can look like a Ken Burns slideshow.' },
+    { label: 'Active', value: 'gentle', tip: 'Subject moves subtly: head turn, breath, hand gesture, fabric drift. Environment also animates. More visible motion at the cost of slight subject drift.' },
+  ];
+  const { row: motionRow } = _makeChipGroup(
+    MOTION_OPTIONS.map(m => ({ label: m.label, value: m.value, title: m.tip })),
+    _motionIntensity,
+    item => { _motionIntensity = item.value; },
+  );
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+    el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Motion' }),
+    motionRow,
+    el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: '- subject stillness vs subtle movement' }),
   ]));
 
   // Novice-friendly: hide the per-clip / director / upscale tweaks behind a
@@ -950,7 +973,10 @@ export function init(panel) {
           auto_pick_model: _autoPick,
           // LTX Distilled (Photo Mood) defaults calm; Wan chips are dynamic.
           // auto_pick_model overrides this server-side when ON.
-          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
+          // For LTX: 'calm' (subject still) or 'gentle' (subject moves subtly).
+          // For Wan I2V: always 'dynamic' (kinetic) -- it's the only mode Wan
+          // does well.
+          motion_style: _model.toLowerCase().includes('ltx') ? _motionIntensity : 'dynamic',
         }),
       });
       _jobId = job_id;
@@ -1113,8 +1139,9 @@ export function init(panel) {
           output_width:    _outW,
           output_height:   _outH,
           auto_pick_model: _autoPick,
-          // LTX defaults calm; Wan is dynamic. auto_pick_model overrides server-side when ON.
-          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
+          // LTX uses the Motion chip (calm | gentle); Wan is always dynamic.
+          // auto_pick_model overrides this server-side when ON.
+          motion_style: _model.toLowerCase().includes('ltx') ? _motionIntensity : 'dynamic',
         }),
       });
       _jobId = job_id;

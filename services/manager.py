@@ -941,18 +941,39 @@ def _watchdog_loop():
             # Check WanGP worker -- restart if we launched it but it died.
             # Snapshot the global to a local so a concurrent stop_service()
             # setting it to None can't NPE the .poll() call.
+            #
+            # IMPORTANT: route the respawn through the GPU orchestrator so
+            # the eviction policy fires. Without this, the watchdog would
+            # call start_wangp_worker() directly while ACE-Step or Forge is
+            # already holding 5-7 GB of VRAM, and the two services end up
+            # co-loaded on a 16 GB card (observed 2026-05-11: VRAM thrash
+            # at 97% util, machine freeze). gpu.acquire("wangp") evicts
+            # whatever else currently holds the GPU before starting.
             wangp_proc = _wangp_worker_proc
             if wangp_proc and wangp_proc.poll() is not None:
-                log.warning("[watchdog] WanGP worker died -- restarting")
+                log.warning("[watchdog] WanGP worker died -- restarting via orchestrator")
                 _set_status("wangp", state="error", message="Worker crashed -- restarting...")
-                start_wangp_worker()
+                try:
+                    from core.gpu_orchestrator import gpu
+                    gpu.acquire("wangp", reason="watchdog respawn after crash")
+                except Exception as e:
+                    log.error("[watchdog] orchestrator-aware WanGP respawn failed: %s; "
+                              "falling back to direct start", e)
+                    start_wangp_worker()
 
-            # Check ACE-Step (same snapshot pattern as WanGP)
+            # Check ACE-Step (same snapshot pattern as WanGP).
+            # Same orchestrator-aware respawn rationale as WanGP above.
             acestep_proc = _acestep_proc
             if acestep_proc and acestep_proc.poll() is not None:
-                log.warning("[watchdog] ACE-Step died -- restarting")
+                log.warning("[watchdog] ACE-Step died -- restarting via orchestrator")
                 _set_status("acestep", state="error", message="Server crashed -- restarting...")
-                start_acestep()
+                try:
+                    from core.gpu_orchestrator import gpu
+                    gpu.acquire("acestep", reason="watchdog respawn after crash")
+                except Exception as e:
+                    log.error("[watchdog] orchestrator-aware ACE-Step respawn failed: %s; "
+                              "falling back to direct start", e)
+                    start_acestep()
 
             # Forge is user-managed (image gen is separate from video gen).
             # Just passively detect its state -- never auto-restart it.

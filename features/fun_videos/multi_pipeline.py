@@ -269,18 +269,58 @@ def _generate_story_arc(
     # frame-of-clip-N+1) carry continuity. Result: a single extended
     # atmospheric shot of the SAME subject in the SAME scene, breathing for
     # the requested total duration.
-    if is_ltx and resolved_style == "calm":
+    if is_ltx and resolved_style in ("calm", "gentle"):
         if progress_fn:
             progress_fn("Locking scene for coherent extension...")
-        scene_prompt = (initial_idea or "").strip() or (
-            "atmospheric scene, subject preserved exactly as in the photo, "
-            "gentle environmental motion (light shift, fabric drift, leaves stir), "
-            "static camera, photorealistic style"
-        )
+
+        user_text = (initial_idea or "").strip()
+
+        if resolved_style == "calm":
+            # Subject completely still, only environment moves. Best subject
+            # identity preservation but lowest visible motion ("Ken Burns").
+            motion_clause = (
+                "static subject, no body or face movement. "
+                "Environment animates: light shifts across surfaces, fabric "
+                "drifts in unseen air, leaves and grass stir, dust motes "
+                "drift, particles in the air."
+            )
+            fallback = (
+                "atmospheric scene, subject preserved exactly as in the photo, "
+                "gentle environmental motion (light shift, fabric drift, "
+                "leaves stir), static camera, photorealistic style"
+            )
+        else:  # "gentle"
+            # Subject allowed to move SUBTLY (head turn, breath, hand
+            # gesture, small weight shift) AND environment animates. Some
+            # risk of subject drift across clips but visible character
+            # motion within each clip. The chain anchor still carries the
+            # last frame across, which preserves most of the identity.
+            motion_clause = (
+                "subject moves subtly while staying in place: gentle head "
+                "turn, eye blink, slow breath, small hand gesture, fabric "
+                "shifting on the body, hair stirring. "
+                "Environment also animates: light shifts, particles drift, "
+                "background movement. Static camera framing."
+            )
+            fallback = (
+                "atmospheric scene, subject moves subtly (head turn, breath, "
+                "fabric stir, slight gesture), environment animates around "
+                "them (light shifts, particles, distant motion), static "
+                "camera, photorealistic style"
+            )
+
+        if user_text:
+            # Append motion guidance to the user's idea so LTX has explicit
+            # instructions to put motion in the frame. The user's words stay
+            # in front so subject identity / scene reads first.
+            scene_prompt = f"{user_text}. {motion_clause}"
+        else:
+            scene_prompt = fallback
+
         clips = [{"prompt": scene_prompt, "duration": float(default_clip_dur)}
                  for _ in range(n_clips)]
-        log.info("[multi] Scene-hold extension: %d clips of the same shot, "
-                 "prompt='%s...'", n_clips, scene_prompt[:60])
+        log.info("[multi] Scene-hold extension (%s): %d clips, prompt='%s...'",
+                 resolved_style, n_clips, scene_prompt[:80])
         return clips, "scene-hold"
 
     if resolved_style == "calm":

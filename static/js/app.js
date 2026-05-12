@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed -- import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260511o';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260511s';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260510q';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260511q';
 import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';

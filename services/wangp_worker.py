@@ -411,12 +411,33 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                                 error=result.get("error"),
                                 progress="Done" if result["ok"] else "Failed",
                             )
-                except Exception as e:
+                # BaseException (not just Exception) so KeyboardInterrupt --
+                # which is what the tqdm abort hook raises -- also resets
+                # busy. Before this fix, an aborted generation left busy=True
+                # forever; the next /generate request either 409'd or
+                # (worse) was accepted onto a worker with corrupted CUDA
+                # state and wedged silently at Step 0. Observed 2026-05-11.
+                except BaseException as e:
                     tb = traceback.format_exc()
+                    aborted = isinstance(e, KeyboardInterrupt)
+                    err_msg = "Aborted by user" if aborted else f"{e}\n{tb}"
+                    progress_msg = "Aborted" if aborted else "Error"
                     with _lock:
                         if _generation_token == token:
-                            _job_status.update(busy=False, error=f"{e}\n{tb}",
-                                               progress="Error")
+                            _job_status.update(busy=False, error=err_msg,
+                                               progress=progress_msg)
+                    # Best-effort CUDA recovery so the NEXT job gets a clean
+                    # context. Without this, even after busy is cleared, the
+                    # next inference can wedge on partial cached state.
+                    try:
+                        import gc
+                        gc.collect()
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                    except Exception:
+                        pass
                     print(tb, flush=True)
 
             threading.Thread(target=_run, args=(my_token,), daemon=True).start()
