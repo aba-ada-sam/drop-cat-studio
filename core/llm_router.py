@@ -25,6 +25,52 @@ _OPENAI_MODELS = {
 }
 
 
+# Phrases that signal a cloud vision API refused an image for content-policy
+# reasons. When we see any of these in a response (and the response is short
+# prose rather than the structured JSON we asked for), we transparently retry
+# against Ollama, which doesn't filter user content.
+_SAFETY_REFUSAL_MARKERS = (
+    "contains nudity",
+    "i can't process",
+    "i cannot process",
+    "i'm not able to process",
+    "i am not able to process",
+    "i can't help with",
+    "i cannot help with",
+    "i'm unable to",
+    "i am unable to",
+    "against my guidelines",
+    "violates my guidelines",
+    "anthropic's usage policies",
+    "anthropic's policies",
+    "openai's usage policies",
+    "openai's policies",
+    "content policy",
+    "content policies",
+    "safety guidelines",
+    "explicit content",
+    "sexually explicit",
+    "i won't be able to describe",
+    "i won't describe",
+    "i cannot describe",
+)
+
+
+def _looks_like_safety_refusal(text: str) -> bool:
+    """Heuristic: did a cloud vision call return a refusal instead of an answer?
+
+    Refusals tend to be SHORT (under ~600 chars) and contain a stock phrase.
+    Long responses that happen to mention 'content policy' in the body of a
+    valid answer don't match.
+    """
+    if not text:
+        return False
+    if len(text) > 700:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _SAFETY_REFUSAL_MARKERS)
+
+
 class LLMRouter:
     """Routes AI calls to the configured provider with retry.
 
@@ -102,13 +148,51 @@ class LLMRouter:
     ) -> str:
         provider = self._provider(force_provider)
         if provider == "anthropic":
-            return self._call_with_retry(lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system), provider=provider)
-        if provider == "openai":
-            return self._call_with_retry(lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system), provider=provider)
-        return self._call_with_retry(
-            lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier, max_tokens=max_tokens, system=system, format_json=format_json),
-            provider=provider,
-        )
+            result = self._call_with_retry(
+                lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system),
+                provider=provider,
+            )
+        elif provider == "openai":
+            result = self._call_with_retry(
+                lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system),
+                provider=provider,
+            )
+        else:
+            return self._call_with_retry(
+                lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier,
+                                                     max_tokens=max_tokens, system=system,
+                                                     format_json=format_json),
+                provider=provider,
+            )
+
+        # Cloud safety-refusal fallback: Anthropic and OpenAI refuse images
+        # they classify as containing nudity / sensitive content with a plain-
+        # English refusal instead of a structured error. Detect that and
+        # transparently retry the SAME prompt against Ollama (local, no
+        # content filter). This restores the pre-Ollama-opt-in behaviour for
+        # NSFW/artistic photos without making Ollama the default for SFW
+        # calls. Caller never needs to know which provider answered.
+        if _looks_like_safety_refusal(result):
+            try:
+                from services.manager import ollama_alive
+                ollama_up = ollama_alive()
+            except Exception:
+                ollama_up = False
+            if ollama_up:
+                log.info("[router] %s refused the image as NSFW -- retrying via Ollama (local, no content filter)",
+                         provider)
+                try:
+                    return self._client.chat_with_images(
+                        "ollama", prompt, images_b64, tier=tier,
+                        max_tokens=max_tokens, system=system, format_json=format_json,
+                    )
+                except Exception as e:
+                    log.warning("[router] Ollama fallback failed after %s refusal: %s", provider, e)
+                    # Return the original refusal so the caller's UI can show it
+            else:
+                log.info("[router] %s refused the image and Ollama is not available -- "
+                         "user will see the refusal text", provider)
+        return result
 
     def stats(self) -> dict:
         return dict(self._stats)

@@ -947,6 +947,27 @@ async def brainstorm(request: Request):
         log.warning("[brainstorm] LLM returned non-JSON response (likely a refusal "
                     "or plain prose). Mode=%s, message=%r. Raw response: %s",
                     mode, message[:120], (result or "")[:600])
+        # Cloud APIs refuse NSFW images with a plain-English refusal. The
+        # router already auto-falls-back to Ollama when it's running, so if
+        # we still got a refusal here it means Ollama wasn't available
+        # either. Replace the literal refusal text with actionable guidance.
+        from core.llm_router import _looks_like_safety_refusal
+        if _looks_like_safety_refusal(result):
+            try:
+                from services.manager import ollama_alive
+                ollama_running = ollama_alive()
+            except Exception:
+                ollama_running = False
+            if ollama_running:
+                friendly = ("The cloud AI couldn't analyse this image and the local "
+                            "fallback didn't produce a useful description either. "
+                            "Try a different image, or write the brief yourself.")
+            else:
+                friendly = ("The cloud AI declined to analyse this image (content policy). "
+                            "Start Ollama (Services tab) so DCS can fall back to a local "
+                            "vision model that handles all images, or type the brief "
+                            "yourself in the textbox.")
+            return {"idea": None, "lyric_direction": None, "reply": friendly}
     else:
         log.info("[brainstorm] mode=%s reply=%r idea=%r lyric=%r",
                  mode, str(data.get("reply") or "")[:80],
