@@ -27,19 +27,39 @@ VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
 MAX_IMAGE_MB = 15
 
 
-def _clean_user_path(p: str) -> str:
-    """Strip whitespace and surrounding quotes from a user-pasted path.
+import re as _re
 
-    Windows Explorer's 'Copy as path' wraps the path in double quotes
-    (e.g. '"C:\\Users\\andre\\Desktop\\my folder"'). PowerShell users
-    sometimes paste with single quotes. Without this scrub the path is
-    treated as relative and Path.resolve() concatenates it onto the
-    server's CWD -- producing a 'Not a folder:' error against a string
-    like 'C:\\DropCat-Studio\\"C:\\Users\\andre\\...' which is exactly
-    what Andrew hit on 2026-05-12 trying to point Loop Folder at a
-    desktop folder.
+# Matches an absolute Windows path: drive letter + colon + slash + everything
+# up to the next quote character. Used to recover a real path from a string
+# that also contains error-message prefixes like "Not a folder: C:\...\".
+_WIN_ABS_PATH_RE = _re.compile(r'[A-Za-z]:[/\\][^\'"]*')
+
+
+def _clean_user_path(p: str) -> str:
+    """Extract a clean absolute filesystem path from raw user input.
+
+    Handles three common mess cases:
+    1. Windows Explorer 'Copy as path': '"C:\\Users\\...\\folder"' -- outer quotes
+    2. Error message re-pasted: 'Not a folder: C:\\DCS\\... "C:\\Users\\...\\folder"'
+       (user copy-pasted the server error back into the input field)
+    3. Single-quoted shell paths: "'C:\\Users\\...\\folder'"
+
+    Strategy:
+    - Strip surrounding whitespace and quotes first.
+    - If the result already looks like an absolute path, return it.
+    - Otherwise scan the string for any embedded Windows absolute path and
+      return the LAST one found (the real target is usually at the end of
+      an error message).
     """
-    return (p or "").strip().strip('"').strip("'").strip()
+    s = (p or "").strip().strip('"').strip("'").strip()
+    # Already an absolute path?
+    if _re.match(r'^[A-Za-z]:[/\\]', s) or s.startswith('/'):
+        return s
+    # Scan for embedded absolute path(s) (handles pasted error messages)
+    matches = _WIN_ABS_PATH_RE.findall(s)
+    if matches:
+        return matches[-1].strip().strip('"').strip("'").strip()
+    return s
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

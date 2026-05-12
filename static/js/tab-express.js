@@ -842,6 +842,30 @@ export function init(panel) {
   ]);
   root.appendChild(folderRepeatRow);
 
+  // Folder path input -- replaces window.prompt() so the user has a proper
+  // labelled text box to paste into. Shown/hidden by _startLoopFolder().
+  const folderPathInput = el('input', {
+    type: 'text',
+    placeholder: 'Paste folder path, e.g. C:\\Users\\andrew\\Desktop\\photos',
+    style: [
+      'flex:1; min-width:0; padding:6px 8px;',
+      'border-radius:6px; border:1px solid var(--border-2);',
+      'background:var(--bg-raised); color:var(--text-1);',
+      'font-size:.82rem; font-family:monospace;',
+    ].join(' '),
+  });
+  folderPathInput.value = localStorage.getItem('dcs-loop-folder') || '';
+  const folderStartBtn   = el('button', { class: 'btn btn-sm', text: 'Start',  title: 'Start folder loop' });
+  const folderCancelLink = el('a', {
+    href: '#',
+    style: 'font-size:.78rem; color:var(--text-3); text-decoration:underline; cursor:pointer; white-space:nowrap;',
+    text: 'cancel',
+  });
+  const folderInputRow = el('div', {
+    style: 'display:none; align-items:center; gap:6px; padding:4px 2px 0;',
+  }, [folderPathInput, folderStartBtn, folderCancelLink]);
+  root.appendChild(folderInputRow);
+
   // Vary-prompt toggle (only visible when loop is active)
   const varyChk   = el('input', { type: 'checkbox', id: 'express-vary-prompt', style: 'cursor:pointer;' });
   const varyRow   = el('div', {
@@ -1157,6 +1181,7 @@ export function init(panel) {
       const lapTag = (snap.repeat && snap.lap > 1) ? ` lap ${snap.lap}` : '';
       loopFolderBtn.textContent = `Stop (${snap.index}/${snap.total}${lapTag})`;
       loopFolderBtn.classList.add('btn-primary');
+      folderInputRow.style.display = 'none';   // hide path box while running
     } else {
       loopFolderBtn.textContent = 'Loop Folder';
       loopFolderBtn.classList.remove('btn-primary');
@@ -1216,27 +1241,31 @@ export function init(panel) {
     };
   }
 
-  async function _startLoopFolder() {
+  // Show the inline path-input row so the user can paste a folder path.
+  // Called by both the Loop Folder button and the drop-zone pick-folder link.
+  function _startLoopFolder() {
     if (_folderActive) {
       // Loop is running -- request stop
-      try { await api('/api/fun/folder-loop/stop', { method: 'POST' }); } catch (_) {}
+      api('/api/fun/folder-loop/stop', { method: 'POST' }).catch(() => {});
       toast('Loop Folder: stop requested', 'info');
-      // Keep polling -- next tick will show active=false and the poll will clean up
+      // Keep polling -- next tick will show active=false and clean up
       return;
     }
-
-    // Default folder: last used, or parent dir of currently-loaded image
-    let defaultPath = _folderPath;
-    if (!defaultPath && _imagePath) {
+    // Pre-populate with last-used path, or parent of currently-loaded image
+    if (!folderPathInput.value && _imagePath) {
       const sep = _imagePath.includes('\\') ? '\\' : '/';
-      defaultPath = _imagePath.substring(0, _imagePath.lastIndexOf(sep));
+      folderPathInput.value = _imagePath.substring(0, _imagePath.lastIndexOf(sep));
     }
-    const folder = window.prompt(
-      'Folder path containing images to loop through:',
-      defaultPath || '',
-    );
-    if (!folder) return;
+    folderInputRow.style.display = 'flex';
+    folderPathInput.focus();
+    folderPathInput.select();
+  }
 
+  // Actually start the loop with the path currently in folderPathInput.
+  async function _submitFolderPath() {
+    const folder = folderPathInput.value.trim();
+    if (!folder) { toast('Paste a folder path first', 'error'); return; }
+    folderInputRow.style.display = 'none';
     try {
       const snap = await api('/api/fun/folder-loop/start', {
         method: 'POST',
@@ -1249,6 +1278,7 @@ export function init(panel) {
       });
       _folderPath = snap.folder;
       localStorage.setItem('dcs-loop-folder', _folderPath);
+      folderPathInput.value = _folderPath;   // normalise to resolved path
       toast(`Loop Folder: ${snap.total} images queued from ${snap.folder}`, 'info');
       _renderFolderStatus(snap);
 
@@ -1257,9 +1287,22 @@ export function init(panel) {
       if (_folderPollTimer) clearInterval(_folderPollTimer);
       _folderPollTimer = setInterval(_pollFolderStatus, 5000);
     } catch (e) {
+      // Re-show the input so the user can fix the path and try again
+      folderInputRow.style.display = 'flex';
+      folderPathInput.focus();
       toast((e && e.message) || 'Could not start folder loop', 'error');
     }
   }
+
+  folderStartBtn.addEventListener('click', _submitFolderPath);
+  folderCancelLink.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    folderInputRow.style.display = 'none';
+  });
+  folderPathInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter')  { ev.preventDefault(); _submitFolderPath(); }
+    if (ev.key === 'Escape') { folderInputRow.style.display = 'none'; }
+  });
 
   loopFolderBtn.addEventListener('click', _startLoopFolder);
   pickFolderLink.addEventListener('click', (e) => {
