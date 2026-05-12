@@ -795,7 +795,13 @@ export function init(panel) {
     title: 'Generate continuously until stopped',
     style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
-  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn]));
+  const loopFolderBtn = el('button', {
+    class: 'btn',
+    text: 'Loop Folder',
+    title: 'Iterate through every image in a folder, running the current settings once per image.',
+    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
+  });
+  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn, loopFolderBtn]));
 
   // Vary-prompt toggle (only visible when loop is active)
   const varyChk   = el('input', { type: 'checkbox', id: 'express-vary-prompt', style: 'cursor:pointer;' });
@@ -1078,6 +1084,129 @@ export function init(panel) {
       loopBtn.classList.add('btn-primary');
       varyRow.style.display = 'flex';
       _runLoop();
+    }
+  });
+
+  // -- Loop Folder: iterate every image in a folder once -------------------
+  // Sister feature to Loop. Where Loop re-runs the SAME image with new
+  // seeds, Loop Folder walks through a directory in alphabetical order,
+  // running ONE generation per image with the current settings. Each new
+  // image triggers the same _autoSelectRatio + scene-hold + auto-pick
+  // flow as if the user had dropped it manually.
+  let _folderLooping = false;
+  let _folderImages  = [];
+  let _folderIndex   = 0;
+  let _folderPath    = localStorage.getItem('dcs-loop-folder') || '';
+
+  function _stopFolderLoop() {
+    _folderLooping = false;
+    loopFolderBtn.textContent = 'Loop Folder';
+    loopFolderBtn.classList.remove('btn-primary');
+  }
+
+  // Set _imagePath + visible preview to a given absolute file path. Reuses
+  // _applyImage so _autoSelectRatio fires once the thumbnail loads (matches
+  // the manual drop flow). Returns a promise that resolves after the
+  // image's natural dimensions are known so ratio settles before submit.
+  async function _setImageFromPath(absPath) {
+    const previewUrl = `/api/thumbnail?path=${encodeURIComponent(absPath)}&size=800`;
+    return new Promise((resolve) => {
+      const probe = new Image();
+      probe.onload = () => {
+        _applyImage(absPath, previewUrl);
+        // _applyImage attaches its own onload that fires _autoSelectRatio.
+        // We've already loaded via probe, so let one tick pass for the
+        // ratio refresh to settle, then resolve.
+        setTimeout(resolve, 50);
+      };
+      probe.onerror = () => { resolve(); };  // best-effort: still try to generate
+      probe.src = previewUrl;
+    });
+  }
+
+  async function _runFolderLoop() {
+    while (_folderLooping && _folderIndex < _folderImages.length) {
+      const img = _folderImages[_folderIndex];
+      _folderIndex++;
+      _loopCount++;
+      loopFolderBtn.textContent = `Stop (${_folderIndex}/${_folderImages.length})`;
+
+      // Load this image and let ratio + dimensions adjust before we submit.
+      await _setImageFromPath(img.path);
+      if (!_folderLooping) break;
+
+      // Clear prompt history so each image gets a fresh AI brainstorm
+      // (the same thing _applyImage does on a new path, but explicit here
+      // in case the user typed something that should not bleed across).
+      // Comment intentionally: we LEAVE ideaInput / lyricInput alone so a
+      // single typed direction can be applied to every image in the folder.
+
+      const submitted = _multiVideo
+        ? await _generateMulti()
+        : await _generateOne(false);
+      if (!submitted) {
+        _stopFolderLoop();
+        toast(`Loop Folder stopped at ${img.name} -- submit failed`, 'error');
+        break;
+      }
+      const ok = await _watchJob(_jobId);
+      if (!ok) {
+        _stopFolderLoop();
+        toast(`Loop Folder stopped at ${img.name} -- generation failed`, 'error');
+        break;
+      }
+      if (!_folderLooping) break;
+      // brief pause so the user sees the result before the next image kicks in
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    if (_folderLooping) {
+      // Reached end of folder cleanly
+      _stopFolderLoop();
+      toast(`Loop Folder done -- ${_folderImages.length} images processed`, 'success');
+    }
+  }
+
+  loopFolderBtn.addEventListener('click', async () => {
+    if (_folderLooping) {
+      _stopFolderLoop();
+      if (_jobId) stopJob(_jobId).catch(() => {});
+      toast('Loop Folder stopped', 'info');
+      return;
+    }
+
+    // Ask for a folder path. Native prompt is ugly but instant; nicer
+    // picker is a follow-up. Default to whatever was used last session,
+    // or the parent directory of the currently loaded image if any.
+    let defaultPath = _folderPath;
+    if (!defaultPath && _imagePath) {
+      const sep = _imagePath.includes('\\') ? '\\' : '/';
+      defaultPath = _imagePath.substring(0, _imagePath.lastIndexOf(sep));
+    }
+    const folder = window.prompt(
+      'Folder path containing images to loop through:',
+      defaultPath || '',
+    );
+    if (!folder) return;
+
+    try {
+      const data = await api(`/api/fun/list-folder?path=${encodeURIComponent(folder)}`);
+      if (!data || !Array.isArray(data.images) || data.images.length === 0) {
+        toast('No images found in that folder', 'error');
+        return;
+      }
+      _folderImages = data.images;
+      _folderIndex  = 0;
+      _folderPath   = data.folder;
+      localStorage.setItem('dcs-loop-folder', _folderPath);
+
+      _folderLooping = true;
+      _loopCount = 0;
+      loopFolderBtn.classList.add('btn-primary');
+      loopFolderBtn.textContent = `Stop (0/${_folderImages.length})`;
+      toast(`Loop Folder: ${_folderImages.length} images queued from ${data.folder}`, 'info');
+      _runFolderLoop();
+    } catch (e) {
+      toast(e.message || 'Could not list folder', 'error');
     }
   });
 

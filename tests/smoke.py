@@ -196,6 +196,16 @@ def main() -> int:
                 f"unexpected current value: {data['current']!r}"
         _test("GET /api/gpu/status returns expected shape", gpu_status_shape)
 
+        # -- Loop Folder endpoint contract ---------------------------------
+        def list_folder_validation():
+            # No path -> 400
+            r = client.get("/api/fun/list-folder")
+            assert r.status_code == 400, f"empty path expected 400, got {r.status_code}"
+            # Bogus path -> 400
+            r = client.get("/api/fun/list-folder?path=/no/such/folder/exists/here")
+            assert r.status_code == 400, f"bad path expected 400, got {r.status_code}"
+        _test("GET /api/fun/list-folder validates input", list_folder_validation)
+
     # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")

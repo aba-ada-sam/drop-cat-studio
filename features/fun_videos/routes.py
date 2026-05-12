@@ -130,6 +130,60 @@ async def upload_photo(files: list[UploadFile] = File(...)):
     return {"files": saved}
 
 
+@router.get("/list-folder")
+async def list_folder(path: str = ""):
+    """List image files in a local folder, sorted by name.
+
+    Used by the 'Loop Folder' button in the Express tab to iterate a
+    user's photo directory. Returns absolute paths so the generation
+    pipeline can read them directly without an upload round-trip.
+
+    Args:
+        path: Absolute filesystem path to a folder containing images.
+
+    Returns:
+        {
+          "folder": str (the resolved path),
+          "images": [{"path": str, "name": str, "size_kb": int}, ...]
+        }
+
+    Raises 400 if the path is missing, not a directory, or contains
+    no recognised images. Hidden files and subdirectories are skipped.
+    """
+    if not path:
+        raise HTTPException(400, "Missing 'path' query parameter")
+
+    folder = Path(path).expanduser().resolve()
+    if not folder.is_dir():
+        raise HTTPException(400, f"Not a folder: {folder}")
+
+    images: list[dict] = []
+    for entry in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
+        if not entry.is_file():
+            continue
+        if entry.name.startswith("."):
+            continue
+        if entry.suffix.lower() not in IMAGE_EXTS:
+            continue
+        try:
+            size_kb = entry.stat().st_size // 1024
+        except OSError:
+            size_kb = 0
+        images.append({
+            "path": str(entry),
+            "name": entry.name,
+            "size_kb": size_kb,
+        })
+
+    if not images:
+        raise HTTPException(
+            400,
+            f"No images found in {folder} (looking for {', '.join(sorted(IMAGE_EXTS))})",
+        )
+
+    return {"folder": str(folder), "images": images}
+
+
 @router.post("/upload-video")
 async def upload_video(files: list[UploadFile] = File(...)):
     """Upload a video file to use as WanGP video-to-video source."""
