@@ -136,6 +136,11 @@ def run_prep(job, photo_path, settings):
         if extract_last_frame_to_file(start_video_path, tmp_path):
             settings["_start_video_last_frame"] = tmp_path
             log.info("[prep] Continuation mode: last frame extracted from %s", start_video_path)
+        else:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     music_prompt    = settings.get("music_prompt", "")
     lyric_direction = settings.get("lyric_direction", "")

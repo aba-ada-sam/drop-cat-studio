@@ -1061,10 +1061,20 @@ def run_multi_prep(job, photo_path, settings):
                 log.info("[multi] Continuation mode: last frame extracted from %s", start_video_path)
             else:
                 log.warning("[multi] Could not extract last frame from %s", start_video_path)
-        else:  # inspired
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+        else:  # inspired -- first frame used for LLM vision only, not stored beyond prep
             if extract_first_frame_to_file(start_video_path, tmp_path):
                 effective_photo = effective_photo or tmp_path
                 log.info("[multi] Inspired mode: first frame extracted from %s", start_video_path)
+                settings["_inspired_frame_tmp"] = tmp_path  # track for cleanup after prep
+            else:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     # -- Reject T2V models -------------------------------------------------
     # Multi-video chains clip i's last frame as clip i+1's start image. T2V
@@ -1097,6 +1107,16 @@ def run_multi_prep(job, photo_path, settings):
         motion_style=motion_style,
     )
     settings["_story_arc"] = arc
+
+    # Inspired mode: first-frame temp file was only needed for story-arc vision.
+    # Delete it now so it doesn't leak into the OS temp dir.
+    _inspired_tmp = settings.pop("_inspired_frame_tmp", None)
+    if _inspired_tmp:
+        try:
+            os.unlink(_inspired_tmp)
+        except OSError:
+            pass
+
     arc_prompts = [a.get("prompt", "")[:40] if isinstance(a, dict) else str(a)[:40] for a in arc]
     if arc_method == "vision":
         log.info("[multi] Story arc via vision (%d clips): %s", n_clips, arc_prompts)

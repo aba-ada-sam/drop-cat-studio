@@ -50,15 +50,18 @@ def _clean_user_path(p: str) -> str:
     - Otherwise scan the string for any embedded Windows absolute path and
       return the LAST one found (the real target is usually at the end of
       an error message).
+    - Normalize the result with os.path.normpath so ".." sequences are
+      collapsed before the caller's os.path.isdir check.
     """
+    import os as _os
     s = (p or "").strip().strip('"').strip("'").strip()
     # Already an absolute path?
     if _re.match(r'^[A-Za-z]:[/\\]', s) or s.startswith('/'):
-        return s
+        return _os.path.normpath(s)
     # Scan for embedded absolute path(s) (handles pasted error messages)
     matches = _WIN_ABS_PATH_RE.findall(s)
     if matches:
-        return matches[-1].strip().strip('"').strip("'").strip()
+        return _os.path.normpath(matches[-1].strip().strip('"').strip("'").strip())
     return s
 
 
