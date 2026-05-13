@@ -166,6 +166,7 @@ export function init(panel) {
     // Un-check video toggle
     videoChk.checked = false;
     videoCard.style.display = 'none';
+    _showVideoMode(false);
     _wipeMotionPrompt();
   });
 
@@ -180,6 +181,7 @@ export function init(panel) {
     // Un-check video toggle if switching from video to image
     videoChk.checked = false;
     videoCard.style.display = 'none';
+    _showVideoMode(false);
     // Auto-select the ratio that best matches the uploaded image dimensions
     previewImg.onload = () => {
       const w = previewImg.naturalWidth, h = previewImg.naturalHeight;
