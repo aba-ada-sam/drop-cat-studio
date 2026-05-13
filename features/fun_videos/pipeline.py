@@ -428,8 +428,9 @@ def run_pipeline(job, photo_path, settings):
         from features.fun_videos.multi_pipeline import _normalize_video_for_concat, _concat_clips
         _stitch_w = int(ow) if ow else 1032
         _stitch_h = int(oh) if oh else 580
+        _stitch_fps = video_generator.MODELS.get(_mn, {}).get("fps", 25)
         norm_orig = str(job_dir / "original_normalized.mp4")
-        if _normalize_video_for_concat(prepend_original, norm_orig, _stitch_w, _stitch_h):
+        if _normalize_video_for_concat(prepend_original, norm_orig, _stitch_w, _stitch_h, fps=_stitch_fps):
             stitched = str(job_dir / f"stitched_{job.id[:8]}.mp4")
             if _concat_clips([norm_orig, video_path], stitched):
                 log.info("[pipeline] Stitched original + AI continuation -> %s", stitched)

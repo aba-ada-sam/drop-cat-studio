@@ -987,12 +987,13 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
             pass
 
 
-def _normalize_video_for_concat(src: str, dst: str, width: int, height: int) -> bool:
+def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps: int = 25) -> bool:
     """Re-encode a video to exact dimensions + libx264 for stitching with AI clips.
 
     Pads with black bars when the source aspect ratio differs from the target
     (e.g. portrait phone video -> landscape AI clip). Audio is dropped so the
     stitched silent video goes through the normal audio generation path.
+    fps must match the AI clips being concatenated (LTX=25, Wan=16).
     """
     try:
         r = subprocess.run([
@@ -1001,7 +1002,7 @@ def _normalize_video_for_concat(src: str, dst: str, width: int, height: int) -> 
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
             ),
-            "-r", "25", "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-r", str(fps), "-c:v", "libx264", "-crf", "18", "-preset", "fast",
             "-an", dst,
         ], capture_output=True, timeout=120)
         ok = r.returncode == 0 and Path(dst).exists()
@@ -1443,10 +1444,11 @@ def run_multi_pipeline(job, photo_path, settings):
       # -- Stitch original video + AI continuation ---------------------------
       # In continuation mode, prepend the original video so the output is
       # [original clip] + [AI continuation clips] as one seamless video.
+      _model_fps = video_generator.MODELS.get(model_name, {}).get("fps", 25)
       if prepend_video_path and os.path.isfile(prepend_video_path) and not _stopped():
           job.update(message="Stitching original video with AI continuation...")
           norm_path = str(job_dir / "original_normalized.mp4")
-          if _normalize_video_for_concat(prepend_video_path, norm_path, tw, th):
+          if _normalize_video_for_concat(prepend_video_path, norm_path, tw, th, fps=_model_fps):
               stitched = str(job_dir / f"stitched_{job.id[:6]}.mp4")
               if _concat_clips([norm_path, concat_path], stitched):
                   log.info("[multi] Stitched original + AI continuation -> %s", stitched)
