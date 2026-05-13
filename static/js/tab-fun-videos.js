@@ -265,7 +265,7 @@ export function init(panel) {
 
   const framePickerRow = el('div', { style: 'display:none; align-items:center; gap:8px; margin-top:6px;' });
   const useFrameBtn = el('button', { class: 'btn btn-sm', text: 'Use this frame', style: 'font-size:.75rem;' });
-  const frameLabel = el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: 'Scrub to your desired start point, then click.' });
+  const frameLabel = el('span', { style: 'font-size:.74rem; color:var(--text-3);' });
   framePickerRow.appendChild(useFrameBtn);
   framePickerRow.appendChild(frameLabel);
   videoCard.appendChild(framePickerRow);
@@ -277,28 +277,64 @@ export function init(panel) {
   framePreviewRow.appendChild(framePreviewLabel);
   videoCard.appendChild(framePreviewRow);
 
+  const LONG_VIDEO_SECS = 45; // above this, prompt user to pick a moment
+
   function _fmt(s) {
     const m = Math.floor(s / 60);
     const sec = (s % 60).toFixed(1).padStart(4, '0');
     return `${m}:${sec}`;
   }
 
+  // Fetch + display a frame preview. Pass t=null for the backend default (85%).
+  async function _setPreviewFrame(t) {
+    if (!_startVideoPath) return;
+    const capturedPath = _startVideoPath;
+    const url = t != null
+      ? `/api/fun/video-frame?path=${encodeURIComponent(_startVideoPath)}&t=${t}`
+      : `/api/fun/video-frame?path=${encodeURIComponent(_startVideoPath)}`;
+    framePreviewLabel.textContent = t != null ? `Loading frame at ${_fmt(t)}...` : 'Selecting start frame...';
+    framePreviewRow.style.display = 'flex';
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok || _startVideoPath !== capturedPath) return;
+      const blob = await resp.blob();
+      if (_startVideoPath !== capturedPath) return;
+      framePreviewImg.src = URL.createObjectURL(blob);
+      if (t != null) {
+        framePreviewLabel.textContent = `Continuation starts at ${_fmt(t)}`;
+      } else {
+        const dur = videoPlayer.duration || 0;
+        if (dur > LONG_VIDEO_SECS) {
+          framePreviewLabel.textContent = `Default shown -- scrub the video to the scene you want and click "Use this frame"`;
+        } else {
+          framePreviewLabel.textContent = `Auto-selected from your clip -- scrub to change if needed`;
+        }
+      }
+    } catch (_e) {
+      if (_startVideoPath === capturedPath) framePreviewLabel.textContent = 'Preview unavailable';
+    }
+  }
+
+  // Auto-preview fires as soon as the video metadata is known -- zero clicks for the novice.
+  videoPlayer.addEventListener('loadedmetadata', () => {
+    if (!_startVideoPath) return;
+    // Seek the player to the default frame so player + thumbnail are in sync.
+    videoPlayer.currentTime = videoPlayer.duration * 0.85;
+    const dur = videoPlayer.duration || 0;
+    if (dur > LONG_VIDEO_SECS) {
+      // Long video: surface the picker hint prominently before fetching preview.
+      frameLabel.textContent = `Long video (${_fmt(dur)}) -- scrub to the scene you want, then click "Use this frame".`;
+    } else {
+      frameLabel.textContent = 'Scrub to change the start point if needed.';
+    }
+    _setPreviewFrame(null); // null = backend default (85%)
+  });
+
   useFrameBtn.addEventListener('click', async () => {
     if (!_startVideoPath || !videoPlayer.src) return;
     const t = videoPlayer.currentTime;
     _startVideoSeekSeconds = t;
-    framePreviewLabel.textContent = `Loading frame at ${_fmt(t)}...`;
-    framePreviewRow.style.display = 'flex';
-    try {
-      const url = `/api/fun/video-frame?path=${encodeURIComponent(_startVideoPath)}&t=${t}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(await resp.text());
-      const blob = await resp.blob();
-      framePreviewImg.src = URL.createObjectURL(blob);
-      framePreviewLabel.textContent = `Continuation starts at ${_fmt(t)}`;
-    } catch (e) {
-      framePreviewLabel.textContent = 'Frame preview failed';
-    }
+    await _setPreviewFrame(t);
   });
 
   function _showFramePicker(visible) {
@@ -306,7 +342,7 @@ export function init(panel) {
     framePickerRow.style.display = visible ? 'flex' : 'none';
     if (!visible) {
       framePreviewRow.style.display = 'none';
-      framePreviewImg.src = '';
+      if (framePreviewImg.src) { URL.revokeObjectURL(framePreviewImg.src); framePreviewImg.src = ''; }
       _startVideoSeekSeconds = null;
     }
   }
