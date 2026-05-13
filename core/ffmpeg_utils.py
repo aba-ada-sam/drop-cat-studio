@@ -182,17 +182,25 @@ def extract_frame_b64(
     return None
 
 
-def extract_last_frame_to_file(video_path: str | Path, out_path: str | Path) -> bool:
-    """Extract a frame near the end of a video and save it as a JPEG file.
+def extract_last_frame_to_file(
+    video_path: str | Path,
+    out_path: str | Path,
+    seek_seconds: float | None = None,
+) -> bool:
+    """Extract a frame from a video and save it as a JPEG file.
 
-    Uses 85% of duration -- LTX-2 clips fade/blur in the final ~10-15%, and the
-    multi-pipeline tail-trim only removes ~0.2s, so 97% can still land in a nearly-
+    Default seek is 85% of duration -- LTX-2 clips fade/blur in the final ~10-15%, and
+    the multi-pipeline tail-trim only removes ~0.2s, so 97% can still land in a nearly-
     black or heavily motion-blurred frame that causes the next clip to go off the rails.
     85% reliably lands in the clear, in-motion portion of the clip.
+    Pass seek_seconds to override (e.g. user-selected frame picker time).
     Returns True on success, False on failure.
     """
     dur = probe_duration(video_path)
-    seek = dur * 0.85 if dur > 0 else 0
+    if seek_seconds is not None:
+        seek = max(0.0, min(float(seek_seconds), dur - 0.05 if dur > 0 else 0.0))
+    else:
+        seek = dur * 0.85 if dur > 0 else 0
     try:
         r = subprocess.run(
             [

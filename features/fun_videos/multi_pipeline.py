@@ -1054,11 +1054,15 @@ def run_multi_prep(job, photo_path, settings):
         tmp_path = tmp.name
         tmp.close()
         if video_mode == "continuation":
-            if extract_last_frame_to_file(start_video_path, tmp_path):
+            seek_s = settings.get("start_video_seek_seconds")
+            if extract_last_frame_to_file(start_video_path, tmp_path, seek_seconds=seek_s):
                 effective_photo = tmp_path
                 settings["_start_video_last_frame"] = tmp_path
                 settings["_prepend_original_video"] = start_video_path
-                log.info("[multi] Continuation mode: last frame extracted from %s", start_video_path)
+                if seek_s is not None:
+                    log.info("[multi] Continuation mode: frame at %.2fs extracted from %s", seek_s, start_video_path)
+                else:
+                    log.info("[multi] Continuation mode: last frame extracted from %s", start_video_path)
             else:
                 log.warning("[multi] Could not extract last frame from %s", start_video_path)
                 try:

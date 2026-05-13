@@ -236,6 +236,7 @@ export function init(panel) {
 
   // -- Start video (video-to-video) ------------------------------------------
   let _startVideoPath = null;
+  let _startVideoSeekSeconds = null;
   let _videoMode = 'continuation'; // 'continuation' | 'inspired'
   const videoToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
   root.appendChild(videoToggleRow);
@@ -254,6 +255,62 @@ export function init(panel) {
   videoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [videoOpenBtn, videoClearBtn]));
   videoCard.appendChild(videoName);
 
+  // -- Frame picker (shown after video upload, continuation mode only) -------
+  const videoPlayer = el('video', {
+    style: 'display:none; width:100%; max-height:160px; border-radius:6px; margin-top:8px; background:#000;',
+    controls: true,
+    preload: 'metadata',
+  });
+  videoCard.appendChild(videoPlayer);
+
+  const framePickerRow = el('div', { style: 'display:none; align-items:center; gap:8px; margin-top:6px;' });
+  const useFrameBtn = el('button', { class: 'btn btn-sm', text: 'Use this frame', style: 'font-size:.75rem;' });
+  const frameLabel = el('span', { style: 'font-size:.74rem; color:var(--text-3);', text: 'Scrub to your desired start point, then click.' });
+  framePickerRow.appendChild(useFrameBtn);
+  framePickerRow.appendChild(frameLabel);
+  videoCard.appendChild(framePickerRow);
+
+  const framePreviewRow = el('div', { style: 'display:none; align-items:center; gap:8px; margin-top:6px;' });
+  const framePreviewImg = el('img', { style: 'width:80px; height:52px; object-fit:cover; border-radius:4px; border:1px solid var(--border-2);' });
+  const framePreviewLabel = el('span', { style: 'font-size:.74rem; color:var(--text-2);' });
+  framePreviewRow.appendChild(framePreviewImg);
+  framePreviewRow.appendChild(framePreviewLabel);
+  videoCard.appendChild(framePreviewRow);
+
+  function _fmt(s) {
+    const m = Math.floor(s / 60);
+    const sec = (s % 60).toFixed(1).padStart(4, '0');
+    return `${m}:${sec}`;
+  }
+
+  useFrameBtn.addEventListener('click', async () => {
+    if (!_startVideoPath || !videoPlayer.src) return;
+    const t = videoPlayer.currentTime;
+    _startVideoSeekSeconds = t;
+    framePreviewLabel.textContent = `Loading frame at ${_fmt(t)}...`;
+    framePreviewRow.style.display = 'flex';
+    try {
+      const url = `/api/fun/video-frame?path=${encodeURIComponent(_startVideoPath)}&t=${t}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(await resp.text());
+      const blob = await resp.blob();
+      framePreviewImg.src = URL.createObjectURL(blob);
+      framePreviewLabel.textContent = `Continuation starts at ${_fmt(t)}`;
+    } catch (e) {
+      framePreviewLabel.textContent = 'Frame preview failed';
+    }
+  });
+
+  function _showFramePicker(visible) {
+    videoPlayer.style.display = visible ? '' : 'none';
+    framePickerRow.style.display = visible ? 'flex' : 'none';
+    if (!visible) {
+      framePreviewRow.style.display = 'none';
+      framePreviewImg.src = '';
+      _startVideoSeekSeconds = null;
+    }
+  }
+
   // Video mode toggle -- shown once a video is loaded
   const _vmBtnBase = 'border:1px solid var(--border-2); border-radius:5px; padding:3px 10px; font-size:.75rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
   const _vmBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
@@ -263,6 +320,7 @@ export function init(panel) {
     _videoMode = mode;
     vmBtnCont.setAttribute('style', _vmBtnBase + (mode === 'continuation' ? _vmBtnOn : ''));
     vmBtnInsp.setAttribute('style', _vmBtnBase + (mode === 'inspired'     ? _vmBtnOn : ''));
+    _showFramePicker(mode === 'continuation' && !!_startVideoPath);
   }
   vmBtnCont.addEventListener('click', () => _setVideoMode('continuation'));
   vmBtnInsp.addEventListener('click', () => _setVideoMode('inspired'));
@@ -287,11 +345,14 @@ export function init(panel) {
       const f = data.files?.[0];
       if (f) {
         _startVideoPath = f.path;
+        _startVideoSeekSeconds = null;
         _videoFramePath = null;
         videoName.textContent = f.name;
         videoClearBtn.style.display = '';
         _showVideoMode(true);
         const vUrl = f.url || pathToUrl(f.path);
+        videoPlayer.src = vUrl;
+        _showFramePicker(true);
         _videoThumb(vUrl).then(async (dataUrl) => {
           if (!dataUrl || _startVideoPath !== f.path) return;
           try {
@@ -307,13 +368,17 @@ export function init(panel) {
     videoFileInput.value = '';
   });
   videoClearBtn.addEventListener('click', () => {
-    _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none';
+    _startVideoPath = null; _startVideoSeekSeconds = null;
+    videoName.textContent = ''; videoClearBtn.style.display = 'none';
+    videoPlayer.src = ''; _showFramePicker(false);
     _showVideoMode(false);
   });
   videoChk.addEventListener('change', () => {
     videoCard.style.display = videoChk.checked ? '' : 'none';
     if (!videoChk.checked) {
-      _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none';
+      _startVideoPath = null; _startVideoSeekSeconds = null;
+      videoName.textContent = ''; videoClearBtn.style.display = 'none';
+      videoPlayer.src = ''; _showFramePicker(false);
       _showVideoMode(false);
     }
   });
@@ -1042,8 +1107,9 @@ export function init(panel) {
       instrumental:     instrChk.checked,
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
       end_photo_path:   _endImagePath || null,
-      start_video_path: _startVideoPath || null,
-      video_mode:       _videoMode,
+      start_video_path:         _startVideoPath || null,
+      start_video_seek_seconds: _startVideoSeekSeconds,
+      video_mode:               _videoMode,
       output_width:     _fvOutW,
       output_height:    _fvOutH,
       auto_pick_model:  _autoPick,

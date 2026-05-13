@@ -9,7 +9,9 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+import tempfile
+
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from PIL import Image
 
 from core import config as cfg
@@ -307,6 +309,41 @@ async def upload_video(files: list[UploadFile] = File(...)):
             "url": f"/uploads/{dest.name}",
         })
     return {"files": saved}
+
+
+@router.get("/video-frame")
+async def video_frame(
+    path: str = Query(...),
+    t: float = Query(default=None),
+):
+    """Return a JPEG of the video frame at time t (seconds).
+
+    Used by the frontend frame-picker to preview the selected continuation point.
+    Path must be inside the uploads directory.
+    """
+    from core.ffmpeg_utils import extract_last_frame_to_file
+
+    abs_path = Path(path).resolve()
+    if not str(abs_path).startswith(str(UPLOADS_DIR.resolve())):
+        raise HTTPException(400, "path outside uploads directory")
+    if not abs_path.is_file():
+        raise HTTPException(404, "video not found")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        ok = await asyncio.to_thread(
+            extract_last_frame_to_file, abs_path, tmp_path, t
+        )
+        if not ok:
+            raise HTTPException(500, "frame extraction failed")
+        return Response(Path(tmp_path).read_bytes(), media_type="image/jpeg")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def _require_ai():
