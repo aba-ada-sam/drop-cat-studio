@@ -256,7 +256,23 @@ export function init(panel) {
     try {
       const data = await apiUpload('/api/fun/upload-video', Array.from(videoFileInput.files));
       const f = data.files?.[0];
-      if (f) { _startVideoPath = f.path; videoName.textContent = f.name; videoClearBtn.style.display = ''; }
+      if (f) {
+        _startVideoPath = f.path;
+        _videoFramePath = null;
+        videoName.textContent = f.name;
+        videoClearBtn.style.display = '';
+        const vUrl = f.url || pathToUrl(f.path);
+        _videoThumb(vUrl).then(async (dataUrl) => {
+          if (!dataUrl || _startVideoPath !== f.path) return;
+          try {
+            const blob = await fetch(dataUrl).then(r => r.blob());
+            const frameFile = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+            const up = await apiUpload('/api/fun/upload', [frameFile]);
+            const fr = up.files?.[0];
+            if (fr && _startVideoPath === f.path) _videoFramePath = fr.path;
+          } catch (_) {}
+        });
+      }
     } catch (e) { toast(e.message, 'error'); }
     videoFileInput.value = '';
   });
