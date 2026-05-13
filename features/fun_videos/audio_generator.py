@@ -1,4 +1,4 @@
-"""ACE-Step audio generation client for Fun Videos.
+"""ACE-Step audio generation client for Create Videos.
 
 Calls the ACE-Step REST API on port 8019 to generate music/audio.
 Based on the battle-tested DropCatGo-Fun-Videos_w_Audio/audio_generator.py.

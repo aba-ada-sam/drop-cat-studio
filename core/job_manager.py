@@ -1,6 +1,6 @@
 """Unified job queue with sequential GPU access enforcement.
 
-All features that use WanGP (Fun Videos, Video Bridges) share a single
+All features that use WanGP (Create Videos, Video Bridges) share a single
 GPU queue so only one generation runs at a time. Non-GPU jobs (Image2Video,
 Video Tools, SD Prompts) run on their own independent threads.
 """

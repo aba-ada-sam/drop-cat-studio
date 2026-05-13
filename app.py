@@ -1,6 +1,6 @@
 """Drop Cat Go Studio -- Unified Video Production App.
 
-Single FastAPI server combining Fun Videos, Video Bridges, SD Prompts,
+Single FastAPI server combining Create Videos, Video Bridges, SD Prompts,
 Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 """
 # Fix double-import: when launched as `python app.py`, this file is loaded as
@@ -1088,7 +1088,7 @@ from features.song_video.routes import router as song_router
 from features.adobe_agent.routes import router as adobe_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
-app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
+app.include_router(fun_router, prefix="/api/fun", tags=["Create Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])

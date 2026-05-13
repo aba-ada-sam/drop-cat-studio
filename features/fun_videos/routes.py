@@ -1,4 +1,4 @@
-"""Fun Videos API routes -- /api/fun/*
+"""Create Videos API routes -- /api/fun/*
 
 Photo -> AI video + audio pipeline with wildcard support.
 """
@@ -687,7 +687,7 @@ async def make_it(request: Request):
     config = cfg.load()
     requested_model = body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled"
 
-    # -- Auto-pick model (off by default for Fun Videos -- advanced users) ------
+    # -- Auto-pick model (off by default for Create Videos -- advanced users) ---
     # When the caller sets auto_pick_model=True, classify the user's idea via a
     # fast LLM call and override the model + motion style with the best match.
     # Falls back silently to the requested model on any LLM error.
@@ -838,7 +838,7 @@ async def make_it_multi(request: Request):
     else:
         n_clips = max(2, min(10, int(body.get("num_clips", config.get("fun_multi_num_clips", 2)))))
 
-    # -- Auto-pick model (default ON for Express, OFF for Fun Videos) -----------
+    # -- Auto-pick model (default ON for Express, OFF for Create Videos) --------
     # When auto_pick_model=True, classify the user's idea via a fast LLM call
     # and override the model + motion style with the best match. Falls back
     # silently to the requested model on any LLM error.

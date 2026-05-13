@@ -1,4 +1,4 @@
-"""Full Fun Videos pipeline: photo -> video -> audio -> merge.
+"""Full Create Videos pipeline: photo -> video -> audio -> merge.
 
 Orchestrates the analyzer, video_generator, and audio_generator modules
 into a single job that the job manager can execute.

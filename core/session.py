@@ -1,7 +1,7 @@
 """Project/session state management -- tracks files flowing between features.
 
 A session is a working context where uploads and outputs are shared.
-When Fun Videos generates a clip, it auto-appears in Bridges' input picker.
+When Create Videos generates a clip, it auto-appears in Bridges' input picker.
 Sessions persist to projects/{session_id}/session.json.
 """
 import json
@@ -75,7 +75,7 @@ class Session:
         ]
 
     def get_images(self) -> list[dict]:
-        """Get all image files (for Fun Videos, SD Prompts)."""
+        """Get all image files (for Create Videos, SD Prompts)."""
         return [
             f.to_dict() for f in self.files.values()
             if f.kind == "image"

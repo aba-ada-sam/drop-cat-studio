@@ -1,4 +1,4 @@
-"""WanGP video generation client for Fun Videos.
+"""WanGP video generation client for Create Videos.
 
 Supports two modes: persistent worker (port 7899) and subprocess fallback.
 Ported from DropCatGo-Fun-Videos_w_Audio/video_generator.py.
@@ -50,16 +50,20 @@ MODELS = {
     #   cap at 2 clips and calm motion to prevent identity drift.
     # LTX Dev13B: 40 steps, strong image conditioning, defaults to dynamic motion.
     # Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot per clip. 25 steps standard.
-    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 6, "motion": "dynamic"},
-    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic"},
+    # poll_timeout_s: Wan models (15+ GB) stream from RAM when they exceed the 80% VRAM
+    # budget (~13 GB on a 16 GB card), resulting in ~14s/step vs ~3s/step for LTX in VRAM.
+    # 25 steps x 14s = 350s denoising + overhead; give 1800s (30 min) per clip so jobs
+    # complete instead of failing. LTX fits in VRAM cleanly so 600s is plenty.
+    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800},
+    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 2400},
     # LTX-2 Distilled: two-stage schedule, 4-8 steps optimal (8 max -- more regresses quality).
     # Guidance 3.0. Default 2 clips; chaining beyond 3 compounds softness drift.
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm"},
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600},
     # LTX-2 Dev13B: 40 steps, strong image conditioning. Handles deliberate motion
     # (strides, gestures, turns). Preferred for painted/illustrated/fantasy subjects.
-    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic"},
-    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic"},
-    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic"},
+    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200},
+    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800},
+    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 900},
 }
 
 
@@ -206,7 +210,8 @@ def _generate_via_worker(
     # Submit with 409-retry: if worker is busy, wait until it's free then retry.
     # On success, capture the generation token so we can reject stale results if
     # this thread outlives its DCS job (e.g. after a timeout).
-    submit_deadline = time.time() + 600
+    _model_timeout = MODELS.get(model_name, {}).get("poll_timeout_s", 600)
+    submit_deadline = time.time() + _model_timeout
     my_token = None
     while True:
         if stop_check and stop_check():
@@ -260,7 +265,7 @@ def _generate_via_worker(
     # Poll for completion. We verify the token on each poll so a stale thread
     # can't claim results that belong to the next job.
     _poll_start = time.time()
-    deadline = _poll_start + 600
+    deadline = _poll_start + _model_timeout
     while time.time() < deadline:
         if stop_check and stop_check():
             # Tell the worker to abort the running generation so it doesn't
@@ -312,7 +317,8 @@ def _generate_via_worker(
         time.sleep(2)
 
     if log_fn:
-        log_fn("[error] Video generation took too long (over 10 minutes). "
+        _timeout_min = _model_timeout // 60
+        log_fn(f"[error] Video generation took too long (over {_timeout_min} min). "
                "Try a shorter clip duration, fewer denoise steps, or smaller resolution.")
     return None
 

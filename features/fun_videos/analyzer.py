@@ -1,4 +1,4 @@
-"""Photo analysis and prompt generation for Fun Videos.
+"""Photo analysis and prompt generation for Create Videos.
 
 Uses Claude/GPT to analyze photos and generate creative I2V video prompts.
 Ported from DropCatGo-Fun-Videos_w_Audio/main.py analyzer functions.
