@@ -927,10 +927,16 @@ async def make_it_multi(request: Request):
     else:
         label = f"Story ({n_clips} clips, {_model_short}): {settings.get('video_prompt', '')[:20]}"
 
+    # Scale the overall job timeout to clip count x per-clip model timeout so the
+    # job manager does not kill a legitimate long Wan I2V run mid-clip. Add 300s
+    # buffer for audio generation and final merge steps.
+    _per_clip_timeout = MODELS.get(requested_model, {}).get("poll_timeout_s", 600)
+    _job_timeout = _per_clip_timeout * n_clips + 300
+
     try:
         job = job_manager.submit_with_prep(
             JOB_FUN_MULTI_VIDEO, run_multi_prep, run_multi_pipeline,
-            photo_path, settings, label=label,
+            photo_path, settings, label=label, timeout_seconds=_job_timeout,
         )
     except RuntimeError as e:
         raise HTTPException(429, str(e))
