@@ -213,6 +213,7 @@ export function init(panel) {
     videoCard.style.display = '';
     videoName.textContent = path.split(/[\\/]/).pop();
     videoClearBtn.style.display = '';
+    _showVideoMode(true);
     // Extract first frame client-side and upload it so Create Story can use LLM vision.
     _videoThumb(vUrl).then(async (dataUrl) => {
       if (!dataUrl || _startVideoPath !== path) return; // aborted or new video loaded
@@ -233,6 +234,7 @@ export function init(panel) {
 
   // -- Start video (video-to-video) ------------------------------------------
   let _startVideoPath = null;
+  let _videoMode = 'continuation'; // 'continuation' | 'inspired'
   const videoToggleRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
   root.appendChild(videoToggleRow);
   const videoChk = el('input', { type: 'checkbox', id: 'fv-video-toggle' });
@@ -250,6 +252,31 @@ export function init(panel) {
   videoCard.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center;' }, [videoOpenBtn, videoClearBtn]));
   videoCard.appendChild(videoName);
 
+  // Video mode toggle -- shown once a video is loaded
+  const _vmBtnBase = 'border:1px solid var(--border-2); border-radius:5px; padding:3px 10px; font-size:.75rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const _vmBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+  const vmBtnCont  = el('button', { style: _vmBtnBase + _vmBtnOn, text: 'Continue', title: 'Continue the video -- AI picks up from the last frame and the original video is prepended to the output' });
+  const vmBtnInsp  = el('button', { style: _vmBtnBase, text: 'Inspired by', title: 'Use the video as creative inspiration -- AI generates new clips in the same world, no stitching' });
+  function _setVideoMode(mode) {
+    _videoMode = mode;
+    vmBtnCont.setAttribute('style', _vmBtnBase + (mode === 'continuation' ? _vmBtnOn : ''));
+    vmBtnInsp.setAttribute('style', _vmBtnBase + (mode === 'inspired'     ? _vmBtnOn : ''));
+  }
+  vmBtnCont.addEventListener('click', () => _setVideoMode('continuation'));
+  vmBtnInsp.addEventListener('click', () => _setVideoMode('inspired'));
+  const videoModeRow = el('div', {
+    style: 'display:none; align-items:center; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border-2);',
+  }, [
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Mode:' }),
+    vmBtnCont, vmBtnInsp,
+  ]);
+  videoCard.appendChild(videoModeRow);
+
+  function _showVideoMode(visible) {
+    videoModeRow.style.display = visible ? 'flex' : 'none';
+    if (!visible) _setVideoMode('continuation');
+  }
+
   videoOpenBtn.addEventListener('click', () => videoFileInput.click());
   videoFileInput.addEventListener('change', async () => {
     if (!videoFileInput.files?.length) return;
@@ -261,6 +288,7 @@ export function init(panel) {
         _videoFramePath = null;
         videoName.textContent = f.name;
         videoClearBtn.style.display = '';
+        _showVideoMode(true);
         const vUrl = f.url || pathToUrl(f.path);
         _videoThumb(vUrl).then(async (dataUrl) => {
           if (!dataUrl || _startVideoPath !== f.path) return;
@@ -276,10 +304,16 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
     videoFileInput.value = '';
   });
-  videoClearBtn.addEventListener('click', () => { _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none'; });
+  videoClearBtn.addEventListener('click', () => {
+    _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none';
+    _showVideoMode(false);
+  });
   videoChk.addEventListener('change', () => {
     videoCard.style.display = videoChk.checked ? '' : 'none';
-    if (!videoChk.checked) { _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none'; }
+    if (!videoChk.checked) {
+      _startVideoPath = null; videoName.textContent = ''; videoClearBtn.style.display = 'none';
+      _showVideoMode(false);
+    }
   });
 
   // -- End image (optional morph) --------------------------------------------
@@ -914,16 +948,19 @@ export function init(panel) {
   const _msBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
   const msBtnCalm  = el('button', { style: _msBtnBase + _msBtnOn, text: 'Calm', title: 'Environment-only motion -- subject stays still (best for LTX)' });
   const msBtnDyn   = el('button', { style: _msBtnBase, text: 'Dynamic', title: 'Subject action -- kinetic motion (Wan I2V)' });
+  const msBtnNar   = el('button', { style: _msBtnBase, text: 'Narrative', title: 'Story beats -- subject does purposeful things with narrative meaning' });
   function _setMotionStyle(style) {
     _motionStyle = style;
-    msBtnCalm.setAttribute('style', _msBtnBase + (style === 'calm' ? _msBtnOn : ''));
-    msBtnDyn.setAttribute('style',  _msBtnBase + (style === 'dynamic' ? _msBtnOn : ''));
+    msBtnCalm.setAttribute('style', _msBtnBase + (style === 'calm'      ? _msBtnOn : ''));
+    msBtnDyn .setAttribute('style', _msBtnBase + (style === 'dynamic'   ? _msBtnOn : ''));
+    msBtnNar .setAttribute('style', _msBtnBase + (style === 'narrative' ? _msBtnOn : ''));
   }
   msBtnCalm.addEventListener('click', () => _setMotionStyle('calm'));
-  msBtnDyn.addEventListener('click',  () => _setMotionStyle('dynamic'));
-  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+  msBtnDyn .addEventListener('click', () => _setMotionStyle('dynamic'));
+  msBtnNar .addEventListener('click', () => _setMotionStyle('narrative'));
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Motion:' }),
-    msBtnCalm, msBtnDyn,
+    msBtnCalm, msBtnDyn, msBtnNar,
   ]));
 
   multiChk.addEventListener('change', () => {
@@ -1004,6 +1041,7 @@ export function init(panel) {
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
       end_photo_path:   _endImagePath || null,
       start_video_path: _startVideoPath || null,
+      video_mode:       _videoMode,
       output_width:     _fvOutW,
       output_height:    _fvOutH,
       auto_pick_model:  _autoPick,
@@ -1058,7 +1096,7 @@ export function init(panel) {
       const base = _buildFvPayload();
       const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
       const payload  = _multiVideo
-        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity', motion_style: _motionStyle }
+        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity', motion_style: _motionStyle, start_video_path: _startVideoPath || null, video_mode: _videoMode }
         : base;
       const { job_id } = await api(endpoint, {
         method: 'POST',

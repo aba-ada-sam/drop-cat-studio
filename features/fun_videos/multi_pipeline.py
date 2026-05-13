@@ -43,6 +43,17 @@ _FALLBACK_PHASES_CALM = [
     "cloud shadow passes overhead, scene breathes in stillness",
 ]
 
+_FALLBACK_PHASES_NARRATIVE = [
+    "slowly reaches forward with one hand, fingers extending toward something just out of frame",
+    "turns their head toward the light, gaze shifting with deliberate focus",
+    "takes one careful step forward, weight transferring with quiet intention",
+    "lifts an object from the surface before them, examining it with both hands",
+    "pauses and looks back over one shoulder, expression reading a moment of recognition",
+    "leans in closer, attention narrowing on a detail in the scene",
+    "stands up slowly, weight shifting as they rise to full height",
+    "opens their hand and looks down at what rests in their palm",
+]
+
 
 # -- Story arc generation ------------------------------------------------------
 
@@ -182,6 +193,48 @@ CLIP COUNT vs PACING: 2-3 clips = single action arc. 4-5 clips = build and
   hold. Do not escalate to a climax -- keep energy steady and legible.\
 """
 
+_STORY_ARC_NARRATIVE = _STORY_ARC_BASE + """
+
+ENERGY: narrative motion. Each clip shows ONE purposeful action that advances
+the story -- not kinetic chaos, not ambient stillness. Think: the moment a
+character reaches for something, turns toward a sound, reacts to a discovery,
+or crosses a threshold. Actions the audience reads as story beats.
+
+NARRATIVE PRINCIPLES:
+- Every action implies causality: something causes the subject to move, or the
+  movement causes something. Do not describe motion for its own sake.
+- Prefer legible, unambiguous gestures readable in one glance: reaches for,
+  turns toward, kneels down, lifts, opens, steps to, looks up at.
+- Arc: the clip sequence should feel like a mini-scene with a beginning,
+  middle, and resolution -- not a random collection of motions.
+
+PROMPT SHAPE (mandatory every clip):
+  1. SUBJECT (12-16 words): exact visual markers from the photo -- clothing,
+     species, material, expression. Name the subject precisely.
+  2. ONE NARRATIVE ACTION (18-24 words): a single purposeful physical action
+     a viewer reads as story. Describe WHAT they do and where attention goes.
+  3. SCENE ANCHOR (10-14 words): setting + lighting + visual style, restated
+     every clip so the background does not drift.
+  4. CAMERA NOTE (4-5 words, LAST): "static shot, fixed camera" or "slow push
+     in" only if the action strongly warrants it.
+
+ALLOWED: reaches for / picks up / sets down, turns toward / looks at / glances
+  away, takes one step toward / approaches, opens / closes / lifts / lowers,
+  leans in / leans back / stands up / sits down, nods / shakes head (sparing).
+BANNED: erupts, slams, explodes, thrashes, surges -- kills subject identity.
+BANNED: ambient-only events (shadow shifting, steam, curtain) as PRIMARY action.
+BANNED: abstract internal states ("contemplates", "realizes") -- show PHYSICAL
+  actions a camera can capture.
+
+ARC STRUCTURE:
+  2 clips: action -> reaction
+  3 clips: notice -> approach -> act
+  4 clips: establish -> notice -> approach -> act
+  5+ clips: establish -> notice -> approach -> act -> consequence
+
+Do NOT escalate to chaos. The final clip is a natural endpoint, not a climax.\
+"""
+
 _STORY_ARC_CALM = _STORY_ARC_BASE + """
 
 ENERGY: scene-hold mode. The subject does not move. Motion comes ONLY from the
@@ -225,6 +278,8 @@ def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -
     resolved = motion_style or ("dynamic" if is_ltx_dev13 else ("calm" if is_ltx else "dynamic"))
     if resolved == "calm":
         return _STORY_ARC_CALM
+    if resolved == "narrative":
+        return _STORY_ARC_NARRATIVE
     if is_ltx:
         # Dev13B runs 40 steps -- can handle real motion.
         # Distilled runs 8 steps -- micro-motion only (GENTLE).
@@ -932,6 +987,33 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
             pass
 
 
+def _normalize_video_for_concat(src: str, dst: str, width: int, height: int) -> bool:
+    """Re-encode a video to exact dimensions + libx264 for stitching with AI clips.
+
+    Pads with black bars when the source aspect ratio differs from the target
+    (e.g. portrait phone video -> landscape AI clip). Audio is dropped so the
+    stitched silent video goes through the normal audio generation path.
+    """
+    try:
+        r = subprocess.run([
+            "ffmpeg", "-y", "-i", src,
+            "-vf", (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            ),
+            "-r", "25", "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-an", dst,
+        ], capture_output=True, timeout=120)
+        ok = r.returncode == 0 and Path(dst).exists()
+        if not ok:
+            log.warning("[multi] normalize_video_for_concat failed:\n%s",
+                        r.stderr.decode(errors="replace")[-1000:])
+        return ok
+    except Exception as e:
+        log.warning("[multi] normalize_video_for_concat exception: %s", e)
+        return False
+
+
 # -- Prep phase (runs before GPU queue) ---------------------------------------
 
 def run_multi_prep(job, photo_path, settings):
@@ -956,6 +1038,33 @@ def run_multi_prep(job, photo_path, settings):
     model_name       = settings.get("model_name", "")
     motion_style     = settings.get("motion_style") or None  # None -> auto-resolve per model
 
+    # -- Video continuation mode -------------------------------------------
+    # If a start_video_path is provided and video_mode == 'continuation',
+    # extract the last frame to use as the LLM vision anchor AND as the
+    # start image for clip 1 (so the AI continues exactly where the video ended).
+    # 'inspired' mode just extracts the first frame for visual context.
+    start_video_path = settings.get("start_video_path") or ""
+    video_mode       = settings.get("video_mode", "continuation")
+    effective_photo  = photo_path
+
+    if start_video_path and os.path.isfile(start_video_path):
+        from core.ffmpeg_utils import extract_last_frame_to_file, extract_first_frame_to_file
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        if video_mode == "continuation":
+            if extract_last_frame_to_file(start_video_path, tmp_path):
+                effective_photo = tmp_path
+                settings["_start_video_last_frame"] = tmp_path
+                settings["_prepend_original_video"] = start_video_path
+                log.info("[multi] Continuation mode: last frame extracted from %s", start_video_path)
+            else:
+                log.warning("[multi] Could not extract last frame from %s", start_video_path)
+        else:  # inspired
+            if extract_first_frame_to_file(start_video_path, tmp_path):
+                effective_photo = effective_photo or tmp_path
+                log.info("[multi] Inspired mode: first frame extracted from %s", start_video_path)
+
     # -- Reject T2V models -------------------------------------------------
     # Multi-video chains clip i's last frame as clip i+1's start image. T2V
     # models do not accept image inputs -- WanGP silently drops them and
@@ -979,7 +1088,7 @@ def run_multi_prep(job, photo_path, settings):
 
     job.update(progress=3, message="Planning story arc...")
     arc, arc_method = _generate_story_arc(
-        llm_router, user_idea, n_clips, photo_path,
+        llm_router, user_idea, n_clips, effective_photo,
         progress_fn=lambda msg: job.update(message=msg),
         target_total_secs=plan_total,
         default_clip_dur=plan_clip_dur,
@@ -1100,7 +1209,12 @@ def run_multi_pipeline(job, photo_path, settings):
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
         # Same trim compensation applied in run_multi_prep.
         fb_dur = clip_dur / _CHAIN_TRIM_RATIO
-        phases = _FALLBACK_PHASES_CALM if motion_style == "calm" else _FALLBACK_PHASES
+        if motion_style == "calm":
+            phases = _FALLBACK_PHASES_CALM
+        elif motion_style == "narrative":
+            phases = _FALLBACK_PHASES_NARRATIVE
+        else:
+            phases = _FALLBACK_PHASES
         story_arc = [
             {"prompt": base + phases[i % len(phases)], "duration": fb_dur}
             for i in range(n_clips)
@@ -1148,10 +1262,16 @@ def run_multi_pipeline(job, photo_path, settings):
       clip_durations: list[float] = []     # actual probed durations for director frame extraction
       prev_frame_path: str | None = None   # PNG chain frame from previous clip
 
-      # Pre-process the original photo to exact WanGP dimensions
+      # For continuation mode, clip 1 starts from the last frame of the original
+      # video (not the uploaded photo), so the AI picks up exactly where it ended.
+      video_last_frame   = settings.get("_start_video_last_frame")
+      prepend_video_path = settings.get("_prepend_original_video")
+      effective_photo_src = video_last_frame or photo_path
+
+      # Pre-process the start image to exact WanGP dimensions
       prepped_photo: str | None = None
-      if photo_path and os.path.isfile(photo_path):
-          prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
+      if effective_photo_src and os.path.isfile(effective_photo_src):
+          prepped_photo = _prep_photo(effective_photo_src, tw, th, job_dir)
 
       _last_error: list[str | None] = [None]
 
@@ -1319,6 +1439,22 @@ def run_multi_pipeline(job, photo_path, settings):
           story_arc = current_arc
           concat_path = current_assembled
           job.meta["clip_paths"] = clip_paths
+
+      # -- Stitch original video + AI continuation ---------------------------
+      # In continuation mode, prepend the original video so the output is
+      # [original clip] + [AI continuation clips] as one seamless video.
+      if prepend_video_path and os.path.isfile(prepend_video_path) and not _stopped():
+          job.update(message="Stitching original video with AI continuation...")
+          norm_path = str(job_dir / "original_normalized.mp4")
+          if _normalize_video_for_concat(prepend_video_path, norm_path, tw, th):
+              stitched = str(job_dir / f"stitched_{job.id[:6]}.mp4")
+              if _concat_clips([norm_path, concat_path], stitched):
+                  log.info("[multi] Stitched original + AI continuation -> %s", stitched)
+                  concat_path = stitched
+              else:
+                  log.warning("[multi] Stitch concat failed -- using AI-only output")
+          else:
+              log.warning("[multi] Could not normalize original video -- using AI-only output")
 
       job.meta["concat_path"] = concat_path
 

@@ -6,6 +6,7 @@ into a single job that the job manager can execute.
 import logging
 import os
 import shutil
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -38,16 +39,19 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 _PROMPT_SUFFIXES = {
     # LTX-2 image conditioning is very strong and produces near-static output without
     # explicit motion language. Force movement with every prompt.
-    "ltx":      "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
+    "ltx":           "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
     # Calm mode: environment-only motion. Subject-motion keywords directly contradict
     # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
-    "ltx_calm": "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
-    "wan":      "smooth animation, photorealistic, high quality, detailed",
+    "ltx_calm":      "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
+    # Narrative mode: purposeful story-driven action, no kinetic extremes.
+    "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, photorealistic, high quality",
+    "wan":           "smooth animation, photorealistic, high quality, detailed",
     # Wan + calm: Wan I2V can be run in calm mode for breathing-photograph stories.
     # Without a matching suffix the per-clip prompt picked up "smooth animation" --
     # a kinetic hint that fights the CALM story-arc system prompt. Mirror the LTX
     # calm suffix so subject-still and static-camera are restated every clip.
-    "wan_calm": "subject completely still, environment in gentle motion, static shot, fixed camera, photorealistic, high quality",
+    "wan_calm":      "subject completely still, environment in gentle motion, static shot, fixed camera, photorealistic, high quality",
+    "wan_narrative": "deliberate purposeful motion, meaningful story action, physically legible gesture, photorealistic, high quality",
 }
 
 
@@ -55,9 +59,19 @@ def _finalize_prompt(prompt: str, model_name: str, motion_style: str | None = No
     """Append model-appropriate quality suffix to any video prompt."""
     base = (prompt or "").strip().rstrip(".,;")
     if "ltx" in model_name.lower():
-        key = "ltx_calm" if motion_style == "calm" else "ltx"
+        if motion_style == "calm":
+            key = "ltx_calm"
+        elif motion_style == "narrative":
+            key = "ltx_narrative"
+        else:
+            key = "ltx"
     else:
-        key = "wan_calm" if motion_style == "calm" else "wan"
+        if motion_style == "calm":
+            key = "wan_calm"
+        elif motion_style == "narrative":
+            key = "wan_narrative"
+        else:
+            key = "wan"
     suffix = _PROMPT_SUFFIXES[key]
     return f"{base}, {suffix}" if base else suffix
 
@@ -109,6 +123,19 @@ def run_prep(job, photo_path, settings):
     """
     from app import get_llm_router; llm_router = get_llm_router()
     from features.fun_videos import analyzer
+
+    # For continuation mode: extract last frame of the source video so LLM
+    # vision sees where the video ended (the chicken, not just the first frame).
+    start_video_path = settings.get("start_video_path", "")
+    video_mode       = settings.get("video_mode", "continuation")
+    if start_video_path and os.path.isfile(start_video_path) and video_mode == "continuation":
+        from core.ffmpeg_utils import extract_last_frame_to_file
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        if extract_last_frame_to_file(start_video_path, tmp_path):
+            settings["_start_video_last_frame"] = tmp_path
+            log.info("[prep] Continuation mode: last frame extracted from %s", start_video_path)
 
     music_prompt    = settings.get("music_prompt", "")
     lyric_direction = settings.get("lyric_direction", "")
@@ -245,6 +272,17 @@ def run_pipeline(job, photo_path, settings):
     instrumental = settings.get("instrumental", False)
     lyrics = settings.pop("_prepped_lyrics", "")
 
+    # Continuation mode: use the last frame of the source video as the
+    # effective start image so the AI continues from where the video ended.
+    video_mode = settings.get("video_mode", "continuation")
+    prepend_original = None
+    video_last_frame = settings.get("_start_video_last_frame")
+    if video_last_frame and os.path.isfile(video_last_frame) and video_mode == "continuation":
+        photo_path = video_last_frame
+        prepend_original = settings.get("start_video_path", "")
+        if not os.path.isfile(prepend_original or ""):
+            prepend_original = None
+
     _last_error = [None]
 
     def _log(msg):
@@ -361,7 +399,9 @@ def run_pipeline(job, photo_path, settings):
         guidance=float(settings.get("video_guidance", 7.5)),
         seed=int(settings.get("video_seed", -1)),
         end_image_path=settings.get("end_photo_path"),
-        start_video_path=settings.get("start_video_path"),
+        # Continuation mode: WanGP uses the last frame as start_image (image_path above).
+        # Don't also pass start_video or it takes precedence over the image in WanGP.
+        start_video_path=None if video_mode == "continuation" else settings.get("start_video_path"),
         loras=settings.get("loras", []),
         negative_prompt=video_generator.negative_prompt_for(_mn),
         stop_check=_stopped,
@@ -381,6 +421,23 @@ def run_pipeline(job, photo_path, settings):
                 "Try fewer steps (<=30), shorter duration (<=8s), or a smaller model, then generate again."
             )
         raise RuntimeError(f"Video generation failed: {raw}")
+
+    # Continuation mode: stitch [original video] + [AI clip] into a single output.
+    if prepend_original and os.path.isfile(prepend_original) and video_path:
+        job.update(progress=59, message="Stitching original video with AI continuation...")
+        from features.fun_videos.multi_pipeline import _normalize_video_for_concat, _concat_clips
+        _stitch_w = int(ow) if ow else 1032
+        _stitch_h = int(oh) if oh else 580
+        norm_orig = str(job_dir / "original_normalized.mp4")
+        if _normalize_video_for_concat(prepend_original, norm_orig, _stitch_w, _stitch_h):
+            stitched = str(job_dir / f"stitched_{job.id[:8]}.mp4")
+            if _concat_clips([norm_orig, video_path], stitched):
+                log.info("[pipeline] Stitched original + AI continuation -> %s", stitched)
+                video_path = stitched
+            else:
+                log.warning("[pipeline] Stitch concat failed -- using AI-only output")
+        else:
+            log.warning("[pipeline] Could not normalize original video -- using AI-only output")
 
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path

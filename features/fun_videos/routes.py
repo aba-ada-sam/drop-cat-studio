@@ -772,6 +772,7 @@ async def make_it(request: Request):
         "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
         "end_photo_path": body.get("end_photo_path"),
         "start_video_path": _resolve_path(body.get("start_video_path", "")),
+        "video_mode":     body.get("video_mode", "continuation"),
         "loras":          body.get("loras", []),
         "upscale":        body.get("upscale", True),
         "upscale_scale":  float(body.get("upscale_scale", 2.0)),
@@ -911,6 +912,8 @@ async def make_it_multi(request: Request):
         "upscale_method":       body.get("upscale_method", "ffmpeg"),
         "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
         "motion_style":         requested_motion,
+        "start_video_path":     _resolve_path(body.get("start_video_path", "")),
+        "video_mode":           body.get("video_mode", "continuation"),
     }
 
     # Surface the chosen model + expected pace in the label so users see what
