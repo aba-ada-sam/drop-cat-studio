@@ -84,12 +84,14 @@ Step 2 10 "Clone Drop Cat Go Studio"
 # ==========================================================================
 
 if (Test-Path "$DCS_DIR\app.py") {
-    Log "DCS already cloned -- pulling latest"
+    Log "DCS already cloned -- resetting and pulling latest"
     Push-Location $DCS_DIR
-    git pull 2>&1 | ForEach-Object { Log $_ }
+    git reset --hard HEAD
+    git clean -fd
+    git pull
     Pop-Location
 } else {
-    git clone $REPO_URL $DCS_DIR 2>&1 | ForEach-Object { Log $_ }
+    git clone $REPO_URL $DCS_DIR
     if (-not (Test-Path "$DCS_DIR\app.py")) { Fail "Clone failed -- app.py not found" }
 }
 Done "Drop Cat Go Studio repo ready at $DCS_DIR"
@@ -100,9 +102,10 @@ Step 3 10 "Install Drop Cat Go Studio Python dependencies"
 
 Push-Location $DCS_DIR
 python -m pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet 2>&1 | ForEach-Object { Log $_ }
+pip install -r requirements.txt --quiet
 Pop-Location
-$check = python -c "import fastapi, PIL; print('ok')"if ($check -ne "ok") { Fail "DCS Python deps check failed: $check" }
+$check = python -c "import fastapi, PIL; print('ok')"
+if ($check -ne "ok") { Fail "DCS Python deps check failed: $check" }
 Done "DCS Python dependencies installed"
 
 # ==========================================================================
@@ -139,17 +142,14 @@ if (-not $ollamaRunning) {
 }
 
 Log "Pulling ollama models (this takes a few minutes)..."
-ollama pull dolphin3:8b 2>&1 | ForEach-Object { Log $_ }
-ollama pull qwen2.5vl:7b 2>&1 | ForEach-Object { Log $_ }
-Done "Ollama models ready"
+ollama pull dolphin3:8bollama pull qwen2.5vl:7bDone "Ollama models ready"
 
 # ==========================================================================
 Step 6 10 "Clone and set up WanGP (AI video engine)"
 # ==========================================================================
 
 if (-not (Test-Path "$WANGP_DIR\wgp.py")) {
-    git clone https://github.com/deepbeepmeep/Wan2GP.git $WANGP_DIR 2>&1 | ForEach-Object { Log $_ }
-    if (-not (Test-Path "$WANGP_DIR\wgp.py")) { Fail "WanGP clone failed" }
+    git clone https://github.com/deepbeepmeep/Wan2GP.git $WANGP_DIR    if (-not (Test-Path "$WANGP_DIR\wgp.py")) { Fail "WanGP clone failed" }
 } else {
     Log "WanGP already cloned -- skipping"
 }
@@ -157,19 +157,16 @@ if (-not (Test-Path "$WANGP_DIR\wgp.py")) {
 # Create WanGP Python virtual environment
 if (-not (Test-Path "$WANGP_DIR\venv\Scripts\python.exe")) {
     Log "Creating WanGP virtual environment..."
-    python -m venv "$WANGP_DIR\venv" 2>&1 | ForEach-Object { Log $_ }
-}
+    python -m venv "$WANGP_DIR\venv"}
 
 $WANGP_PY = "$WANGP_DIR\venv\Scripts\python.exe"
 $WANGP_PIP = "$WANGP_DIR\venv\Scripts\pip.exe"
 
 Log "Installing PyTorch with CUDA 12.4..."
-& $WANGP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet 2>&1 | ForEach-Object { Log $_ }
-
+& $WANGP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet
 Log "Installing WanGP requirements..."
 Push-Location $WANGP_DIR
-& $WANGP_PIP install -r requirements.txt --quiet 2>&1 | ForEach-Object { Log $_ }
-Pop-Location
+& $WANGP_PIP install -r requirements.txt --quietPop-Location
 
 $gpuCheck = & $WANGP_PY -c "import torch; print(torch.cuda.is_available())"Log "CUDA available: $gpuCheck"
 if ($gpuCheck -ne "True") {
@@ -201,23 +198,19 @@ Step 7 10 "Clone and set up ACE-Step (AI music engine)"
 # ==========================================================================
 
 if (-not (Test-Path "$ACESTEP_DIR\run_inference.py")) {
-    git clone https://github.com/ace-step/ACE-Step.git $ACESTEP_DIR 2>&1 | ForEach-Object { Log $_ }
-    if (-not (Test-Path "$ACESTEP_DIR\run_inference.py")) { Fail "ACE-Step clone failed" }
+    git clone https://github.com/ace-step/ACE-Step.git $ACESTEP_DIR    if (-not (Test-Path "$ACESTEP_DIR\run_inference.py")) { Fail "ACE-Step clone failed" }
 } else {
     Log "ACE-Step already cloned -- skipping"
 }
 
 if (-not (Test-Path "$ACESTEP_DIR\venv\Scripts\python.exe")) {
     Log "Creating ACE-Step virtual environment..."
-    python -m venv "$ACESTEP_DIR\venv" 2>&1 | ForEach-Object { Log $_ }
-}
+    python -m venv "$ACESTEP_DIR\venv"}
 
 $ACESTEP_PIP = "$ACESTEP_DIR\venv\Scripts\pip.exe"
 Log "Installing ACE-Step requirements..."
 Push-Location $ACESTEP_DIR
-& $ACESTEP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet 2>&1 | ForEach-Object { Log $_ }
-& $ACESTEP_PIP install -r requirements.txt --quiet 2>&1 | ForEach-Object { Log $_ }
-Pop-Location
+& $ACESTEP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet& $ACESTEP_PIP install -r requirements.txt --quietPop-Location
 
 Done "ACE-Step environment ready at $ACESTEP_DIR"
 
