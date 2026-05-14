@@ -987,24 +987,29 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
             pass
 
 
-def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps: int = 25) -> bool:
+def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps: int = 25, trim_to: float | None = None) -> bool:
     """Re-encode a video to exact dimensions + libx264 for stitching with AI clips.
 
     Pads with black bars when the source aspect ratio differs from the target
     (e.g. portrait phone video -> landscape AI clip). Audio is dropped so the
     stitched silent video goes through the normal audio generation path.
     fps must match the AI clips being concatenated (LTX=25, Wan=16).
+    trim_to: if set, output only the first trim_to seconds (cuts faded tail before
+    the AI continuation begins so there is no visible seam).
     """
     try:
-        r = subprocess.run([
-            "ffmpeg", "-y", "-i", src,
+        cmd = ["ffmpeg", "-y", "-i", src]
+        if trim_to is not None:
+            cmd += ["-t", f"{trim_to:.3f}"]
+        cmd += [
             "-vf", (
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
             ),
             "-r", str(fps), "-c:v", "libx264", "-crf", "18", "-preset", "fast",
             "-an", dst,
-        ], capture_output=True, timeout=120)
+        ]
+        r = subprocess.run(cmd, capture_output=True, timeout=120)
         ok = r.returncode == 0 and Path(dst).exists()
         if not ok:
             log.warning("[multi] normalize_video_for_concat failed:\n%s",
@@ -1059,6 +1064,12 @@ def run_multi_prep(job, photo_path, settings):
                 effective_photo = tmp_path
                 settings["_start_video_last_frame"] = tmp_path
                 settings["_prepend_original_video"] = start_video_path
+                # Store the actual trim point so the stitch cuts the original
+                # exactly where the AI clip begins -- no faded tail, no seam.
+                from core.ffmpeg_utils import probe_duration as _pd
+                _dur = _pd(start_video_path)
+                _trim = seek_s if seek_s is not None else (_dur * 0.85 if _dur > 0 else 0)
+                settings["_prepend_video_trim_seconds"] = _trim
                 if seek_s is not None:
                     log.info("[multi] Continuation mode: frame at %.2fs extracted from %s", seek_s, start_video_path)
                 else:
@@ -1472,7 +1483,8 @@ def run_multi_pipeline(job, photo_path, settings):
       if prepend_video_path and os.path.isfile(prepend_video_path) and not _stopped():
           job.update(message="Stitching original video with AI continuation...")
           norm_path = str(job_dir / "original_normalized.mp4")
-          if _normalize_video_for_concat(prepend_video_path, norm_path, tw, th, fps=_model_fps):
+          trim_to = settings.get("_prepend_video_trim_seconds")
+          if _normalize_video_for_concat(prepend_video_path, norm_path, tw, th, fps=_model_fps, trim_to=trim_to):
               stitched = str(job_dir / f"stitched_{job.id[:6]}.mp4")
               if _concat_clips([norm_path, concat_path], stitched):
                   log.info("[multi] Stitched original + AI continuation -> %s", stitched)
