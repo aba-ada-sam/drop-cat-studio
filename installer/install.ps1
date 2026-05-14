@@ -40,8 +40,7 @@ function Fail($label) {
 
 function WingetInstall($id, $label) {
     Log "Installing $label via winget..."
-    $result = winget install --id $id -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>&1
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+    $result = winget install --id $id -e --source winget --accept-package-agreements --accept-source-agreements --silent    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
         # -1978335189 = already installed, that is fine
         Done "$label installed"
     } else {
@@ -103,8 +102,7 @@ Push-Location $DCS_DIR
 python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet 2>&1 | ForEach-Object { Log $_ }
 Pop-Location
-$check = python -c "import fastapi, PIL; print('ok')" 2>&1
-if ($check -ne "ok") { Fail "DCS Python deps check failed: $check" }
+$check = python -c "import fastapi, PIL; print('ok')"if ($check -ne "ok") { Fail "DCS Python deps check failed: $check" }
 Done "DCS Python dependencies installed"
 
 # ==========================================================================
@@ -173,8 +171,7 @@ Push-Location $WANGP_DIR
 & $WANGP_PIP install -r requirements.txt --quiet 2>&1 | ForEach-Object { Log $_ }
 Pop-Location
 
-$gpuCheck = & $WANGP_PY -c "import torch; print(torch.cuda.is_available())" 2>&1
-Log "CUDA available: $gpuCheck"
+$gpuCheck = & $WANGP_PY -c "import torch; print(torch.cuda.is_available())"Log "CUDA available: $gpuCheck"
 if ($gpuCheck -ne "True") {
     Log "WARNING: CUDA not detected in WanGP venv. Video generation may be CPU-only (very slow)."
     Log "Check that NVIDIA drivers are up to date."
@@ -307,8 +304,7 @@ Done "Desktop shortcut created"
 
 # Smoke tests
 Push-Location $DCS_DIR
-$testOut = python tests/smoke.py 2>&1
-Log "Smoke test output: $testOut"
+$testOut = python tests/smoke.pyLog "Smoke test output: $testOut"
 if ($LASTEXITCODE -eq 0) {
     Done "Smoke tests passed"
 } else {
