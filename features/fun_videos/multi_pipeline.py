@@ -299,6 +299,7 @@ def _generate_story_arc(
     default_clip_dur: float = 5.0,
     model_name: str = "",
     motion_style: str | None = None,
+    continuation_mode: bool = False,
 ) -> tuple[list[dict], str]:
     """Generate N sequential motion prompts with per-clip durations.
 
@@ -324,7 +325,7 @@ def _generate_story_arc(
     # frame-of-clip-N+1) carry continuity. Result: a single extended
     # atmospheric shot of the SAME subject in the SAME scene, breathing for
     # the requested total duration.
-    if is_ltx and resolved_style in ("calm", "gentle"):
+    if is_ltx and resolved_style in ("calm", "gentle") and not continuation_mode:
         if progress_fn:
             progress_fn("Locking scene for coherent extension...")
 
@@ -1113,13 +1114,18 @@ def run_multi_prep(job, photo_path, settings):
     plan_clip_dur = clip_dur / _CHAIN_TRIM_RATIO
 
     job.update(progress=3, message="Planning story arc...")
+    is_continuation = bool(start_video_path) and video_mode == "continuation"
+    # In continuation mode, force "gentle" so the AI clip actually moves --
+    # "calm" (static subject) looks wrong when stitched after a live video.
+    arc_motion = "gentle" if is_continuation and (motion_style or "calm") == "calm" else motion_style
     arc, arc_method = _generate_story_arc(
         llm_router, user_idea, n_clips, effective_photo,
         progress_fn=lambda msg: job.update(message=msg),
         target_total_secs=plan_total,
         default_clip_dur=plan_clip_dur,
         model_name=model_name,
-        motion_style=motion_style,
+        motion_style=arc_motion,
+        continuation_mode=is_continuation,
     )
     settings["_story_arc"] = arc
 
