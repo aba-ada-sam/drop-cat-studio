@@ -242,15 +242,18 @@ Step 8 10 "Finalize DCS configuration"
 
 $config = Get-Content "$DCS_DIR\config.json" | ConvertFrom-Json
 
-# Point DCS at the local WanGP and ACE-Step installs
-$config.wan2gp_root  = $WANGP_DIR
-$config.wan2gp_python = "$WANGP_DIR\venv\Scripts\python.exe"
-$config.acestep_root = $ACESTEP_DIR
+# Use Add-Member -Force so missing keys are created and existing ones are updated
+function SetCfg($obj, $key, $val) {
+    if ($obj.PSObject.Properties[$key]) { $obj.$key = $val }
+    else { $obj | Add-Member -NotePropertyName $key -NotePropertyValue $val -Force }
+}
 
-# Laptop-appropriate defaults
-$config.wan_model    = "Wan2.1-I2V-14B-480P"  # user picks the downloaded model in UI
-$config.fun_model    = "Wan2.1-I2V-14B-480P"
-$config.resolution   = "480p"
+SetCfg $config "wan2gp_root"   $WANGP_DIR
+SetCfg $config "wan2gp_python" "$WANGP_DIR\venv\Scripts\python.exe"
+SetCfg $config "acestep_root"  $ACESTEP_DIR
+SetCfg $config "wan_model"     "Wan2.1-I2V-14B-480P"
+SetCfg $config "fun_model"     "Wan2.1-I2V-14B-480P"
+SetCfg $config "resolution"    "480p"
 
 $config | ConvertTo-Json -Depth 10 | Set-Content "$DCS_DIR\config.json" -Encoding utf8
 Done "DCS config updated with local paths"
@@ -276,33 +279,39 @@ Write-Host "   3. Wait for the download to complete (10-30 min)" -ForegroundColo
 Write-Host "   4. Note the EXACT model name that appeared in the dropdown" -ForegroundColor White
 Write-Host "   5. Come back here and press Enter" -ForegroundColor White
 Write-Host ""
-Log "Launching WanGP web UI for model download..."
-
-# Start WanGP server in background
-$wgpArgs = "-c `"cd '$WANGP_DIR'; & '$WANGP_DIR\venv\Scripts\python.exe' wgp.py --server_port 7899`""
-Start-Process powershell -ArgumentList $wgpArgs -WindowStyle Normal
-Start-Sleep -Seconds 8
-
-# Open browser to WanGP
-Start-Process "http://127.0.0.1:7899"
+Write-Host ""
+Write-Host "  ============================================================" -ForegroundColor Yellow
+Write-Host "   MANUAL STEP -- download the AI video model" -ForegroundColor Yellow
+Write-Host "  ============================================================" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "   1. Open a NEW terminal window (leave this one open)" -ForegroundColor White
+Write-Host "   2. Run these two commands:" -ForegroundColor White
+Write-Host "        cd C:\WanGP" -ForegroundColor Cyan
+Write-Host "        venv\Scripts\python.exe wgp.py" -ForegroundColor Cyan
+Write-Host "   3. Wait ~30 seconds, then open: http://127.0.0.1:7899" -ForegroundColor White
+Write-Host "   4. In WanGP, find the Models/Download section" -ForegroundColor White
+Write-Host "   5. Download one of these (pick the first available):" -ForegroundColor White
+Write-Host "        LTX-Video 2.0 or 2.1     <-- BEST for RTX 4070" -ForegroundColor Green
+Write-Host "        Wan2.1 I2V 480P 1.3B     <-- second choice" -ForegroundColor Green
+Write-Host "        Wan2.1 I2V 480P 14B int8 <-- also works, slower" -ForegroundColor Green
+Write-Host "   6. Wait for download to finish (10-30 min)" -ForegroundColor White
+Write-Host "   7. Note the EXACT model name shown in the dropdown" -ForegroundColor White
+Write-Host "   8. Come back HERE and press Enter" -ForegroundColor White
+Write-Host ""
+Log "Waiting for user to download WanGP model manually..."
 
 Read-Host "  Press Enter when the model download is complete"
 
-# Ask which model was downloaded so we can update config
-Write-Host ""
 $modelName = Read-Host "  Paste the exact model name from the WanGP dropdown (or press Enter to skip)"
 if ($modelName -and $modelName.Trim() -ne "") {
-    $config = Get-Content "$DCS_DIR\config.json" | ConvertFrom-Json
-    $config.wan_model = $modelName.Trim()
-    $config.fun_model = $modelName.Trim()
-    $config | ConvertTo-Json -Depth 10 | Set-Content "$DCS_DIR\config.json" -Encoding utf8
-    Done "Model name saved to config: $($modelName.Trim())"
+    $config2 = Get-Content "$DCS_DIR\config.json" | ConvertFrom-Json
+    SetCfg $config2 "wan_model" $modelName.Trim()
+    SetCfg $config2 "fun_model" $modelName.Trim()
+    $config2 | ConvertTo-Json -Depth 10 | Set-Content "$DCS_DIR\config.json" -Encoding utf8
+    Done "Model name saved: $($modelName.Trim())"
 } else {
-    Log "Model name skipped -- update wan_model in config.json manually if needed"
+    Log "Model name skipped -- set wan_model in DCS Settings after launch"
 }
-
-# Stop WanGP (DCS will manage it from here)
-Stop-Process -Name "python" -ErrorAction SilentlyContinue
 
 # ==========================================================================
 Step 10 10 "Create desktop shortcut and run smoke tests"
