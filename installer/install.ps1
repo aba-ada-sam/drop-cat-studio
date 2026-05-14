@@ -197,22 +197,44 @@ Done "WanGP profile set for RTX 4070 (profile 3, vae_config 1)"
 Step 7 10 "Clone and set up ACE-Step (AI music engine)"
 # ==========================================================================
 
-if (-not (Test-Path "$ACESTEP_DIR\run_inference.py")) {
-    git clone https://github.com/ace-step/ACE-Step.git $ACESTEP_DIR    if (-not (Test-Path "$ACESTEP_DIR\run_inference.py")) { Fail "ACE-Step clone failed" }
-} else {
+$acestepOk = $false
+$ACESTEP_URLS = @(
+    "https://github.com/ace-step/ACE-Step.git",
+    "https://github.com/ACE-Step/ACE-Step.git"
+)
+
+if (Test-Path "$ACESTEP_DIR\requirements.txt") {
     Log "ACE-Step already cloned -- skipping"
+    $acestepOk = $true
+} else {
+    foreach ($url in $ACESTEP_URLS) {
+        Log "Trying ACE-Step clone from $url ..."
+        git clone $url $ACESTEP_DIR
+        if (Test-Path "$ACESTEP_DIR\requirements.txt") {
+            $acestepOk = $true
+            break
+        }
+        Remove-Item $ACESTEP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
-if (-not (Test-Path "$ACESTEP_DIR\venv\Scripts\python.exe")) {
-    Log "Creating ACE-Step virtual environment..."
-    python -m venv "$ACESTEP_DIR\venv"}
-
-$ACESTEP_PIP = "$ACESTEP_DIR\venv\Scripts\pip.exe"
-Log "Installing ACE-Step requirements..."
-Push-Location $ACESTEP_DIR
-& $ACESTEP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet& $ACESTEP_PIP install -r requirements.txt --quietPop-Location
-
-Done "ACE-Step environment ready at $ACESTEP_DIR"
+if ($acestepOk) {
+    if (-not (Test-Path "$ACESTEP_DIR\venv\Scripts\python.exe")) {
+        Log "Creating ACE-Step virtual environment..."
+        python -m venv "$ACESTEP_DIR\venv"
+    }
+    $ACESTEP_PIP = "$ACESTEP_DIR\venv\Scripts\pip.exe"
+    Log "Installing ACE-Step requirements (PyTorch + deps)..."
+    Push-Location $ACESTEP_DIR
+    & $ACESTEP_PIP install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet
+    & $ACESTEP_PIP install -r requirements.txt --quiet
+    Pop-Location
+    Done "ACE-Step environment ready at $ACESTEP_DIR"
+} else {
+    Log "WARNING: ACE-Step clone failed -- music generation will be unavailable."
+    Log "You can install it manually later by running: git clone https://github.com/ace-step/ACE-Step C:\ACE-Step"
+    Write-Host "  [WARN] ACE-Step skipped -- videos will generate without music" -ForegroundColor Yellow
+}
 
 # ==========================================================================
 Step 8 10 "Finalize DCS configuration"

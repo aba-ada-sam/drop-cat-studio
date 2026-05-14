@@ -115,6 +115,27 @@ APP_VERSION = _read_git_version()
 async def lifespan(app: FastAPI):
     log.info("Drop Cat Go Studio starting up...")
 
+    # Background git pull -- keeps the app current without manual steps.
+    # Runs in a daemon thread so startup is never delayed by network.
+    def _bg_pull():
+        import subprocess as _sp, pathlib as _pl
+        repo = _pl.Path(__file__).parent
+        if not (_repo := repo / ".git").exists():
+            return
+        try:
+            r = _sp.run(["git", "-C", str(repo), "pull", "--ff-only"],
+                        capture_output=True, timeout=30)
+            out = (r.stdout + r.stderr).decode(errors="replace").strip()
+            if r.returncode == 0:
+                if "Already up to date" not in out:
+                    log.info("[startup] git pull: %s", out)
+            else:
+                log.debug("[startup] git pull skipped: %s", out)
+        except Exception as _e:
+            log.debug("[startup] git pull error: %s", _e)
+    import threading as _threading
+    _threading.Thread(target=_bg_pull, daemon=True, name="git-pull").start()
+
     # Ensure runtime directories exist
     UPLOADS_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
