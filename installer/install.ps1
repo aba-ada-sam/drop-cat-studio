@@ -20,7 +20,7 @@ function Step($n, $total, $label) {
     Write-Host "  ============================================================" -ForegroundColor Cyan
     Write-Host "   STEP $n of $total -- $label" -ForegroundColor Cyan
     Write-Host "  ============================================================" -ForegroundColor Cyan
-    Log "=== STEP $n/$total: $label ==="
+    Log "=== STEP $n/${total}: $label ==="
 }
 
 function Done($label) {
