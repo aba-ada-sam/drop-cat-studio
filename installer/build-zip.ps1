@@ -2,7 +2,7 @@
 $HERE = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ROOT = Split-Path -Parent $HERE
 $TS   = Get-Date -Format "yyyyMMdd-HHmm"
-$ZIP  = "$env:USERPROFILE\Desktop\dcs-laptop-setup-$TS.zip"
+$ZIP  = "Z:\My Drive\1 Apache Directions\dcs-laptop-setup-$TS.zip"
 
 $stage = "$env:TEMP\dcs-installer-staging"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
