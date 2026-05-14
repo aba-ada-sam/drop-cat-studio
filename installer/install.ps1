@@ -190,7 +190,9 @@ Add-Member -InputObject $cfg -MemberType NoteProperty -Name "image_profile"  -Va
 Add-Member -InputObject $cfg -MemberType NoteProperty -Name "vae_config"     -Value 1 -Force
 Add-Member -InputObject $cfg -MemberType NoteProperty -Name "compile"        -Value "" -Force
 Add-Member -InputObject $cfg -MemberType NoteProperty -Name "attention_mode" -Value "auto" -Force
-$cfg | ConvertTo-Json -Depth 10 | Set-Content $wgpConfig -Encoding utf8
+# PS 5.1 Set-Content -Encoding utf8 adds a BOM -- Python's json.loads rejects BOM.
+# Use .NET WriteAllText with UTF8Encoding($false) to write without BOM.
+[System.IO.File]::WriteAllText($wgpConfig, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
 Done "WanGP profile set for RTX 4070 (profile 3, vae_config 1)"
 
 # ==========================================================================
@@ -255,7 +257,7 @@ SetCfg $config "wan_model"     "Wan2.1-I2V-14B-480P"
 SetCfg $config "fun_model"     "Wan2.1-I2V-14B-480P"
 SetCfg $config "resolution"    "480p"
 
-$config | ConvertTo-Json -Depth 10 | Set-Content "$DCS_DIR\config.json" -Encoding utf8
+[System.IO.File]::WriteAllText("$DCS_DIR\config.json", ($config | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
 Done "DCS config updated with local paths"
 
 # ==========================================================================
@@ -307,7 +309,7 @@ if ($modelName -and $modelName.Trim() -ne "") {
     $config2 = Get-Content "$DCS_DIR\config.json" | ConvertFrom-Json
     SetCfg $config2 "wan_model" $modelName.Trim()
     SetCfg $config2 "fun_model" $modelName.Trim()
-    $config2 | ConvertTo-Json -Depth 10 | Set-Content "$DCS_DIR\config.json" -Encoding utf8
+    [System.IO.File]::WriteAllText("$DCS_DIR\config.json", ($config2 | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
     Done "Model name saved: $($modelName.Trim())"
 } else {
     Log "Model name skipped -- set wan_model in DCS Settings after launch"
