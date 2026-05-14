@@ -129,13 +129,17 @@ def run_prep(job, photo_path, settings):
     start_video_path = settings.get("start_video_path", "")
     video_mode       = settings.get("video_mode", "continuation")
     if start_video_path and os.path.isfile(start_video_path) and video_mode == "continuation":
-        from core.ffmpeg_utils import extract_last_frame_to_file
+        from core.ffmpeg_utils import extract_last_frame_to_file, probe_duration
         tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
         tmp_path = tmp.name
         tmp.close()
-        if extract_last_frame_to_file(start_video_path, tmp_path):
+        seek_s = settings.get("start_video_seek_seconds")
+        if extract_last_frame_to_file(start_video_path, tmp_path, seek_seconds=seek_s):
             settings["_start_video_last_frame"] = tmp_path
-            log.info("[prep] Continuation mode: last frame extracted from %s", start_video_path)
+            _dur = probe_duration(start_video_path)
+            _trim = seek_s if seek_s is not None else (_dur * 0.85 if _dur > 0 else 0)
+            settings["_prepend_video_trim_seconds"] = _trim
+            log.info("[prep] Continuation mode: frame at %.2fs extracted from %s", _trim, start_video_path)
         else:
             try:
                 os.unlink(tmp_path)
@@ -435,7 +439,8 @@ def run_pipeline(job, photo_path, settings):
         _stitch_h = int(oh) if oh else 580
         _stitch_fps = video_generator.MODELS.get(_mn, {}).get("fps", 25)
         norm_orig = str(job_dir / "original_normalized.mp4")
-        if _normalize_video_for_concat(prepend_original, norm_orig, _stitch_w, _stitch_h, fps=_stitch_fps):
+        _trim_to = settings.get("_prepend_video_trim_seconds")
+        if _normalize_video_for_concat(prepend_original, norm_orig, _stitch_w, _stitch_h, fps=_stitch_fps, trim_to=_trim_to):
             stitched = str(job_dir / f"stitched_{job.id[:8]}.mp4")
             if _concat_clips([norm_orig, video_path], stitched):
                 log.info("[pipeline] Stitched original + AI continuation -> %s", stitched)
