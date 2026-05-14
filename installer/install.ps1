@@ -2,7 +2,7 @@
 # Tested: Windows 11, RTX 4070 12GB
 # Run via install.bat (handles admin elevation)
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
 $LOG = "$env:USERPROFILE\Desktop\dcs-install-log.txt"
@@ -39,13 +39,13 @@ function Fail($label) {
 }
 
 function WingetInstall($id, $label) {
-    Log "Installing $label via winget..."
-    $result = winget install --id $id -e --source winget --accept-package-agreements --accept-source-agreements --silent    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
-        # -1978335189 = already installed, that is fine
-        Done "$label installed"
+    Log "Installing $label..."
+    winget install --id $id --exact --accept-package-agreements --accept-source-agreements --silent
+    # 0 = success, -1978335189 = already installed (both are fine)
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+        Done "$label ready"
     } else {
-        Log "winget output: $result"
-        Fail "$label install failed (exit $LASTEXITCODE)"
+        Fail "$label install failed (winget exit $LASTEXITCODE) -- check log"
     }
 }
 
