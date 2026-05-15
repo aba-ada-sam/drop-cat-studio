@@ -1,7 +1,7 @@
 """Smoke tests for Drop Cat Go Studio.
 
 Runs end-to-end against an in-process TestClient. No external services are
-exercised — LLM calls, WanGP, Forge, ACE-Step are all skipped or mocked.
+exercised -- LLM calls, WanGP, Forge, ACE-Step are all skipped or mocked.
 
 Usage:
     python tests/smoke.py          # prints each test + pass/fail, exits nonzero on any failure
@@ -63,13 +63,13 @@ def _test(name: str, fn):
 
 
 def main() -> int:
-    print("\nDrop Cat Go Studio — smoke tests\n" + "=" * 48)
+    print("\nDrop Cat Go Studio -- smoke tests\n" + "=" * 48)
 
-    # ── Import smoke ──────────────────────────────────────────────────────
+    # -- Import smoke ------------------------------------------------------
     print("\n[imports]")
 
     def import_app():
-        import app  # noqa: F401 — exercises module-level side effects
+        import app  # noqa: F401 -- exercises module-level side effects
     _test("import app", import_app)
 
     def import_features():
@@ -85,7 +85,7 @@ def main() -> int:
         from core import nsfw_sanitizer  # noqa: F401
     _test("import core", import_core)
 
-    # ── HTTP smoke (in-process via TestClient) ────────────────────────────
+    # -- HTTP smoke (in-process via TestClient) ----------------------------
     print("\n[http]")
 
     _setup_isolated_paths()
@@ -113,7 +113,7 @@ def main() -> int:
             assert "export" in r.text or "import" in r.text, "app.js looks empty"
         _test("GET /static/js/app.js", static_serves)
 
-        # ── AI intent validation (no LLM call — 400 paths) ────────────────
+        # -- AI intent validation (no LLM call -- 400 paths) ----------------
         def ai_intent_empty_query():
             r = client.post("/api/ai-intent", json={"tab": "sd-prompts", "query": ""})
             assert r.status_code == 400, r.status_code
@@ -124,7 +124,7 @@ def main() -> int:
             assert r.status_code == 400, r.status_code
         _test("POST /api/ai-intent bogus tab -> 400", ai_intent_bogus_tab)
 
-        # ── Gallery round-trip ────────────────────────────────────────────
+        # -- Gallery round-trip --------------------------------------------
         def gallery_roundtrip():
             payload = {
                 "tab": "sd-prompts",
@@ -147,7 +147,7 @@ def main() -> int:
             assert r.status_code == 200, r.status_code
         _test("gallery POST/GET/DELETE round-trip", gallery_roundtrip)
 
-        # ── Presets round-trip ────────────────────────────────────────────
+        # -- Presets round-trip --------------------------------------------
         def presets_roundtrip():
             payload = {
                 "tab": "sd-prompts",
@@ -166,13 +166,13 @@ def main() -> int:
             assert r.status_code == 200, r.status_code
         _test("presets POST/GET/DELETE round-trip", presets_roundtrip)
 
-        # ── Prompt enhance validation ─────────────────────────────────────
+        # -- Prompt enhance validation -------------------------------------
         def enhance_empty_idea():
             r = client.post("/api/prompts/enhance", json={"idea": "", "provider": "local"})
             assert r.status_code == 400, r.status_code
         _test("POST /api/prompts/enhance empty idea -> 400", enhance_empty_idea)
 
-        # ── Wildcards endpoint ────────────────────────────────────────────
+        # -- Wildcards endpoint --------------------------------------------
         def wildcards_list():
             r = client.get("/api/prompts/wildcards")
             assert r.status_code == 200, r.status_code
@@ -183,7 +183,63 @@ def main() -> int:
             assert "camera" in payload_s or "mood" in payload_s, "no inline wildcards surfaced"
         _test("GET /api/prompts/wildcards", wildcards_list)
 
-    # ── Summary ───────────────────────────────────────────────────────────
+        # -- GPU orchestrator status endpoint ------------------------------
+        def gpu_status_shape():
+            r = client.get("/api/gpu/status")
+            assert r.status_code == 200, r.status_code
+            data = r.json()
+            assert isinstance(data, dict), f"expected dict, got {type(data).__name__}"
+            assert "current" in data, "missing 'current' key"
+            assert "history" in data, "missing 'history' key"
+            assert isinstance(data["history"], list), "history must be list"
+            assert data["current"] is None or data["current"] in ("wangp", "acestep", "forge", "ollama"), \
+                f"unexpected current value: {data['current']!r}"
+        _test("GET /api/gpu/status returns expected shape", gpu_status_shape)
+
+        # -- Loop Folder endpoint contract ---------------------------------
+        def list_folder_validation():
+            # No path -> 400
+            r = client.get("/api/fun/list-folder")
+            assert r.status_code == 400, f"empty path expected 400, got {r.status_code}"
+            # Bogus path -> 400
+            r = client.get("/api/fun/list-folder?path=/no/such/folder/exists/here")
+            assert r.status_code == 400, f"bad path expected 400, got {r.status_code}"
+            # Path wrapped in double quotes (Windows 'Copy as path') -> 400
+            # because the underlying folder doesn't exist, NOT because of the
+            # quotes. The error message must mention the unquoted form so we
+            # know _clean_user_path ran. Andrew 2026-05-12 hit this on a real
+            # quoted path; regression-locking the strip behaviour.
+            quoted = '"C:\\Users\\andre\\Desktop\\fake-no-such-folder"'
+            r = client.get(f"/api/fun/list-folder?path={quoted}")
+            assert r.status_code == 400, r.status_code
+            detail = r.json().get("detail", "")
+            assert '"' not in detail, f"quotes leaked into error detail: {detail!r}"
+        _test("GET /api/fun/list-folder validates input", list_folder_validation)
+
+        # -- Folder loop endpoints contract --------------------------------
+        def folder_loop_status_shape():
+            r = client.get("/api/fun/folder-loop/status")
+            assert r.status_code == 200, r.status_code
+            d = r.json()
+            for k in ("active", "total", "index", "lap", "succeeded", "failed",
+                     "status", "heartbeat_timeout_sec"):
+                assert k in d, f"missing key {k!r} in status snapshot"
+            assert isinstance(d["active"], bool)
+            assert d["status"] in ("idle", "running", "stopping", "stopped",
+                                   "done", "error")
+        _test("GET /api/fun/folder-loop/status shape", folder_loop_status_shape)
+
+        def folder_loop_start_validates():
+            # No folder -> 400
+            r = client.post("/api/fun/folder-loop/start", json={})
+            assert r.status_code == 400, r.status_code
+            # Bogus folder -> 400
+            r = client.post("/api/fun/folder-loop/start",
+                            json={"folder": "/no/such/path/xyz"})
+            assert r.status_code == 400, r.status_code
+        _test("POST /api/fun/folder-loop/start validates input", folder_loop_start_validates)
+
+    # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")
     if _FAILED:

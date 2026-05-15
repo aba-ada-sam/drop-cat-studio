@@ -1,4 +1,4 @@
-/* Drop Cat Go Studio — Circus Tab Navigation */
+/* Drop Cat Go Studio -- Circus Tab Navigation */
 
 #tab-bar {
   display: flex;
@@ -41,7 +41,7 @@
   border-radius: 1px 1px 0 0;
 }
 
-/* ── Dropdown (Tools) ─────────────────────────────────────────────────────── */
+/* -- Dropdown (Tools) ------------------------------------------------------- */
 /* GUI-01: click-based, keyboard-accessible dropdown (replaces :hover-only).  */
 /* JS in app.js handles open/close; CSS only provides the visual styles.       */
 

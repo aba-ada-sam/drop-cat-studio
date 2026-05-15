@@ -4,8 +4,8 @@
  * Presets persisted to /api/presets (disk-backed SQLite on server).
  */
 
-import { apiFetch, toast } from './toast.js?v=20260416d';
-import { registerItems } from './command-palette.js?v=20260416d';
+import { apiFetch, toast } from './toast.js?v=20260503a';
+import { registerItems } from './command-palette.js?v=20260421c';
 
 // Tab settings providers: { getSettings(), applySettings(s) }
 const _providers = {};
@@ -59,7 +59,7 @@ export async function applyPreset(presetId) {
   const preset = _presets.find(p => p.id === presetId);
   if (!preset) { toast('Preset not found', 'error'); return; }
   const provider = _providers[preset.tab];
-  if (!provider?.applySettings) { toast(`No provider for tab: ${preset.tab}`, 'error'); return; }
+  if (!provider?.applySettings) { toast('This preset cannot be applied on the current tab', 'error'); return; }
   provider.applySettings(preset.settings || {});
   toast(`Applied preset: ${preset.name}`, 'success');
 }

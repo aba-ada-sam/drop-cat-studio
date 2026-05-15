@@ -1,12 +1,12 @@
 /**
- * Drop Cat Go Studio — Add Transitions (Video Bridges)
- * Pick session videos → arrange sequence → AI generates bridge clips between each pair.
+ * Drop Cat Go Studio -- Add Transitions (Video Bridges)
+ * Pick session videos -> arrange sequence -> AI generates bridge clips between each pair.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260414';
-import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration } from './components.js?v=20260414';
-import { toast } from './shell/toast.js?v=20260421c';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
+import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260507a';
+import { toast } from './shell/toast.js?v=20260503a';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419o';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 let _items      = [];   // { path, name, kind, duration, analysis, prompt }
 let _activeMode = 'cinematic';
@@ -22,12 +22,6 @@ const TRANSITION_MODES = [
   { id: 'fade',        label: 'Fade',        sub: 'Clean dissolve' },
 ];
 
-function outputPathToUrl(p) {
-  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
-  const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
-}
 
 function _addItem(item) {
   if (item.path && _items.find(i => i.path === item.path)) return false;
@@ -54,7 +48,7 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; max-width:900px; margin:0 auto;' });
   panel.appendChild(root);
 
-  // ── Clip picker ──────────────────────────────────────────────────────────
+  // -- Clip picker ----------------------------------------------------------
   const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(pickerCard);
 
@@ -94,7 +88,7 @@ export function init(panel) {
     fileInput.value = '';
   });
 
-  // ── Sequence ──────────────────────────────────────────────────────────────
+  // -- Sequence --------------------------------------------------------------
   const seqCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(seqCard);
 
@@ -110,18 +104,26 @@ export function init(panel) {
     const toAnalyze = _items.filter(it => !it.analysis && it.kind !== 'text');
     if (!toAnalyze.length) { toast('Nothing to analyze', 'info'); return; }
     analyzeBtn.disabled = true;
+    const origText = analyzeBtn.textContent;
+    let done = 0, failed = 0;
     for (let i = 0; i < _items.length; i++) {
       if (_items[i].analysis || _items[i].kind === 'text') continue;
+      analyzeBtn.textContent = `Analyzing ${done + failed + 1}/${toAnalyze.length}...`;
       try {
-        toast(`Analyzing clip ${i + 1}/${_items.length}…`, 'info');
         _items[i].analysis = await api('/api/bridges/analyze', {
           method: 'POST', body: JSON.stringify({ path: _items[i].path }),
         });
         _renderItems();
-      } catch (e) { toast(`Analysis failed: ${e.message}`, 'error'); }
+        done++;
+      } catch (e) {
+        failed++;
+        toast(`"${_items[i].name}" analysis failed: ${e.message}`, 'error');
+      }
     }
     analyzeBtn.disabled = false;
-    toast('Analysis done', 'success');
+    analyzeBtn.textContent = origText;
+    if (failed === 0) toast('Analysis done', 'success');
+    else if (done > 0) toast(`Analysis done -- ${failed} clip${failed > 1 ? 's' : ''} failed`, 'info');
   });
 
   const itemList = el('div', { style: 'display:flex; flex-direction:column; gap:0;' });
@@ -130,11 +132,11 @@ export function init(panel) {
   // Text scene toggle
   const textToggleRow = el('div', { style: 'margin-top:10px; border-top:1px solid var(--border-2); padding-top:10px;' });
   seqCard.appendChild(textToggleRow);
-  const textToggle = el('button', { class: 'btn btn-sm', text: '+ Add text scene (text → video clip)' });
+  const textToggle = el('button', { class: 'btn btn-sm', text: '+ Add text scene (text -> video clip)' });
   textToggleRow.appendChild(textToggle);
-  const textInput = el('div', { style: 'display:none; margin-top:8px; display:none;' });
+  const textInput = el('div', { style: 'display:none; margin-top:8px;' });
   textToggleRow.appendChild(textInput);
-  const textTA = el('input', { type: 'text', placeholder: 'Describe a scene…', style: 'flex:1;' });
+  const textTA = el('input', { type: 'text', placeholder: 'Describe a scene...', style: 'flex:1;' });
   const textAddBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Add' });
   textInput.appendChild(el('div', { style: 'display:flex; gap:6px;' }, [textTA, textAddBtn]));
   let textOpen = false;
@@ -159,13 +161,13 @@ export function init(panel) {
 
     const count = _items.length;
     seqTitle.textContent = count
-      ? `Sequence — ${count} clip${count !== 1 ? 's' : ''}, ${Math.max(0, count - 1)} bridge${count - 1 !== 1 ? 's' : ''}`
+      ? `Sequence -- ${count} clip${count !== 1 ? 's' : ''}, ${Math.max(0, count - 1)} bridge${count - 1 !== 1 ? 's' : ''}`
       : 'Sequence';
 
     if (!count) {
       itemList.appendChild(el('div', {
         style: 'text-align:center; padding:28px 0; color:var(--text-3); font-size:.82rem;',
-        text: 'Add videos from above — you need at least 2 clips to generate bridges.',
+        text: 'Add videos from above -- you need at least 2 clips to generate bridges.',
       }));
       return;
     }
@@ -173,9 +175,9 @@ export function init(panel) {
     _items.forEach((item, i) => {
       const icon = item.kind === 'text' ? 'T' : item.kind === 'image' ? 'IMG' : 'VID';
       const meta = item.kind === 'text'
-        ? 'text → video'
+        ? 'text -> video'
         : item.analysis
-          ? `${item.analysis.mood || ''} · ${formatDuration(item.duration)}`
+          ? `${item.analysis.mood || ''} . ${formatDuration(item.duration)}`
           : formatDuration(item.duration) || item.kind;
 
       const row = el('div', { style: 'display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--border-2);' });
@@ -188,16 +190,16 @@ export function init(panel) {
 
       const actions = el('div', { style: 'display:flex; gap:4px; flex-shrink:0;' });
       if (i > 0) {
-        const upBtn = el('button', { class: 'btn-icon-xs', text: '↑', title: 'Move up',
+        const upBtn = el('button', { class: 'btn-icon-xs', text: '^', title: 'Move up',
           onclick() { [_items[i-1], _items[i]] = [_items[i], _items[i-1]]; _renderItems(); } });
         actions.appendChild(upBtn);
       }
       if (i < _items.length - 1) {
-        const downBtn = el('button', { class: 'btn-icon-xs', text: '↓', title: 'Move down',
+        const downBtn = el('button', { class: 'btn-icon-xs', text: 'v', title: 'Move down',
           onclick() { [_items[i], _items[i+1]] = [_items[i+1], _items[i]]; _renderItems(); } });
         actions.appendChild(downBtn);
       }
-      const removeBtn = el('button', { class: 'btn-icon-xs remove', text: '✕', title: 'Remove',
+      const removeBtn = el('button', { class: 'btn-icon-xs remove', text: 'x', title: 'Remove',
         onclick() { _items.splice(i, 1); _renderItems(); } });
       actions.appendChild(removeBtn);
       row.appendChild(actions);
@@ -216,7 +218,7 @@ export function init(panel) {
 
   _renderItems();
 
-  // ── Transition style ──────────────────────────────────────────────────────
+  // -- Transition style ------------------------------------------------------
   const styleCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(styleCard);
   styleCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:10px;', text: 'Transition Style' }));
@@ -250,7 +252,7 @@ export function init(panel) {
     modeGrid.appendChild(tile);
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // -- Settings --------------------------------------------------------------
   const settingsCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(settingsCard);
   settingsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Settings' }));
@@ -261,7 +263,7 @@ export function init(panel) {
   const creativitySlider = createSlider(settingsGrid, { label: 'Creativity',         min: 1, max: 10, step: 1,   value: 9  });
   const stepsSlider      = createSlider(settingsCard, { label: 'Steps',              min: 4, max: 50, step: 1,   value: 20 });
 
-  // ── Generate ──────────────────────────────────────────────────────────────
+  // -- Generate --------------------------------------------------------------
   const genBtn = el('button', {
     class: 'btn btn-primary btn-generate',
     text: 'Generate Bridges',
@@ -282,7 +284,7 @@ export function init(panel) {
   root.appendChild(sendCard);
   sendCard.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:10px;', text: 'Next step:' }));
   sendCard.appendChild(el('button', {
-    class: 'btn btn-primary', text: '→ Audio & Export',
+    class: 'btn btn-primary', text: '-> Audio & Export',
     style: 'padding:9px 24px; font-size:.95rem;',
     onclick() {
       if (!_lastOutput) return;
@@ -301,7 +303,7 @@ export function init(panel) {
     }
     genBtn.disabled = true;
     prog.show();
-    prog.update(0, 'Submitting…');
+    prog.update(0, 'Submitting...');
     player.hide();
     sendCard.style.display = 'none';
 
@@ -325,13 +327,13 @@ export function init(panel) {
 
       prog.onCancel(async () => { await stopJob(data.job_id).catch(() => {}); genBtn.disabled = false; });
       pollJob(data.job_id,
-        j => prog.update(j.progress || 0, j.message || 'Working…'),
+        j => prog.update(j.progress || 0, j.message || 'Working...'),
         j => {
           prog.hide();
           genBtn.disabled = false;
           if (j.output) {
             _lastOutput = j.output;
-            player.show(outputPathToUrl(j.output), j.output);
+            player.show(pathToUrl(j.output), j.output);
             pushToGallery('bridges', j.output, `${_activeMode} transition (${_items.length} clips)`, null, {
               transition_mode: _activeMode,
               creativity:      Number(creativitySlider.value),
@@ -350,8 +352,8 @@ export function init(panel) {
 
   player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; _lastOutput = null; });
 
-  // ── Palette AI intent ─────────────────────────────────────────────────────
-  import('./shell/ai-intent.js?v=20260419e').then(({ registerTabAI }) => {
+  // -- Palette AI intent -----------------------------------------------------
+  import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
     registerTabAI('bridges', {
       getContext: () => ({
         transition_mode: _activeMode,

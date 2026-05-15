@@ -1,16 +1,17 @@
 /**
- * Drop Cat Go Studio — Wildcard Manager panel.
+ * Drop Cat Go Studio -- Wildcard Manager panel.
  * AI-powered wildcard file curation: prune, expand, merge, audit.
  */
-import { api } from './api.js?v=20260414';
-import { toast, createSlider, createSelect, el } from './components.js?v=20260414';
+import { api } from './api.js?v=20260505e';
+import { createSlider, createSelect, el } from './components.js?v=20260507a';
+import { toast } from './shell/toast.js?v=20260503a';
 
 export function init(panel) {
   panel.innerHTML = '';
   const layout = el('div', { style: 'max-width:800px; margin:0 auto' });
   panel.appendChild(layout);
 
-  // ── File List ─────────────────────────────────────────────────────────
+  // -- File List ---------------------------------------------------------
   const listCard = el('div', { class: 'card', style: 'margin-bottom:16px' });
   layout.appendChild(listCard);
   listCard.appendChild(el('h3', { text: 'Wildcard Files' }));
@@ -53,7 +54,7 @@ export function init(panel) {
     });
   }
 
-  // ── Operations ────────────────────────────────────────────────────────
+  // -- Operations --------------------------------------------------------
   const opsCard = el('div', { class: 'card' });
   layout.appendChild(opsCard);
 
@@ -66,7 +67,7 @@ export function init(panel) {
   const ops = ['Prune', 'Expand', 'Audit'];
   let activeOp = 0;
 
-  // ── Prune panel ───────────────────────────────────────────────────────
+  // -- Prune panel -------------------------------------------------------
   const prunePanel = el('div', { class: 'audio-content active' });
   const pruneLevel = createSlider(prunePanel, { label: 'Aggressiveness', min: 1, max: 5, step: 1, value: 3 });
   const pruneBtn = el('button', { class: 'btn btn-primary', text: 'Prune Selected File' });
@@ -85,16 +86,17 @@ export function init(panel) {
         body: JSON.stringify({ path: f?.path || selectedFile, level: pruneLevel.value }),
       });
       pruneResult.style.display = '';
-      pruneResult.innerHTML = `
-        <p style="color:var(--green)">Kept: ${data.kept?.length || 0} entries</p>
-        <p style="color:var(--red)">Removed: ${data.removed?.length || 0} entries</p>
-        <pre style="font-size:.75rem; color:var(--text-3); max-height:200px; overflow:auto">${data.notes || ''}</pre>
-      `;
+      pruneResult.innerHTML = '';
+      pruneResult.appendChild(el('p', { style: 'color:var(--green)', text: `Kept: ${data.kept?.length || 0} entries` }));
+      pruneResult.appendChild(el('p', { style: 'color:var(--red)', text: `Removed: ${data.removed?.length || 0} entries` }));
+      const pruneNotes = el('pre', { style: 'font-size:.75rem; color:var(--text-3); max-height:200px; overflow:auto' });
+      pruneNotes.textContent = data.notes || '';
+      pruneResult.appendChild(pruneNotes);
     } catch (e) { toast(e.message, 'error'); }
     pruneBtn.disabled = false;
   });
 
-  // ── Expand panel ──────────────────────────────────────────────────────
+  // -- Expand panel ------------------------------------------------------
   const expandPanel = el('div', { class: 'audio-content' });
   const expandCount = createSlider(expandPanel, { label: 'New Entries', min: 5, max: 50, step: 5, value: 20 });
   const expandBtn = el('button', { class: 'btn btn-primary', text: 'Expand Selected File' });
@@ -112,15 +114,16 @@ export function init(panel) {
         body: JSON.stringify({ path: f?.path || selectedFile, count: expandCount.value }),
       });
       expandResult.style.display = '';
-      expandResult.innerHTML = `
-        <p style="color:var(--green)">${data.count} new entries generated:</p>
-        <pre style="font-size:.75rem; color:var(--text-2); max-height:200px; overflow:auto">${(data.new_entries || []).join('\n')}</pre>
-      `;
+      expandResult.innerHTML = '';
+      expandResult.appendChild(el('p', { style: 'color:var(--green)', text: `${data.count} new entries generated:` }));
+      const expandPre = el('pre', { style: 'font-size:.75rem; color:var(--text-2); max-height:200px; overflow:auto' });
+      expandPre.textContent = (data.new_entries || []).join('\n');
+      expandResult.appendChild(expandPre);
     } catch (e) { toast(e.message, 'error'); }
     expandBtn.disabled = false;
   });
 
-  // ── Audit panel ───────────────────────────────────────────────────────
+  // -- Audit panel -------------------------------------------------------
   const auditPanel = el('div', { class: 'audio-content' });
   const auditBtn = el('button', { class: 'btn btn-primary', text: 'Audit Entire Library' });
   auditPanel.appendChild(auditBtn);
@@ -133,7 +136,10 @@ export function init(panel) {
     try {
       const data = await api('/api/prompts/audit', { method: 'POST', body: '{}' });
       auditResult.style.display = '';
-      auditResult.innerHTML = `<pre style="font-size:.8rem; color:var(--text-2); white-space:pre-wrap; max-height:400px; overflow:auto">${data.report || 'No report generated'}</pre>`;
+      auditResult.innerHTML = '';
+      const auditPre = el('pre', { style: 'font-size:.8rem; color:var(--text-2); white-space:pre-wrap; max-height:400px; overflow:auto' });
+      auditPre.textContent = data.report || 'No report generated';
+      auditResult.appendChild(auditPre);
     } catch (e) { toast(e.message, 'error'); }
     auditBtn.disabled = false;
     auditBtn.textContent = 'Audit Entire Library';

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Persistent WanGP worker — loads the model ONCE and serves generation requests.
+"""Persistent WanGP worker -- loads the model ONCE and serves generation requests.
 
 Runs as a long-lived subprocess with WanGP's Python environment.
 Copied from DropCatGo-Fun-Videos_w_Audio/wangp_worker.py with import path
 updated to use core.wangp_runtime.
 
 Exposes a tiny HTTP server:
-  GET  /health    → {"ok": true, "model": "..."}
-  POST /generate  → submit a generation job (JSON body)
-  GET  /status    → current generation status
+  GET  /health    -> {"ok": true, "model": "..."}
+  POST /generate  -> submit a generation job (JSON body)
+  GET  /status    -> current generation status
 """
 
 import argparse
@@ -30,16 +30,16 @@ if PROJECT_DIR not in sys.path:
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-# ── Model mapping (BUG-02/FLW-04: import from single source of truth) ────────
+# -- Model mapping (BUG-02/FLW-04: import from single source of truth) --------
 
 try:
     from core.wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
 except ImportError:
-    # Fallback if run before sys.path is configured — shouldn't happen in practice
+    # Fallback if run before sys.path is configured -- shouldn't happen in practice
     from wangp_models import MODEL_MAP, resolve_model_name, build_state as _build_state, SAFE_DEFAULTS
 
 
-# ── Global state ─────────────────────────────────────────────────────────────
+# -- Global state -------------------------------------------------------------
 
 wgp = None
 app_path = None
@@ -47,8 +47,15 @@ current_model = None
 _lock = threading.Lock()
 _job_status = {"busy": False, "progress": "", "step": 0, "total_steps": 0, "result": None, "error": None}
 
+# Monotonic generation counter -- incremented on each accepted /generate.
+# DCS pollers embed the expected token so stale threads can't steal a new job's result.
+_generation_token = 0
+
 # Hook called by the tqdm patch on each step update: (step: int, total: int) -> None
 _step_hook = None
+
+# Set by the /abort endpoint -- raises in the tqdm hook to interrupt generation.
+_abort_event = threading.Event()
 
 
 def _install_tqdm_hook():
@@ -56,6 +63,8 @@ def _install_tqdm_hook():
 
     WanGP's diffusion loop calls tqdm.update() once per inference step.
     We intercept those calls to update _job_status with real step progress.
+    The abort check fires BEFORE super().update() so it can raise before the
+    model computes the next step.
     """
     try:
         import tqdm as _tqdm_mod
@@ -63,9 +72,15 @@ def _install_tqdm_hook():
 
         class _HookedTqdm(_orig):
             def update(self, n=1):
+                # Abort check OUTSIDE try/except so KeyboardInterrupt propagates.
+                # WanGP diffusion loops don't catch KeyboardInterrupt (BaseException).
+                if _abort_event.is_set():
+                    raise KeyboardInterrupt("[DCS] Generation aborted by user")
                 super().update(n)
-                # Only track bars that look like inference step bars (total >= 5)
-                if _step_hook and self.total and self.total >= 5:
+                # Only track bars that are plausibly diffusion steps:
+                # - total >= 2 (not a 1-item dummy bar)
+                # - total <= 5000 (model-loading byte/token counters are billions)
+                if _step_hook and self.total and 2 <= self.total <= 5000:
                     try:
                         _step_hook(int(self.n), int(self.total))
                     except Exception:
@@ -90,12 +105,14 @@ def _update_status(**kwargs):
 
 
 def _get_status_snapshot() -> dict:
-    """Return a copy of _job_status under the lock. BUG-04: lock on reads too."""
+    """Return a copy of _job_status (+ current token) under the lock."""
     with _lock:
-        return dict(_job_status)
+        snap = dict(_job_status)
+        snap["token"] = _generation_token
+        return snap
 
 
-# ── Generation logic ─────────────────────────────────────────────────────────
+# -- Generation logic ---------------------------------------------------------
 
 def _do_generate(params: dict) -> dict:
     global current_model
@@ -111,6 +128,8 @@ def _do_generate(params: dict) -> dict:
     seed = int(params.get("seed", -1))
     start_image = params.get("start_image")
     end_image = params.get("end_image")
+    start_video = params.get("start_video")      # video-to-video source
+    negative_prompt = params.get("negative_prompt", "")
     activated_loras = params.get("activated_loras", [])
     loras_multipliers = params.get("loras_multipliers", "")
 
@@ -121,18 +140,28 @@ def _do_generate(params: dict) -> dict:
     model_type = resolve_model_name(model_name)
     current_model = model_name
 
+    # WanGP enforces a hard minimum of 20 steps for ltxv_13B (LTX-2 Dev13B).
+    # Guard here as a safety net in case callers don't enforce it themselves.
+    if model_type == "ltxv_13B" and steps < 20:
+        print(f"[worker] ltxv_13B requires >=20 steps (got {steps}) -- raising to 20", flush=True)
+        steps = 20
+
     state = _build_state(model_type)
 
     start_images = []
     end_images = []
+    start_videos = []
     if start_image and os.path.isfile(start_image):
         start_images = [os.path.abspath(start_image)]
     if end_image and os.path.isfile(end_image):
         end_images = [os.path.abspath(end_image)]
+    if start_video and os.path.isfile(start_video):
+        start_videos = [os.path.abspath(start_video)]
 
     defaults = wgp.get_default_settings(model_type).copy()
     defaults.update({
         "prompt": prompt,
+        "negative_prompt": negative_prompt,
         "resolution": f"{width}x{height}",
         "video_length": num_frames,
         "num_inference_steps": steps,
@@ -151,19 +180,58 @@ def _do_generate(params: dict) -> dict:
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
+    # Force off ALL post-processing passes that WanGP saves to its settings file.
+    # setdefault cannot override already-present keys, so explicit assignment is required.
+    # This block is the single authoritative list -- add any new WanGP pass here if it
+    # reappears, rather than discovering it one generation at a time.
+    defaults["spatial_upsampling"]   = ""   # no Lanczos/VAE upscaling pass
+    defaults["temporal_upsampling"]  = ""   # no RIFE frame interpolation pass
+    defaults["self_refiner_setting"] = 0    # no second denoising pass
+    defaults["self_refiner_plan"]    = []
+    defaults["film_grain_intensity"] = 0    # no film grain
+    defaults["prompt_enhancer"]      = ""   # no LLM prompt rewriting inside WanGP
+    # TeaCache: skips redundant denoising computations between similar timesteps.
+    # "tea" gives ~25-35% speedup with negligible quality loss at 480p and below.
+    # Pass cache_type="" in params to disable for a specific job if needed.
+    defaults["skip_steps_cache_type"] = params.get("cache_type", "tea")
+    # MMAudio: enable post-processing audio when requested (Wan models only)
+    if params.get("mmaudio"):
+        defaults["MMAudio_setting"] = 1
+    else:
+        defaults["MMAudio_setting"] = 0     # never inherit a saved MMAudio=1
+    # LTX-2 audio conditioning: "A" mode generates video synchronized with the
+    # provided audio segment at model level. Set explicitly (not via setdefault)
+    # to override any stale audio_prompt_type saved in WanGP's settings file.
+    audio_source_path = params.get("audio_source")
+    if audio_source_path and os.path.isfile(audio_source_path):
+        defaults["audio_source"]      = os.path.abspath(audio_source_path)
+        defaults["audio_prompt_type"] = "A"
+        defaults["audio_scale"]       = float(params.get("audio_scale", 1.0))
+        print(f"[worker] audio conditioning: type=A scale={defaults['audio_scale']} src={os.path.basename(audio_source_path)}", flush=True)
+    else:
+        defaults["audio_source"]      = None
+        defaults["audio_prompt_type"] = ""
+        defaults["audio_scale"]       = 1.0
     # LoRA settings override defaults when provided
     if activated_loras:
         defaults["activated_loras"] = activated_loras
         defaults["loras_multipliers"] = loras_multipliers
-    # Image settings must always override
-    defaults["image_start"] = start_images
-    defaults["image_end"] = end_images
-    defaults["image_prompt_type"] = (
-        "S"  if start_images and not end_images else
-        "SE" if start_images and end_images else ""
-    )
+    # Input mode -- video-to-video takes priority over image inputs
+    # WanGP expects video_source as a plain string path, not a list
+    if start_videos:
+        defaults["video_source"]      = start_videos[0]
+        defaults["image_start"]       = []
+        defaults["image_end"]         = []
+        defaults["image_prompt_type"] = "V"
+    else:
+        defaults["image_start"] = start_images
+        defaults["image_end"]   = end_images
+        defaults["image_prompt_type"] = (
+            "S"  if start_images and not end_images else
+            "SE" if start_images and end_images else ""
+        )
 
-    # server_config alone isn't enough — WanGP copies save_path into module-level
+    # server_config alone isn't enough -- WanGP copies save_path into module-level
     # variables at import time. Override those directly so files land in output_dir.
     os.makedirs(output_dir, exist_ok=True)
     wgp.server_config["save_path"] = output_dir
@@ -189,7 +257,10 @@ def _do_generate(params: dict) -> dict:
     wgp.process_prompt_and_add_tasks(state, 0, model_type)
     queue = wgp.get_gen_info(state).get("queue", [])
     if not queue:
-        return {"ok": False, "output": None, "error": "WanGP did not create any tasks"}
+        return {"ok": False, "output": None,
+                "error": "WanGP rejected the generation request -- this usually means a parameter is out "
+                         "of range for the chosen model. Check that steps >= 4 for LTX Distilled or "
+                         ">= 20 for Wan I2V and Dev13B."}
 
     # Arm the tqdm hook so inference steps update _job_status in real time
     global _step_hook
@@ -199,13 +270,31 @@ def _do_generate(params: dict) -> dict:
         _update_status(step=n, total_steps=total, progress=f"Step {n}/{total}")
 
     _step_hook = _on_step
+
+    # Capture print() output during generation so WanGP errors are visible via /status
+    import builtins as _builtins
+    _captured_error_lines: list[str] = []
+    _orig_print = _builtins.print
+
+    def _capturing_print(*args, **kwargs):
+        text = " ".join(str(a) for a in args)
+        stripped = text.strip()
+        if stripped and ("[ERROR]" in stripped or "[SKIP]" in stripped or
+                        "Error" in stripped or "Traceback" in stripped or
+                        "TypeError" in stripped or "RuntimeError" in stripped):
+            _captured_error_lines.append(stripped[:300])
+        _orig_print(*args, **kwargs)
+
+    _builtins.print = _capturing_print
     try:
         success = wgp.process_tasks_cli(queue, state)
     finally:
+        _builtins.print = _orig_print
         _step_hook = None
 
     if not success:
-        return {"ok": False, "output": None, "error": "WanGP generation failed"}
+        detail = "; ".join(_captured_error_lines[-3:]) if _captured_error_lines else "WanGP generation failed (no error detail captured)"
+        return {"ok": False, "output": None, "error": detail}
 
     # Find output
     candidates = []
@@ -256,7 +345,7 @@ def _do_generate(params: dict) -> dict:
     return {"ok": True, "output": output_path, "error": None}
 
 
-# ── HTTP server ──────────────────────────────────────────────────────────────
+# -- HTTP server --------------------------------------------------------------
 
 class WorkerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -281,6 +370,12 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
+        if self.path == "/abort":
+            # Signal the running generation to stop at the next tqdm step.
+            _abort_event.set()
+            self._send_json({"ok": True, "message": "abort signal sent"})
+            return
+
         if self.path == "/generate":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
@@ -290,25 +385,64 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid JSON"}, 400)
                 return
 
-            if _get_status_snapshot()["busy"]:
-                self._send_json({"error": "Worker is busy"}, 409)
-                return
+            # Atomically check-and-set busy under _lock so concurrent requests
+            # from ThreadingHTTPServer can't both pass the busy check (TOCTOU fix).
+            global _generation_token
+            with _lock:
+                if _job_status["busy"]:
+                    self._send_json({"error": "Worker is busy"}, 409)
+                    return
+                _abort_event.clear()  # reset any lingering abort from last job
+                _generation_token += 1
+                my_token = _generation_token
+                _job_status.update(busy=True, progress="Starting...",
+                                   result=None, error=None,
+                                   step=0, total_steps=0)
 
-            _update_status(busy=True, progress="Starting...", result=None, error=None)
-
-            def _run():
+            def _run(token):
                 try:
                     result = _do_generate(params)
-                    _update_status(busy=False, result=result.get("output"),
-                                   error=result.get("error"),
-                                   progress="Done" if result["ok"] else "Failed")
-                except Exception as e:
+                    with _lock:
+                        # Only write back if we still own the slot (paranoia guard)
+                        if _generation_token == token:
+                            _job_status.update(
+                                busy=False,
+                                result=result.get("output"),
+                                error=result.get("error"),
+                                progress="Done" if result["ok"] else "Failed",
+                            )
+                # BaseException (not just Exception) so KeyboardInterrupt --
+                # which is what the tqdm abort hook raises -- also resets
+                # busy. Before this fix, an aborted generation left busy=True
+                # forever; the next /generate request either 409'd or
+                # (worse) was accepted onto a worker with corrupted CUDA
+                # state and wedged silently at Step 0. Observed 2026-05-11.
+                except BaseException as e:
                     tb = traceback.format_exc()
-                    _update_status(busy=False, error=f"{e}\n{tb}", progress="Error")
+                    aborted = isinstance(e, KeyboardInterrupt)
+                    err_msg = "Aborted by user" if aborted else f"{e}\n{tb}"
+                    progress_msg = "Aborted" if aborted else "Error"
+                    with _lock:
+                        if _generation_token == token:
+                            _job_status.update(busy=False, error=err_msg,
+                                               progress=progress_msg)
+                    # Best-effort CUDA recovery so the NEXT job gets a clean
+                    # context. Without this, even after busy is cleared, the
+                    # next inference can wedge on partial cached state.
+                    try:
+                        import gc
+                        gc.collect()
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                    except Exception:
+                        pass
                     print(tb, flush=True)
 
-            threading.Thread(target=_run, daemon=True).start()
-            self._send_json({"ok": True, "message": "Generation started"})
+            threading.Thread(target=_run, args=(my_token,), daemon=True).start()
+            self._send_json({"ok": True, "message": "Generation started",
+                             "token": my_token})
 
         elif self.path == "/shutdown":
             self._send_json({"ok": True, "message": "Shutting down"})
@@ -317,7 +451,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "Not found"}, 404)
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 def main():
     global wgp, app_path
@@ -438,7 +572,7 @@ def main():
 
     # BUG-03: ThreadingHTTPServer lets /status polls and /generate run concurrently
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkerHandler)
-    print(f"[worker] Ready — listening on port {args.port}", flush=True)
+    print(f"[worker] Ready -- listening on port {args.port}", flush=True)
 
     try:
         server.serve_forever()

@@ -1,4 +1,4 @@
-"""Merged wildcard system — inline defaults + filesystem discovery.
+"""Merged wildcard system -- inline defaults + filesystem discovery.
 
 Combines the inline wildcard dicts from Fun-Videos (camera, motion, mood,
 transform, style, music_genre, music_mood) with the filesystem wildcard
@@ -10,7 +10,7 @@ import re
 import threading
 from pathlib import Path
 
-# ── Inline wildcards (from Fun-Videos) ───────────────────────────────────────
+# -- Inline wildcards (from Fun-Videos) ---------------------------------------
 
 INLINE_WILDCARDS: dict[str, list[str]] = {
     "__camera__": [
@@ -60,7 +60,7 @@ INLINE_WILDCARDS: dict[str, list[str]] = {
     ],
 }
 
-# ── Filesystem wildcard discovery (from SD-Prompts) ──────────────────────────
+# -- Filesystem wildcard discovery (from SD-Prompts) --------------------------
 # FLW-06: protect the mutable cache dicts against concurrent read/write.
 _cache_lock = threading.Lock()
 _fs_cache: dict[str, list[str]] = {}

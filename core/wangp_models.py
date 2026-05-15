@@ -1,4 +1,4 @@
-"""Shared WanGP model definitions — single source of truth.
+"""Shared WanGP model definitions -- single source of truth.
 
 Previously duplicated (and diverging) between services/wan_bridge_client.py and
 services/wangp_worker.py. Both files now import from here. (BUG-02 / FLW-04)
@@ -11,6 +11,7 @@ MODEL_MAP: dict[str, str] = {
     "Wan2.1-I2V-14B-720P":      "i2v_720p",
     "Wan2.1-VACE-1.3B":         "vace_1.3B",
     "LTX-2 Dev19B Distilled":   "ltx2_distilled",
+    "LTX-2 Dev13B":             "ltxv_13B",
 }
 
 
@@ -64,7 +65,7 @@ SAFE_DEFAULTS: dict = {
     "image_guide": [],
     "image_mask": [],
     "video_guide": [],
-    "video_source": [],
+    "video_source": None,
     "video_mask": [],
     "video_guide_outpainting": [],
     "audio_source": None,
@@ -72,6 +73,7 @@ SAFE_DEFAULTS: dict = {
     "audio_guide2": None,
     "custom_guide": None,
     "audio_prompt_type": "",
+    "audio_scale": 1.0,
     "MMAudio_setting": 0,
     "image_mode": 0,        # 0=video output, >0=image output -- always want video
     "model_mode": "",
@@ -79,13 +81,13 @@ SAFE_DEFAULTS: dict = {
     "loras_multipliers": [],
     "custom_settings": {},
     "self_refiner_plan": "",
-    "self_refiner_setting": "",
+    "self_refiner_setting": 0,     # WanGP compares >0; must be int not str
     "spatial_upsampling": "",
     "skip_steps_cache_type": "",
     "speakers_locations": "",
     "frames_positions": "",
     "guidance_phases": 0,
-    "motion_amplitude": 0,
+    "motion_amplitude": 1,    # WanGP rejects values < 1
     "denoising_strength": 1.0,
     "masking_strength": 1.0,
     "model_switch_phase": 0,
@@ -94,7 +96,19 @@ SAFE_DEFAULTS: dict = {
     "keep_frames_video_guide": "",
     "keep_frames_video_source": "",
     "force_fps": "",
-    "sliding_window_size": 0,
-    "sliding_window_overlap": 1,
+    # WanGP validates these even when sliding window isn't actually needed.
+    "sliding_window_size": 129,   # WanGP UI default; only activates if video > this frame count
+    "sliding_window_overlap": 17,
     "sliding_window_discard_last_frames": 0,
+    # Keys accessed directly via inputs["key"] in wgp.py -- must be present or KeyError
+    "multi_images_gen_type": 0,
+    "image_quality": "",
+    "video_quality": "",
+    "base_model_type": "",
+    "lset_name": "",
+    "model_filename": "",
+    "modules": [],
+    "settings_version": 0,
+    "type": "",
+    "negative_prompt": "",
 }

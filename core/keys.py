@@ -34,7 +34,10 @@ def get_key(provider: str) -> str:
         return val
     # Fall back to local credentials file
     creds = _load_creds()
-    return creds.get(config_key, "") or creds.get(f"{provider}_api_key", "")
+    val = creds.get(config_key, "") or creds.get(f"{provider}_api_key", "")
+    if not val and provider == "openai":
+        val = creds.get("open_ai_key", "")
+    return val
 
 
 def save_keys(**kwargs):
@@ -48,7 +51,7 @@ def save_keys(**kwargs):
         cfg.save(updates)
 
 
-# ── Ollama helpers (unchanged) ────────────────────────────────────────────────
+# -- Ollama helpers (unchanged) ------------------------------------------------
 
 def get_ollama_host() -> str:
     return cfg.get("ollama_host") or "http://localhost:11434"

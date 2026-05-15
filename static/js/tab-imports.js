@@ -6,8 +6,9 @@
  * - Start a new project
  * - Browse and restore previous work
  */
-import { api } from './api.js?v=20260414';
-import { toast, createDropZone, el } from './components.js?v=20260414';
+import { api } from './api.js?v=20260505e';
+import { createDropZone, el } from './components.js?v=20260507a';
+import { toast } from './shell/toast.js?v=20260503a';
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -17,9 +18,9 @@ export function init(panel) {
   });
   panel.appendChild(root);
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
   // HEADER
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
 
   const header = el('div', {
     style: 'border-bottom:1px solid var(--border); padding-bottom:12px;'
@@ -36,9 +37,9 @@ export function init(panel) {
     style: 'color:var(--text-2); font-size:.95rem;'
   }));
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
   // NEW PROJECT
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
 
   const newProjCard = el('div', {
     style: 'padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md);'
@@ -46,7 +47,7 @@ export function init(panel) {
   root.appendChild(newProjCard);
 
   newProjCard.appendChild(el('h3', {
-    text: '✨ Start Fresh',
+    text: '* Start Fresh',
     style: 'font-size:1.1rem; color:var(--accent-2); margin-bottom:8px;'
   }));
 
@@ -59,13 +60,13 @@ export function init(panel) {
     class: 'btn btn-primary',
     text: 'Create New Project',
     style: 'padding:10px 20px;',
-    onclick() { toast('New project ready — go to "Generate Images" tab to begin', 'info'); }
+    onclick() { toast('New project ready -- go to "Generate Images" tab to begin', 'info'); }
   });
   newProjCard.appendChild(newProjBtn);
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
   // IMPORT ASSETS
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
 
   const importCard = el('div', {
     style: 'padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md);'
@@ -117,9 +118,9 @@ export function init(panel) {
   });
   importBtnsRow.appendChild(importPromptBtn);
 
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
   // PIPELINE GUIDE
-  // ════════════════════════════════════════════════════════════════════════════
+  // ============================================================================
 
   const guideCard = el('div', {
     style: 'padding:16px; background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-md);'
@@ -132,9 +133,9 @@ export function init(panel) {
   }));
 
   const stages = [
-    { icon: '🎨', name: 'Generate Images', desc: 'Create images from prompts using AI (Forge SD)', next: '→' },
-    { icon: '🎬', name: 'Create Videos', desc: 'Turn images into video with AI music', next: '→' },
-    { icon: '🌉', name: 'Add Transitions', desc: 'Create transitions between video clips', next: '→' },
+    { icon: '🎨', name: 'Generate Images', desc: 'Create images from prompts using AI (Forge SD)', next: '->' },
+    { icon: '🎬', name: 'Create Videos', desc: 'Turn images into video with AI music', next: '->' },
+    { icon: '🌉', name: 'Add Transitions', desc: 'Create transitions between video clips', next: '->' },
     { icon: '🎵', name: 'Audio & Export', desc: 'Mix audio and export final video', next: '' },
   ];
 
@@ -170,7 +171,7 @@ export function init(panel) {
   });
 
   guideCard.appendChild(el('p', {
-    text: '💡 You can enter at any stage — if you have existing images, jump to "Create Videos". If you have videos, go to "Add Transitions".',
+    text: '💡 You can enter at any stage -- if you have existing images, jump to "Create Videos". If you have videos, go to "Add Transitions".',
     style: 'color:var(--text-3); font-size:.8rem; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); font-style:italic;'
   }));
 }

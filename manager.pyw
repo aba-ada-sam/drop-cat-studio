@@ -1,29 +1,31 @@
 """
-manager.pyw — Drop Cat Go Studio tray + window manager
+manager.pyw -- Drop Cat Go Studio window manager
 Run with:  pythonw.exe manager.pyw
 
 - Shows tkinter loading splash instantly while server starts
 - Opens app in Chrome --app mode (plain window, no URL bar or tabs)
 - Single-instance mutex: double-click while running re-opens the window
-- Tray: Open / Restart Server / Exit
+- Closing the Chrome window shuts down the server and exits
 - Keeps app.py alive, restarts on crash (max 5 in 60s)
-
-Dependencies: pystray, Pillow  (pip install pystray Pillow)
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from urllib.request import urlopen
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# Suppress console windows for all subprocess calls on Windows.
+# Without this every git/pip/netstat/taskkill briefly flashes a terminal.
+_NW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
+# -- Paths ---------------------------------------------------------------------
 
 ROOT       = Path(__file__).resolve().parent
 APP_PY     = ROOT / "app.py"
@@ -48,7 +50,7 @@ PORT_TRIES = 20
 _MUTEX_HANDLE = None  # held at module level so GC never releases it
 
 
-# ── Python interpreter ────────────────────────────────────────────────────────
+# -- Python interpreter --------------------------------------------------------
 
 def _python_exe() -> str:
     exe = Path(sys.executable)
@@ -64,7 +66,7 @@ def _python_exe() -> str:
 PYTHON = _python_exe()
 
 
-# ── Port helpers ──────────────────────────────────────────────────────────────
+# -- Port helpers --------------------------------------------------------------
 
 def read_port_file() -> tuple[int | None, int | None]:
     try:
@@ -81,19 +83,41 @@ def clear_port_file() -> None:
         pass
 
 
-def server_responds(port: int, timeout: float = 0.4) -> bool:
+def server_responds(port: int, timeout: float = 0.3) -> bool:
     try:
-        with urlopen(f"http://127.0.0.1:{port}/api/system", timeout=timeout) as r:
-            return r.status == 200
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def is_dcs_server(port: int, timeout: float = 1.5) -> bool:
+    """Return True only if port has a live DCS server (checks /api/version).
+
+    A plain TCP connect is not enough -- Forge SD also listens in the 7860-7879
+    range. Without this check, manager opens Chrome pointing at Forge and the
+    user sees Forge's 404 instead of DCS.
+    """
+    import urllib.request as _ur
+    try:
+        with _ur.urlopen(f"http://127.0.0.1:{port}/api/version", timeout=timeout) as r:
+            body = r.read(200).decode(errors="replace")
+            return "Drop Cat" in body or "version" in body.lower()
     except Exception:
         return False
 
 
 def find_running_server() -> int | None:
-    """Check only the port recorded in .dcs-port — no blind scan."""
+    """Find a live DCS server: check .dcs-port first, then scan 7860-7879."""
     port, _ = read_port_file()
-    if port and server_responds(port):
+    if port and server_responds(port) and is_dcs_server(port):
         return port
+    # Port file missing or stale -- scan the full range
+    for p in range(7860, 7880):
+        if p == port:
+            continue  # already checked above
+        if server_responds(p) and is_dcs_server(p):
+            return p
     return None
 
 
@@ -102,54 +126,164 @@ def kill_pid(pid: int | None) -> None:
         return
     try:
         subprocess.run(["taskkill", "/PID", str(pid), "/F"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, **_NW)
         log.info("Killed PID %d", pid)
     except Exception as exc:
         log.warning("taskkill %d failed: %s", pid, exc)
 
 
-# ── Open app window ───────────────────────────────────────────────────────────
+# -- Auto-update (git pull + pip install) -------------------------------------
 
-def open_app_window(port: int) -> None:
-    """Open the app in Chrome --app mode: plain window, no URL bar or tabs."""
+def _do_git_pull(on_status=None) -> None:
+    """Pull latest code; pip-install deps only if the commit changed. Non-fatal."""
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+
+    if not shutil.which("git"):
+        log.info("git not on PATH -- skipping update check")
+        return
+
+    _status("Checking for updates...")
+    try:
+        sha_before = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, **_NW,
+        ).stdout.strip()
+    except Exception:
+        sha_before = ""
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(ROOT), "pull", "--ff-only", "origin", "master"],
+            capture_output=True, timeout=30, **_NW,
+        )
+    except Exception as exc:
+        log.warning("git pull skipped: %s", exc)
+        return
+
+    try:
+        sha_after = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, **_NW,
+        ).stdout.strip()
+    except Exception:
+        sha_after = sha_before
+
+    if sha_before and sha_after and sha_before != sha_after:
+        log.info("New code pulled (%s -> %s)", sha_before[:7], sha_after[:7])
+        # Only pip-install if requirements.txt itself changed -- avoids a
+        # 30-60s dep-resolution crawl on every code-only update.
+        req_changed = False
+        try:
+            diff = subprocess.run(
+                ["git", "-C", str(ROOT), "diff", "--name-only", sha_before, sha_after, "--", "requirements.txt"],
+                capture_output=True, text=True, timeout=10, **_NW,
+            )
+            req_changed = bool(diff.stdout.strip())
+        except Exception:
+            req_changed = True  # can't tell -- be safe and install
+
+        if req_changed:
+            log.info("requirements.txt changed -- updating dependencies")
+            _status("Updating dependencies...")
+            try:
+                req = ROOT / "requirements.txt"
+                if req.exists():
+                    subprocess.run(
+                        ["pip", "install", "-q", "-r", str(req)],
+                        capture_output=True, timeout=180, **_NW,
+                    )
+            except Exception as exc:
+                log.warning("pip install failed (non-fatal): %s", exc)
+        else:
+            log.info("requirements.txt unchanged -- skipping pip install")
+    else:
+        log.info("Already up to date")
+
+
+# -- Desktop shortcut self-update ----------------------------------------------
+
+def _ensure_shortcut() -> None:
+    """Keep the desktop shortcut pointing at launch-silent.vbs via wscript.exe."""
+    try:
+        desktop_lnk = Path(os.environ["USERPROFILE"]) / "Desktop" / "Drop Cat Go Studio.lnk"
+        vbs = ROOT / "launch-silent.vbs"
+        ico = ROOT / "dropcat.ico"
+        if not vbs.exists():
+            return
+        ico_str = f"{ico},0" if ico.exists() else ""
+        wscript = r"C:\Windows\System32\wscript.exe"
+        ps = (
+            f'$ws=New-Object -ComObject WScript.Shell;'
+            f'$sc=$ws.CreateShortcut("{desktop_lnk}");'
+            f'$sc.TargetPath="{wscript}";'
+            f'$sc.Arguments=\'"{vbs}"\';'
+            f'$sc.WorkingDirectory="{ROOT}";'
+            f'$sc.IconLocation="{ico_str}";'
+            f'$sc.Description="Drop Cat Go Studio";'
+            f'$sc.Save()'
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, timeout=15, **_NW,
+        )
+        log.info("Desktop shortcut updated -> launch-silent.vbs")
+    except Exception as exc:
+        log.warning("_ensure_shortcut failed (non-fatal): %s", exc)
+
+
+# -- Open app window -----------------------------------------------------------
+
+def open_app_window(port: int) -> "subprocess.Popen | None":
+    """Open the app in Chrome --app mode using a dedicated profile.
+
+    Using --user-data-dir ensures Chrome runs as its own process (not delegated
+    to an existing Chrome instance), so we can wait() on the returned Popen and
+    detect when the window is closed.
+
+    Returns the Popen object, or None if Chrome was not found (default browser).
+    """
     url = f"http://127.0.0.1:{port}"
     chrome_paths = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
     ]
+    profile_dir = str(ROOT / ".chrome_profile")
     for path in chrome_paths:
         if os.path.isfile(path):
-            subprocess.Popen([
+            args = [
                 path,
                 f"--app={url}",
+                f"--user-data-dir={profile_dir}",
                 "--window-size=1400,900",
                 "--window-position=100,50",
-            ])
-            log.info("Opened Chrome --app on port %d", port)
-            return
-    # Chrome not found — fall back to default browser
+            ]
+            if ICO_PATH.exists():
+                args.append(f"--app-icon={ICO_PATH}")
+            proc = subprocess.Popen(args)
+            log.info("Opened Chrome --app on port %d (profile: %s)", port, profile_dir)
+            return proc
+    # Chrome not found -- fall back to default browser (can't track close)
     import webbrowser
     webbrowser.open(url)
     log.warning("Chrome not found, opened default browser")
+    return None
 
 
-# ── Server process manager ────────────────────────────────────────────────────
+# -- Server process manager ----------------------------------------------------
 
 class ServerManager:
-    MAX_RESTARTS   = 5
-    RESTART_WINDOW = 60
-    RESTART_DELAY  = 3
-    READY_TIMEOUT  = 120
+    READY_TIMEOUT = 120
 
-    def __init__(self) -> None:
+    def __init__(self, on_crash=None) -> None:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._port: int | None = None
-        self._restart_times: list[float] = []
-        self._gave_up = False
+        self._on_crash = on_crash  # callable(exit_code) -- shown to user on unexpected exit
 
     @property
     def port(self) -> int | None:
@@ -178,6 +312,9 @@ class ServerManager:
         self._port = None
         with self._lock:
             self._kill_current()
+        self._stop_event.clear()
+        self._spawn()
+        threading.Thread(target=self._watch, daemon=True, name="srv-watch").start()
 
     def _kill_current(self) -> None:
         proc = self._proc
@@ -250,9 +387,6 @@ class ServerManager:
             with self._lock:
                 proc = self._proc
             if proc is None:
-                if not self._stop_event.is_set() and not self._gave_up:
-                    time.sleep(self.RESTART_DELAY)
-                    self._spawn()
                 time.sleep(1)
                 continue
             ret = proc.poll()
@@ -262,39 +396,174 @@ class ServerManager:
             if self._stop_event.is_set():
                 log.info("Server exited (manager stopping)")
                 return
-            log.warning("Server exited with code %s — considering restart", ret)
+            # Unexpected exit -- notify the user instead of silently restarting.
+            log.warning("Server exited unexpectedly (code %s)", ret)
             self._ready_event.clear()
             self._port = None
-            now = time.monotonic()
-            self._restart_times = [t for t in self._restart_times if now - t < self.RESTART_WINDOW]
-            if len(self._restart_times) >= self.MAX_RESTARTS:
-                log.error("Server crashed %d times in %ds — giving up.",
-                          self.MAX_RESTARTS, self.RESTART_WINDOW)
-                self._gave_up = True
-                return
-            self._restart_times.append(now)
-            log.info("Restarting server in %ds (attempt %d/%d)…",
-                     self.RESTART_DELAY, len(self._restart_times), self.MAX_RESTARTS)
             with self._lock:
                 self._proc = None
-            time.sleep(self.RESTART_DELAY)
-            self._spawn()
+            if self._on_crash:
+                self._on_crash(ret)
+            return
 
 
-# ── Loading splash (tkinter) ──────────────────────────────────────────────────
+# -- Crash notification --------------------------------------------------------
 
-def show_splash(srv: ServerManager) -> None:
-    """Frameless loading window that closes when the server is ready."""
+def _show_crash_ui(srv: "ServerManager", exit_code: int) -> None:
+    """Pop a crash notification with Restart / Quit buttons.
+
+    Called from the srv._on_crash callback (background thread) via root.after
+    so tkinter runs on the main thread. The Chrome window is still open showing
+    a dead page -- restarting brings it back without relaunching Chrome.
+    """
     try:
         import tkinter as tk
     except ImportError:
-        srv.wait_ready(timeout=120)
+        log.error("Server crashed (exit %s) -- tkinter unavailable, cannot show UI", exit_code)
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    # Pop above everything so the user notices, but release topmost on focus
+    # change or after 2s so it doesn't trap their workflow.
+    root.attributes("-topmost", True)
+    def _drop_topmost(_e=None):
+        try: root.attributes("-topmost", False)
+        except tk.TclError: pass
+    root.bind("<FocusOut>", _drop_topmost)
+    root.after(2000, _drop_topmost)
+
+    W, H = 340, 200
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 16, "bold")).pack(pady=(22, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+
+    tk.Label(root, text="Server stopped unexpectedly.", bg="#0d0606", fg="#f0e6d0",
+             font=("Arial", 10)).pack(pady=(14, 2))
+    tk.Label(root, text=f"Exit code: {exit_code}  --  see logs/server.log",
+             bg="#0d0606", fg="#6a5a4a", font=("Arial", 8)).pack()
+
+    btn_frame = tk.Frame(root, bg="#0d0606")
+    btn_frame.pack(pady=18)
+
+    def _restart():
+        root.destroy()
+        # show_splash drives the same startup sequence as initial launch
+        show_splash(srv)
+        if srv.port:
+            # Chrome window is still open -- just reload it
+            try:
+                import urllib.request as _ur
+                _ur.urlopen(f"http://127.0.0.1:{srv.port}/", timeout=2)
+            except Exception:
+                pass
+
+    def _quit():
+        root.destroy()
+        _shutdown(srv)
+
+    tk.Button(
+        btn_frame, text="  Restart  ", bg="#c41e3a", fg="#f0e6d0",
+        activebackground="#a01828", activeforeground="#f0e6d0",
+        relief="flat", bd=0, font=("Arial", 10, "bold"), cursor="hand2",
+        padx=14, pady=6, command=_restart,
+    ).pack(side="left", padx=10)
+
+    tk.Button(
+        btn_frame, text="  Quit  ", bg="#2a1010", fg="#8a7a6a",
+        activebackground="#1a0808", activeforeground="#f0e6d0",
+        relief="flat", bd=0, font=("Arial", 10), cursor="hand2",
+        padx=14, pady=6, command=_quit,
+    ).pack(side="left", padx=10)
+
+    root.mainloop()
+
+
+# -- Opening splash (already-running path) -------------------------------------
+
+def _show_opening_splash() -> None:
+    """Show 'Opening...' window while finding + opening the existing server.
+    Gives immediate visual feedback so the user doesn't retry clicking."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        existing = find_running_server()
+        if existing:
+            open_app_window(existing)
         return
 
     root = tk.Tk()
     root.overrideredirect(True)
     root.configure(bg="#0d0606")
     root.attributes("-topmost", True)
+    root.after(5000, lambda: root.attributes("-topmost", False))
+
+    W, H = 320, 140
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 20, "bold")).pack(pady=(28, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+    tk.Label(root, text="Opening...", bg="#0d0606", fg="#6a5a4a",
+             font=("Arial", 9)).pack(pady=(14, 0))
+
+    _done = threading.Event()
+
+    def _bg():
+        existing = find_running_server()
+        if existing:
+            open_app_window(existing)
+        _done.set()
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+    def _poll():
+        if _done.is_set():
+            root.after(500, root.destroy)
+        else:
+            root.after(200, _poll)
+
+    root.after(100, _poll)
+    root.after(8000, root.destroy)  # failsafe
+    root.mainloop()
+
+
+# -- Loading splash (tkinter) --------------------------------------------------
+
+def show_splash(srv: ServerManager) -> None:
+    """Frameless loading window: pulls updates -> starts server -> closes.
+
+    Drives the full startup sequence in a background thread so the window
+    appears immediately. srv.start() is called from here, not from main().
+    """
+    try:
+        import tkinter as tk
+    except ImportError:
+        _do_git_pull()
+        srv.start()
+        srv.wait_ready(timeout=120)
+        return
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    # Pop above everything on initial paint so the user sees the splash, but
+    # release topmost as soon as they click any other window. Also drop after
+    # 2s as a fallback in case FocusOut doesn't fire on this overrideredirect
+    # window (Windows is inconsistent here).
+    root.attributes("-topmost", True)
+    def _drop_topmost(_e=None):
+        try: root.attributes("-topmost", False)
+        except tk.TclError: pass
+    root.bind("<FocusOut>", _drop_topmost)
+    root.after(2000, _drop_topmost)
 
     W, H = 320, 180
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -305,102 +574,172 @@ def show_splash(srv: ServerManager) -> None:
     tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
              font=("Arial", 8)).pack()
 
-    status = tk.StringVar(value="Starting…")
+    status = tk.StringVar(value="Checking for updates...")
     tk.Label(root, textvariable=status, bg="#0d0606", fg="#6a5a4a",
              font=("Arial", 9)).pack(pady=(16, 0))
 
-    dot_var = tk.StringVar(value="●○○○")
+    dot_var = tk.StringVar(value="*ooo")
     tk.Label(root, textvariable=dot_var, bg="#0d0606", fg="#c41e3a",
              font=("Arial", 13)).pack(pady=4)
 
-    dots = ["●○○○", "○●○○", "○○●○", "○○○●"]
+    _skip_port = [None]  # shared between skip handler and _bg thread
+
+    def _do_skip():
+        # Find any running server so open_app_window gets a valid port
+        _skip_port[0] = find_running_server() or srv.port
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    # Skip button -- hidden until 8s
+    skip_btn = tk.Button(
+        root, text="Skip waiting", bg="#1a0a0a", fg="#6a5a4a",
+        relief="flat", bd=0, font=("Arial", 8), cursor="hand2",
+        command=_do_skip,
+    )
+    skip_btn.pack(pady=(4, 0))
+    skip_btn.pack_forget()  # hidden initially
+
+    dots = ["*ooo", "o*oo", "oo*o", "ooo*"]
     idx = [0]
 
     def _tick():
         idx[0] = (idx[0] + 1) % 4
         dot_var.set(dots[idx[0]])
-        if idx[0] > 6:
-            status.set("Loading model…")
         root.after(260, _tick)
 
-    def _poll():
-        if srv.ready:
-            root.destroy()
-        else:
-            root.after(400, _poll)
+    def _bg():
+        _do_git_pull(on_status=lambda s: root.after(0, lambda: status.set(s)))
+        root.after(0, lambda: status.set("Starting server..."))
+        srv.start()
+        deadline = time.time() + 120
+        while not srv.ready and time.time() < deadline:
+            # Also accept a server started by an external process (e.g. manual restart)
+            ext = find_running_server()
+            if ext:
+                if not srv.port:
+                    srv._port = ext
+                break
+            time.sleep(0.4)
+        try:
+            root.after(0, root.destroy)
+        except Exception:
+            pass
+
+    def _show_skip():
+        try:
+            skip_btn.pack(pady=(4, 0))
+        except Exception:
+            pass
 
     _tick()
-    root.after(400, _poll)
+    root.after(8000, _show_skip)
+    threading.Thread(target=_bg, daemon=True).start()
     root.mainloop()
+    # mainloop exited -- use skip port if bg thread didn't set srv.port
+    if _skip_port[0] and not srv.port:
+        srv._port = _skip_port[0]
 
 
-# ── Tray icon ─────────────────────────────────────────────────────────────────
-
-def _build_icon_image():
-    from PIL import Image, ImageDraw, ImageFont
-    if ICO_PATH.is_file():
-        try:
-            img = Image.open(ICO_PATH).convert("RGBA")
-            if img.size != (32, 32):
-                img = img.resize((32, 32), Image.LANCZOS)
-            return img
-        except Exception:
-            pass
-    size = 32
-    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([0, 0, size - 1, size - 1], fill=(196, 30, 58, 255))
-    font = None
-    for name in ("arialbd.ttf", "arial.ttf", "calibrib.ttf"):
-        try:
-            font = ImageFont.truetype(name, 12); break
-        except Exception:
-            continue
-    if font is None:
-        font = ImageFont.load_default()
-    draw.text((size // 2, size // 2), "DCG", fill=(212, 160, 23, 255), font=font, anchor="mm")
-    return img
+def _kill_procs_on_port(port: int, label: str) -> None:
+    """Kill all processes listening on port (including non-LISTENING ones via wmic)."""
+    try:
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5, **_NW)
+        for line in r.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                pid_s = parts[-1].strip()
+                if pid_s.isdigit() and int(pid_s) > 0:
+                    log.info("Killing %s on port %d (PID %s)", label, port, pid_s)
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", pid_s],
+                                   capture_output=True, timeout=5, **_NW)
+    except Exception as e:
+        log.warning("Port kill %d failed: %s", port, e)
 
 
-def run_tray(srv: ServerManager) -> None:
-    import pystray
+def _kill_by_cmdline(script: str, label: str) -> None:
+    """Kill all processes whose command line contains script name.
 
-    def _open(icon=None, item=None):
-        if srv.port:
-            open_app_window(srv.port)
-
-    def _do_restart():
-        srv.restart()
-        srv.wait_ready(120)
-        if srv.port:
-            open_app_window(srv.port)
-
-    def _restart(icon=None, item=None):
-        threading.Thread(target=_do_restart, daemon=True).start()
-
-    def _exit(icon, item=None):
-        log.info("Exit from tray")
-        srv.stop()
-        clear_port_file()
-        try:
-            icon.stop()
-        except Exception:
-            pass
-        threading.Timer(0.5, lambda: os._exit(0)).start()
-
-    menu = pystray.Menu(
-        pystray.MenuItem("Open Drop Cat Go Studio", _open, default=True),
-        pystray.MenuItem("Restart Server", _restart),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Exit", _exit),
-    )
-    icon = pystray.Icon("DropCatGoStudio", _build_icon_image(), "Drop Cat Go Studio", menu)
-    icon.run()   # blocks until Exit is clicked
+    Uses PowerShell Get-WmiObject (works on Windows 11 where wmic is removed).
+    Catches non-LISTENING orphans that survive the port-based kill.
+    """
+    own = os.getpid()
+    try:
+        ps_cmd = (
+            "Get-WmiObject Win32_Process | "
+            f"Where-Object {{ $_.CommandLine -like '*{script}*' }} | "
+            "Select-Object ProcessId | "
+            "ForEach-Object { $_.ProcessId }"
+        )
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15, **_NW,
+        )
+        for line in r.stdout.splitlines():
+            pid_s = line.strip()
+            if not pid_s.isdigit():
+                continue
+            pid = int(pid_s)
+            if pid <= 0 or pid == own:
+                continue
+            log.info("Killing stale %s (PID %d) by cmdline scan", label, pid)
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           capture_output=True, timeout=5, **_NW)
+    except Exception as e:
+        log.warning("Cmdline kill for %s failed: %s", label, e)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def _shutdown(srv: "ServerManager") -> None:
+    """Kill all DCS-related processes, then exit."""
+    log.info("Shutting down")
+
+    # 1. Kill GPU workers + Forge by port (fast -- catches LISTENING processes)
+    _kill_procs_on_port(7899, "WanGP")
+    _kill_procs_on_port(8019, "ACE-Step")
+    _kill_procs_on_port(7861, "Forge")
+
+    # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
+    #    orphans that port kill misses, e.g. second worker that lost the port race)
+    _kill_by_cmdline("wangp_worker.py", "WanGP")
+    _kill_by_cmdline("api_server.py", "ACE-Step")
+    _kill_by_cmdline("webui.py", "Forge")
+
+    # 3. Also try via services module (uses tracked Popen handles -- most reliable
+    #    when app.py spawned the workers through the normal path)
+    try:
+        from services import manager as svc
+        svc.shutdown_all()
+    except Exception as e:
+        log.warning("Service module shutdown failed (non-fatal): %s", e)
+
+    # 4. Kill app.py: via tracked proc handle if we spawned it...
+    srv.stop()
+
+    # 5. ...and via port file PID as backstop for when we attached to a
+    #    pre-existing server (srv._proc is None in that path)
+    _, server_pid = read_port_file()
+    if server_pid:
+        log.info("Killing app.py by port file PID %d", server_pid)
+        kill_pid(server_pid)
+
+    clear_port_file()
+    os._exit(0)
+
+
+# -- Entry point ---------------------------------------------------------------
+
+def _diag(msg: str) -> None:
+    """Append a timestamped line to manager_diag.txt for silent-crash diagnosis."""
+    try:
+        with open(ROOT / "manager_diag.txt", "a", encoding="utf-8") as _f:
+            _f.write(f"{time.strftime('%H:%M:%S')} PID={os.getpid()} {msg}\n")
+    except Exception:
+        pass
+
 
 def main() -> None:
+    _diag("main() entered")
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
 
     # Single-instance: Windows named mutex held for the lifetime of the process.
@@ -409,52 +748,93 @@ def main() -> None:
     import ctypes as _ct
     _k32 = _ct.WinDLL("kernel32", use_last_error=True)
     _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
-    if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS — another manager owns it
-        log.info("Already running — opening app window")
-        existing = find_running_server()
-        if existing:
-            open_app_window(existing)
-        sys.exit(0)
-
-    try:
-        import pystray
-        from PIL import Image
-    except ImportError as exc:
-        log.error("Missing: %s — run: pip install pystray Pillow", exc)
+    if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS -- another manager owns it
+        # Find the other manager's PID and check if its server is still alive.
+        # If the server is dead the old manager is a zombie -- kill it and take over.
+        other_pid = None
         try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"Cannot start:\n\n{exc}\n\nRun: pip install -r requirements.txt",
-                "Drop Cat Go Studio", 0x10,
-            )
-        except Exception:
+            import psutil
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    if proc.info["name"] and "pythonw" in proc.info["name"].lower():
+                        cl = " ".join(proc.info["cmdline"] or [])
+                        if "manager.pyw" in cl and proc.pid != os.getpid():
+                            other_pid = proc.pid
+                            break
+                except Exception:
+                    pass
+        except ImportError:
             pass
-        sys.exit(1)
 
-    srv = ServerManager()
+        existing_alive = find_running_server()
+
+        if existing_alive and not other_pid:
+            # Mutex held by an undetectable process and server is alive -- just open.
+            log.info("Server on port %d alive, no trackable manager -- opening window", existing_alive)
+            _show_opening_splash()
+            sys.exit(0)
+        else:
+            # Kill any stuck manager so WE take over Chrome tracking and shutdown.
+            if other_pid:
+                log.info("Replacing stuck manager PID %d -- taking over Chrome tracking", other_pid)
+                kill_pid(other_pid)
+                time.sleep(0.5)
+            if not existing_alive:
+                clear_port_file()
+            # Release and re-acquire the mutex under our PID
+            _k32.ReleaseMutex(_MUTEX_HANDLE)
+            _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
+            # Fall through to normal startup
+
+    _diag("calling _ensure_shortcut")
+    # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)
+    _ensure_shortcut()
+
+    _diag("_ensure_shortcut done -- finding server")
+
+    def _on_crash(exit_code: int) -> None:
+        threading.Thread(target=_show_crash_ui, args=(srv, exit_code), daemon=True).start()
+
+    srv = ServerManager(on_crash=_on_crash)
 
     # Fast check: is a server already recorded in .dcs-port and alive?
     existing_port = find_running_server()
 
+    chrome_proc = None
     if existing_port:
+        _diag(f"server already on port {existing_port} -- opening window")
         log.info("Server already on port %d", existing_port)
         srv._port = existing_port
         srv._ready_event.set()
-        open_app_window(existing_port)
+        chrome_proc = open_app_window(existing_port)
     else:
-        # Start the server first, then show the splash immediately.
-        # Do NOT scan all 20 ports — that adds up to 30s of silence.
-        log.info("Starting app.py")
-        srv.start()
-        show_splash(srv)   # appears within ~1s of double-click
+        # show_splash drives the full startup: git pull -> srv.start() -> wait ready
+        _diag("no server found -- calling show_splash")
+        log.info("Starting fresh -- splash will handle git pull + server start")
+        show_splash(srv)
+        _diag(f"show_splash returned -- srv.port={srv.port}")
         if srv.port:
-            open_app_window(srv.port)
+            chrome_proc = open_app_window(srv.port)
         else:
             log.error("Server never became ready")
 
-    run_tray(srv)
+    # Block until the Chrome window closes, then shut everything down.
+    # If Chrome wasn't found (default browser), keep alive until the server dies.
+    _diag("waiting for window close")
+    if chrome_proc is not None:
+        chrome_proc.wait()
+        log.info("App window closed -- shutting down")
+        _shutdown(srv)
+    else:
+        # No trackable window -- keep manager alive as a watchdog indefinitely
+        srv._stop_event.wait()
 
 
 if __name__ == "__main__":
+    # Module-level diag: proves the process started and imports succeeded
+    try:
+        with open(ROOT / "manager_diag.txt", "a", encoding="utf-8") as _f:
+            _f.write(f"{time.strftime('%H:%M:%S')} PID={os.getpid()} __main__ block reached\n")
+    except Exception:
+        pass
     main()

@@ -1,4 +1,4 @@
-"""Video Bridges API routes — /api/bridges/*
+"""Video Bridges API routes -- /api/bridges/*
 
 Generate AI-powered transition videos between clips.
 """
@@ -29,32 +29,37 @@ async def add_paths(request: Request):
 
     Accepts video files, image files, or folders. Returns metadata for each.
     """
-    from core.ffmpeg_utils import probe_file
+    import asyncio
     body = await request.json()
     paths = body.get("paths", [])
-    result = []
-    for path in paths:
-        p = Path(path)
-        if p.is_dir():
-            for fp in sorted(p.iterdir()):
-                if fp.suffix.lower() in MEDIA_EXTS:
-                    info = probe_file(str(fp))
-                    kind = "image" if fp.suffix.lower() in IMAGE_EXTS else "video"
-                    result.append({"path": str(fp), "name": fp.name, "kind": kind, **info})
-        elif p.is_file():
-            if p.suffix.lower() in MEDIA_EXTS:
-                info = probe_file(str(p))
-                kind = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
-                result.append({"path": str(p), "name": p.name, "kind": kind, **info})
+
+    def _scan():
+        result = []
+        for path in paths:
+            p = Path(path)
+            if p.is_dir():
+                for fp in sorted(p.iterdir()):
+                    if fp.suffix.lower() in MEDIA_EXTS:
+                        info = probe_file(str(fp))
+                        kind = "image" if fp.suffix.lower() in IMAGE_EXTS else "video"
+                        result.append({"path": str(fp), "name": fp.name, "kind": kind, **info})
+            elif p.is_file():
+                if p.suffix.lower() in MEDIA_EXTS:
+                    info = probe_file(str(p))
+                    kind = "image" if p.suffix.lower() in IMAGE_EXTS else "video"
+                    result.append({"path": str(p), "name": p.name, "kind": kind, **info})
+                else:
+                    result.append({"path": path, "name": p.name, "error": "Unsupported file type"})
             else:
-                result.append({"path": path, "name": p.name, "error": "Unsupported file type"})
-        else:
-            result.append({"path": path, "name": p.name, "error": "Path not found"})
-    return {"files": result}
+                result.append({"path": path, "name": p.name, "error": "Path not found"})
+        return result
+
+    return {"files": await asyncio.to_thread(_scan)}
 
 
 @router.post("/upload")
 async def upload_media(files: list[UploadFile] = File(...)):
+    import asyncio
     saved = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
@@ -63,7 +68,7 @@ async def upload_media(files: list[UploadFile] = File(...)):
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
         dest.write_bytes(data)
-        info = probe_file(str(dest))
+        info = await asyncio.to_thread(probe_file, str(dest))
         kind = "image" if ext in IMAGE_EXTS else "video"
         saved.append({
             "path": str(dest),
@@ -77,19 +82,26 @@ async def upload_media(files: list[UploadFile] = File(...)):
 
 @router.post("/analyze")
 async def analyze_media_endpoint(request: Request):
-    from app import get_llm_router; llm_router = get_llm_router()
+    import asyncio
+    from app import get_llm_router, get_job_manager
+    llm_router = get_llm_router()
     from features.video_bridges.analyzer import analyze_media
 
     body = await request.json()
     path = body.get("path", "")
     if not path or not os.path.isfile(path):
         raise HTTPException(400, "File not found")
-    return analyze_media(llm_router, path)
+
+    if get_job_manager().is_gpu_busy():
+        raise HTTPException(503, "GPU is busy with a video job -- wait for it to finish before analyzing clips")
+
+    return await asyncio.to_thread(analyze_media, llm_router, path)
 
 
 @router.post("/bridge-preview")
 async def bridge_preview(request: Request):
     """Preview a bridge prompt for a specific pair (no generation)."""
+    import asyncio
     from app import get_llm_router; llm_router = get_llm_router()
     from features.video_bridges.analyzer import generate_bridge_prompt
 
@@ -100,18 +112,21 @@ async def bridge_preview(request: Request):
     path_b = body.get("path_b", "")
 
     config = cfg.load()
-    frame_a = extract_frame_b64(path_a, position=0.97) if path_a else None
-    frame_b = extract_frame_b64(path_b, position=0.03) if path_b else None
 
-    prompt = generate_bridge_prompt(
-        llm_router,
-        analysis_a, analysis_b,
-        frame_a, frame_b,
-        transition_mode=body.get("transition_mode", config.get("bridge_transition_mode", "cinematic")),
-        prompt_mode=body.get("prompt_mode", config.get("bridge_prompt_mode", "ai_informed")),
-        creativity=float(body.get("creativity", config.get("bridge_creativity", 9.0))),
-        user_guidance=body.get("user_guidance", ""),
-    )
+    def _run():
+        frame_a = extract_frame_b64(path_a, position=0.97) if path_a else None
+        frame_b = extract_frame_b64(path_b, position=0.03) if path_b else None
+        return generate_bridge_prompt(
+            llm_router,
+            analysis_a, analysis_b,
+            frame_a, frame_b,
+            transition_mode=body.get("transition_mode", config.get("bridge_transition_mode", "cinematic")),
+            prompt_mode=body.get("prompt_mode", config.get("bridge_prompt_mode", "ai_informed")),
+            creativity=float(body.get("creativity", config.get("bridge_creativity", 9.0))),
+            user_guidance=body.get("user_guidance", ""),
+        )
+
+    prompt = await asyncio.to_thread(_run)
     return {"prompt": prompt}
 
 
@@ -138,7 +153,7 @@ def _bridges_worker(job, items, settings):
 
     n = len(items)
 
-    # ── Pre-generate any text-to-video clips ──────────────────────────────
+    # -- Pre-generate any text-to-video clips ------------------------------
     from features.fun_videos.video_generator import generate_video as _gen_video
     for i, item in enumerate(items):
         if item.get("kind") != "text":
@@ -165,7 +180,7 @@ def _bridges_worker(job, items, settings):
         segment_paths[i] = result
         segment_kinds[i] = "video"
 
-    # Analyze any missing clips (skip text clips — they have no original media to analyze)
+    # Analyze any missing clips (skip text clips -- they have no original media to analyze)
     for i, analysis in enumerate(analyses):
         if _stopped():
             return
@@ -267,6 +282,7 @@ def _bridges_worker(job, items, settings):
 
     if result:
         job.output = result
+        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.message = f"Complete! {num_bridges} bridge(s) generated"
         from core.session import get_current as get_session
         get_session().add_file(Path(result).name, "video", "video_bridges", path=result)
@@ -312,8 +328,12 @@ async def start_generation(request: Request):
     }
     merged.update(settings)
 
-    job = job_manager.submit(
-        JOB_BRIDGE, _bridges_worker, items, merged,
-        label=f"{len(items)} clips, {len(items)-1} bridges",
-    )
+    try:
+        job = job_manager.submit(
+            JOB_BRIDGE, _bridges_worker, items, merged,
+            label=f"{len(items)} clips, {len(items)-1} bridges",
+        )
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
+    job.meta["feature"] = "bridge"
     return {"job_id": job.id}

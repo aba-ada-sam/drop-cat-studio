@@ -14,21 +14,34 @@ from pathlib import Path
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS: dict = {
-    # ── Global (shared across features) ──────────────────────────────────
+    # -- Global (shared across features) ----------------------------------
     "debug_mode": False,            # show service terminal windows when True
-    "gpu_job_timeout_seconds": 600, # max seconds before a GPU job is killed
+    "gpu_job_timeout_seconds": 1800, # max seconds before a GPU job is killed (30 min)
+    "gpu_queue_max_depth": 200,      # max jobs waiting in the GPU queue
     "wan2gp_root": "",
     "wan2gp_python": "",            # auto-detected if blank
     "wan_model": "LTX-2 Dev19B Distilled",
-    "resolution": "580p",
+    "resolution": "480p",
     "acestep_root": "",
 
-    # ── LLM Provider ─────────────────────────────────────────────────────
-    "llm_provider": "auto",          # auto | ollama | anthropic | openai
+    # -- LLM Provider -----------------------------------------------------
+    "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
     "anthropic_key": "",
     "openai_key": "",
+    # Ollama is OFF by default. It's only used when the user explicitly opts in:
+    #   * llm_provider == "ollama" (explicit selection), OR
+    #   * allow_ollama_fallback == True AND no cloud key is configured
+    # Vision calls that historically defaulted to Ollama (NSFW-safe) now route to
+    # cloud unless this flag is on and Ollama is reachable.
+    "allow_ollama_fallback": False,
 
-    # ── Image-to-Video (i2v_) ────────────────────────────────────────────
+    # -- Image Provider ----------------------------------------------------
+    "image_provider": "forge",        # forge | openai
+
+    # -- Audio Provider ----------------------------------------------------
+    "audio_provider": "acestep",      # acestep | ltx_native (LTX-2 MMAudio)
+
+    # -- Image-to-Video (i2v_) --------------------------------------------
     "i2v_ken_burns_zoom": 5,        # 0-20 %
     "i2v_img_dur": 3.0,
     "i2v_fade_dur": 0.5,
@@ -40,19 +53,22 @@ DEFAULTS: dict = {
     "i2v_crf": 18,
     "i2v_fps": 30,
 
-    # ── Fun Videos (fun_) ────────────────────────────────────────────────
-    "fun_video_duration": 14.0,
+    # -- Fun Videos (fun_) ------------------------------------------------
+    "fun_multi_num_clips": 2,          # default clip count for multi-video story
+    "fun_multi_clip_duration": 5.0,    # default seconds per clip in multi-video mode
+    "fun_director_passes": 0,          # 0=off, 1=one review pass, 2=two review passes
+    "fun_video_duration": 5.0,
     "fun_video_steps": 30,
     "fun_video_guidance": 7.5,
     "fun_video_seed": -1,
-    "fun_audio_steps": 8,
+    "fun_audio_steps": 27,
     "fun_audio_guidance": 7.0,
     "fun_audio_format": "mp3",
     "fun_audio_instrumental": False,
     "fun_num_prompts": 4,
     "fun_creativity": 8.0,
 
-    # ── Video Bridges (bridge_) ──────────────────────────────────────────
+    # -- Video Bridges (bridge_) ------------------------------------------
     "bridge_duration": 10.0,
     "bridge_image_duration": 2.5,
     "bridge_steps": 20,
@@ -68,7 +84,7 @@ DEFAULTS: dict = {
     "bridge_allow_fallback": True,
     "bridge_auto_analyze": True,
 
-    # ── SD Prompts (sd_) ─────────────────────────────────────────────────
+    # -- SD Prompts (sd_) -------------------------------------------------
     "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
     "forge_root": r"C:\Users\andre\My Drive\sd\stable-diffusion-webui",
@@ -83,15 +99,15 @@ DEFAULTS: dict = {
     # Step 1 front-door defaults (SD Prompts tab)
     "sd_step1_default_shape":    "single",   # "single" | "regional"
     "sd_step1_default_source":   "vague",    # "vague" | "paste"
-    "sd_step1_default_suffix":   "(depth blur)",
+    "sd_step1_default_suffix":   "",
     "sd_step1_default_provider": "local",    # "local" (Ollama) | "cloud" (Anthropic/OpenAI)
 
-    # ── Video Tools (tools_) ─────────────────────────────────────────────
+    # -- Video Tools (tools_) ---------------------------------------------
     "tools_crf": 18,
     "tools_out_format": "mp4",
     "tools_out_dir": "",
 
-    # ── Ollama (local AI — no API keys required) ─────────────────────────
+    # -- Ollama (local AI -- no API keys required) -------------------------
     # Models for RTX 4070 (12GB VRAM):
     #   gemma3:4b   (4B, ~3 GB)    -- fast, multimodal vision, tiny footprint
     #   qwen2.5:14b (14B, ~8.7 GB) -- power; strong reasoning, fits in 12GB
@@ -99,8 +115,9 @@ DEFAULTS: dict = {
     "ollama_fast_model":     "gemma3:4b",
     "ollama_balanced_model": "gemma3:4b",
     "ollama_power_model":    "qwen2.5:14b",
+    "ollama_vision_model":   "gemma3:4b",
 
-    # ── AI model aliases (mapped to Ollama) ───────────────────────────────
+    # -- AI model aliases (mapped to Ollama) -------------------------------
     "ai_model_fast":     "gemma3:4b",
     "ai_model_balanced": "gemma3:4b",
     "ai_model_power":    "qwen2.5:14b",
@@ -126,7 +143,7 @@ def _validate_config(data: dict) -> dict:
         # int/float are interchangeable
         if expected in (int, float) and isinstance(value, (int, float)):
             continue
-        _log.warning("[Config] Key '%s' expected %s, got %s (%r) — using default",
+        _log.warning("[Config] Key '%s' expected %s, got %s (%r) -- using default",
                      key, expected.__name__, type(value).__name__, value)
         data[key] = DEFAULTS[key]
     return data
@@ -163,8 +180,8 @@ def load() -> dict:
                 _cache = merged
                 _cache_mtime = mtime
                 return dict(merged)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("config.json is malformed, using defaults: %s", e)
         result = dict(DEFAULTS)
         _cache = result
         _cache_mtime = mtime
@@ -191,7 +208,7 @@ def set_val(key: str, value):
     save({key: value})
 
 
-# ── WanGP path helpers ───────────────────────────────────────────────────────
+# -- WanGP path helpers -------------------------------------------------------
 
 WAN_INDICATORS = ["app.py", "wan_video", "wgp.py", "wgp"]
 
@@ -221,17 +238,17 @@ def validate_wan2gp(path: str) -> tuple[bool, str]:
     if not p.exists():
         return False, f"Directory not found: {path}"
     if (p / "wgp.py").exists():
-        return True, "OK — found wgp.py"
+        return True, "OK -- found wgp.py"
     has_indicator = any((p / ind).exists() for ind in WAN_INDICATORS)
     if not has_indicator:
         return False, (
             f"Does not look like a Wan2GP directory "
             f"(expected wgp.py or one of: {', '.join(WAN_INDICATORS)})"
         )
-    return True, "OK — Wan2GP directory found"
+    return True, "OK -- Wan2GP directory found"
 
 
-# ── ACE-Step path helpers ────────────────────────────────────────────────────
+# -- ACE-Step path helpers ----------------------------------------------------
 
 def get_acestep_root() -> Path | None:
     """Return ACE-Step root as Path if configured and exists, else None."""
@@ -262,7 +279,7 @@ def validate_acestep(path: str) -> tuple[bool, str]:
     # Accept venv-based OR uv-based installs
     python = p / ".venv" / "Scripts" / "python.exe"
     if not python.exists() and not shutil.which("uv"):
-        return False, "Neither .venv\\Scripts\\python.exe nor 'uv' found — cannot start ACE-Step"
+        return False, "Neither .venv\\Scripts\\python.exe nor 'uv' found -- cannot start ACE-Step"
     return True, f"ACE-Step found at: {p}"
 
 
@@ -284,10 +301,10 @@ def auto_detect_acestep() -> str | None:
     return None
 
 
-# ── Config migration from old apps ──────────────────────────────────────────
+# -- Config migration from old apps ------------------------------------------
 
 _MIGRATION_MAP = {
-    # Fun-Videos keys → unified keys
+    # Fun-Videos keys -> unified keys
     "video_duration": "fun_video_duration",
     "video_steps": "fun_video_steps",
     "video_guidance": "fun_video_guidance",
@@ -297,7 +314,7 @@ _MIGRATION_MAP = {
     "audio_format": "fun_audio_format",
     "audio_instrumental": "fun_audio_instrumental",
     "num_prompts": "fun_num_prompts",
-    # Image2Video keys → unified keys
+    # Image2Video keys -> unified keys
     "ken_burns_zoom": "i2v_ken_burns_zoom",
     "img_dur": "i2v_img_dur",
     "fade_dur": "i2v_fade_dur",
@@ -313,7 +330,7 @@ _MIGRATION_MAP = {
 def migrate_from_old_apps():
     """Import settings from original app config files (run once on first start)."""
     if CONFIG_FILE.exists():
-        return  # already have a config — don't overwrite
+        return  # already have a config -- don't overwrite
 
     migrated: dict = {}
     ai_editors = CONFIG_FILE.parent.parent  # AI Editors directory

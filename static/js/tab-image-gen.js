@@ -3,9 +3,10 @@
  * Direct interface to Forge SD or OpenAI DALL-E 3 for txt2img.
  * Source toggle auto-falls back to DALL-E when Forge is offline.
  */
-import { api } from './api.js';
-import { toast, createSlider, createDropZone, el } from './components.js';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260419h';
+import { api } from './api.js?v=20260505e';
+import { createSlider, createDropZone, el } from './components.js?v=20260507a';
+import { toast } from './shell/toast.js?v=20260503a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
 
 let forgeStatus  = null;
 let openaiAvail  = false;
@@ -16,6 +17,7 @@ let source = 'forge'; // 'forge' | 'dalle'
 
 export function init(panel) {
   panel.innerHTML = '';
+  if (_forgeRetryTimer) { clearInterval(_forgeRetryTimer); _forgeRetryTimer = null; }
   const layout = el('div', { class: 'wide-layout' });
   panel.appendChild(layout);
 
@@ -56,7 +58,7 @@ export function init(panel) {
   statusBanner.appendChild(statusMsg);
   sidebar.appendChild(statusBanner);
 
-  // ── Prompt ───────────────────────────────────────────────────────────
+  // -- Prompt -----------------------------------------------------------
   const promptCard = el('div', { class: 'step-card' });
   sidebar.appendChild(promptCard);
   promptCard.appendChild(el('h3', { text: 'Prompt' }));
@@ -138,6 +140,7 @@ export function init(panel) {
     onclick() { seedInput.value = '-1'; } }));
   settingsCard.appendChild(seedRow);
 
+  // -- HiRes Fix (collapsible) ------------------------------------------
   const hrToggle = el('details', { style: 'margin-top:6px' });
   hrToggle.appendChild(el('summary', { style:'cursor:pointer;font-size:.85rem;color:var(--text-2)', text:'HiRes Fix' }));
   const hrBody = el('div', { style: 'margin-top:6px' });
@@ -206,7 +209,7 @@ export function init(panel) {
   const progressMsg = el('div', { style: 'display:none; text-align:center; padding:8px; font-size:.85rem; color:var(--accent)' });
   sidebar.appendChild(progressMsg);
 
-  // ── Main area ─────────────────────────────────────────────────────────
+  // -- Main Area: Image Display -----------------------------------------
   const resultCard = el('div', { class: 'card', style: 'text-align:center' });
   mainArea.appendChild(resultCard);
 
@@ -231,7 +234,8 @@ export function init(panel) {
   });
   resultCard.appendChild(emptyMsg);
 
-  const actionRow = el('div', { style: 'display:none; margin-top:10px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap' });
+  // Action buttons below image
+  const actionRow = el('div', { style: 'display:none; margin-top:10px; gap:6px; justify-content:center; flex-wrap:wrap' });
   resultCard.appendChild(actionRow);
 
   const btnReuse = el('button', { class:'btn btn-sm', text:'Reuse seed', onclick() {
@@ -239,8 +243,8 @@ export function init(panel) {
   }});
   const btnSendFun = el('button', { class:'btn btn-sm', text:'-> Make Videos', onclick() {
     if (!generatedImages[currentIdx]?.path) return;
-    import('./handoff.js').then(h => h.handoff('fun-videos', { type:'image', path:generatedImages[currentIdx].path }));
-    document.querySelector('[data-tab="fun-videos"]')?.click();
+    import('./handoff.js').then(h => h.handoff('create-videos', { type: 'image', path: generatedImages[currentIdx].path }));
+    document.querySelector('[data-tab="create-videos"]')?.click();
     toast('Image sent to Make Videos', 'info');
   }});
   const btnSendSD = el('button', { class:'btn btn-sm', text:'-> SD Prompts', onclick() {
@@ -253,22 +257,26 @@ export function init(panel) {
   actionRow.appendChild(btnSendSD);
   actionRow.appendChild(btnSendFun);
 
-  const navRow = el('div', { style: 'display:none; margin-top:8px; display:flex; justify-content:center; align-items:center; gap:12px' });
-  const prevBtn = el('button', { class:'btn btn-sm', text:'< Prev', onclick() { showImage(currentIdx-1); } });
+  // -- Gallery (thumbnails of past generations) -------------------------
+  const galleryCard = el('div', { class: 'card' });
+  mainArea.appendChild(galleryCard);
+  galleryCard.appendChild(el('h3', { style: 'margin-bottom:8px', text: 'Gallery' }));
+  const galleryGrid = el('div', {
+    style: 'display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); gap:6px',
+  });
+  galleryCard.appendChild(galleryGrid);
+  const galleryEmpty = el('div', { style: 'font-size:.82rem; color:var(--text-3); padding:6px 0', text: 'No images generated yet.' });
+  galleryCard.appendChild(galleryEmpty);
+
+  // Nav row
+  const navRow = el('div', { style: 'display:none; margin-top:8px; justify-content:center; align-items:center; gap:12px' });
+  const prevBtn = el('button', { class: 'btn btn-sm', text: '< Prev', onclick() { showImage(currentIdx - 1); } });
   const navLabel = el('span', { style: 'font-size:.82rem; color:var(--text-2)' });
   const nextBtn = el('button', { class:'btn btn-sm', text:'Next >', onclick() { showImage(currentIdx+1); } });
   navRow.appendChild(prevBtn); navRow.appendChild(navLabel); navRow.appendChild(nextBtn);
   resultCard.appendChild(navRow);
 
-  const galleryCard = el('div', { class: 'card' });
-  mainArea.appendChild(galleryCard);
-  galleryCard.appendChild(el('h3', { style:'margin-bottom:8px', text:'Gallery' }));
-  const galleryGrid = el('div', { style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px' });
-  galleryCard.appendChild(galleryGrid);
-  const galleryEmpty = el('div', { style:'font-size:.82rem;color:var(--text-3);padding:6px 0', text:'No images generated yet.' });
-  galleryCard.appendChild(galleryEmpty);
-
-  // ── Functions ─────────────────────────────────────────────────────────
+  // -- Functions ---------------------------------------------------------
 
   function setSource(s) {
     source = s;
@@ -403,6 +411,7 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
+  // -- Generate ---------------------------------------------------------
   let progressTimer = null;
 
   genBtn.addEventListener('click', async () => {

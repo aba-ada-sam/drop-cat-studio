@@ -182,6 +182,95 @@ def extract_frame_b64(
     return None
 
 
+def extract_last_frame_to_file(video_path: str | Path, out_path: str | Path) -> bool:
+    """Extract a frame near the end of a video and save it as a JPEG file.
+
+    Uses 85% of duration -- LTX-2 clips fade/blur in the final ~10-15%, and the
+    multi-pipeline tail-trim only removes ~0.2s, so 97% can still land in a nearly-
+    black or heavily motion-blurred frame that causes the next clip to go off the rails.
+    85% reliably lands in the clear, in-motion portion of the clip.
+    Returns True on success, False on failure.
+    """
+    dur = probe_duration(video_path)
+    seek = dur * 0.85 if dur > 0 else 0
+    try:
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", f"{seek:.3f}",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(out_path),
+            ],
+            capture_output=True, timeout=30,
+        )
+        return r.returncode == 0 and Path(out_path).exists()
+    except Exception as e:
+        log.debug("extract_last_frame_to_file(%s) failed: %s", video_path, e)
+        return False
+
+
+def extract_first_frame_to_file(video_path: str | Path, out_path: str | Path) -> bool:
+    """Extract a frame near the start of a video and save it as a JPEG file.
+
+    Uses 3% of duration (or 0.1s minimum) to skip any black-frame leader.
+    Returns True on success, False on failure.
+    """
+    dur = probe_duration(video_path)
+    seek = max(0.1, dur * 0.03) if dur > 0 else 0.1
+    try:
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", f"{seek:.3f}",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(out_path),
+            ],
+            capture_output=True, timeout=30,
+        )
+        return r.returncode == 0 and Path(out_path).exists()
+    except Exception as e:
+        log.debug("extract_first_frame_to_file(%s) failed: %s", video_path, e)
+        return False
+
+
+def sample_frames_temporal(
+    video_path: str | Path,
+    max_frames: int = 12,
+    max_dim: int = 512,
+) -> list[str]:
+    """Sample frames across a video's full duration for AI analysis.
+
+    Strategy (matches the original DropCatGo approach):
+      - duration <= max_frames seconds  -> 1 frame per second (centred in each second)
+      - duration  > max_frames seconds -> max_frames evenly-spaced frames
+
+    This gives the AI a temporal view of the video so it can write a story
+    that tracks what actually happens over time, not just a snapshot.
+    """
+    dur = probe_duration(video_path)
+    if dur <= 0:
+        return []
+
+    if dur <= max_frames:
+        # 1 fps -- centre of each second
+        positions = [(i + 0.5) / dur for i in range(int(dur))]
+    else:
+        # evenly spaced, avoid the very first and last frame
+        step = 1.0 / max_frames
+        positions = [step * i + step / 2 for i in range(max_frames)]
+
+    frames = []
+    for pos in positions:
+        b64 = extract_frame_b64(video_path, position=min(pos, 0.999), max_dim=max_dim)
+        if b64:
+            frames.append(b64)
+    return frames
+
+
 def run_ffmpeg(
     cmd: list[str],
     timeout: int = 3600,

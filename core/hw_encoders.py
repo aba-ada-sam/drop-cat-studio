@@ -8,8 +8,8 @@ import subprocess
 
 # All known encoders: (id, display_label, is_hw)
 KNOWN_ENCODERS = [
-    ("libx264",     "H.264 (CPU — libx264)",       False),
-    ("libx265",     "H.265 (CPU — libx265)",       False),
+    ("libx264",     "H.264 (CPU -- libx264)",       False),
+    ("libx265",     "H.265 (CPU -- libx265)",       False),
     ("h264_nvenc",  "H.264 (NVIDIA NVENC)",         True),
     ("hevc_nvenc",  "H.265 (NVIDIA NVENC)",         True),
     ("h264_amf",    "H.264 (AMD AMF)",              True),

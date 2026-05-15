@@ -4,33 +4,43 @@
  *       command palette, keyboard shortcuts, modals, settings.
  */
 
-// tab-imports.js removed — import is handled per-tab
+// tab-imports.js removed -- import is handled per-tab
 import { init as initImageGen } from './tab-image-gen.js?v=20260425c';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260423c';
-import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260423d';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260423e';
-import { init as initPipeline  } from './tab-pipeline.js?v=20260422f';
-import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260422h';
-import { consumeHandoff } from './handoff.js?v=20260422a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260421c';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260422m';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260512a';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260510q';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260511q';
+import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260505g';
+import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260503i';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260510b';
+import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
+import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
+import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
+import { consumeHandoff } from './handoff.js?v=20260508a';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260503a';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260509a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
-import './shell/ai-intent.js?v=20260421c';
+import './shell/ai-intent.js?v=20260503h';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260421c';
 
-// ── Tab module map ──────────────────────────────────────────────────────────
+// -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {
+  'express':           initExpress,
   'pipeline':          initPipeline,
   'image-gen':         initImageGen,
-  'fun-videos':        initFunVideos,
+  'create-videos':     initFunVideos,
+  'song-video':        initSongVideo,
   'bridges':           initBridges,
   'sd-prompts':        initSdPrompts,
   'video-tools':       initVideoTools,
   'video-tools-batch': initVideoToolsBatch,
+  'adobe':             initAdobe,
+  'queue':             initQueue,
 };
 const TAB_HANDOFF = {
-  'fun-videos':        funHandoff,
+  'express':           expressHandoff,
+  'create-videos':     funHandoff,
+  'song-video':        songVideoHandoff,
   'bridges':           bridgesHandoff,
   'sd-prompts':        sdPromptsHandoff,
   'video-tools':       null,
@@ -38,15 +48,12 @@ const TAB_HANDOFF = {
 };
 const _tabInitialized = new Set();
 
-// ── Pipeline breadcrumb ───────────────────────────────────────────────────────
-// Injected once into each of the 4 pipeline panels so users always know
-// where they are and what comes next.
+// -- Pipeline breadcrumb -------------------------------------------------------
+// Injected into Generate Images and Create Videos panels.
+// Audio lives inside Create Videos; Batch Processing is its own standalone tool.
 const PIPELINE_STEPS = [
-  { id: 'sd-prompts',        num: '01', label: 'Generate Images'  },
-  { id: 'fun-videos',        num: '02', label: 'Create Videos'    },
-  { id: 'bridges',           num: '03', label: 'Add Transitions'  },
-  { id: 'video-tools',       num: '04', label: 'Audio'            },
-  { id: 'video-tools-batch', num: '05', label: 'Batch Processing' },
+  { id: 'sd-prompts', num: '01', label: 'Generate Images' },
+  { id: 'create-videos', num: '02', label: 'Create Videos'   },
 ];
 
 function _buildPipelineBar(activeTabId) {
@@ -93,8 +100,8 @@ function _buildPipelineBar(activeTabId) {
   return bar;
 }
 
-// ── Splash ──────────────────────────────────────────────────────────────────
-const SPLASH_BLOCKING_STATES = new Set(['unknown']);
+// -- Splash ------------------------------------------------------------------
+const SPLASH_BLOCKING_STATES = new Set(['unknown', 'starting']);
 const SPLASH_LOADING_STATES  = new Set(['unknown', 'starting']);
 
 function svcStateToCheck(state) {
@@ -253,7 +260,7 @@ async function runSplash() {
   }
 }
 
-// ── State ───────────────────────────────────────────────────────────────────
+// -- State -------------------------------------------------------------------
 const state = {
   activeTab:    'sd-prompts',
   logOpen:      false,
@@ -262,9 +269,20 @@ const state = {
   galleryOpen:  false,
 };
 
-// ── Tab routing ─────────────────────────────────────────────────────────────
+// Video pill: config default (from settings) vs tab override (what will actually run)
+let _configVideoModel = '';
+let _tabVideoModel    = null;   // set by active tab; null = show config default
+
+// Tabs broadcast their active model here; app.js updates the pill immediately.
+document.addEventListener('dcs:video-model', e => {
+  _tabVideoModel = e.detail?.model ?? null;
+  _applyVideoPillState(_tabVideoModel || _configVideoModel);
+});
+
+// -- Tab routing -------------------------------------------------------------
 function switchTab(tabId) {
   state.activeTab = tabId;
+  if (state.galleryOpen) _galleryClose();
 
   // Update rail buttons (Gallery has no data-tab so it's handled separately)
   document.querySelectorAll('.rail-tab[data-tab]').forEach(btn => {
@@ -275,9 +293,11 @@ function switchTab(tabId) {
   // Keep gallery button state in sync with overlay state
   document.getElementById('btn-gallery-rail')?.classList.toggle('active', state.galleryOpen);
 
-  // Update panels
+  // Update panels -- pause any playing videos in panels being hidden
   document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.toggle('active', panel.id === `panel-${tabId}`);
+    const becoming = panel.id === `panel-${tabId}`;
+    if (!becoming) panel.querySelectorAll('video').forEach(v => v.pause());
+    panel.classList.toggle('active', becoming);
   });
 
   // Initialize on first visit
@@ -298,14 +318,25 @@ function switchTab(tabId) {
     }
   }
 
+  // Pause/resume queue polling based on visibility
+  if (tabId === 'queue') resumeQueue(); else pauseQueue();
+
+  // Video pill: let the incoming tab announce its model; clear override for non-video tabs
+  const VIDEO_TABS = new Set(['express', 'create-videos', 'song-video']);
+  if (!VIDEO_TABS.has(tabId)) {
+    _tabVideoModel = null;
+    _applyVideoPillState(_configVideoModel);
+  }
+  document.dispatchEvent(new CustomEvent('dcs:tab-activated', { detail: { tab: tabId } }));
+
   // Dispatch handoff
   const handoffData = consumeHandoff(tabId);
   if (handoffData && TAB_HANDOFF[tabId]) TAB_HANDOFF[tabId](handoffData);
 }
 
-// ── Service polling ─────────────────────────────────────────────────────────
+// -- Service polling ---------------------------------------------------------
 const SERVICE_MESSAGES = {
-  acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- set path in Settings' },
+  acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- click Start to load music model' },
   forge:   { not_running: 'Not detected -- start Forge with --api flag', starting: 'Starting (~60s)...', not_configured: 'Not configured' },
   wangp:   { not_configured: 'Not configured -- set WanGP path in Settings', ready: 'Configured -- worker starts on first use' },
 };
@@ -313,40 +344,94 @@ const SERVICE_MESSAGES = {
 // Latest service state for service panel
 const _svcState = {};
 
+let _imageProvider = 'forge'; // synced from config; controls Image pill dot + label
+
+const _SVC_TO_TYPE = { forge: 'image', wangp: 'video', acestep: 'sound' };
+
 async function pollServices() {
   try {
     const data = await fetch('/api/services').then(r => r.json());
-    let anyProblem = false;
     for (const [name, info] of Object.entries(data)) {
       _svcState[name] = info;
       const dotClass = info.state || 'unknown';
-      if (!['running','ready','ok'].includes(dotClass)) anyProblem = true;
 
-      const pillDot = document.querySelector(`#pill-${name} .dot`);
-      if (pillDot) { pillDot.className = 'dot'; pillDot.classList.add(dotClass); }
+      // New AI-type pill dots
+      const typeKey = _SVC_TO_TYPE[name];
+      if (typeKey) {
+        // Don't let forge state overwrite the image dot when OpenAI is selected
+        if (typeKey === 'image' && _imageProvider === 'openai') {
+          // dot managed by _applyImagePillState instead
+        } else {
+          const d = document.getElementById(`ap-${typeKey}-dot`);
+          if (d) { d.className = `dot ${dotClass}`; }
+        }
+      }
 
+      // Text dot: update when ollama state changes
+      if (name === 'ollama') _updateTextDot(info.state);
+
+      // Service panel meta (IDs used by renderServicePanel)
       const svcId = name === 'forge' ? 'dot-forge-svc' : `dot-${name}`;
       const svcDot = document.getElementById(svcId);
       if (svcDot) { svcDot.className = 'dot'; svcDot.classList.add(dotClass); }
-
       const override = SERVICE_MESSAGES[name]?.[info.state];
       const displayMsg = override || info.message || info.state;
       const msgId = name === 'forge' ? 'msg-forge-svc' : `msg-${name}`;
       const msgEl = document.getElementById(msgId);
       if (msgEl) msgEl.textContent = displayMsg;
-
-      const pill = document.getElementById(`pill-${name}`);
-      if (pill) pill.title = displayMsg;
     }
 
-    // Update service panel if open
     if (document.getElementById('service-panel-overlay')?.classList.contains('open')) {
       renderServicePanel();
     }
   } catch (_) {}
 }
 
-// ── Service panel ───────────────────────────────────────────────────────────
+function _updateTextDot(ollamaState) {
+  const dot = document.getElementById('ap-text-dot');
+  if (!dot) return;
+  const badge = document.getElementById('ai-badge');
+  const isCloud = badge?.classList.contains('ai-cloud');
+  const ok = isCloud || ollamaState === 'running';
+  dot.className = `dot ${ok ? 'running' : 'unknown'}`;
+}
+
+function _videoModelShortLabel(name) {
+  if (!name) return 'Video';
+  const n = name.toLowerCase();
+  if (n.includes('ltx')) return 'Video: LTX-2';
+  if (n.includes('480p')) return 'Video: Wan 480P';
+  if (n.includes('720p')) return 'Video: Wan 720P';
+  if (n.includes('t2v') && n.includes('1.3')) return 'Video: Wan T2V 1.3B';
+  if (n.includes('t2v')) return 'Video: Wan T2V';
+  return `Video: ${name.split(' ')[0]}`;
+}
+
+function _applyVideoPillState(modelName) {
+  const label = document.querySelector('#ap-video .ap-label');
+  if (label) label.textContent = _videoModelShortLabel(modelName);
+}
+
+function _applySoundPillState(audioProvider) {
+  const label = document.querySelector('#ap-sound .ap-label');
+  if (!label) return;
+  label.textContent = (audioProvider === 'ltx_native') ? 'Sound: LTX-2' : 'Sound: ACE-Step';
+}
+
+function _applyImagePillState(provider, hasOpenAI) {
+  _imageProvider = provider || 'forge';
+  const label = document.querySelector('#ap-image .ap-label');
+  if (label) label.textContent = _imageProvider === 'openai' ? 'Image: OpenAI' : 'Image: Forge';
+  const dot = document.getElementById('ap-image-dot');
+  if (!dot) return;
+  if (_imageProvider === 'openai') {
+    dot.className = `dot ${hasOpenAI ? 'running' : 'unknown'}`;
+  } else {
+    dot.className = `dot ${_svcState.forge?.state || 'unknown'}`;
+  }
+}
+
+// -- Service panel -----------------------------------------------------------
 function openServicePanel() {
   document.getElementById('service-panel-overlay')?.classList.add('open');
   renderServicePanel();
@@ -391,13 +476,13 @@ function renderServicePanel() {
       <div class="svc-detail-header">
         <span class="dot ${state}" style="width:10px;height:10px" aria-hidden="true"></span>
         <h3>${label}</h3>
-        <span style="font-size:.72rem;color:var(--text-3)">${state}</span>
+        <span style="font-size:.72rem;color:var(--text-3)">${escHtml(state)}</span>
       </div>
       <div class="svc-detail-body">
         <div class="svc-meta-row"><span>Hint</span><span>${SVC_HINTS[name]}</span></div>
         <div class="svc-meta-row"><span>Latency</span><span>${latency}</span></div>
         <div class="svc-meta-row"><span>Last check</span><span>${lastCheck}</span></div>
-        ${model !== '--' ? `<div class="svc-meta-row"><span>Model</span><span>${model}</span></div>` : ''}
+        ${model !== '--' ? `<div class="svc-meta-row"><span>Model</span><span>${escHtml(model)}</span></div>` : ''}
         ${vram  !== '--' ? `<div class="svc-meta-row"><span>GPU VRAM</span><span>${vram}</span></div>`  : ''}
         <div class="svc-log-lines">${escHtml(logLines)}</div>
       </div>
@@ -405,7 +490,7 @@ function renderServicePanel() {
         <button class="btn btn-sm svc-start" data-svc="${name}">Start</button>
         <button class="btn btn-sm svc-stop"  data-svc="${name}">Stop</button>
         <button class="btn btn-sm svc-restart" data-svc="${name}">Restart</button>
-        ${info.url ? `<a href="${info.url}" target="_blank" class="btn btn-sm">Open UI</a>` : ''}
+        ${info.url ? `<a href="${escHtml(info.url)}" target="_blank" class="btn btn-sm">Open UI</a>` : ''}
       </div>`;
 
     card.querySelectorAll('.svc-start').forEach(b => b.addEventListener('click', () => svcAction('start', b.dataset.svc)));
@@ -416,7 +501,7 @@ function renderServicePanel() {
   }
 }
 
-// ── Log polling ─────────────────────────────────────────────────────────────
+// -- Log polling -------------------------------------------------------------
 async function pollLogs() {
   if (!state.logOpen) return;
   try {
@@ -425,7 +510,7 @@ async function pollLogs() {
     for (const entry of (data.logs || [])) {
       const div = document.createElement('div');
       div.className = `log-entry ${entry.level}`;
-      div.innerHTML = `<span class="time">${entry.time}</span>${escHtml(entry.msg)}`;
+      div.innerHTML = `<span class="time">${escHtml(entry.time)}</span>${escHtml(entry.msg)}`;
       container.prepend(div);
       state.logSeq = Math.max(state.logSeq, entry.seq || 0);
     }
@@ -433,40 +518,74 @@ async function pollLogs() {
 }
 
 
-// ── Modals ──────────────────────────────────────────────────────────────────
+// -- Modals ------------------------------------------------------------------
 function openModal(id)  { document.getElementById(id)?.classList.add('open');    }
 function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 
-// ── Settings ────────────────────────────────────────────────────────────────
+// -- Settings ----------------------------------------------------------------
 async function loadConfig() {
   try {
     state.config = await apiFetch('/api/config', { context: 'loadConfig' });
     for (const [key, val] of Object.entries(state.config)) {
       const el = document.getElementById(`cfg-${key}`);
-      if (el) el.value = val;
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!val;
+      else el.value = val;
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
-    onLLMProviderChange(llm.provider || 'ollama');
-    if (llm.anthropic_key_hint) {
-      const h = document.getElementById('anthropic-key-hint');
-      if (h) h.textContent = `Current key: ${llm.anthropic_key_hint}`;
-    }
+    _applyLLMState(llm);
+    _applyImagePillState(state.config.image_provider || 'forge', !!llm.openai_key_set);
+    _configVideoModel = state.config.wan_model || '';
+    _applyVideoPillState(_tabVideoModel || _configVideoModel);
+    _applySoundPillState(state.config.audio_provider || 'acestep');
   } catch (_) {}
 }
 
-function onLLMProviderChange(provider) {
-  const useAnthropic = provider === 'anthropic';
-  const toggle = document.getElementById('provider-toggle-input');
-  if (toggle) toggle.checked = useAnthropic;
-  document.getElementById('llm-ollama-section').style.display    = useAnthropic ? 'none' : '';
-  document.getElementById('llm-anthropic-section').style.display = useAnthropic ? ''     : 'none';
-  ['ollama','anthropic'].forEach(p => {
-    const side = document.getElementById(`provider-side-${p}`);
-    if (side) {
-      side.classList.toggle('active',   p === provider);
-      side.classList.toggle('inactive', p !== provider);
-    }
-  });
+function _applyLLMState(llm) {
+  const provider   = llm.provider   || 'auto';
+  const effective  = llm.effective_provider || provider;
+
+  // Sync the settings select (may already be set by the config loop above)
+  const sel = document.getElementById('cfg-llm_provider');
+  if (sel && sel.value !== provider) sel.value = provider;
+
+  // Ollama section: show when provider uses local AI
+  const showOllama = (provider === 'ollama' || provider === 'auto');
+  const ollamaSec = document.getElementById('llm-ollama-section');
+  if (ollamaSec) ollamaSec.style.display = showOllama ? '' : 'none';
+
+  // Key hints
+  const ah = document.getElementById('anthropic-key-hint');
+  if (ah) ah.textContent = llm.anthropic_key_hint ? `Current: ${llm.anthropic_key_hint}` : 'Not set';
+  const oh = document.getElementById('openai-key-hint');
+  if (oh) oh.textContent = llm.openai_key_hint ? `Current: ${llm.openai_key_hint}` : 'Not set';
+
+  // Effective provider hint under the select
+  const hint = document.getElementById('ai-effective-hint');
+  if (hint && provider === 'auto') hint.textContent = `Using: ${effective}`;
+  else if (hint) hint.textContent = '';
+
+  // Header AI badge (kept for compat; element may not exist)
+  const badge = document.getElementById('ai-badge');
+  const isCloud = (effective === 'anthropic' || effective === 'openai');
+  const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
+  if (badge) {
+    badge.className = 'ai-badge ' + (isCloud ? 'ai-cloud' : hasAny ? 'ai-local' : 'ai-none');
+    badge.textContent = isCloud ? `* AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
+                                 : effective === 'ollama' ? '* AI: Local' : '* AI';
+  }
+
+  // Text pill dot + label
+  const textDot = document.getElementById('ap-text-dot');
+  if (textDot) {
+    const ok = (isCloud && hasAny) || (_svcState.ollama?.state === 'running');
+    textDot.className = `dot ${ok ? 'running' : 'unknown'}`;
+  }
+  const textLabel = document.querySelector('#ap-text .ap-label');
+  if (textLabel) {
+    textLabel.textContent = isCloud ? `Text: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
+                                    : effective === 'ollama' ? 'Text: Local' : 'Text';
+  }
 }
 
 async function saveSettings() {
@@ -477,13 +596,18 @@ async function saveSettings() {
       const el = document.getElementById(`cfg-${key}`);
       if (el) body[key] = el.value;
     }
+    // Boolean toggles (checkboxes)
+    for (const key of ['allow_ollama_fallback']) {
+      const el = document.getElementById(`cfg-${key}`);
+      if (el) body[key] = !!el.checked;
+    }
     await apiFetch('/api/config', { method: 'POST', body: JSON.stringify(body), context: 'saveSettings' });
     const ollamaBody = {};
     for (const k of ['ollama_host','ollama_fast_model','ollama_power_model']) if (body[k] !== undefined) ollamaBody[k] = body[k];
     if (Object.keys(ollamaBody).length) {
       await apiFetch('/api/ollama/config', { method: 'POST', body: JSON.stringify(ollamaBody), context: 'saveOllama' });
     }
-    const llmBody = { provider: document.getElementById('provider-toggle-input')?.checked ? 'anthropic' : 'ollama' };
+    const llmBody = { provider: document.getElementById('cfg-llm_provider')?.value || 'auto' };
     const anthropicKey = document.getElementById('cfg-anthropic_key')?.value;
     const openaiKey    = document.getElementById('cfg-openai_key')?.value;
     if (anthropicKey) llmBody.anthropic_key = anthropicKey;
@@ -503,7 +627,7 @@ async function loadOllamaModels() {
       const sel = document.getElementById(selId);
       if (!sel) continue;
       const current = sel.value || state.config?.[selId.replace('cfg-', '')] || '';
-      sel.innerHTML = models.map(m => `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`).join('') || '<option value="">No models found</option>';
+      sel.innerHTML = models.map(m => `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`).join('') || '<option value="">No models found</option>';
     }
   } catch (_) {}
 }
@@ -519,7 +643,7 @@ async function validatePath(type) {
   } catch (_) {}
 }
 
-// ── Service actions ─────────────────────────────────────────────────────────
+// -- Service actions ---------------------------------------------------------
 async function svcAction(action, name) {
   const label = action === 'start' ? 'Starting' : action === 'stop' ? 'Stopping' : 'Restarting';
   toast(`${label} ${name}...`, 'info');
@@ -530,7 +654,7 @@ async function svcAction(action, name) {
   setTimeout(pollServices, 1000);
 }
 
-// ── Gallery overlay ──────────────────────────────────────────────────────────
+// -- Gallery overlay ----------------------------------------------------------
 function _galleryOpen() {
   const ov  = document.getElementById('gallery-overlay');
   if (!ov) return;
@@ -552,7 +676,218 @@ function _galleryToggle() {
   state.galleryOpen ? _galleryClose() : _galleryOpen();
 }
 
-// ── Rail collapse ─────────────────────────────────────────────────────────────
+// -- AI-type header pills ------------------------------------------------------
+function initAIPills() {
+  const TYPES = ['text', 'image', 'video', 'sound'];
+  let _openType = null;
+
+  function closeAllMenus() {
+    TYPES.forEach(t => { document.getElementById(`ap-${t}-menu`)?.toggleAttribute('hidden', true); });
+    _openType = null;
+  }
+
+  async function renderMenu(type) {
+    const menu = document.getElementById(`ap-${type}-menu`);
+    if (!menu) return;
+    menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading...</div>`;
+
+    if (type === 'text')  { await _renderTextMenu(menu); }
+    if (type === 'image') { await _renderImageMenu(menu); }
+    if (type === 'video') { await _renderVideoMenu(menu); }
+    if (type === 'sound') { await _renderSoundMenu(menu); }
+  }
+
+  async function _renderTextMenu(menu) {
+    let llm = {};
+    try { llm = await apiFetch('/api/llm/config', { context: 'pill.text' }); } catch (_) {}
+    const current = llm.provider || 'auto';
+    const PROVIDERS = [
+      { value: 'auto',      label: 'Auto',      hint: 'Best available' },
+      { value: 'anthropic', label: 'Anthropic', hint: 'Claude -- fast & smart' },
+      { value: 'openai',    label: 'OpenAI',    hint: 'GPT-4o' },
+      { value: 'ollama',    label: 'Ollama',    hint: 'Local / private' },
+    ];
+    menu.innerHTML = '<div class="ap-menu-title">Text AI</div>';
+    for (const p of PROVIDERS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-text-p" value="${p.value}"${p.value === current ? ' checked' : ''}>
+        <span class="ap-opt-label">${p.label}</span><span class="ap-opt-hint">${p.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ llm_provider: p.value }), context: 'pill.text.save' }).catch(() => {});
+        const fresh = await apiFetch('/api/llm/config', { context: 'pill.text.refresh' }).catch(() => ({}));
+        _applyLLMState(fresh);
+        closeAllMenus();
+        toast(`Text AI -> ${p.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    const link = document.createElement('button');
+    link.className = 'ap-menu-link'; link.textContent = '⚙ Settings ->';
+    link.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); closeAllMenus(); });
+    menu.appendChild(link);
+  }
+
+  async function _renderImageMenu(menu) {
+    let configData = {}, llm = {};
+    try { configData = await apiFetch('/api/config', { context: 'pill.image.cfg' }); } catch (_) {}
+    try { llm = await apiFetch('/api/llm/config', { context: 'pill.image.llm' }); } catch (_) {}
+    const current = configData.image_provider || 'forge';
+    const hasOpenAI = !!llm.openai_key_set;
+    const forgeSvc = _svcState.forge || {};
+
+    const PROVIDERS = [
+      { value: 'forge',  label: 'Forge SD',      hint: 'Local Stable Diffusion' },
+      { value: 'openai', label: 'OpenAI DALL-E',  hint: hasOpenAI ? 'DALL-E 3 -- key ready' : 'Needs OpenAI key in Settings' },
+    ];
+    menu.innerHTML = '<div class="ap-menu-title">Image</div>';
+    for (const p of PROVIDERS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-image-p" value="${p.value}"${p.value === current ? ' checked' : ''}>
+        <span class="ap-opt-label">${p.label}</span><span class="ap-opt-hint">${p.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: p.value }), context: 'pill.image.save' }).catch(() => {});
+        _applyImagePillState(p.value, hasOpenAI);
+        closeAllMenus();
+        toast(`Image -> ${p.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    if (current === 'forge') {
+      const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '--';
+      menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>`);
+      const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+      acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="forge" data-act="start">Start</button>
+        <button class="btn btn-sm ap-ss" data-svc="forge" data-act="stop">Stop</button>
+        ${forgeSvc.url ? `<a href="${escHtml(forgeSvc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
+        <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
+      acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+      acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+      menu.appendChild(acts);
+    } else {
+      const link = document.createElement('button');
+      link.className = 'ap-menu-link'; link.style.cssText = 'padding:6px 12px;display:block;';
+      link.textContent = '⚙ Configure OpenAI key in Settings ->';
+      link.addEventListener('click', () => { loadConfig(); openModal('modal-settings'); closeAllMenus(); });
+      menu.appendChild(link);
+    }
+  }
+
+  async function _renderVideoMenu(menu) {
+    let models = {}, configData = {};
+    try { models = (await apiFetch('/api/fun/models', { context: 'pill.video' })).models || {}; } catch (_) {}
+    try { configData = await apiFetch('/api/config', { context: 'pill.video.cfg' }); } catch (_) {}
+    // Match the pill: tab-announced model (Express quality chip) wins over saved config.
+    const currentModel = _tabVideoModel || configData.wan_model || 'LTX-2 Dev19B Distilled';
+    const svc = _svcState.wangp || {};
+
+    menu.innerHTML = `<div class="ap-menu-title">Video <span class="dot ${svc.state||'unknown'}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(svc.state||'--')}</span></div>
+      <div class="ap-menu-subtitle">Select model</div>`;
+    for (const [name, info] of Object.entries(models)) {
+      const res = info.res ? `${info.res[0]}x${info.res[1]}` : '';
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-video-m" value="${escHtml(name)}"${name === currentModel ? ' checked' : ''}>
+        <span class="ap-opt-label">${escHtml(name)}</span>${res ? `<span class="ap-opt-hint">${res}</span>` : ''}`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ wan_model: name }), context: 'pill.video.save' }).catch(() => {});
+        _applyVideoPillState(name);
+        closeAllMenus();
+        toast(`Video model -> ${name}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="wangp" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="wangp" data-act="stop">Stop</button>
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  async function _renderSoundMenu(menu) {
+    let configData = {};
+    try { configData = await apiFetch('/api/config', { context: 'pill.sound.cfg' }); } catch (_) {}
+    const currentVideoModel = configData.wan_model || '';
+    const currentAudio = configData.audio_provider || 'acestep';
+    const isLTX = currentVideoModel.toLowerCase().includes('ltx');
+    const svc = _svcState.acestep || {};
+    const st = svc.state || 'unknown';
+    const msg = SERVICE_MESSAGES.acestep?.[svc.state] || svc.message || svc.state || '--';
+
+    const AUDIO_OPTIONS = [
+      { value: 'acestep', label: 'ACE-Step', hint: 'Full AI music + lyrics generation' },
+      ...(isLTX ? [{ value: 'ltx_native', label: 'LTX-2 native audio', hint: 'Built-in WanGP MMAudio -- no ACE-Step needed' }] : []),
+    ];
+
+    menu.innerHTML = '<div class="ap-menu-title">Sound</div><div class="ap-menu-subtitle">Audio generation engine</div>';
+    for (const opt of AUDIO_OPTIONS) {
+      const row = document.createElement('label');
+      row.className = 'ap-menu-option';
+      row.innerHTML = `<input type="radio" name="ap-sound-p" value="${opt.value}"${opt.value === currentAudio ? ' checked' : ''}>
+        <span class="ap-opt-label">${opt.label}</span><span class="ap-opt-hint">${opt.hint}</span>`;
+      row.querySelector('input').addEventListener('change', async () => {
+        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ audio_provider: opt.value }), context: 'pill.sound.save' }).catch(() => {});
+        _applySoundPillState(opt.value);
+        closeAllMenus();
+        toast(`Audio -> ${opt.label}`, 'success');
+      });
+      menu.appendChild(row);
+    }
+    menu.insertAdjacentHTML('beforeend', `<div class="ap-menu-sep"></div>
+      <div class="ap-menu-title" style="font-size:.7rem;">ACE-Step <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(st)}</span></div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>
+      <div class="ap-menu-sep"></div>`);
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="acestep" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="acestep" data-act="stop">Stop</button>
+      ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  function _renderSvcMenu(menu, svcName, label, hint) {
+    const svc = _svcState[svcName] || {};
+    const st = svc.state || 'unknown';
+    const msg = SERVICE_MESSAGES[svcName]?.[svc.state] || svc.message || svc.state || '--';
+    menu.innerHTML = `<div class="ap-menu-title">${label} <span class="dot ${st}" style="width:7px;height:7px;display:inline-block;vertical-align:middle;margin:0 2px 1px"></span><span class="ap-svc-state">${escHtml(st)}</span></div>
+      <div class="ap-menu-subtitle">${hint}</div>
+      <div style="font-size:.75rem;color:var(--text-2);padding:0 12px 10px;line-height:1.5;">${escHtml(msg)}</div>
+      <div class="ap-menu-sep"></div>`;
+    const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
+    acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="start">Start</button>
+      <button class="btn btn-sm ap-ss" data-svc="${svcName}" data-act="stop">Stop</button>
+      ${svc.url ? `<a href="${escHtml(svc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
+      <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
+    acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
+    acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
+    menu.appendChild(acts);
+  }
+
+  // Wire pill buttons
+  TYPES.forEach(type => {
+    document.querySelector(`#ap-${type} .ai-pill-btn`)?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (_openType === type) { closeAllMenus(); return; }
+      closeAllMenus();
+      _openType = type;
+      renderMenu(type);
+      document.getElementById(`ap-${type}-menu`)?.removeAttribute('hidden');
+    });
+    document.getElementById(`ap-${type}-menu`)?.addEventListener('click', e => e.stopPropagation());
+  });
+  document.addEventListener('click', closeAllMenus);
+}
+
+
+// -- Rail collapse -------------------------------------------------------------
 function initRailToggle() {
   const rail = document.getElementById('app-rail');
   const btn  = document.getElementById('rail-toggle');
@@ -566,7 +901,7 @@ function initRailToggle() {
   });
 }
 
-// ── Keyboard shortcuts registration ─────────────────────────────────────────
+// -- Keyboard shortcuts registration -----------------------------------------
 function initShortcuts() {
   const SHORTCUTS = [
     { key: 'k', ctrl: true, global: true, action: () => openPalette(), description: 'Command palette' },
@@ -579,12 +914,10 @@ function initShortcuts() {
       document.getElementById('gallery-detail-overlay')?.classList.remove('open');
       document.getElementById('error-log-overlay')?.classList.remove('open');
     }, description: 'Close / cancel' },
-    { key: '0', action: () => switchTab('pipeline'),   description: 'Studio Home' },
-    { key: '1', action: () => switchTab('sd-prompts'),  description: 'Generate Images (Step 01)' },
-    { key: '2', action: () => switchTab('fun-videos'),  description: 'Create Videos (Step 02)' },
-    { key: '3', action: () => switchTab('bridges'),     description: 'Add Transitions (Step 03)' },
-    { key: '4', action: () => switchTab('video-tools'),       description: 'Audio (Step 04)' },
-    { key: '5', action: () => switchTab('video-tools-batch'), description: 'Batch Processing (Step 05)' },
+    { key: '0', action: () => switchTab('pipeline'),          description: 'Studio Home' },
+    { key: '1', action: () => switchTab('sd-prompts'),         description: 'Generate Images' },
+    { key: '2', action: () => switchTab('create-videos'),      description: 'Create Videos' },
+    { key: '4', action: () => switchTab('video-tools-batch'),  description: 'Batch Processing' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
   ];
@@ -605,15 +938,14 @@ function initShortcuts() {
   }
 }
 
-// ── Command palette items ─────────────────────────────────────────────────────
+// -- Command palette items -----------------------------------------------------
 function initPaletteItems() {
   registerItems([
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
+    { label: 'Quick Video',      group: 'Tabs',   hint: 'Q', action: () => switchTab('express') },
     { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
-    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('fun-videos') },
-    { label: 'Create Transitions', group: 'Tabs', hint: '3', action: () => switchTab('bridges') },
-    { label: 'Audio',            group: 'Tabs',   hint: '4', action: () => switchTab('video-tools') },
-    { label: 'Batch Processing', group: 'Tabs',   hint: '5', action: () => switchTab('video-tools-batch') },
+    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('create-videos') },
+    { label: 'Batch Processing', group: 'Tabs',   hint: '4', action: () => switchTab('video-tools-batch') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
@@ -624,7 +956,7 @@ function initPaletteItems() {
   ]);
 }
 
-// ── Utilities ───────────────────────────────────────────────────────────────
+// -- Utilities ---------------------------------------------------------------
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
@@ -632,7 +964,7 @@ function escHtml(s) {
 }
 
 
-// ── Client-side error logging ────────────────────────────────────────────────
+// -- Client-side error logging ------------------------------------------------
 function _reportClientError(message, source, lineno) {
   fetch('/api/logs/client', {
     method: 'POST',
@@ -650,6 +982,23 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
+    // Version label
+    apiFetch('/api/version', { context: 'startup.version' }).then(d => {
+      const vEl = document.getElementById('app-version');
+      if (vEl && d.version) vEl.textContent = d.version;
+    }).catch(() => {});
+
+    // Seed pill labels from config on first load
+    Promise.all([
+      apiFetch('/api/config',     { context: 'startup.cfg' }),
+      apiFetch('/api/llm/config', { context: 'startup.llm' }),
+    ]).then(([cfg, llm]) => {
+      _applyLLMState(llm);
+      _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
+      _configVideoModel = cfg.wan_model || '';
+      _applyVideoPillState(_tabVideoModel || _configVideoModel);
+      _applySoundPillState(cfg.audio_provider || 'acestep');
+    }).catch(() => {});
   }, { once: true });
 
   runSplash();
@@ -696,14 +1045,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-gallery-rail')?.addEventListener('click', _galleryToggle);
   document.getElementById('btn-gallery-close')?.addEventListener('click', _galleryClose);
 
-  document.getElementById('service-cluster-btn')?.addEventListener('click', openServicePanel);
+  initAIPills();
 
   document.getElementById('btn-close-svc-panel')?.addEventListener('click', closeServicePanel);
   document.getElementById('service-panel-overlay')?.addEventListener('click', e => {
     if (e.target.id === 'service-panel-overlay') closeServicePanel();
   });
 
-  // Log toggle — closed by default, preference persisted in localStorage
+  // Log toggle -- closed by default, preference persisted in localStorage
   const logToggle  = document.getElementById('log-toggle');
   const logContent = document.getElementById('log-content');
   state.logOpen = false;
@@ -717,6 +1066,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Modals
   document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
+
+  // Global mute toggle -- silences every video element on the page
+  let _globalMuted = false;
+  document.getElementById('btn-mute-all')?.addEventListener('click', () => {
+    _globalMuted = !_globalMuted;
+    document.querySelectorAll('video').forEach(v => { v.muted = _globalMuted; });
+    const lbl = document.getElementById('mute-label');
+    const btn = document.getElementById('btn-mute-all');
+    if (lbl) lbl.textContent = _globalMuted ? 'Unmute' : 'Mute';
+    if (btn) btn.title = _globalMuted ? 'Unmute all videos' : 'Mute all videos';
+  });
   document.querySelectorAll('.modal-close').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.closest('.modal-overlay') || btn.closest('[id$="-overlay"]');
@@ -728,17 +1088,258 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Settings
-  document.getElementById('provider-toggle-input')?.addEventListener('change', e => onLLMProviderChange(e.target.checked ? 'anthropic' : 'ollama'));
+  document.getElementById('cfg-llm_provider')?.addEventListener('change', e => {
+    const showOllama = (e.target.value === 'ollama' || e.target.value === 'auto');
+    const sec = document.getElementById('llm-ollama-section');
+    if (sec) sec.style.display = showOllama ? '' : 'none';
+  });
+  // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
+  document.getElementById('btn-restart-app')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-restart-app');
+    btn.disabled = true;
+    btn.textContent = 'Restarting...';
+    try {
+      await apiFetch('/api/app/restart', { method: 'POST' });
+      btn.textContent = 'Reconnecting...';
+      // Poll until the server comes back
+      const poll = setInterval(async () => {
+        try {
+          await fetch('/api/services');
+          clearInterval(poll);
+          btn.textContent = 'Restart Server';
+          btn.disabled = false;
+          toast('Server restarted -- all code changes are now live', 'success');
+        } catch (_) { /* still down */ }
+      }, 1500);
+    } catch (_) {
+      btn.textContent = 'Restart Server';
+      btn.disabled = false;
+    }
+  });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
   // Boot default tab
-  switchTab('sd-prompts');
+  switchTab('express');
   loadConfig();
   pollServices();
   pollLogs();
 
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
+
+  // -- GPU indicator pill: which service currently owns the GPU --------------
+  const _gpuLabelMap = {
+    wangp:   { label: 'GPU: Video',  color: '#d4a017' },
+    acestep: { label: 'GPU: Sound',  color: '#c41e3a' },
+    forge:   { label: 'GPU: Image',  color: '#5fa8d3' },
+    ollama:  { label: 'GPU: LLM',    color: '#7eb86c' },
+  };
+  async function pollGpuIndicator() {
+    try {
+      const r = await fetch('/api/gpu/status', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      const dot = document.getElementById('gpu-indicator-dot');
+      const lbl = document.getElementById('gpu-indicator-label');
+      if (!dot || !lbl) return;
+      const meta = data.current ? _gpuLabelMap[data.current] : null;
+      if (meta) {
+        dot.style.background = meta.color;
+        lbl.textContent = meta.label;
+        const hist = (data.history || []).slice(-3).reverse()
+          .map(h => `${h.from || 'none'} -> ${h.to} (${h.reason || 'no reason'}, ${h.ms}ms)`).join('\n');
+        document.getElementById('gpu-indicator').title =
+          `Currently held by ${data.current}.` + (hist ? `\n\nRecent transitions:\n${hist}` : '');
+      } else {
+        dot.style.background = '#555';
+        lbl.textContent = 'GPU: idle';
+        document.getElementById('gpu-indicator').title = 'No service is holding the GPU right now.';
+      }
+    } catch (_) { /* silent -- indicator is read-only diagnostic */ }
+  }
+  pollGpuIndicator();
+  setInterval(pollGpuIndicator, 3000);
+
+  // -- Sidebar job feed ------------------------------------------------------
+  const _feedEl = document.getElementById('job-feed');
+  const _feedCards    = new Map(); // job_id -> card element
+  const _feedDone     = [];        // completed job ids, newest-first (capped at 5)
+  const _feedDismissed = new Set(); // job ids the user explicitly closed
+
+  function _thumbUrl(job) {
+    const src = job.meta?.source_image;
+    if (src) return `/api/thumbnail?path=${encodeURIComponent(src)}&size=88`;
+    const out = Array.isArray(job.output) ? job.output[0] : job.output;
+    if (out && /\.(png|jpg|jpeg|webp)/i.test(out))
+      return `/api/thumbnail?path=${encodeURIComponent(out)}&size=88`;
+    return null;
+  }
+
+  function _makeCard(job) {
+    const card = document.createElement('div');
+    card.className = 'jf-card';
+    card.style.cursor = 'pointer';
+    card.title = 'Click to see details';
+    card._job = job;
+    card.addEventListener('click', () => openJobModal(card._job));
+
+    const thumbUrl = _thumbUrl(job);
+    if (thumbUrl) {
+      const img = document.createElement('img');
+      img.className = 'jf-thumb';
+      img.src = thumbUrl;
+      img.onerror = () => { img.replaceWith(ph()); };
+      card.appendChild(img);
+    } else {
+      card.appendChild(ph());
+    }
+
+    const body = document.createElement('div');
+    body.className = 'jf-body';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'jf-label';
+    lbl.textContent = job.label || job.type || 'Job';
+    body.appendChild(lbl);
+
+    const sta = document.createElement('div');
+    sta.className = 'jf-status';
+    body.appendChild(sta);
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'jf-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'jf-bar';
+    bar.style.width = '0%';
+    barWrap.appendChild(bar);
+    body.appendChild(barWrap);
+
+    card.appendChild(body);
+
+    const dismiss = document.createElement('button');
+    dismiss.className = 'jf-dismiss';
+    dismiss.textContent = 'x';
+    dismiss.title = 'Dismiss';
+    dismiss.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = card._job?.id;
+      const status = card._job?.status;
+      card.remove();
+      if (id) {
+        _feedCards.delete(id);
+        _feedDismissed.add(id);
+        const idx = _feedDone.indexOf(id);
+        if (idx !== -1) _feedDone.splice(idx, 1);
+        // Cancel the server-side job if it's still active
+        if (status === 'running' || status === 'queued') {
+          fetch(`/api/jobs/${id}/stop`, { method: 'POST' }).catch(() => {});
+        }
+      }
+    });
+    card.appendChild(dismiss);
+
+    card._sta = sta;
+    card._bar = bar;
+    return card;
+  }
+
+  function ph() {
+    const d = document.createElement('div');
+    d.className = 'jf-thumb-placeholder';
+    d.textContent = '🎬';
+    return d;
+  }
+
+  function _updateCard(card, job, queueInfo = null) {
+    card._job = job;  // keep modal data fresh on every poll
+    const pct = job.progress || 0;
+
+    card.classList.remove('jf-running', 'jf-done', 'jf-error', 'jf-queued');
+    if (job.status === 'running') {
+      card.classList.add('jf-running');
+      card._bar.style.width = pct + '%';
+      card._sta.textContent = job.message || 'Running...';
+    } else if (job.status === 'queued') {
+      card.classList.add('jf-queued');
+      // width set to 100% by CSS; animation handled by .jf-queued .jf-bar
+      if (queueInfo && queueInfo.total > 1) {
+        card._sta.textContent = queueInfo.pos === 1 ? 'Up next' : `Queue position ${queueInfo.pos} of ${queueInfo.total}`;
+      } else {
+        card._sta.textContent = 'Up next';
+      }
+    } else if (job.status === 'done') {
+      card.classList.add('jf-done');
+      card._bar.style.width = '100%';
+      card._sta.textContent = job.message || 'Done';
+    } else if (job.status === 'error' || job.status === 'stopped') {
+      card.classList.add('jf-error');
+      card._bar.style.width = '100%';
+      card._sta.textContent = job.message || job.status;
+    }
+  }
+
+  async function _pollFeed() {
+    if (!_feedEl) return;
+    try {
+      const data = await fetch('/api/queue').then(r => r.json());
+      const active = [...(data.running || []), ...(data.queued || [])];
+      const done   = (data.completed || []).slice(0, 5);
+
+      // Update/create active cards (running first, then queued)
+      const seen = new Set();
+      const queuedJobs = (data.queued || []).filter(j => !_feedDismissed.has(j.id));
+      for (const job of active) {
+        if (_feedDismissed.has(job.id)) continue;
+        seen.add(job.id);
+        if (!_feedCards.has(job.id)) {
+          const card = _makeCard(job);
+          _feedEl.prepend(card);
+          _feedCards.set(job.id, card);
+        }
+        const qPos = queuedJobs.findIndex(j => j.id === job.id);
+        _updateCard(_feedCards.get(job.id), job, qPos >= 0 ? { pos: qPos + 1, total: queuedJobs.length } : null);
+      }
+
+      // Add freshly completed jobs to top (newest-first, max 5)
+      for (const job of done) {
+        if (_feedDone.includes(job.id) || _feedDismissed.has(job.id)) continue;
+        _feedDone.unshift(job.id);
+        if (_feedDone.length > 5) {
+          const old = _feedDone.pop();
+          const el = _feedCards.get(old);
+          if (el) { el.remove(); _feedCards.delete(old); }
+        }
+        // Remove the active card for this job before adding the done card
+        // (prevents the same job appearing twice during the active->done transition)
+        const existing = _feedCards.get(job.id);
+        if (existing) existing.remove();
+        const card = _makeCard(job);
+        _updateCard(card, job);
+        _feedEl.prepend(card);
+        _feedCards.set(job.id, card);
+      }
+
+      // Remove cards for jobs no longer active or in recent completed
+      const keep = new Set([...seen, ..._feedDone]);
+      for (const [id, el] of _feedCards) {
+        if (!keep.has(id)) { el.remove(); _feedCards.delete(id); }
+      }
+
+      // Update Queue hint (only when Queue tab is not open -- tab-queue.js owns it then)
+      if (!document.querySelector('.rail-tab.active[data-tab="queue"]')) {
+        const hint = document.getElementById('queue-rail-hint');
+        if (hint) {
+          const n = active.length;
+          if (n === 0)      hint.textContent = '(no items processing)';
+          else if (n === 1) hint.textContent = '(1 item processing)';
+          else              hint.textContent = `(${n} items processing)`;
+        }
+      }
+    } catch (_) {}
+  }
+
+  _pollFeed();
+  setInterval(_pollFeed, 2500);
 });

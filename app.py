@@ -1,4 +1,4 @@
-"""Drop Cat Go Studio — Unified Video Production App.
+"""Drop Cat Go Studio -- Unified Video Production App.
 
 Single FastAPI server combining Fun Videos, Video Bridges, SD Prompts,
 Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
@@ -10,6 +10,15 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 # as "app" here ensures both names share the same module object.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
+
+# Single-instance guard -- only when run as the server entry point, not when
+# imported by tests or other modules. Uses os._exit so atexit/lifespan don't run.
+if _sys.modules.get("__main__") is _sys.modules.get("app"):
+    import ctypes as _ctypes, os as _os
+    _mutex = _ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\DropCatGoStudio_SingleInstance")
+    if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        _sys.stderr.write("Drop Cat Go Studio is already running.\n")
+        _os._exit(0)
 
 import asyncio
 import json as _json_std
@@ -25,7 +34,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from core import config as cfg
@@ -37,7 +46,7 @@ from core.llm_client import LLMClient
 from core.llm_router import LLMRouter, TIER_BALANCED, TIER_FAST
 from services import manager as svc
 
-# ── Logging setup ────────────────────────────────────────────────────────────
+# -- Logging setup ------------------------------------------------------------
 
 _LOG_DIR  = Path(__file__).resolve().parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
@@ -58,8 +67,8 @@ log = logging.getLogger("dropcat")
 log_buffer.install_handler(level=logging.DEBUG)
 log_buffer.capture_stdout()
 
-# ── Globals (initialized in lifespan) ────────────────────────────────────────
-# Use a mutable dict — dict item mutation is always visible module-wide without
+# -- Globals (initialized in lifespan) ----------------------------------------
+# Use a mutable dict -- dict item mutation is always visible module-wide without
 # relying on 'global' inside async generators (broken in Python 3.10 asynccontextmanager).
 
 _g: dict = {
@@ -69,10 +78,11 @@ _g: dict = {
     "available_encoders": [],
 }
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR    = Path(__file__).resolve().parent
 UPLOADS_DIR = APP_DIR / "uploads"
-OUTPUT_DIR = APP_DIR / "output"
-STATIC_DIR = APP_DIR / "static"
+OUTPUT_DIR  = APP_DIR / "output"
+STATIC_DIR  = APP_DIR / "static"
+_BUILD_TS   = int(time.time())   # changes every restart; busts Chrome module-map cache
 
 # BUG-01: create directories at module level so StaticFiles mounts succeed on
 # fresh install (StaticFiles checks directory existence in __init__).
@@ -80,7 +90,26 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
-# ── Lifespan ─────────────────────────────────────────────────────────────────
+def _read_git_version() -> str:
+    import subprocess as _sp
+    try:
+        date = _sp.check_output(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y-%m-%d"],
+            cwd=str(APP_DIR), text=True, stderr=_sp.DEVNULL, timeout=5,
+        ).strip()
+        sha = _sp.check_output(
+            ["git", "log", "-1", "--format=%h"],
+            cwd=str(APP_DIR), text=True, stderr=_sp.DEVNULL, timeout=5,
+        ).strip()
+        return f"{date} . {sha}" if date and sha else "unknown"
+    except Exception:
+        return "unknown"
+
+
+APP_VERSION = _read_git_version()
+
+
+# -- Lifespan -----------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -116,10 +145,16 @@ async def lifespan(app: FastAPI):
         hw = [e[1] for e in _g["available_encoders"] if e[2]]
         log.info("Encoders: %s", ", ".join(hw) if hw else "CPU only")
 
+    # Synchronous: evict any orphan WanGP / ACE-Step workers from a prior DCS
+    # session BEFORE we accept user requests. Without this, clicking Create on
+    # the new app would queue work behind the dying old worker, making restarts
+    # feel like the program never closed.
+    svc.kill_orphans_at_startup()
+
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 
-    # Periodic job cleanup — purge completed/errored jobs older than 24h
+    # Periodic job cleanup -- purge completed/errored jobs older than 24h
     def _cleanup_jobs():
         import time as _time
         while True:
@@ -129,10 +164,6 @@ async def lifespan(app: FastAPI):
                 jm.cleanup()
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
 
-    # System tray icon — skip when launched from manager.pyw (it has its own)
-    if not os.environ.get("DCS_MANAGED"):
-        from core import tray as _tray
-        _tray.start_tray()
 
     _port = _g.get("port", 7860)
     log.info("Drop Cat Go Studio ready on http://127.0.0.1:%d", _port)
@@ -145,7 +176,7 @@ async def lifespan(app: FastAPI):
     port_lock.clear_port_file()
 
 
-# ── App ──────────────────────────────────────────────────────────────────────
+# -- App ----------------------------------------------------------------------
 
 app = FastAPI(title="Drop Cat Go Studio", lifespan=lifespan)
 
@@ -174,13 +205,13 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 # StaticFiles path joining on Windows breaks for nested subdirectories.
 
 
-# ── Global accessors (use these in features instead of direct import) ─────────
+# -- Global accessors (use these in features instead of direct import) ---------
 
 def get_llm_router():
     """Return the initialized LLMRouter."""
     r = _g["llm_router"]
     if r is None:
-        raise RuntimeError("LLM router not initialized — app not fully started")
+        raise RuntimeError("LLM router not initialized -- app not fully started")
     return r
 
 
@@ -188,21 +219,48 @@ def get_job_manager():
     """Return the initialized JobManager."""
     jm = _g["job_manager"]
     if jm is None:
-        raise RuntimeError("Job manager not initialized — app not fully started")
+        raise RuntimeError("Job manager not initialized -- app not fully started")
     return jm
 
 
-# ── Global routes ────────────────────────────────────────────────────────────
+# -- Global routes ------------------------------------------------------------
+
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
 @app.get("/")
 async def index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
+        html = index_path.read_text(encoding="utf-8")
+        # Stamp app.js URL with server-start time so Chrome's ES module map
+        # sees a new URL on every restart and never serves stale JS.
+        html = html.replace('src="/static/js/app.js?', f'src="/static/js/app.js?b={_BUILD_TS}&')
+        return HTMLResponse(content=html, headers=_NO_CACHE)
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
 
 
-# ── Config ───────────────────────────────────────────────────────────────────
+@app.get("/static/js/app.js")
+async def serve_app_js():
+    """Serve app.js with no-cache so the browser always picks up new code after restart."""
+    return FileResponse(str(STATIC_DIR / "js" / "app.js"), headers=_NO_CACHE)
+
+
+@app.get("/api/version")
+async def get_version():
+    return {"version": APP_VERSION}
+
+
+@app.get("/manifest.json")
+async def serve_manifest():
+    return FileResponse(str(STATIC_DIR / "manifest.json"), media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def serve_sw():
+    return FileResponse(str(STATIC_DIR / "sw.js"), media_type="application/javascript")
+
+
+# -- Config -------------------------------------------------------------------
 
 @app.get("/api/config")
 async def get_config():
@@ -233,7 +291,7 @@ async def validate_acestep(request: Request):
     return {"ok": ok, "message": msg}
 
 
-# ── Ollama config ─────────────────────────────────────────────────────────────
+# -- Ollama config -------------------------------------------------------------
 
 @app.get("/api/ollama/models")
 async def ollama_models():
@@ -268,21 +326,27 @@ async def keys_status():
     return keys.status()
 
 
-# ── LLM provider config ───────────────────────────────────────────────────────
+# -- LLM provider config -------------------------------------------------------
 
 @app.get("/api/llm/config")
 async def get_llm_config():
     """Return current LLM provider and whether keys are set."""
-    provider = cfg.get("llm_provider") or "ollama"
+    provider = cfg.get("llm_provider") or "auto"
     anthropic_key = keys.get_key("anthropic")
     openai_key = keys.get_key("openai")
+    if provider == "auto":
+        if anthropic_key:   effective = "anthropic"
+        elif openai_key:    effective = "openai"
+        else:               effective = "ollama"
+    else:
+        effective = provider
     return {
         "provider": provider,
+        "effective_provider": effective,
         "anthropic_key_set": bool(anthropic_key),
         "openai_key_set": bool(openai_key),
-        # Return masked keys for display (show last 4 chars)
         "anthropic_key_hint": f"...{anthropic_key[-4:]}" if len(anthropic_key) > 4 else ("set" if anthropic_key else ""),
-        "openai_key_hint": f"...{openai_key[-4:]}" if len(openai_key) > 4 else ("set" if openai_key else ""),
+        "openai_key_hint":    f"...{openai_key[-4:]}" if len(openai_key) > 4 else ("set" if openai_key else ""),
     }
 
 
@@ -303,26 +367,54 @@ async def save_llm_config(request: Request):
     return await get_llm_config()
 
 
-# ── Services ─────────────────────────────────────────────────────────────────
+# -- Services -----------------------------------------------------------------
 
 @app.get("/api/services")
 async def services_status():
     return JSONResponse(content=svc.get_status(), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/gpu/status")
+async def gpu_status():
+    """Which service currently owns the GPU + recent eviction history."""
+    from core.gpu_orchestrator import gpu
+    return JSONResponse(content=gpu.status(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/gpu/release")
+async def gpu_release_all():
+    """Force-evict every GPU service. Frees VRAM for other applications."""
+    from core.gpu_orchestrator import gpu
+    gpu.release_all()
+    return {"ok": True, "current": gpu.current}
+
+
 @app.post("/api/services/start/{name}")
 async def start_service(name: str):
-    starters = {
-        "wangp": svc.start_wangp_worker,
-        "acestep": svc.start_acestep,
-        "forge": svc.start_forge,
-        "ollama": svc.start_ollama,
-    }
-    fn = starters.get(name)
-    if not fn:
+    # GPU-using services MUST go through the orchestrator so the current
+    # VRAM holder is evicted before the new service loads its model on top.
+    # Without this, clicking 'Start Forge' while WanGP is in VRAM causes
+    # two CUDA contexts to collide and crash app.py (observed 2026-05-11).
+    if name not in ("wangp", "acestep", "forge", "ollama"):
         return JSONResponse({"error": f"Unknown service: {name}"}, 404)
-    # Run in background thread -- services can take minutes to start
-    threading.Thread(target=fn, daemon=True).start()
+
+    def _safe_start():
+        try:
+            from core.gpu_orchestrator import gpu
+            gpu.acquire(name, reason="manual service start from UI")
+        except Exception as e:
+            log.error("[services] start %s via orchestrator failed: %s", name, e)
+            # Fall back to direct start so user isn't blocked if orchestrator hits a bug
+            starters = {
+                "wangp": svc.start_wangp_worker,
+                "acestep": svc.start_acestep,
+                "forge": svc.start_forge,
+                "ollama": svc.start_ollama,
+            }
+            try: starters[name]()
+            except Exception as e2: log.error("[services] direct fallback also failed: %s", e2)
+
+    threading.Thread(target=_safe_start, daemon=True).start()
     return {"ok": True, "message": f"Starting {name}..."}
 
 
@@ -338,7 +430,23 @@ async def restart_service_route(name: str):
     return {"ok": True, "message": f"Restarting {name}..."}
 
 
-# ── Logs ─────────────────────────────────────────────────────────────────────
+@app.post("/api/app/restart")
+async def restart_app():
+    """Gracefully exit app.py so the manager watchdog restarts it with fresh code.
+
+    Useful after deploying Python code changes without touching the manager process.
+    Returns immediately -- the server will be unreachable for ~10 seconds then come back.
+    """
+    import signal, os
+    log.info("App restart requested via /api/app/restart -- exiting for watchdog respawn")
+    def _do_exit():
+        import time; time.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_do_exit, daemon=True).start()
+    return {"ok": True, "message": "Restarting -- reconnect in ~10 seconds"}
+
+
+# -- Logs ---------------------------------------------------------------------
 
 @app.get("/api/logs")
 async def get_logs(since: int = 0):
@@ -355,9 +463,9 @@ async def client_log(request: Request):
         msg  = body.get("message", "unknown client error")
         src  = body.get("source", "")
         line = body.get("lineno", "")
-        logger.error("CLIENT JS: %s  (%s:%s)", msg, src, line)
-    except Exception:
-        pass
+        log.error("CLIENT JS: %s  (%s:%s)", msg, src, line)
+    except Exception as e:
+        log.warning("client_log endpoint failed: %s", e)
     return {"ok": True}
 
 
@@ -366,7 +474,7 @@ async def get_log_file(lines: int = 200):
     """Return the last N lines from the persistent log file as plain text."""
     from fastapi.responses import PlainTextResponse
     if not _LOG_FILE.exists():
-        return PlainTextResponse("Log file not found yet — restart the app.\n")
+        return PlainTextResponse("Log file not found yet -- restart the app.\n")
     try:
         all_lines = _LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
         tail = "\n".join(all_lines[-lines:])
@@ -375,7 +483,7 @@ async def get_log_file(lines: int = 200):
         return PlainTextResponse(f"Error reading log file: {e}\n")
 
 
-# ── Jobs ─────────────────────────────────────────────────────────────────────
+# -- Jobs ---------------------------------------------------------------------
 
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
@@ -393,6 +501,211 @@ async def stop_job(job_id: str):
         return JSONResponse({"error": "Not ready"}, 503)
     found = _g["job_manager"].stop(job_id)
     return {"ok": found}
+
+
+@app.delete("/api/jobs/{job_id}")
+async def dismiss_job(job_id: str):
+    """Remove a completed/failed job from the queue entirely."""
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    removed = _g["job_manager"].dismiss(job_id)
+    return {"ok": removed}
+
+
+@app.delete("/api/jobs")
+async def dismiss_all_finished():
+    """Remove all completed/failed/cancelled jobs from the queue."""
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = _g["job_manager"].dismiss_all_finished()
+    return {"ok": True, "dismissed": count}
+
+
+@app.post("/api/jobs/pause")
+async def pause_queue():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    _g["job_manager"].pause()
+    return {"ok": True, "paused": True}
+
+
+@app.post("/api/jobs/resume")
+async def resume_queue():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    _g["job_manager"].resume()
+    return {"ok": True, "paused": False}
+
+
+@app.post("/api/jobs/cancel-queued")
+async def cancel_all_queued():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = _g["job_manager"].cancel_all_queued()
+    return {"ok": True, "cancelled": count}
+
+
+@app.get("/api/jobs/save-queue")
+async def get_save_queue_info():
+    """Return info about any previously saved queue file."""
+    from core.job_manager import QUEUE_SAVE_FILE
+    if not QUEUE_SAVE_FILE.exists():
+        return {"has_save": False, "count": 0, "saved_at": None}
+    try:
+        import json as _json
+        data = _json.loads(QUEUE_SAVE_FILE.read_text(encoding="utf-8"))
+        return {"has_save": True, "count": len(data.get("jobs", [])), "saved_at": data.get("saved_at")}
+    except Exception:
+        return {"has_save": False, "count": 0, "saved_at": None}
+
+
+@app.post("/api/jobs/save-queue")
+async def save_queue():
+    """Serialize all waiting jobs to queue_save.json."""
+    import asyncio as _asyncio
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    count = await _asyncio.to_thread(_g["job_manager"].save_queue)
+    return {"ok": True, "saved": count}
+
+
+@app.post("/api/jobs/restore-queue")
+async def restore_queue():
+    """Re-submit jobs from queue_save.json."""
+    import asyncio as _asyncio
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+
+    from features.song_video.pipeline import run_song_prep, run_song_pipeline
+    from features.fun_videos.pipeline import run_prep, run_pipeline
+    from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
+    from features.video_bridges.routes import _bridges_worker
+    from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE
+
+    jm = _g["job_manager"]
+
+    def _make_fun_video(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit_with_prep(JOB_FUN_VIDEO, run_prep, run_pipeline,
+                                   photo_path, settings, label=label)
+
+    def _make_fun_multi(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_multi_prep, run_multi_pipeline,
+                                   photo_path, settings, label=label)
+
+    def _make_song_video(args, label, timeout_seconds):
+        photo_path = args[0] if args else None
+        settings   = dict(args[1]) if len(args) > 1 else {}
+        n_clips    = int(settings.get("num_clips", 10))
+        timeout    = timeout_seconds or max(1800, n_clips * 300 + 900)
+        return jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_song_prep, run_song_pipeline,
+                                   photo_path, settings, label=label, timeout_seconds=timeout)
+
+    def _make_bridge(args, label, timeout_seconds):
+        items    = list(args[0]) if args else []
+        settings = dict(args[1]) if len(args) > 1 else {}
+        return jm.submit(JOB_BRIDGE, _bridges_worker, items, settings, label=label)
+
+    registry = {
+        "fun_video":       _make_fun_video,
+        "fun_multi_video": _make_fun_multi,
+        "song_video":      _make_song_video,
+        "bridge":          _make_bridge,
+    }
+
+    restored, failed = await _asyncio.to_thread(jm.restore_queue, registry)
+    return {"ok": True, "restored": restored, "failed": failed}
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def retry_job(job_id: str):
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    new_job = _g["job_manager"].retry(job_id)
+    if new_job is None:
+        return JSONResponse({"error": "Cannot retry this job"}, 400)
+    return {"ok": True, "job_id": new_job.id}
+
+
+@app.post("/api/jobs/{job_id}/promote")
+async def promote_job(job_id: str):
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    ok = _g["job_manager"].promote(job_id)
+    return {"ok": ok}
+
+
+@app.get("/api/jobs")
+async def list_jobs():
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    return _g["job_manager"].queue_status()
+
+
+_THUMBNAIL_VIDEO_EXT  = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+_THUMBNAIL_NO_SUPPORT = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+
+@app.get("/api/thumbnail")
+async def get_thumbnail(path: str, size: int = 120):
+    """Serve a scaled-down thumbnail of an image or video file.
+
+    For images: PIL thumbnail. For videos: ffmpeg extracts a midpoint frame,
+    then PIL scales it. The queue modal uses this to show clip-by-clip
+    progress as a row of thumbnails while a multi-clip job runs.
+    """
+    import io
+    import subprocess
+    import tempfile
+    from pathlib import Path as _Path
+    from fastapi.responses import Response as _Resp
+    try:
+        from PIL import Image as _Img
+        # Accept URL-style paths like /output/... or /uploads/... in addition to
+        # absolute filesystem paths.  Resolve them relative to the app root.
+        _url_prefixes = ('/output/', '/uploads/', '/static/')
+        if any(path.startswith(pfx) for pfx in _url_prefixes):
+            path = str(_Path(__file__).resolve().parent / path.lstrip('/'))
+        p = _Path(path)
+        if not p.is_file():
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        suf = p.suffix.lower()
+        if suf in _THUMBNAIL_NO_SUPPORT:
+            return JSONResponse({"error": "No thumbnail for this file type"}, status_code=415)
+
+        if suf in _THUMBNAIL_VIDEO_EXT:
+            from core.ffmpeg_utils import probe_duration
+            dur = probe_duration(str(p)) or 0.0
+            seek = max(0.0, min(dur * 0.5, dur - 0.1))
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-ss", f"{seek:.3f}", "-i", str(p),
+                     "-frames:v", "1", "-q:v", "3", tmp_path],
+                    capture_output=True, timeout=10,
+                )
+                if r.returncode != 0 or not _Path(tmp_path).is_file():
+                    return JSONResponse({"error": "ffmpeg frame extraction failed"}, status_code=500)
+                with _Img.open(tmp_path) as img:
+                    img.thumbnail((size * 2, size * 2))
+                    buf = io.BytesIO()
+                    img.convert("RGB").save(buf, format="JPEG", quality=75)
+            finally:
+                try: os.remove(tmp_path)
+                except OSError: pass
+            return _Resp(content=buf.getvalue(), media_type="image/jpeg")
+
+        with _Img.open(p) as img:
+            img.thumbnail((size * 2, size * 2))
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=75)
+        return _Resp(content=buf.getvalue(), media_type="image/jpeg")
+    except Exception as e:
+        log.warning("Thumbnail generation failed for %s: %s", path, e)
+        return JSONResponse({"error": "Could not generate thumbnail"}, status_code=500)
 
 
 @app.get("/output/{path:path}")
@@ -470,7 +783,7 @@ async def extract_frame_endpoint(request: Request):
 
     b64 = extract_frame_b64(str(vid_path), position=position)
     if not b64:
-        raise HTTPException(status_code=500, detail="Frame extraction failed — check ffmpeg")
+        raise HTTPException(status_code=500, detail="Frame extraction failed -- check ffmpeg")
 
     frames_dir = OUTPUT_DIR / "frames"
     frames_dir.mkdir(exist_ok=True)
@@ -502,8 +815,8 @@ async def delete_output(request: Request):
     try:
         if delete_folder:
             # BUG-06: use explicit depth check instead of the old inverted logic.
-            # depth == 2 → output/date/jobfolder/file.mp4  (delete jobfolder)
-            # depth == 1 → output/jobfolder/file.mp4        (delete jobfolder)
+            # depth == 2 -> output/date/jobfolder/file.mp4  (delete jobfolder)
+            # depth == 1 -> output/jobfolder/file.mp4        (delete jobfolder)
             job_dir = file_path.parent
             try:
                 depth = len(file_path.relative_to(out_root).parts)
@@ -512,7 +825,7 @@ async def delete_output(request: Request):
             if depth >= 2 and str(job_dir).startswith(str(out_root)) and job_dir != out_root:
                 _shutil.rmtree(str(job_dir), ignore_errors=True)
             else:
-                return JSONResponse({"error": "Cannot delete — unexpected depth"}, status_code=400)
+                return JSONResponse({"error": "Cannot delete -- unexpected depth"}, status_code=400)
         else:
             file_path.unlink(missing_ok=True)
         return {"ok": True}
@@ -528,7 +841,7 @@ async def queue_status():
     return _g["job_manager"].queue_status()
 
 
-# ── Wildcards ────────────────────────────────────────────────────────────────
+# -- Wildcards ----------------------------------------------------------------
 
 @app.get("/api/wildcards")
 async def get_wildcards():
@@ -544,7 +857,7 @@ async def expand_wildcards(request: Request):
     return {"expanded": wildcards.expand(text, fs_root)}
 
 
-# ── Session ──────────────────────────────────────────────────────────────────
+# -- Session ------------------------------------------------------------------
 
 @app.get("/api/session")
 async def get_session_info():
@@ -585,7 +898,7 @@ async def switch_session(session_id: str):
     return JSONResponse({"error": "Session not found"}, 404)
 
 
-# ── Windows theme ────────────────────────────────────────────────────────────
+# -- Windows theme ------------------------------------------------------------
 
 @app.get("/api/theme")
 async def windows_theme():
@@ -608,7 +921,7 @@ async def windows_theme():
     return {"accent": accent, "dark": dark}
 
 
-# ── System info ──────────────────────────────────────────────────────────────
+# -- System info --------------------------------------------------------------
 
 @app.get("/api/system")
 async def system_info():
@@ -624,7 +937,7 @@ async def system_info():
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 
 
-# ── AI intent (palette-driven) ───────────────────────────────────────────────
+# -- AI intent (palette-driven) -----------------------------------------------
 
 _AI_INTENT_TABS: dict[str, dict] = {
     "sd-prompts": {
@@ -750,7 +1063,7 @@ async def ai_intent(request: Request):
         settings = settings_raw
     else:
         settings = {k: v for k, v in parsed.items() if k != "reply"}
-    # Drop junk keys we don't accept for this tab — the JS applier ignores
+    # Drop junk keys we don't accept for this tab -- the JS applier ignores
     # unknown keys too, but filtering server-side keeps the toast count honest.
     allowed = _allowed_intent_keys(tab)
     settings = {k: v for k, v in settings.items() if k in allowed}
@@ -765,21 +1078,25 @@ async def ai_intent(request: Request):
     return {"reply": reply, "settings": settings, "provider_used": provider_used}
 
 
-# ── Feature routers ──────────────────────────────────────────────────────────
+# -- Feature routers ----------------------------------------------------------
 from features.image2video.routes import router as i2v_router
 from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
 from features.sd_prompts.routes import router as prompts_router
 from features.video_tools.routes import router as tools_router
+from features.song_video.routes import router as song_router
+from features.adobe_agent.routes import router as adobe_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Fun Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
 app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
+app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
+app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 
 
-# ── Presets (WS8) ────────────────────────────────────────────────────────────
+# -- Presets (WS8) ------------------------------------------------------------
 
 _PRESETS_DB = APP_DIR / "presets.db"
 
@@ -856,7 +1173,7 @@ async def preset_delete(preset_id: str):
     return {"ok": True}
 
 
-# ── Gallery (WS2) ────────────────────────────────────────────────────────────
+# -- Gallery (WS2) ------------------------------------------------------------
 
 _GALLERY_DB = APP_DIR / "gallery.db"
 
@@ -880,6 +1197,35 @@ def _gallery_db() -> sqlite3.Connection:
     return conn
 
 
+def gallery_push(url: str, tab: str = "", prompt: str = "", model: str = "", metadata: dict | None = None):
+    """Insert a completed generation into gallery.db from server-side code.
+
+    Called by pipelines so items appear in the gallery regardless of which
+    browser tab is open when the job completes.  Silently skips duplicates
+    (same url already in the db).
+    """
+    import uuid as _uuid
+    meta = metadata or {}
+    try:
+        conn = _gallery_db()
+        existing = conn.execute("SELECT id FROM gallery WHERE url=?", (url,)).fetchone()
+        if existing:
+            conn.close()
+            return
+        conn.execute("""
+            INSERT INTO gallery (id, tab, url, thumbnail, prompt, model, seed, metadata, favorite, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+            _uuid.uuid4().hex[:8], tab, url, "",
+            prompt or meta.get("prompt", ""),
+            model  or meta.get("model",  ""),
+            None, _json_std.dumps(meta), 0, time.time(),
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning("gallery_push failed: %s", e)
+
+
 def _row_to_dict(row) -> dict:
     d = dict(row)
     try:
@@ -891,7 +1237,9 @@ def _row_to_dict(row) -> dict:
 
 
 @app.get("/api/gallery")
-async def gallery_list(tab: str = "", search: str = "", favorite: bool = False):
+async def gallery_list(tab: str = "", search: str = "", favorite: bool = False,
+                       limit: int = 100, offset: int = 0):
+    limit = max(1, min(limit, 500))
     def _query():
         conn = _gallery_db()
         try:
@@ -903,12 +1251,16 @@ async def gallery_list(tab: str = "", search: str = "", favorite: bool = False):
             if favorite:
                 clauses.append("favorite = 1")
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-            rows = conn.execute(f"SELECT * FROM gallery {where} ORDER BY created_at DESC LIMIT 500", params).fetchall()
-            return [_row_to_dict(r) for r in rows]
+            total = conn.execute(f"SELECT COUNT(*) FROM gallery {where}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM gallery {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows], total
         finally:
             conn.close()
-    items = await asyncio.to_thread(_query)
-    return {"items": items}
+    items, total = await asyncio.to_thread(_query)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @app.post("/api/gallery")
@@ -981,18 +1333,70 @@ async def gallery_delete(item_id: str):
     return {"ok": True}
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+# -- Entry point --------------------------------------------------------------
 
-class _PollFilter(logging.Filter):
-    """Drop access-log noise from high-frequency internal polling endpoints."""
-    _SKIP = ("/api/logs", "/api/services", "/api/jobs/")
+class _NoiseFilter(logging.Filter):
+    """Drop high-frequency polling and harmless TCP noise from all log handlers.
+
+    Two categories of noise:
+    1. HTTP access-log entries from endpoints that poll every 1-3s -- no
+       diagnostic value and drown out real events.
+    2. ConnectionResetError / WinError 10054 -- asyncio TCP teardown when
+       Chrome closes a video-stream connection.  Not an error; fires a
+       10-line traceback for every 206 Partial Content response.
+    """
+
+    _SKIP_PATHS = (
+        "/api/queue",
+        "/api/jobs",
+        "/api/logs",
+        "/api/services",
+        "/api/gallery?limit=",
+        "/api/fun/models",
+        "/api/llm/config",
+        "/api/prompts/forge/status",
+        "/api/version",
+        "/api/system",
+        "/manifest.json",
+        "/sw.js",
+    )
+
+    _SKIP_MSGS = (
+        "ConnectionResetError",
+        "WinError 10054",
+        "_call_connection_lost",
+        "socket.SHUT_RDWR",
+        "NoneType: None",   # bare exception-with-no-value that asyncio emits alongside the above
+    )
 
     def filter(self, record):
-        msg = record.getMessage()
-        return not any(s in msg for s in self._SKIP)
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if any(s in msg for s in self._SKIP_PATHS):
+            return False
+        if any(s in msg for s in self._SKIP_MSGS):
+            return False
+        # Also suppress exception info that is a ConnectionResetError
+        if record.exc_info:
+            exc_type = record.exc_info[0]
+            if exc_type is not None and issubclass(exc_type, ConnectionResetError):
+                return False
+        return True
 
 
-logging.getLogger("uvicorn.access").addFilter(_PollFilter())
+_noise_filter = _NoiseFilter()
+
+# Attach to every handler so records propagated from child loggers are
+# also filtered (Python only checks logger-level filters for that logger's
+# own handlers, not for parent handlers that receive propagated records).
+for _h in logging.root.handlers:
+    _h.addFilter(_noise_filter)
+
+# Also filter at the source loggers so the records never propagate at all
+logging.getLogger("uvicorn.access").addFilter(_noise_filter)
+logging.getLogger("asyncio").addFilter(_noise_filter)
 
 
 if __name__ == "__main__":

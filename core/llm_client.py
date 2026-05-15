@@ -1,4 +1,4 @@
-"""LLM client backed by local Ollama — no API keys required.
+"""LLM client backed by local Ollama -- no API keys required.
 
 Replaces the Anthropic/OpenAI client. All AI calls route through the local
 Ollama daemon (http://localhost:11434 by default). Models are selected by
@@ -9,11 +9,18 @@ import io
 import json
 import logging
 import re
+import threading
 from pathlib import Path
+
+# Serialises all Ollama calls to one at a time.
+# qwen3-vl is a large model; running two vision calls concurrently causes
+# VRAM thrashing and 3-minute timeouts. All callers (pipeline + UI routes)
+# share this lock so the GPU only ever runs one inference at a time.
+_ollama_lock = threading.Lock()
 
 log = logging.getLogger(__name__)
 
-# AI model tiers — tasks mapped to speed/quality
+# AI model tiers -- tasks mapped to speed/quality
 TIER_FAST     = "fast"      # quick responses, lighter model
 TIER_BALANCED = "balanced"  # all-round quality
 TIER_POWER    = "power"     # deep analysis, best model
@@ -39,13 +46,47 @@ def _extract_content(resp) -> str:
     # Strip inline <think> blocks that some Ollama versions leave in content
     if "<think>" in content:
         content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
-    # If content is empty after stripping, fall back to thinking field (Ollama 0.9+)
-    if not content.strip():
-        thinking = getattr(resp.message, "thinking", None) or ""
-        if thinking:
-            log.warning("Response content empty, extracting from thinking field (len=%d)", len(thinking))
-            content = re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
-    return content
+    if content.strip():
+        return content
+
+    # Content empty -- fall back to thinking field (Ollama 0.9+ with thinking models).
+    # qwen3-vl sometimes puts the entire answer inside the thinking chain even when
+    # think=False is requested. The actual JSON is usually the last code-fenced block
+    # or the last balanced JSON object in the reasoning text.
+    thinking = getattr(resp.message, "thinking", None) or ""
+    if not thinking:
+        return content
+
+    log.warning("Response content empty, extracting from thinking field (len=%d)", len(thinking))
+
+    # 1. Last ```json ... ``` fence in thinking
+    fences = list(re.finditer(r'```(?:json)?\s*([\s\S]+?)```', thinking))
+    if fences:
+        return fences[-1].group(1).strip()
+
+    # 2. Last syntactically valid JSON object/array
+    for m in reversed(list(re.finditer(r'[\[{][\s\S]*?[\]}]', thinking))):
+        try:
+            json.loads(m.group())
+            return m.group()
+        except Exception:
+            continue
+
+    # 3. Text following a conclusion marker (model often says "Here is the JSON:")
+    for marker in ("Here is the JSON:", "Final answer:", "Result:", "Therefore:"):
+        idx = thinking.rfind(marker)
+        if idx != -1:
+            rest = thinking[idx + len(marker):].strip()
+            if rest:
+                return rest
+
+    # 4. Return stripped thinking text (caller's salvage logic may still recover it).
+    # Also handle unclosed <think> (truncated by max_tokens): strip the opening tag
+    # so the caller sees the inner reasoning text rather than a literal "<think>".
+    result = re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
+    if result.startswith("<think>"):
+        result = result[len("<think>"):].strip()
+    return result
 
 
 class LLMClient:
@@ -80,7 +121,7 @@ class LLMClient:
             import ollama
             self._client = ollama.Client(
                 host=self._host,
-                timeout=httpx.Timeout(connect=10, read=180, write=30, pool=10),
+                timeout=httpx.Timeout(connect=10, read=45, write=30, pool=10),
             )
         return self._client
 
@@ -135,7 +176,8 @@ class LLMClient:
                       options={"num_predict": max_tokens})
         if "qwen3" in model.lower():
             kwargs["think"] = False
-        resp = self._get_client().chat(**kwargs)
+        with _ollama_lock:
+            resp = self._get_client().chat(**kwargs)
         return _extract_content(resp)
 
     def chat_with_images(
@@ -146,9 +188,10 @@ class LLMClient:
         tier: str = TIER_BALANCED,
         max_tokens: int = 2048,
         system: str = "",
+        format_json: bool = False,
     ) -> str:
         """Send a vision request to Ollama. Always uses the vision model (qwen3-vl),
-        not the text-tier models — text-only models silently ignore images."""
+        not the text-tier models -- text-only models silently ignore images."""
         import time
         model = self._vision_model
         log.info("Ollama vision call: model=%s images=%d max_tokens=%d", model, len(images_b64), max_tokens)
@@ -166,7 +209,10 @@ class LLMClient:
                       options={"num_predict": max_tokens})
         if "qwen3" in model.lower():
             kwargs["think"] = False
-        resp = self._get_client().chat(**kwargs)
+        if format_json:
+            kwargs["format"] = "json"
+        with _ollama_lock:
+            resp = self._get_client().chat(**kwargs)
         elapsed = time.time() - t0
         content = _extract_content(resp)
         log.info("Ollama vision call done in %.1fs (response len=%d)", elapsed, len(content))
@@ -188,7 +234,7 @@ class LLMClient:
             return False
 
 
-# ── Response parsing helpers ─────────────────────────────────────────────────
+# -- Response parsing helpers -------------------------------------------------
 
 def parse_json_response(text: str) -> dict | list | None:
     """Extract JSON from an LLM response that may contain markdown fences.

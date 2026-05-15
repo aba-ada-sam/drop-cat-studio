@@ -3,10 +3,21 @@
 Translates explicit terms to euphemisms before sending to Anthropic/OpenAI,
 then reverses the translation on the output so generated prompts remain
 creatively uncensored for local image/video generation.
+
+IMPORTANT: All replacements use whole-word matching (\b word boundaries) so
+common English words that contain NSFW substrings ("massive", "classic",
+"legion", "background") are never accidentally mangled.
+
+Euphemisms are chosen to be uncommon as standalone English words so that
+the desanitizer does not corrupt innocent sentences in LLM responses.
 """
+import re
 
 # Pairs: (explicit, euphemism)
-# Ordered longest-first to avoid partial replacements.
+# Rules for choosing euphemisms:
+#   1. Must not be a common English word that the LLM might use independently
+#   2. Must not be a substring of common innocent words
+#   3. Ordered longest-first to avoid partial phrase replacements
 _PAIRS = [
     # body parts
     ("bare breasts", "exposed shoulders"),
@@ -15,15 +26,15 @@ _PAIRS = [
     ("nipples", "collarbones"),
     ("nipple", "collarbone"),
     ("cleavage", "neckline"),
-    ("boobs", "shoulders"),
-    ("buttocks", "lower back"),
-    ("butt", "back"),
-    ("ass", "back"),
+    ("boobs", "bust area"),        # "shoulders" was too innocent; "bust" itself is kept below
+    ("buttocks", "lower torso"),   # was "lower back" -- "back" too common
+    ("butt", "rear end"),          # was "back" -- "back" is FAR too common a word
+    ("ass", "rear end"),           # was "back" -- ditto; both map to same euphemism is fine
     ("groin", "waistline"),
     ("crotch", "waistline"),
     ("genitals", "midsection"),
-    ("thighs", "legs"),
-    ("thigh", "leg"),
+    ("thighs", "upper legs"),      # was "legs" -- "legs" is too common; "upper legs" is specific
+    ("thigh", "upper leg"),        # was "leg"  -- ditto
     # states
     ("topless", "sleeveless"),
     ("bottomless", "flowing garment"),
@@ -93,12 +104,12 @@ _PAIRS = [
     ("g-string", "narrow garment"),
 ]
 
-# Pre-sort by length (longest first) to avoid partial matches
+# Pre-sort by length (longest first) to avoid partial phrase matches
 _PAIRS.sort(key=lambda p: len(p[0]), reverse=True)
 
 
 def sanitize(text: str) -> str:
-    """Replace NSFW terms with euphemisms (case-insensitive, preserves case)."""
+    """Replace NSFW terms with euphemisms (whole-word, case-insensitive)."""
     if not text:
         return text
     result = text
@@ -108,7 +119,7 @@ def sanitize(text: str) -> str:
 
 
 def desanitize(text: str) -> str:
-    """Reverse: replace euphemisms back to explicit terms."""
+    """Reverse: replace euphemisms back to explicit terms (whole-word, case-insensitive)."""
     if not text:
         return text
     result = text
@@ -118,8 +129,11 @@ def desanitize(text: str) -> str:
 
 
 def _replace_preserve_case(text: str, old: str, new: str) -> str:
-    """Case-insensitive replace that tries to preserve the original casing."""
-    import re
+    """Whole-word, case-insensitive replace that preserves the original casing.
+
+    Uses \b word boundaries so substrings inside larger words are never
+    touched: "legion" is safe from the "leg" pair, "massive" from "ass", etc.
+    """
     def _repl(match):
         orig = match.group()
         if orig.isupper():
@@ -127,4 +141,10 @@ def _replace_preserve_case(text: str, old: str, new: str) -> str:
         if orig[0].isupper():
             return new[0].upper() + new[1:]
         return new
-    return re.sub(re.escape(old), _repl, text, flags=re.IGNORECASE)
+
+    # \b treats the hyphen in "g-string" as a boundary, so we need to handle
+    # multi-token phrases that start/end with punctuation carefully.  For
+    # simple alphanumeric terms \b is sufficient; for phrases with spaces the
+    # word boundaries at the edges of the whole phrase are what matter.
+    pattern = r'\b' + re.escape(old) + r'\b'
+    return re.sub(pattern, _repl, text, flags=re.IGNORECASE)

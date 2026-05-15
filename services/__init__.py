@@ -1,1 +1,1 @@
-# Drop Cat Go Studio — external service management
+# Drop Cat Go Studio -- external service management

@@ -1,5 +1,5 @@
 /**
- * Drop Cat Go Studio — Electron main process.
+ * Drop Cat Go Studio -- Electron main process.
  * Opens a transparent acrylic window on Windows 11 and loads the local server.
  */
 const { app, BrowserWindow, shell, nativeTheme } = require('electron');
@@ -11,7 +11,7 @@ const PORT_FILE = path.join(__dirname, '..', '.dcs-port');
 
 nativeTheme.themeSource = 'dark';
 
-// ── Port discovery ────────────────────────────────────────────────────────────
+// -- Port discovery ------------------------------------------------------------
 
 function readPort() {
   try {
@@ -56,7 +56,7 @@ function httpGet(url, timeoutMs) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Window ────────────────────────────────────────────────────────────────────
+// -- Window --------------------------------------------------------------------
 
 async function createWindow() {
   const port = await waitForPortFile();
@@ -68,7 +68,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 600,
 
-    // Windows 11 acrylic — client area becomes a blurred-desktop material
+    // Windows 11 acrylic -- client area becomes a blurred-desktop material
     backgroundColor: '#00000000',
     backgroundMaterial: 'acrylic',
 

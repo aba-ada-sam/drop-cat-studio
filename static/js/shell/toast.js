@@ -11,7 +11,7 @@ let _errorBadge = null;
 
 // Suppress toasts until the splash exits (app is actually visible).
 // app.js dispatches 'dcs:ready' from exitSplash(). Until then errors go
-// silently to the log — the user is staring at a loading screen anyway.
+// silently to the log -- the user is staring at a loading screen anyway.
 let _splashDone = false;
 window.addEventListener('dcs:ready', () => { _splashDone = true; }, { once: true });
 function _inStartup() { return !_splashDone; }
@@ -38,11 +38,10 @@ function _updateBadge() {
  * @returns {object} controller { update(pct), dismiss() }
  */
 export function toast(msg, level = 'info', opts = {}) {
-  // No popups ever. Errors go silently to the Errors log panel.
   if (level === 'error') _logError(msg, opts.context, opts.details);
-  return { update() {}, dismiss() {} };
+  if (_inStartup()) return { update() {}, dismiss() {} };
 
-  const wrap = _getWrap(); // unreachable — kept so apiFetch still compiles
+  const wrap = _getWrap();
 
   // Deduplicate by id
   if (opts.id) {
@@ -146,8 +145,8 @@ function _logError(msg, context, details) {
 function _prependErrorEntry(container, entry) {
   const div = document.createElement('div');
   div.className = 'error-log-entry';
-  div.innerHTML = `<span class="elog-time">${entry.time}</span>` +
-    (entry.context ? `<span class="elog-ctx">[${entry.context}]</span>` : '') +
+  div.innerHTML = `<span class="elog-time">${_escHtml(entry.time)}</span>` +
+    (entry.context ? `<span class="elog-ctx">[${_escHtml(entry.context)}]</span>` : '') +
     `<span class="elog-msg">${_escHtml(entry.msg)}</span>` +
     (entry.details ? `<div style="margin-top:2px;color:var(--text-3);word-break:break-all">${_escHtml(entry.details)}</div>` : '');
   container.prepend(div);
@@ -172,7 +171,7 @@ export function clearErrorLog() {
 }
 
 /**
- * Central fetch wrapper — auto-toasts errors, supports retry.
+ * Central fetch wrapper -- auto-toasts errors, supports retry.
  * Drop-in replacement for fetch() calls that expect JSON.
  */
 export async function apiFetch(path, opts = {}) {
@@ -198,10 +197,18 @@ export async function apiFetch(path, opts = {}) {
       });
       throw new Error(errMsg);
     }
-    return res.json();
+    try {
+      return await res.json();
+    } catch (_parseErr) {
+      const errMsg = `Server returned non-JSON response (${res.status})`;
+      _logError(errMsg, context, '');
+      toast(errMsg, 'error', { context });
+      throw new Error(errMsg);
+    }
   } catch (e) {
+    if (e.name === 'AbortError') throw e;  // intentional cancellation -- no toast
     if (e.name === 'TypeError') {
-      // Network error (offline, refused)
+      // Network error (offline, refused, CORS)
       const errMsg = `Network error: ${context}`;
       _logError(errMsg, context, e.message);
       toast(errMsg, 'error', {

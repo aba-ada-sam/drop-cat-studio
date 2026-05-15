@@ -1,5 +1,5 @@
 /**
- * Drop Cat Go Studio — Shared API helpers.
+ * Drop Cat Go Studio -- Shared API helpers.
  * Fetch wrapper, file upload, and generic job polling.
  */
 
@@ -13,7 +13,7 @@ export async function api(path, opts = {}) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || err.detail || `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => { throw new Error(`Non-JSON response from server (${res.status})`); });
 }
 
 /** Upload files via FormData. Returns parsed JSON response. */
@@ -27,7 +27,7 @@ export async function apiUpload(path, files) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || err.detail || `HTTP ${res.status}`);
   }
-  return res.json();
+  return res.json().catch(() => { throw new Error(`Non-JSON response from server (${res.status})`); });
 }
 
 /**
@@ -39,7 +39,7 @@ export async function apiUpload(path, files) {
  * @param {number} interval - Poll interval in ms (default 1500)
  * @returns {{ stop: () => void }} - Call stop() to cancel polling
  */
-export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 400) {
+export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 2400) {
   let timer = null;
   let stopped = false;
   let polls = 0;
@@ -61,6 +61,11 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
       }
       if (job.status === 'error' || job.status === 'stopped' || job.status === 'cancelled') {
         onError(job.error || job.message || `Job ${job.status}`);
+        return;
+      }
+      // Guard against null/unknown status -- avoids 10-minute poll loop on server errors
+      if (job.status && job.status !== 'running' && job.status !== 'queued' && job.status !== 'preparing') {
+        onError(`Unexpected job status: ${job.status}`);
         return;
       }
       onProgress(job);

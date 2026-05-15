@@ -1,9 +1,19 @@
 /**
- * Drop Cat Go Studio — Shared UI components.
+ * Drop Cat Go Studio -- Shared UI components.
  * Reusable DOM builders for all feature tabs.
  */
 
-// ── Utilities ────────────────────────────────────────────────────────────────
+// -- Utilities ----------------------------------------------------------------
+
+export function pathToUrl(p) {
+  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
+  const norm = p.replace(/\\/g, '/');
+  const iOut = norm.toLowerCase().indexOf('/output/');
+  if (iOut !== -1) return norm.substring(iOut);
+  const iUp  = norm.toLowerCase().indexOf('/uploads/');
+  if (iUp  !== -1) return norm.substring(iUp);
+  return `/output/${norm.split('/').pop()}`;
+}
 
 export function escHtml(s) {
   const d = document.createElement('div');
@@ -40,11 +50,10 @@ export function formatDuration(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// ── Toast ────────────────────────────────────────────────────────────────────
+// -- Toast re-export (convenience for panels that only import components.js) --
+export { toast } from './shell/toast.js?v=20260503a';
 
-export function toast(_msg, _level) { /* no popups */ }
-
-// ── DropZone ─────────────────────────────────────────────────────────────────
+// -- DropZone -----------------------------------------------------------------
 
 /**
  * Create a drag-and-drop file upload zone.
@@ -118,7 +127,7 @@ export function createDropZone(container, opts = {}) {
   return zone;
 }
 
-// ── ProgressCard ─────────────────────────────────────────────────────────────
+// -- ProgressCard -------------------------------------------------------------
 
 /**
  * Create a progress tracking card with bar + message + cancel button.
@@ -158,13 +167,13 @@ export function createProgressCard(container) {
   };
 }
 
-// ── Video Player ─────────────────────────────────────────────────────────────
+// -- Video Player -------------------------------------------------------------
 
 export function createVideoPlayer(container) {
   const vlcBtn    = el('button', { class: 'btn btn-sm', text: '▶ VLC' });
   const revealBtn = el('button', { class: 'btn btn-sm', text: 'Show in folder' });
   const wrap = el('div', { class: 'card video-result', style: 'display:none' }, [
-    el('video', { controls: 'true', class: 'video-player' }),
+    el('video', { controls: 'true', preload: 'auto', class: 'video-player' }),
     el('div', { class: 'video-actions' }, [
       el('a', { class: 'btn btn-primary download-link', text: 'Download', download: '' }),
       vlcBtn,
@@ -195,7 +204,7 @@ export function createVideoPlayer(container) {
   vlcBtn.addEventListener('click',    () => _reveal('vlc'));
   revealBtn.addEventListener('click', () => _reveal('explorer'));
 
-  // Handle video load errors — show a clear message instead of silent failure
+  // Handle video load errors -- show a clear message instead of silent failure
   video.addEventListener('error', () => {
     if (video.src) {
       const errDiv = wrap.querySelector('.video-error') || (() => {
@@ -203,7 +212,7 @@ export function createVideoPlayer(container) {
         video.after(d);
         return d;
       })();
-      errDiv.textContent = `Video file could not be loaded — use Download to save it, or Show in folder to open it directly.`;
+      errDiv.textContent = `Video file could not be loaded -- use Download to save it, or Show in folder to open it directly.`;
     }
   });
 
@@ -232,7 +241,7 @@ export function createVideoPlayer(container) {
   };
 }
 
-// ── Slider Input ─────────────────────────────────────────────────────────────
+// -- Slider Input -------------------------------------------------------------
 
 export function createSlider(container, opts = {}) {
   const { label, min = 0, max = 100, step = 1, value = 50, unit = '', onChange } = opts;
@@ -265,7 +274,7 @@ export function createSlider(container, opts = {}) {
   };
 }
 
-// ── Number Input ────────────────────────────────────────────────────────────
+// -- Number Input ------------------------------------------------------------
 
 export function createNumberInput(container, opts = {}) {
   const { label, min = 0, max = 9999, step = 1, value = '', onChange } = opts;
@@ -287,7 +296,7 @@ export function createNumberInput(container, opts = {}) {
   };
 }
 
-// ── Select Input ─────────────────────────────────────────────────────────────
+// -- Select Input -------------------------------------------------------------
 
 export function createSelect(container, opts = {}) {
   const { label, options = [], value = '', onChange } = opts;
@@ -313,7 +322,7 @@ export function createSelect(container, opts = {}) {
   };
 }
 
-// ── Checkbox ─────────────────────────────────────────────────────────────────
+// -- Checkbox -----------------------------------------------------------------
 
 export function createCheckbox(container, opts = {}) {
   const { label, checked = false, onChange } = opts;

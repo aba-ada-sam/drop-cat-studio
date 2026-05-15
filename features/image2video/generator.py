@@ -1,4 +1,4 @@
-"""Ken Burns video generator — converts images into videos with motion effects.
+"""Ken Burns video generator -- converts images into videos with motion effects.
 
 Extracted from DropCat-Image-2-Video/web_server.py. Pure ffmpeg, no AI.
 """
@@ -146,7 +146,7 @@ def generate_video(
     fade_dur = min(fade_dur, max(0.0, img_dur - 0.1))
     n = len(image_specs)
 
-    job.update(progress=5, message=f"Starting — {n} image(s)")
+    job.update(progress=5, message=f"Starting -- {n} image(s)")
 
     with tempfile.TemporaryDirectory(prefix="dciv_") as tmpdir:
         seg_paths = []

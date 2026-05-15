@@ -1,4 +1,4 @@
-"""Image-to-Video API routes — /api/i2v/*
+"""Image-to-Video API routes -- /api/i2v/*
 
 Ken Burns slideshow generator. Upload images, configure motion/duration,
 generate combined or separate videos.
@@ -58,7 +58,7 @@ def _normalize_spec(item) -> dict:
     }
 
 
-# ── Upload ───────────────────────────────────────────────────────────────────
+# -- Upload -------------------------------------------------------------------
 
 @router.post("/upload")
 async def upload_images(files: list[UploadFile] = File(...)):
@@ -74,7 +74,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
     return {"images": saved}
 
 
-# ── Folder scan ──────────────────────────────────────────────────────────────
+# -- Folder scan --------------------------------------------------------------
 
 @router.post("/scan_folder")
 async def scan_folder(request: Request):
@@ -98,7 +98,7 @@ async def serve_image(path: str = Query(...)):
     return FileResponse(str(p))
 
 
-# ── Generate ─────────────────────────────────────────────────────────────────
+# -- Generate -----------------------------------------------------------------
 
 def _i2v_worker(job, image_specs, settings):
     """Background worker for image-to-video generation."""
@@ -145,6 +145,9 @@ def _i2v_worker(job, image_specs, settings):
 
     if not job.stop_event.is_set():
         job.output = outputs[0] if outputs else None
+        from core.inbox import copy_to_inbox
+        for _out in outputs:
+            copy_to_inbox(str(OUTPUT_DIR / _out))
         job.meta["outputs"] = outputs
         job.message = f"Done! Created {len(outputs)} video(s)." if output_mode == "separate" else "Done!"
         from core.session import get_current as get_session

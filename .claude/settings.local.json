@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Invoke-RestMethod -Uri \"http://127.0.0.1:7860/api/services/stop/wangp\" -Method POST -ErrorAction SilentlyContinue)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://127.0.0.1:7860/api/services/stop/acestep\" -Method POST -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process | Where-Object { $_.Name -match \"python|wgp|acestep|pinokio\" } | Select-Object Id, Name, CPU, WorkingSet | Format-Table -AutoSize)"
+    ]
+  }
+}

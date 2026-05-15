@@ -1,1 +1,1 @@
-# Drop Cat Go Studio — feature modules
+# Drop Cat Go Studio -- feature modules

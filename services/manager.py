@@ -5,6 +5,7 @@ AI services that multiple features depend on.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import os
@@ -21,6 +22,144 @@ from core import config as cfg
 
 log = logging.getLogger(__name__)
 
+# -- Windows Job Object -- kill GPU children when DCS dies for any reason -------
+# A Job Object with KILL_ON_JOB_CLOSE is the OS-level guarantee: when the DCS
+# Python process exits (clean, crash, or Task Manager kill), Windows closes the
+# job handle and immediately terminates every process assigned to it.
+# This prevents WanGP / ACE-Step from surviving as orphan GPU hogs.
+
+_JOB_HANDLE: ctypes.c_void_p | None = None
+
+def _init_job_object() -> None:
+    global _JOB_HANDLE
+    if sys.platform != "win32" or _JOB_HANDLE is not None:
+        return
+    try:
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+        JobObjectExtendedLimitInformation   = 9
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit",     ctypes.c_int64),
+                ("LimitFlags",             ctypes.c_uint32),
+                ("MinimumWorkingSetSize",   ctypes.c_size_t),
+                ("MaximumWorkingSetSize",   ctypes.c_size_t),
+                ("ActiveProcessLimit",      ctypes.c_uint32),
+                ("Affinity",               ctypes.c_size_t),
+                ("PriorityClass",           ctypes.c_uint32),
+                ("SchedulingClass",         ctypes.c_uint32),
+            ]
+
+        class _IO(ctypes.Structure):
+            _fields_ = [(f, ctypes.c_uint64) for f in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount",  "WriteTransferCount",  "OtherTransferCount",
+            )]
+
+        class _EXT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BASIC),
+                ("IoInfo",                _IO),
+                ("ProcessMemoryLimit",    ctypes.c_size_t),
+                ("JobMemoryLimit",        ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed",     ctypes.c_size_t),
+            ]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            log.warning("Job Object: CreateJobObjectW failed (%s)", ctypes.get_last_error())
+            return
+
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ok = k32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info),
+        )
+        if not ok:
+            log.warning("Job Object: SetInformationJobObject failed (%s)", ctypes.get_last_error())
+            k32.CloseHandle(job)
+            return
+
+        _JOB_HANDLE = job
+        log.info("Job Object armed -- GPU subprocesses will die with DCS (any exit)")
+    except Exception as exc:
+        log.warning("Job Object setup failed (non-fatal): %s", exc)
+
+
+def _assign_to_job(proc: subprocess.Popen) -> None:
+    """Assign a subprocess to the DCS Job Object so it dies when DCS dies."""
+    if _JOB_HANDLE is None or sys.platform != "win32":
+        return
+    try:
+        PROCESS_ALL_ACCESS = 0x001F0FFF
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = k32.OpenProcess(PROCESS_ALL_ACCESS, False, proc.pid)
+        if handle:
+            ok = k32.AssignProcessToJobObject(_JOB_HANDLE, handle)
+            k32.CloseHandle(handle)
+            if not ok:
+                # Fails if the process is already in a Job Object that forbids
+                # nesting (e.g. Pinokio's Job Object on Windows 7). On Windows 8+
+                # nested jobs are supported; this error means something else.
+                # shutdown_all()._kill_stale_gpu_processes() is the backstop.
+                log.warning(
+                    "Job Object: could not assign PID %d (error %d) -- "
+                    "process will be killed by name scan on shutdown",
+                    proc.pid, ctypes.get_last_error(),
+                )
+    except Exception as exc:
+        log.debug("Could not assign PID %s to Job Object: %s", proc.pid, exc)
+
+
+_init_job_object()
+
+
+def _kill_stale_gpu_processes() -> None:
+    """Kill orphan WanGP / ACE-Step processes left over from a previous DCS session.
+
+    When DCS restarts but _assign_to_job() failed (e.g. because Pinokio puts its
+    Python process in its own Job Object), GPU workers survive as orphans that
+    consume VRAM without serving requests.  We scan by command-line pattern and
+    kill any matches before starting fresh workers.
+    """
+    if sys.platform != "win32":
+        return
+    own_pid = os.getpid()
+    patterns = [
+        ("wangp_worker.py", "WanGP worker"),
+        ("api_server.py", "ACE-Step"),
+    ]
+    for pattern, label in patterns:
+        try:
+            ps_cmd = (
+                "Get-WmiObject Win32_Process | "
+                f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+                "Select-Object ProcessId | "
+                "ForEach-Object { $_.ProcessId }"
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=15, **_popen_flags(),
+            )
+            for line in result.stdout.splitlines():
+                pid_str = line.strip()
+                if not pid_str.isdigit():
+                    continue
+                pid = int(pid_str)
+                if pid == 0 or pid == own_pid:
+                    continue
+                log.info("Killing stale %s orphan (PID %d)", label, pid)
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, timeout=5, **_popen_flags(),
+                )
+        except Exception as e:
+            log.debug("Could not scan for stale %s processes: %s", label, e)
+
 
 def _popen_flags() -> dict:
     """Return creationflags to hide console windows on Windows (unless debug mode)."""
@@ -28,7 +167,7 @@ def _popen_flags() -> dict:
         return {"creationflags": subprocess.CREATE_NO_WINDOW}
     return {}
 
-# ── Status tracking ──────────────────────────────────────────────────────────
+# -- Status tracking ----------------------------------------------------------
 
 _status_lock = threading.Lock()
 _service_status: dict = {
@@ -44,6 +183,7 @@ _acestep_proc: subprocess.Popen | None = None
 # BUG-11: guard against two concurrent calls both passing the alive-check and
 # starting duplicate worker processes.
 _wangp_start_lock = threading.Lock()
+_acestep_start_lock = threading.Lock()
 
 
 def get_status() -> dict:
@@ -56,7 +196,7 @@ def _set_status(service: str, **kwargs):
         _service_status[service].update(kwargs)
 
 
-# ── Port / HTTP helpers ──────────────────────────────────────────────────────
+# -- Port / HTTP helpers ------------------------------------------------------
 
 def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
     try:
@@ -74,7 +214,7 @@ def http_get(url: str, timeout: int = 5) -> dict | None:
         return None
 
 
-# ── ACE-Step ─────────────────────────────────────────────────────────────────
+# -- ACE-Step -----------------------------------------------------------------
 
 ACESTEP_HOST = "127.0.0.1"
 ACESTEP_PORT = 8019
@@ -92,119 +232,140 @@ def start_acestep() -> tuple[bool, str | None]:
     import shutil
     global _acestep_proc
 
-    if acestep_alive():
-        _set_status("acestep", state="running",
-                    message="ACE-Step server already running", port=ACESTEP_PORT)
-        log.info("ACE-Step already running on port %d", ACESTEP_PORT)
-        return True, None
+    with _acestep_start_lock:
+        if acestep_alive():
+            _set_status("acestep", state="running",
+                        message="ACE-Step server already running", port=ACESTEP_PORT)
+            log.info("ACE-Step already running on port %d", ACESTEP_PORT)
+            return True, None
 
-    acestep_root = cfg.get_acestep_root()
-    if acestep_root is None:
-        msg = "ACE-Step path not configured — set it in Settings"
-        _set_status("acestep", state="not_configured", message=msg)
-        return False, msg
+        acestep_root = cfg.get_acestep_root()
+        if acestep_root is None:
+            msg = "ACE-Step path not configured -- set it in Settings"
+            _set_status("acestep", state="not_configured", message=msg)
+            return False, msg
 
-    api_script = acestep_root / "acestep" / "api_server.py"
-    if not api_script.exists():
-        msg = f"ACE-Step api_server.py not found: {api_script}"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
-
-    # Prefer venv python; fall back to uv run
-    python = acestep_root / ".venv" / "Scripts" / "python.exe"
-    uv_exe = shutil.which("uv")
-
-    if python.exists():
-        cmd = [str(python), str(api_script), "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
-    elif uv_exe:
-        cmd = [uv_exe, "run", "--no-sync", "acestep-api",
-               "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
-    else:
-        msg = "Cannot start ACE-Step: no .venv Python and 'uv' not found in PATH"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
-
-    _set_status("acestep", state="starting", message="Starting ACE-Step server...")
-    log.info("Starting ACE-Step server headlessly (port %d)...", ACESTEP_PORT)
-
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env["ACESTEP_NO_INIT"] = "false"
-    env["ACESTEP_INIT_LLM"] = "auto"
-    existing_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(acestep_root) + (os.pathsep + existing_pp if existing_pp else "")
-
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(acestep_root), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            **_popen_flags(),
-        )
-        _acestep_proc = proc
-
-        def _drain(p):
-            try:
-                for line in p.stdout:
-                    stripped = line.rstrip()
-                    if stripped:
-                        log.info("[ace-step] %s", stripped)
-            except Exception:
-                pass
-
-        threading.Thread(target=_drain, args=(proc,), daemon=True).start()
-
-        deadline = time.time() + 300  # 5 min — LM model loading takes ~90s
-
-        # Phase 1: wait for uvicorn to bind the port (~5s)
-        while time.time() < deadline:
-            if check_port(ACESTEP_HOST, ACESTEP_PORT, timeout=2):
-                break
-            if proc.poll() is not None:
-                msg = "ACE-Step process exited before port opened"
-                _set_status("acestep", state="error", message=msg)
-                return False, msg
-            time.sleep(2)
-        else:
-            msg = "ACE-Step did not open port within 300s"
+        api_script = acestep_root / "acestep" / "api_server.py"
+        if not api_script.exists():
+            msg = f"ACE-Step api_server.py not found: {api_script}"
             _set_status("acestep", state="error", message=msg)
             return False, msg
 
-        # Phase 2: port open; wait for model loading (~90s).
-        # uvicorn queues HTTP requests during startup — issue one long-timeout
-        # request so we get the response as soon as initialization finishes.
-        log.info("ACE-Step port %d open — waiting for model to load...", ACESTEP_PORT)
-        _set_status("acestep", state="starting",
-                    message="ACE-Step loading model into VRAM (~90s)...")
-        while time.time() < deadline:
-            remaining = max(10, int(deadline - time.time()))
-            result = http_get(
-                f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health",
-                timeout=remaining,
+        # Prefer venv python; fall back to uv run
+        python = acestep_root / ".venv" / "Scripts" / "python.exe"
+        uv_exe = shutil.which("uv")
+
+        if python.exists():
+            cmd = [str(python), str(api_script), "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+        elif uv_exe:
+            cmd = [uv_exe, "run", "--no-sync", "acestep-api",
+                   "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+        else:
+            msg = "Cannot start ACE-Step: no .venv Python and 'uv' not found in PATH"
+            _set_status("acestep", state="error", message=msg)
+            return False, msg
+
+        _set_status("acestep", state="starting", message="Starting ACE-Step server...")
+        log.info("Starting ACE-Step server headlessly (port %d)...", ACESTEP_PORT)
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["ACESTEP_NO_INIT"] = "false"
+        env["ACESTEP_INIT_LLM"] = "auto"
+        # Force the SFT (Supervised Fine-Tuned) checkpoint instead of the
+        # default turbo variant. Turbo is distilled to 8 steps and produces
+        # music beds without intelligible vocals -- SFT accepts 20+ steps and
+        # actually sings the lyrics we pass in. The SFT model must be
+        # downloaded first: `acestep-download --model acestep-v15-sft`.
+        # If SFT isn't on disk, ACE-Step falls back to whatever is available.
+        #
+        # CRITICAL: ACE-Step's api_server.py reads ACESTEP_CONFIG_PATH for
+        # the DiT model name. The SERVICE_MODE_DIT_MODEL env var only
+        # affects the acestep_v15_pipeline.py CLI entry point, NOT the API
+        # server we launch. See acestep/api/startup_model_init.py:68.
+        sft_path = acestep_root / "checkpoints" / "acestep-v15-sft"
+        if sft_path.is_dir():
+            env["ACESTEP_CONFIG_PATH"] = "acestep-v15-sft"
+            log.info("ACE-Step DiT model: acestep-v15-sft (vocals-capable)")
+        else:
+            log.warning("ACE-Step SFT checkpoint not found at %s -- vocals will be "
+                        "muted on Turbo. Download: acestep-download --model acestep-v15-sft",
+                        sft_path)
+        existing_pp = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(acestep_root) + (os.pathsep + existing_pp if existing_pp else "")
+
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=str(acestep_root), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                **_popen_flags(),
             )
-            if result is not None:
-                _set_status("acestep", state="running",
-                            message="ACE-Step ready — music generation available",
-                            port=ACESTEP_PORT, pid=proc.pid)
-                log.info("ACE-Step started and ready on port %d", ACESTEP_PORT)
-                return True, None
-            if proc.poll() is not None:
-                msg = "ACE-Step exited during model loading"
+            _assign_to_job(proc)
+            _acestep_proc = proc
+
+            def _drain(p):
+                try:
+                    for line in p.stdout:
+                        stripped = line.rstrip()
+                        if stripped:
+                            log.info("[ace-step] %s", stripped)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+
+            deadline = time.time() + 300  # 5 min -- LM model loading takes ~90s
+
+            # Phase 1: wait for uvicorn to bind the port (~5s)
+            while time.time() < deadline:
+                if check_port(ACESTEP_HOST, ACESTEP_PORT, timeout=2):
+                    break
+                if proc.poll() is not None:
+                    msg = "ACE-Step process exited before port opened"
+                    _set_status("acestep", state="error", message=msg)
+                    return False, msg
+                time.sleep(2)
+            else:
+                msg = "ACE-Step did not open port within 300s"
                 _set_status("acestep", state="error", message=msg)
                 return False, msg
-            time.sleep(5)
 
-        msg = "ACE-Step model did not finish loading within 300s"
-        _set_status("acestep", state="error", message=msg)
+            # Phase 2: port open; wait for model loading (~90s).
+            # uvicorn queues HTTP requests during startup -- issue one long-timeout
+            # request so we get the response as soon as initialization finishes.
+            log.info("ACE-Step port %d open -- waiting for model to load...", ACESTEP_PORT)
+            _set_status("acestep", state="starting",
+                        message="ACE-Step loading model into VRAM (~90s)...")
+            while time.time() < deadline:
+                remaining = max(10, int(deadline - time.time()))
+                result = http_get(
+                    f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health",
+                    timeout=remaining,
+                )
+                if result is not None:
+                    _set_status("acestep", state="running",
+                                message="ACE-Step ready -- music generation available",
+                                port=ACESTEP_PORT, pid=proc.pid)
+                    log.info("ACE-Step started and ready on port %d", ACESTEP_PORT)
+                    return True, None
+                if proc.poll() is not None:
+                    msg = "ACE-Step exited during model loading"
+                    _set_status("acestep", state="error", message=msg)
+                    return False, msg
+                time.sleep(5)
+
+            msg = "ACE-Step model did not finish loading within 300s"
+            _set_status("acestep", state="error", message=msg)
+            return False, msg
+
+        except Exception as e:
+            msg = f"Failed to start ACE-Step: {e}"
+            _set_status("acestep", state="error", message=msg)
         return False, msg
 
-    except Exception as e:
-        msg = f"Failed to start ACE-Step: {e}"
-        _set_status("acestep", state="error", message=msg)
-        return False, msg
 
-
-# ── WanGP ────────────────────────────────────────────────────────────────────
+# -- WanGP --------------------------------------------------------------------
 
 WANGP_GRADIO_PORTS = [7862, 7863, 7864]  # 7860=DropCat, 7861=Forge
 WANGP_WORKER_PORT = 7899
@@ -239,7 +400,7 @@ def check_wangp() -> dict:
     gradio_port = _detect_wangp_gradio()
     if gradio_port:
         return {"state": "running", "message": f"WanGP Gradio on port {gradio_port}", "mode": "gradio", "port": gradio_port}
-    return {"state": "ready", "message": "WanGP configured — will use subprocess per request", "mode": "subprocess"}
+    return {"state": "ready", "message": "WanGP configured -- will use subprocess per request", "mode": "subprocess"}
 
 
 def start_wangp_worker() -> tuple[bool, str | None]:
@@ -258,7 +419,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
 
         wan_root = cfg.get("wan2gp_root")
         if not wan_root:
-            msg = "WanGP path not configured — set it in Settings"
+            msg = "WanGP path not configured -- set it in Settings"
             _set_status("wangp", state="not_configured", message=msg)
             return False, msg
 
@@ -274,6 +435,13 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             msg = "wangp_worker.py not found in services/"
             _set_status("wangp", state="error", message=msg)
             return False, msg
+
+        # Kill any lingering worker processes before starting a new one so we
+        # don't leak orphan GPU processes across restarts. Use both strategies:
+        # port kill catches anything holding 7899 (including Pinokio-spawned
+        # miniconda workers that survive the wmic process-name scan).
+        _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
+        _kill_stale_gpu_processes()
 
         _set_status("wangp", state="starting",
                     message="Starting WanGP worker (loading model)...")
@@ -292,6 +460,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
                 text=True, encoding="utf-8", errors="replace",
                 **_popen_flags(),
             )
+            _assign_to_job(proc)
             _wangp_worker_proc = proc
 
             def _drain(p):
@@ -333,14 +502,14 @@ def start_wangp_worker() -> tuple[bool, str | None]:
             return False, msg
 
 
-# ── Lifecycle ────────────────────────────────────────────────────────────────
+# -- Lifecycle ----------------------------------------------------------------
 
 def quick_detect():
     """Fast synchronous snapshot of which services are already running.
 
     Called in the lifespan before the server starts accepting requests so the
     very first /api/system response returns real states instead of 'unknown'.
-    Each check is just a socket connect — completes in <50ms if the service
+    Each check is just a socket connect -- completes in <50ms if the service
     is up, or fails fast (connection refused) if it's down.
     """
     if wangp_worker_alive():
@@ -351,7 +520,7 @@ def quick_detect():
         wan_root = cfg.get("wan2gp_root")
         if wan_root:
             _set_status("wangp", state="ready",
-                        message="WanGP configured — starting worker...")
+                        message="WanGP configured -- starting worker...")
         else:
             _set_status("wangp", state="not_configured",
                         message="WanGP path not configured")
@@ -364,7 +533,7 @@ def quick_detect():
                         port=FORGE_PORT)
         else:
             _set_status("forge", state="not_running",
-                        message="Forge not running — use Services tab to start")
+                        message="Forge not running -- use Services tab to start")
     except Exception:
         _set_status("forge", state="not_running", message="Forge not detected")
 
@@ -381,16 +550,20 @@ def quick_detect():
         acestep_root = cfg.get("acestep_root")
         if acestep_root:
             _set_status("acestep", state="ready",
-                        message="ACE-Step ready — starts automatically when you generate music")
+                        message="ACE-Step ready -- starts automatically when you generate music")
         else:
             _set_status("acestep", state="not_configured",
-                        message="ACE-Step not configured — set path in Settings")
+                        message="ACE-Step not configured -- set path in Settings")
 
     log.info("Quick service detect complete")
 
 
 def startup_all():
-    """Detect and start services concurrently on app startup."""
+    """Detect and start services concurrently on app startup.
+
+    Orphan eviction has already run synchronously via kill_orphans_at_startup()
+    in the FastAPI lifespan, so we don't repeat the WMIC scan here.
+    """
     quick_detect()
     log.info("Checking services...")
     threads = []
@@ -405,7 +578,7 @@ def startup_all():
         if root is None:
             detected = cfg.auto_detect_acestep()
             if detected:
-                log.info("ACE-Step auto-detected at %s — saving to config", detected)
+                log.info("ACE-Step auto-detected at %s -- saving to config", detected)
                 cfg.save({"acestep_root": detected})
         start_acestep()
 
@@ -427,18 +600,6 @@ def startup_all():
             log.error("[Startup] %s failed to start: %s", name, e)
             _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
 
-    def _check_forge():
-        from services.forge_client import forge_alive, FORGE_PORT
-        if forge_alive():
-            _set_status("forge", state="running",
-                        message="Forge WebUI running (SD image generation ready)",
-                        port=FORGE_PORT)
-            log.info("Forge WebUI detected on port %d", FORGE_PORT)
-            return
-        # Auto-start Forge on app launch
-        log.info("Forge not detected — starting automatically...")
-        start_forge()
-
     def _ensure_ollama():
         ok, err = start_ollama()
         if ok:
@@ -448,7 +609,7 @@ def startup_all():
             _set_status("ollama", state="not_running",
                         message=err or "Ollama not available")
 
-    for label, fn in [("WanGP", _start_wan), ("Forge", _check_forge), ("Ollama", _ensure_ollama)]:
+    for label, fn in [("WanGP", _start_wan), ("Ollama", _ensure_ollama)]:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
     # ACE-Step: deferred -- only started when music generation is needed.
@@ -460,10 +621,10 @@ def startup_all():
         acestep_root = cfg.get("acestep_root")
         if acestep_root:
             _set_status("acestep", state="ready",
-                        message="ACE-Step ready — starts automatically when you generate music")
+                        message="ACE-Step ready -- starts automatically when you generate music")
         else:
             _set_status("acestep", state="not_configured",
-                        message="ACE-Step not configured — set path in Settings for music generation")
+                        message="ACE-Step not configured -- set path in Settings for music generation")
 
     # Start the health watchdog
     start_watchdog()
@@ -486,13 +647,20 @@ def _kill_proc(proc: subprocess.Popen | None, label: str) -> bool:
     return True
 
 
-def _kill_by_port(port: int, label: str):
-    """Kill any process occupying a port (for frozen processes we didn't spawn)."""
+def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
+    """Kill any process occupying a port (for frozen processes we didn't spawn).
+
+    Uses /F /T so child processes (CUDA workers, etc.) are killed too. When
+    wait_release is True, polls the port for up to 4s to confirm it's free
+    before returning -- needed at startup so the new worker can bind cleanly.
+    Returns True if a kill was attempted.
+    """
     if sys.platform != "win32":
-        return
+        return False
+    killed_any = False
     try:
         result = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5, **_popen_flags(),
         )
         for line in result.stdout.splitlines():
             if f":{port}" in line and "LISTENING" in line:
@@ -500,10 +668,48 @@ def _kill_by_port(port: int, label: str):
                 pid = int(parts[-1])
                 if pid > 0:
                     log.info("Killing frozen %s on port %d (pid %d)", label, port, pid)
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                                   capture_output=True, timeout=5)
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                                   capture_output=True, timeout=5, **_popen_flags())
+                    killed_any = True
     except Exception as e:
         log.warning("Failed to kill process on port %d: %s", port, e)
+
+    if killed_any and wait_release:
+        # Poll until the port no longer appears as LISTENING -- max 4s.
+        deadline = time.time() + 4.0
+        while time.time() < deadline:
+            try:
+                result = subprocess.run(
+                    ["netstat", "-ano"], capture_output=True, text=True, timeout=2, **_popen_flags(),
+                )
+                still_listening = any(
+                    f":{port}" in ln and "LISTENING" in ln
+                    for ln in result.stdout.splitlines()
+                )
+                if not still_listening:
+                    log.info("Port %d released after kill", port)
+                    return True
+            except Exception:
+                break
+            time.sleep(0.3)
+        log.warning("Port %d still LISTENING after 4s -- new %s may fail to bind", port, label)
+    return killed_any
+
+
+def kill_orphans_at_startup() -> None:
+    """Synchronously evict orphan WanGP / ACE-Step workers on app startup.
+
+    Runs BEFORE FastAPI starts accepting requests so a previous DCS session's
+    GPU subprocesses (which the OS has not yet finished tearing down) can't
+    keep VRAM hostage and force the user to wait for the old job to complete.
+
+    Fast path: netstat + taskkill /F /T on ports 7899 and 8019 (~1s).
+    Backstop: WMIC command-line scan for orphans on different ports (~10s).
+    """
+    log.info("Evicting any orphan GPU workers from prior session...")
+    _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
+    _kill_by_port(ACESTEP_PORT, "ACE-Step", wait_release=True)
+    _kill_stale_gpu_processes()
 
 
 def stop_service(name: str) -> tuple[bool, str | None]:
@@ -523,7 +729,14 @@ def stop_service(name: str) -> tuple[bool, str | None]:
         if not killed:
             _kill_by_port(ACESTEP_PORT, "ACE-Step")
         _acestep_proc = None
-        _set_status("acestep", state="not_running", message="ACE-Step stopped", pid=None)
+        # After stopping, go back to "ready" if the path is configured so the UI
+        # shows "starts automatically" instead of the misleading "set path in Settings".
+        if cfg.get_acestep_root():
+            _set_status("acestep", state="ready",
+                        message="ACE-Step stopped -- will restart automatically when music is needed", pid=None)
+        else:
+            _set_status("acestep", state="not_configured",
+                        message="ACE-Step stopped -- set path in Settings", pid=None)
         return True, None
 
     if name == "forge":
@@ -561,7 +774,7 @@ def restart_service(name: str) -> tuple[bool, str | None]:
     return False, f"Unknown service: {name}"
 
 
-# ── Forge auto-start ─────────────────────────────────────────────────────────
+# -- Forge auto-start ---------------------------------------------------------
 
 _forge_proc: subprocess.Popen | None = None
 
@@ -582,10 +795,10 @@ def start_forge() -> tuple[bool, str | None]:
     """Start Forge SD WebUI as a fully detached process.
 
     Forge is launched via PowerShell Start-Process so it runs independently
-    of Drop Cat Go Studio — it survives app restarts and closing the app.
+    of Drop Cat Go Studio -- it survives app restarts and closing the app.
 
     If Forge's port is already open (model still loading), we skip the launch
-    and just wait for the API to become ready — prevents killing a loading Forge.
+    and just wait for the API to become ready -- prevents killing a loading Forge.
     """
     global _forge_proc
     from services.forge_client import forge_alive, FORGE_PORT
@@ -599,7 +812,7 @@ def start_forge() -> tuple[bool, str | None]:
 
     # Port open but API not yet ready = Forge is mid-startup; don't kill it
     if _forge_port_open(FORGE_PORT):
-        log.info("Forge port %d is open — model still loading, waiting...", FORGE_PORT)
+        log.info("Forge port %d is open -- model still loading, waiting...", FORGE_PORT)
         _set_status("forge", state="starting",
                     message="Forge loading model, please wait (~90s)...")
         # Fall through to the poll loop below without launching a new process
@@ -617,9 +830,9 @@ def start_forge() -> tuple[bool, str | None]:
 
     try:
         if webui_bat is not None:
-            # Fresh launch — Forge isn't running at all
+            # Fresh launch -- Forge isn't running at all
             _set_status("forge", state="starting",
-                        message="Starting Forge SD — loading model, please wait (~90s)...")
+                        message="Starting Forge SD -- loading model, please wait (~90s)...")
             log.info("Starting Forge SD from %s (detached)...", forge_root)
 
             # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser
@@ -634,9 +847,9 @@ def start_forge() -> tuple[bool, str | None]:
                 ["powershell", "-WindowStyle", "Hidden", "-NonInteractive",
                  "-Command", ps_args],
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                close_fds=True,
             )
-        _forge_proc = None  # detached — no handle to track
+            log.info("Forge launch command sent -- polling for API...")
+        _forge_proc = None  # detached -- no handle to track
 
         # Poll until Forge API responds (up to 5 minutes for large models)
         deadline = time.time() + 300
@@ -668,7 +881,7 @@ def start_forge() -> tuple[bool, str | None]:
         return False, msg
 
 
-# ── Ollama auto-start ────────────────────────────────────────────────────────
+# -- Ollama auto-start --------------------------------------------------------
 
 def _find_ollama() -> str | None:
     import shutil
@@ -716,7 +929,7 @@ def start_ollama() -> tuple[bool, str | None]:
         return False, f"Failed to start Ollama: {e}"
 
 
-# ── Health watchdog ──────────────────────────────────────────────────────────
+# -- Health watchdog ----------------------------------------------------------
 
 def _watchdog_loop():
     """Periodically check managed services and restart crashed ones."""
@@ -725,37 +938,56 @@ def _watchdog_loop():
         try:
             status = get_status()
 
-            # Check WanGP worker -- restart if we launched it but it died
-            if _wangp_worker_proc and _wangp_worker_proc.poll() is not None:
-                log.warning("[watchdog] WanGP worker died -- restarting")
+            # Check WanGP worker -- restart if we launched it but it died.
+            # Snapshot the global to a local so a concurrent stop_service()
+            # setting it to None can't NPE the .poll() call.
+            #
+            # IMPORTANT: route the respawn through the GPU orchestrator so
+            # the eviction policy fires. Without this, the watchdog would
+            # call start_wangp_worker() directly while ACE-Step or Forge is
+            # already holding 5-7 GB of VRAM, and the two services end up
+            # co-loaded on a 16 GB card (observed 2026-05-11: VRAM thrash
+            # at 97% util, machine freeze). gpu.acquire("wangp") evicts
+            # whatever else currently holds the GPU before starting.
+            wangp_proc = _wangp_worker_proc
+            if wangp_proc and wangp_proc.poll() is not None:
+                log.warning("[watchdog] WanGP worker died -- restarting via orchestrator")
                 _set_status("wangp", state="error", message="Worker crashed -- restarting...")
-                start_wangp_worker()
+                try:
+                    from core.gpu_orchestrator import gpu
+                    gpu.acquire("wangp", reason="watchdog respawn after crash")
+                except Exception as e:
+                    log.error("[watchdog] orchestrator-aware WanGP respawn failed: %s; "
+                              "falling back to direct start", e)
+                    start_wangp_worker()
 
-            # Check ACE-Step
-            if _acestep_proc and _acestep_proc.poll() is not None:
-                log.warning("[watchdog] ACE-Step died -- restarting")
+            # Check ACE-Step (same snapshot pattern as WanGP).
+            # Same orchestrator-aware respawn rationale as WanGP above.
+            acestep_proc = _acestep_proc
+            if acestep_proc and acestep_proc.poll() is not None:
+                log.warning("[watchdog] ACE-Step died -- restarting via orchestrator")
                 _set_status("acestep", state="error", message="Server crashed -- restarting...")
-                start_acestep()
+                try:
+                    from core.gpu_orchestrator import gpu
+                    gpu.acquire("acestep", reason="watchdog respawn after crash")
+                except Exception as e:
+                    log.error("[watchdog] orchestrator-aware ACE-Step respawn failed: %s; "
+                              "falling back to direct start", e)
+                    start_acestep()
 
-            # Check Forge -- restart if we launched it and it died
-            if _forge_proc and _forge_proc.poll() is not None:
-                log.warning("[watchdog] Forge died -- restarting")
-                _set_status("forge", state="error", message="Forge crashed -- restarting...")
-                start_forge()
-
-            # Re-check externally-managed Forge every cycle so it goes green
-            # when the user launches it separately (e.g. via desktop shortcut)
+            # Forge is user-managed (image gen is separate from video gen).
+            # Just passively detect its state -- never auto-restart it.
             from services.forge_client import forge_alive as _forge_alive
             forge_state = status.get("forge", {}).get("state", "unknown")
-            if forge_state in ("not_running", "unknown", "error") and not _forge_proc:
+            if forge_state in ("not_running", "unknown", "error", "ready"):
                 if _forge_alive():
                     _set_status("forge", state="running",
                                 message="Forge WebUI running (SD image generation ready)",
                                 port=7861)
-            elif forge_state == "running" and not _forge_proc:
+            elif forge_state == "running":
                 if not _forge_alive():
                     _set_status("forge", state="not_running",
-                                message="Forge stopped — use Services tab to restart")
+                                message="Forge not running -- use Services tab to start")
 
             # Ensure Ollama stays up (lightweight check)
             if not ollama_alive():
@@ -771,7 +1003,7 @@ def start_watchdog():
     log.info("Service health watchdog started (30s interval)")
 
 
-# ── Lifecycle ────────────────────────────────────────────────────────────────
+# -- Lifecycle ----------------------------------------------------------------
 
 def shutdown_all():
     """Cleanly shut down managed services."""
@@ -779,6 +1011,10 @@ def shutdown_all():
     for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc),
                         ("Forge", _forge_proc)]:
         _kill_proc(proc, label)
+    # Belt+suspenders: kill by port for processes we didn't spawn (or lost the handle to)
+    _kill_by_port(WANGP_WORKER_PORT, "WanGP")
+    _kill_by_port(ACESTEP_PORT, "ACE-Step")
+    _kill_stale_gpu_processes()
     _wangp_worker_proc = None
     _acestep_proc = None
     _forge_proc = None

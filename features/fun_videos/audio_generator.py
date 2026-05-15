@@ -5,7 +5,9 @@ Based on the battle-tested DropCatGo-Fun-Videos_w_Audio/audio_generator.py.
 """
 import json
 import logging
+import re as _re_sil
 import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -19,7 +21,7 @@ ACESTEP_PORT = 8019
 API_BASE = f"http://{ACESTEP_HOST}:{ACESTEP_PORT}"
 
 MAX_DURATION = 120
-GENERATION_TIMEOUT = 180  # 3 min — if ACE-Step can't finish by then, skip to video-only
+GENERATION_TIMEOUT = 300  # 5 min
 POLL_INTERVAL = 3
 
 
@@ -41,45 +43,63 @@ def _post(url: str, payload: dict, timeout: int = 30) -> dict | None:
         return None
 
 
+_AUTHENTICITY_MARKERS = (
+    "authentic", "raw", "gritty", "organic", "lo-fi", "lo fi",
+    "vintage", "underground", "indie", "soul", "real",
+    "not generic", "not polished", "not pop", "distinct character",
+)
+
+
 def _lyrics_request_vocals(lyrics: str) -> bool:
     text = (lyrics or "").strip().lower()
     return bool(text) and text not in {"[inst]", "[instrumental]"}
 
 
+def _add_style_guardrails(prompt: str) -> str:
+    """Append authenticity qualifiers if the prompt has no genre-identity signals.
+
+    Steers ACE-Step away from default generic pop/lite-FM production.
+    Use ONLY positive descriptors -- diffusion models ignore negation, so "not pop"
+    activates "pop" rather than suppressing it.
+    """
+    if not prompt:
+        return prompt
+    lower = prompt.lower()
+    if not any(m in lower for m in _AUTHENTICITY_MARKERS):
+        return prompt.rstrip(", ") + ", distinct character, authentic energy, raw production"
+    return prompt
+
+
 def _normalize_prompt(prompt: str, instrumental: bool, lyrics: str) -> str:
     normalized = (prompt or "").strip()
     if instrumental or not _lyrics_request_vocals(lyrics):
-        return normalized
+        return _add_style_guardrails(normalized)
 
     prompt_lower = normalized.lower()
+    # Word-boundary match -- substring match falsely triggered on "vib[rap]hone"
+    # for "rap", which made ACE-Step skip the "lead vocal" hint and render the
+    # track instrumental despite the lyrics block being non-empty.
+    import re as _re_v
     vocal_keywords = (
         "vocal", "vocals", "singer", "singing", "sung", "female vocal",
         "male vocal", "choir", "duet", "rap", "spoken word",
     )
-    if not any(kw in prompt_lower for kw in vocal_keywords):
+    has_vocal_kw = any(_re_v.search(rf"\b{_re_v.escape(kw)}\b", prompt_lower) for kw in vocal_keywords)
+    if not has_vocal_kw:
         normalized = (normalized.rstrip(", ") + ", lead vocal") if normalized else "lead vocal"
         prompt_lower = normalized.lower()
 
+    # Force ACE-Step to place vocals at t=0. Without this hint the model adds an
+    # instrumental intro that can eat half the track before any lyric is sung.
     pacing_keywords = (
         "from the opening", "from the start", "early vocal", "vocals enter early",
-        "immediate vocal", "lead vocal up front",
+        "immediate vocal", "lead vocal up front", "straight to verse", "no intro",
+        "beat 1", "bar 1", "instant",
     )
-    leading = [l.strip().lower() for l in (lyrics or "").splitlines() if l.strip()][:3]
-    starts_with_intro = any(l.startswith("[intro") or l.startswith("[instrumental") for l in leading)
-    if not starts_with_intro and not any(kw in prompt_lower for kw in pacing_keywords):
-        normalized = (normalized.rstrip(", ") + ", vocals enter early") if normalized else "vocals enter early"
+    if not any(kw in prompt_lower for kw in pacing_keywords):
+        normalized = (normalized.rstrip(", ") + ", cold open, no intro bars, voice on beat 1, immediate lyric entry") if normalized else "cold open, no intro bars, voice on beat 1, immediate lyric entry"
 
-    return normalized
-
-
-def _ensure_intro(lyrics: str) -> str:
-    text = (lyrics or "").strip()
-    if not text:
-        return text
-    first = next((l.strip().lower() for l in text.splitlines() if l.strip()), "")
-    if first.startswith("[intro") or first.startswith("[instrumental"):
-        return text
-    return f"[intro]\n\n{text}"
+    return _add_style_guardrails(normalized)
 
 
 def _extract_audio_url(item: dict) -> str | None:
@@ -135,7 +155,7 @@ def generate_audio(
         # Lazy-start: ACE-Step is deferred to keep VRAM free for Ollama.
         # Start it now and wait for it to be ready.
         from services.manager import start_acestep
-        log.info("ACE-Step not running — starting on demand for audio generation...")
+        log.info("ACE-Step not running -- starting on demand for audio generation...")
         if progress_cb:
             progress_cb(-1)  # signal "starting service"
         ok, err = start_acestep()
@@ -150,15 +170,49 @@ def generate_audio(
     duration = max(5.0, min(float(duration), MAX_DURATION))
     has_vocals = not instrumental and _lyrics_request_vocals(lyrics)
 
-    effective_lyrics = _ensure_intro(lyrics) if has_vocals else ""
-    effective_prompt = _normalize_prompt(prompt, instrumental, effective_lyrics)
-    effective_prompt = effective_prompt or "cinematic ambient music, atmospheric, instrumental"
+    # Pass lyrics as-is -- do NOT inject [intro] markup; it causes ACE-Step to
+    # produce a long blank intro that eats 2/3 of the track before vocals enter.
+    effective_lyrics = lyrics.strip() if has_vocals else ""
+
+    # ACE-Step uses section markers to control vocal onset. The model treats
+    # numbered markers like [verse 1] / [chorus 2] / [verse 3] as a multi-section
+    # song -- it then allocates an instrumental intro before "verse 1" so the
+    # first lyric only enters ~1/3 to 1/2 of the way in. Stripping the numbers
+    # collapses those into plain section tags and forces vocals on beat 1.
+    # If the lyrics open with [intro] or have no marker at all, also prepend
+    # [verse] so there is no silent leader.
+    if has_vocals and effective_lyrics:
+        import re as _re
+        effective_lyrics = _re.sub(
+            r'(?im)^\s*\[\s*(verse|chorus|bridge|hook|pre[- ]?chorus|outro)\s*[0-9ivxIVX]*\s*\]\s*$',
+            r'[\1]',
+            effective_lyrics,
+        )
+        if not _re.match(r'^\s*\[', effective_lyrics):
+            effective_lyrics = '[chorus]\n' + effective_lyrics
+        elif _re.match(r'^\s*\[intro\]', effective_lyrics, _re.IGNORECASE):
+            effective_lyrics = _re.sub(r'^\s*\[intro\]', '[chorus]', effective_lyrics, count=1, flags=_re.IGNORECASE)
+        # Strip any [outro] -- short tracks have no room and ACE-Step often pads
+        # silence to "fit" it.
+        effective_lyrics = _re.sub(r'(?im)^\s*\[outro\]\s*$', '', effective_lyrics).strip()
+        # ACE-Step treats [verse] as requiring an instrumental intro before vocals enter,
+        # delaying the first lyric by 1/3 to 1/2 of the track. [chorus] signals
+        # immediate vocal entry -- replace the opening section if it is still [verse].
+        effective_lyrics = _re.sub(r'^\s*\[verse\]', '[chorus]', effective_lyrics, count=1, flags=_re.IGNORECASE)
+
+    effective_prompt = _normalize_prompt(prompt, instrumental, lyrics)
+    effective_prompt = effective_prompt or "atmospheric music, organic texture, instrumental, distinct character"
 
     payload = {
         "prompt": effective_prompt,
         "lyrics": effective_lyrics,
+        # ACE-Step 1.5 dropped 'none' from chunk_mask_mode -- it now only
+        # accepts 'explicit' or 'auto' (pydantic literal validation rejects
+        # 'none' with HTTP 500). 'auto' is the closest behavioral match: lets
+        # ACE-Step decide chunking by itself, same effective output as 'none'
+        # for our short single-block tracks.
         "chunk_mask_mode": "auto",
-        "thinking": has_vocals,
+        "thinking": False,
         "audio_duration": duration,
         "audio_format": audio_format,
         "batch_size": 1,
@@ -168,10 +222,15 @@ def generate_audio(
         "guidance_scale": guidance,
         "lm_backend": "pt",
         "use_cot_caption": False,
-        "use_cot_language": has_vocals,
+        "use_cot_language": False,
     }
-    if bpm and bpm > 0:
-        payload["bpm"] = int(bpm)
+    if bpm is not None:
+        try:
+            bpm_int = int(bpm)
+            if 20 <= bpm_int <= 300:
+                payload["bpm"] = bpm_int
+        except (TypeError, ValueError):
+            pass
 
     resp = _post(f"{API_BASE}/release_task", payload, timeout=30)
     if resp is None:
@@ -216,6 +275,60 @@ def generate_audio(
 
     if dest.exists() and dest.stat().st_size > 0:
         log.info("Audio saved: %s", dest)
+        _trim_silence_tail(str(dest))
         return str(dest), None
 
     return None, "Downloaded audio file is empty"
+
+
+def _trim_silence_tail(audio_path: str, threshold_db: float = -45.0) -> None:
+    """In-place trim of trailing silence, with 0.8s fade-out.
+
+    ACE-Step frequently pads generated audio with 3-6 seconds of silence at
+    the end. Trimming it prevents a silent tail in the final merged video.
+    """
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-of", "default",
+             "-show_entries", "format=duration", audio_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        total_dur = None
+        for line in probe.stdout.splitlines():
+            if line.startswith("duration="):
+                try:
+                    total_dur = float(line.split("=", 1)[1])
+                except ValueError:
+                    pass
+        if not total_dur or total_dur < 4.0:
+            return
+
+        r = subprocess.run(
+            ["ffmpeg", "-i", audio_path,
+             "-af", f"silencedetect=n={threshold_db}dB:d=0.4",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        starts = [float(m) for m in _re_sil.findall(r"silence_start: ([0-9.]+)", r.stderr)]
+        if not starts:
+            return
+        last_start = starts[-1]
+        # Only trim if trailing silence is more than 1.5 seconds
+        if total_dur - last_start < 1.5:
+            return
+        trim_end = min(last_start + 0.3, total_dur)
+        fade_start = max(0.0, trim_end - 0.8)
+        tmp = audio_path + ".strim"
+        r2 = subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path,
+             "-t", f"{trim_end:.3f}",
+             "-af", f"afade=t=out:st={fade_start:.3f}:d=0.8",
+             tmp],
+            capture_output=True, timeout=60,
+        )
+        if r2.returncode == 0 and Path(tmp).exists():
+            import os as _os
+            _os.replace(tmp, audio_path)
+            log.info("[audio] Trimmed trailing silence %.1fs->%.1fs", total_dur, trim_end)
+    except Exception as e:
+        log.warning("[audio] Silence trim failed: %s", e)

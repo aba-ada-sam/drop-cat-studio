@@ -1,8 +1,9 @@
-"""Video Tools API routes — /api/tools/*
+"""Video Tools API routes -- /api/tools/*
 
 Batch video transforms: reverse, mirror, flip, speed, upscale, sharpen.
 Also includes the music mixer from Github Video Editor.
 """
+import asyncio
 import logging
 import os
 import uuid
@@ -25,48 +26,53 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 async def add_paths(request: Request):
     """Register existing file paths (no upload needed).
 
-    Accepts paths to files already on disk — from other apps, folders, etc.
+    Accepts paths to files already on disk -- from other apps, folders, etc.
     Returns metadata (duration, resolution) for each valid file.
     """
     from core.ffmpeg_utils import probe_file
     body = await request.json()
     paths = body.get("paths", [])
-    result = []
-    for path in paths:
-        p = Path(path)
-        if p.is_dir():
-            # Add all video files from folder
-            for fp in sorted(p.iterdir()):
-                if fp.suffix.lower() in VIDEO_EXTS:
-                    info = probe_file(str(fp))
-                    result.append({"path": str(fp), "name": fp.name, **info})
-        elif p.is_file() and p.suffix.lower() in VIDEO_EXTS:
-            info = probe_file(str(p))
-            result.append({"path": str(p), "name": p.name, **info})
-        else:
-            result.append({"path": path, "name": p.name, "error": "File not found or not a video"})
-    return {"files": result}
+
+    def _scan():
+        result = []
+        for path in paths:
+            p = Path(path)
+            if p.is_dir():
+                for fp in sorted(p.iterdir()):
+                    if fp.suffix.lower() in VIDEO_EXTS:
+                        info = probe_file(str(fp))
+                        result.append({"path": str(fp), "name": fp.name, **info})
+            elif p.is_file() and p.suffix.lower() in VIDEO_EXTS:
+                info = probe_file(str(p))
+                result.append({"path": str(p), "name": p.name, **info})
+            else:
+                result.append({"path": path, "name": p.name, "error": "File not found or not a video"})
+        return result
+
+    return {"files": await asyncio.to_thread(_scan)}
 
 
 @router.post("/upload")
 async def upload_videos(files: list[UploadFile] = File(...)):
     saved = []
+    rejected = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
         if ext not in VIDEO_EXTS:
+            rejected.append(f.filename or "unnamed")
             continue
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
         dest.write_bytes(data)
         from core.ffmpeg_utils import probe_file
-        info = probe_file(str(dest))
+        info = await asyncio.to_thread(probe_file, str(dest))
         saved.append({
             "path": str(dest),
             "name": f.filename,
             "size": len(data),
             **info,
         })
-    return {"files": saved}
+    return {"files": saved, "rejected": rejected}
 
 
 @router.post("/process")
@@ -124,7 +130,7 @@ async def mix_music(request: Request):
     if not music_path or not os.path.isfile(music_path):
         raise HTTPException(400, "Music file not found")
 
-    # Validate volume dB values — sane range is -60 to +20 dB
+    # Validate volume dB values -- sane range is -60 to +20 dB
     settings = body.get("settings", {})
     try:
         music_vol = max(-60.0, min(20.0, float(settings.get("music_volume_db", -18.0))))
@@ -141,6 +147,7 @@ async def mix_music(request: Request):
         )
         if result["success"]:
             job.output = result["output_path"]
+            from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
             job.message = "Music mixed successfully"
         else:
             raise RuntimeError(result["error"])

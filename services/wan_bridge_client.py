@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unified WanGP subprocess client — generates a single I2V video clip.
+"""Unified WanGP subprocess client -- generates a single I2V video clip.
 
 Merged from the three copies in Fun-Videos, BRIDGES, and Github Video Editor.
 Called as a subprocess with WanGP's own Python environment.
@@ -140,6 +140,18 @@ def main():
     # Use setdefault so WanGP's own defaults (e.g. sliding_window_size) are preserved
     for k, v in SAFE_DEFAULTS.items():
         defaults.setdefault(k, v)
+    # Force off ALL post-processing passes saved in WanGP's settings file.
+    # setdefault above won't override already-present keys -- explicit assignment required.
+    # This block is the single authoritative list -- add any new WanGP pass here if it
+    # reappears, rather than discovering it one generation at a time.
+    defaults["spatial_upsampling"]    = ""  # no Lanczos/VAE upscaling pass
+    defaults["temporal_upsampling"]   = ""  # no RIFE frame interpolation pass
+    defaults["self_refiner_setting"]  = 0   # no second denoising pass
+    defaults["self_refiner_plan"]     = []
+    defaults["film_grain_intensity"]  = 0   # no film grain
+    defaults["prompt_enhancer"]       = ""  # no LLM prompt rewriting inside WanGP
+    defaults["skip_steps_cache_type"] = ""  # no tea/mag cache
+    defaults["MMAudio_setting"]       = 0   # never inherit a saved MMAudio=1
     # Image settings must always override
     defaults["image_start"] = start_images
     defaults["image_end"] = end_images

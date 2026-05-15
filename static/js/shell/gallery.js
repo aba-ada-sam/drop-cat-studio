@@ -3,11 +3,15 @@
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
 
-import { apiFetch, toast } from './toast.js?v=20260419h';
-import { applySettingsToTab } from './ai-intent.js?v=20260419h';
+import { apiFetch, toast } from './toast.js?v=20260503a';
+import { applySettingsToTab } from './ai-intent.js?v=20260503h';
 import { handoff } from '../handoff.js?v=20260422a';
+import { pathToUrl } from '../components.js?v=20260507a';
 
 let _items = [];
+let _totalItems = 0;
+let _loadedOffset = 0;
+const _PAGE_SIZE = 100;
 let _filters = { tab: '', search: '' };
 let _containerEl = null;
 let _detailItem = null;
@@ -51,15 +55,8 @@ export async function addItem(item) {
 // Tabs call this when a generation succeeds. Converts a filesystem path to
 // the /output/... URL the app serves, and bundles settings as metadata so
 // "Load Settings" from the gallery item can replay them.
-function _pathToUrl(p) {
-  if (!p || p.startsWith('/') || p.startsWith('http')) return p || '';
-  const norm = p.replace(/\\/g, '/');
-  const idx  = norm.toLowerCase().indexOf('/output/');
-  return idx !== -1 ? norm.substring(idx) : `/output/${norm.split('/').pop()}`;
-}
-
 export function pushFromTab(tab, savedPath, prompt, seed, settings) {
-  const url = _pathToUrl(savedPath);
+  const url = pathToUrl(savedPath);
   if (!url) return;
   return addItem({
     tab,
@@ -71,10 +68,30 @@ export function pushFromTab(tab, savedPath, prompt, seed, settings) {
   });
 }
 
+function _apiUrl(offset) {
+  const p = new URLSearchParams({ limit: _PAGE_SIZE, offset });
+  if (_filters.tab)    p.set('tab', _filters.tab);
+  if (_filters.search) p.set('search', _filters.search);
+  return `/api/gallery?${p}`;
+}
+
 async function _load() {
   try {
-    const data = await apiFetch('/api/gallery', { context: 'gallery.load' });
+    const data = await apiFetch(_apiUrl(0), { context: 'gallery.load' });
     _items = data.items || [];
+    _totalItems = data.total ?? _items.length;
+    _loadedOffset = _items.length;
+    _renderGrid();
+  } catch (_) {}
+}
+
+async function _loadMore() {
+  try {
+    const data = await apiFetch(_apiUrl(_loadedOffset), { context: 'gallery.load-more' });
+    const more = data.items || [];
+    _items = _items.concat(more);
+    _totalItems = data.total ?? _items.length;
+    _loadedOffset = _items.length;
     _renderGrid();
   } catch (_) {}
 }
@@ -89,7 +106,7 @@ function _render() {
           <option value="">All tabs</option>
           <option value="sd-prompts">SD Prompts</option>
           <option value="image-gen">Image Gen</option>
-          <option value="fun-videos">Videos</option>
+          <option value="create-videos">Videos</option>
           <option value="bridges">Bridges</option>
         </select>
       </div>
@@ -98,11 +115,13 @@ function _render() {
 
   _containerEl.querySelector('#gallery-search')?.addEventListener('input', e => {
     _filters.search = e.target.value;
-    _renderGrid();
+    _items = []; _loadedOffset = 0; _totalItems = 0;
+    _load();
   });
   _containerEl.querySelector('#gallery-tab-filter')?.addEventListener('change', e => {
     _filters.tab = e.target.value;
-    _renderGrid();
+    _items = []; _loadedOffset = 0; _totalItems = 0;
+    _load();
   });
 }
 
@@ -128,8 +147,8 @@ function _renderPreview() {
   area.innerHTML = `
     <div style="display:flex;flex-direction:column;background:var(--surface-2);border-bottom:1px solid var(--border)">
       ${isVideo
-        ? `<video src="${mediaSrc}" controls style="width:100%;max-height:55vh;object-fit:contain;background:#000;display:block"></video>`
-        : `<img src="${mediaSrc}" alt="" style="width:100%;max-height:55vh;object-fit:contain;background:var(--bg);display:block">`}
+        ? `<video src="${_esc(mediaSrc)}" controls style="width:100%;max-height:55vh;object-fit:contain;background:#000;display:block"></video>`
+        : `<img src="${_esc(mediaSrc)}" alt="" style="width:100%;max-height:55vh;object-fit:contain;background:var(--bg);display:block">`}
       <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
         ${btnHtml}
         ${prompt ? `<p style="font-size:.75rem;color:var(--text-3);margin:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${_esc(prompt)}</p>` : ''}
@@ -140,7 +159,7 @@ function _renderPreview() {
     area.querySelector(`[data-preview-action="${i}"]`)?.addEventListener('click', a.onClick);
   });
 
-  // Hide the search toolbar when preview is active — history is below
+  // Hide the search toolbar when preview is active -- history is below
   if (toolbar) toolbar.style.display = 'none';
 }
 
@@ -159,7 +178,7 @@ function _filtered() {
 function _renderGrid() {
   const grid = _containerEl?.querySelector('#gallery-grid');
   if (!grid) return;
-  const items = _filtered();
+  const items = _items;
 
   if (!items.length) {
     if (_preview) {
@@ -184,6 +203,15 @@ function _renderGrid() {
   for (const item of items) {
     grid.appendChild(_makeCard(item));
   }
+  // "Load more" row when there are more items in the DB than we've fetched
+  if (_loadedOffset < _totalItems) {
+    const remaining = _totalItems - _loadedOffset;
+    const btn = document.createElement('div');
+    btn.style.cssText = 'grid-column:1/-1;padding:12px;text-align:center';
+    btn.innerHTML = `<button class="btn btn-sm" id="gallery-load-more">Load ${Math.min(remaining, _PAGE_SIZE)} more (${remaining} remaining)</button>`;
+    btn.querySelector('button').addEventListener('click', _loadMore);
+    grid.appendChild(btn);
+  }
 }
 
 function _makeCard(item) {
@@ -194,7 +222,7 @@ function _makeCard(item) {
   card.setAttribute('aria-label', `Open ${item.tab} generation from ${item.created_at || ''}`);
 
   const TAB_LABELS = {
-    'sd-prompts': 'SD', 'image-gen': 'IMG', 'fun-videos': 'VID', 'bridges': 'BRG',
+    'sd-prompts': 'SD', 'image-gen': 'IMG', 'create-videos': 'VID', 'bridges': 'BRG',
   };
   const badge = TAB_LABELS[item.tab] || item.tab?.toUpperCase() || '?';
 
@@ -206,7 +234,9 @@ function _makeCard(item) {
     mediaEl = document.createElement('video');
     mediaEl.src = item.url;
     mediaEl.preload = 'none';
-    mediaEl.poster = item.thumbnail || '';
+    mediaEl.poster = item.url
+        ? `/api/thumbnail?path=${encodeURIComponent(item.url)}&size=300`
+        : (item.thumbnail || '');
     mediaEl.style.cssText = 'width:100%;height:100%;object-fit:cover';
     mediaEl.muted = true;
     card.addEventListener('mouseenter', () => mediaEl.play().catch(() => {}));
@@ -238,21 +268,33 @@ function _makeCard(item) {
 
   actions.querySelector('.gallery-fav').addEventListener('click', async e => {
     e.stopPropagation();
-    item.favorite = !item.favorite;
-    e.currentTarget.classList.toggle('on', item.favorite);
-    await apiFetch(`/api/gallery/${item.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ favorite: item.favorite }),
-      context: 'gallery.favorite',
-    }).catch(() => {});
+    const btn = e.currentTarget;
+    const newVal = !item.favorite;
+    item.favorite = newVal;
+    btn.classList.toggle('on', newVal);
+    try {
+      await apiFetch(`/api/gallery/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ favorite: newVal }),
+        context: 'gallery.favorite',
+      });
+    } catch (_) {
+      // revert local state so the star reflects actual server state
+      item.favorite = !newVal;
+      btn.classList.toggle('on', item.favorite);
+    }
   });
 
   actions.querySelector('.remove').addEventListener('click', async e => {
     e.stopPropagation();
     if (!confirm('Delete this generation?')) return;
-    await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {});
-    _items = _items.filter(i => i.id !== item.id);
-    _renderGrid();
+    try {
+      await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' });
+      _items = _items.filter(i => i.id !== item.id);
+      _renderGrid();
+    } catch (_) {
+      // error already toasted by apiFetch; leave item in grid
+    }
   });
 
   card.appendChild(actions);
@@ -276,19 +318,27 @@ function _openDetail(item) {
     overlay.setAttribute('aria-modal', 'true');
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => {
-      if (e.target === overlay) overlay.classList.remove('open');
+      if (e.target === overlay) {
+        overlay.querySelector('video')?.pause();
+        overlay.classList.remove('open');
+      }
     });
   }
 
   const isVideo = /\.(mp4|webm|mov)$/i.test(item.url || '');
   const meta = item.metadata || {};
 
+  function _closeOverlay() {
+    overlay.querySelector('video')?.pause();
+    overlay.classList.remove('open');
+  }
+
   overlay.innerHTML = `
     <div class="gallery-detail">
       <div class="gallery-detail-media">
         ${isVideo
-          ? `<video src="${item.url}" controls autoplay style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
-          : `<img src="${item.url}" alt="${item.prompt || ''}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
+          ? `<video src="${_esc(item.url)}" controls style="max-width:100%;max-height:90vh;object-fit:contain"></video>`
+          : `<img src="${_esc(item.url)}" alt="${_esc(item.prompt || '')}" style="max-width:100%;max-height:90vh;object-fit:contain">`}
       </div>
       <div class="gallery-detail-sidebar">
         <button class="btn-icon modal-close" style="align-self:flex-end" aria-label="Close">&times;</button>
@@ -297,25 +347,29 @@ function _openDetail(item) {
         </div>
         ${meta.model ? `<div class="gallery-meta-block"><strong>Model</strong><span>${_esc(meta.model)}</span></div>` : ''}
         ${meta.seed  ? `<div class="gallery-meta-block"><strong>Seed</strong><span>${meta.seed}</span></div>` : ''}
+        ${meta.clips ? `<div class="gallery-meta-block"><strong>Clips</strong><span>${meta.clips}</span></div>` : ''}
+        ${meta.duration_sec ? `<div class="gallery-meta-block"><strong>Output length</strong><span>${Math.round(meta.duration_sec)}s</span></div>` : ''}
+        ${meta.elapsed_seconds ? `<div class="gallery-meta-block"><strong>Compute time</strong><span>${_formatGalleryDuration(meta.elapsed_seconds)}</span></div>` : ''}
         ${item.created_at ? `<div class="gallery-meta-block"><strong>Created</strong><span>${new Date(item.created_at).toLocaleString()}</span></div>` : ''}
         ${item.tab ? `<div class="gallery-meta-block"><strong>Source</strong><span>${_esc(item.tab)}</span></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
-          ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">→ Make Video</button>` : ''}
-          <a href="${item.url}" download class="btn btn-sm">Download</a>
+          ${!isVideo ? `<button class="btn btn-primary btn-sm" id="gd-make-video">-> Make Video</button>` : ''}
+          <a href="${_esc(item.url)}" download class="btn btn-sm">Download</a>
           <button class="btn btn-sm" id="gd-load-settings">Load Settings</button>
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
+          <button class="btn btn-sm btn-danger" id="gd-delete">Delete File</button>
         </div>
       </div>
     </div>`;
 
-  overlay.querySelector('.modal-close').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.querySelector('.modal-close').addEventListener('click', _closeOverlay);
   overlay.querySelector('#gd-make-video')?.addEventListener('click', () => {
     const path = item.metadata?.path || item.url;
-    handoff('fun-videos', { type: 'image', path, url: item.url });
+    handoff('express', { type: 'image', path, url: item.url });
     overlay.classList.remove('open');
-    document.getElementById('btn-gallery-close')?.click();  // close gallery overlay
-    document.querySelector('.rail-tab[data-tab="fun-videos"]')?.click();
-    toast('Image sent to Create Videos', 'info');
+    document.getElementById('btn-gallery-close')?.click();
+    document.querySelector('.rail-tab[data-tab="express"]')?.click();
+    toast('Image loaded -- click Create!', 'info');
   });
   overlay.querySelector('#gd-load-settings')?.addEventListener('click', () => {
     _loadItemSettings(item);
@@ -323,26 +377,66 @@ function _openDetail(item) {
     toast('Settings loaded from gallery item', 'success');
   });
   overlay.querySelector('#gd-branch')?.addEventListener('click', () => {
-    _loadItemSettings(item);
     overlay.classList.remove('open');
-    // Branch & Tweak jumps to the source tab so you can immediately edit+regen.
-    if (item.tab) document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
-    toast('Branched: settings loaded — tweak and re-generate', 'info');
+    // Close the main gallery overlay so the tab is visible
+    document.getElementById('btn-gallery-close')?.click();
+    if (item.tab) {
+      // Navigate first so the tab initialises (lazy init on first visit)
+      document.querySelector(`.rail-tab[data-tab="${item.tab}"]`)?.click();
+      // Apply settings after the tab's async registerTabAI() Promise resolves
+      setTimeout(() => {
+        const ok = _loadItemSettings(item);
+        if (!ok) toast(`Open the ${item.tab} tab first`, 'info');
+      }, 80);
+    } else {
+      _loadItemSettings(item);
+    }
+    toast('Branched -- tweak and re-generate', 'info');
+  });
+  overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
+    if (!confirm('Delete this file permanently? This cannot be undone.')) return;
+    _closeOverlay();
+    const filePath = item.metadata?.path;
+    await Promise.all([
+      apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {}),
+      filePath ? apiFetch('/api/output/delete', {
+        method: 'POST',
+        body: JSON.stringify({ path: filePath }),
+        context: 'gallery.delete-file',
+      }).catch(() => {}) : Promise.resolve(),
+    ]);
+    _items = _items.filter(i => i.id !== item.id);
+    _renderGrid();
+    toast('File deleted', 'success');
   });
 
   overlay.classList.add('open');
 }
 
 function _loadItemSettings(item) {
-  if (!item.metadata?.settings || !item.tab) return;
-  const ok = applySettingsToTab(item.tab, item.metadata.settings);
-  if (!ok) toast(`Can't load settings — ${item.tab} tab not initialized yet`, 'info');
+  if (!item.metadata?.settings || !item.tab) return false;
+  const settings = item.metadata.settings;
+  if (!Object.keys(settings).length) return false;
+  const ok = applySettingsToTab(item.tab, settings);
+  return ok;
 }
 
 function _esc(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+function _formatGalleryDuration(sec) {
+  if (sec == null || sec < 0) return '';
+  const total = Math.round(sec);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m < 60) return `${m}m ${String(s).padStart(2, '0')}s`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${h}h ${String(mm).padStart(2, '0')}m`;
 }
 
 export function refresh() { _load(); }

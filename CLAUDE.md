@@ -4,11 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 5 separate tools (previously independent apps on different ports) into one FastAPI + vanilla JS web app. Single server on port 7860, no build step.
+**Drop Cat Go Studio** is a unified AI video production app belonging to Andrew. It merges 5 separate tools into one FastAPI + vanilla JS web app. The server picks its own port (7860–7879), writes `.dcs-port`, and the browser reads that file. No build step.
 
-**Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860
+**Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860 (or whichever port was free)
 
-There are no tests, linting, or CI/CD configured. The app is tested manually through the UI.
+**Design philosophy:** simpleton path first. The Express tab ("Create") is the zero-friction entry — drop image, describe idea, get video with AI music + lyrics. Advanced users can go deeper through the per-step tabs (Generate Images → Create Videos → Audio). Never add infrastructure complexity (service names, LLM provider controls) to the header or primary UI.
+
+---
+
+## Commands
+
+```bash
+# Run the app
+python app.py
+
+# Smoke tests (in-process FastAPI TestClient, no GPU/Ollama needed)
+python tests/smoke.py
+
+# Check JS for silent syntax errors (ES module SyntaxErrors kill all JS silently)
+node --check static/js/app.js
+node --check static/js/tab-sd-prompts.js   # or any other module
+
+# Check Python syntax
+python -m py_compile features/fun_videos/routes.py
+```
+
+**Silent JS failure pattern:** If the splash shows raw HTML text ("Connecting to server..." not "Connecting…"), it means app.js never executed — an ES module import or syntax error killed the whole chain. Run `node --check` on every changed JS file. Common culprits: Unicode minus/dash characters instead of ASCII `-`, duplicate function declarations, bad import paths.
 
 ---
 
@@ -30,9 +51,19 @@ static/                 — Vanilla JS frontend (ES modules, no framework, no bu
   js/tab-*.js           — Per-tab controllers, lazy-inited on first visit
 ```
 
+### Feature API prefixes
+
+| Feature | Route prefix | GPU? |
+|---------|-------------|------|
+| Fun Videos | `/api/fun/*` | Yes (WanGP) |
+| Video Bridges | `/api/bridges/*` | Yes (WanGP) |
+| SD Prompts | `/api/prompts/*` | No |
+| Image-to-Video | `/api/i2v/*` | No |
+| Video Tools | `/api/tools/*` | No |
+
 ### Critical pattern: circular import avoidance
 
-`app.py` imports all feature routers at module level (lines 555-567). Features that need the LLM router or job manager **must use lazy getter functions**, never direct imports:
+`app.py` imports all feature routers at module level. Features that need the LLM router or job manager **must use lazy getter functions**, never direct imports:
 
 ```python
 # CORRECT — deferred to request time
@@ -43,7 +74,7 @@ llm_router = get_llm_router()
 from app import LLMRouter
 ```
 
-The `sys.modules` fix at the top of `app.py` (line 12) ensures `from app import ...` and `from __main__ import ...` resolve to the same module object with shared `_g` globals dict.
+The `sys.modules` fix at the top of `app.py` ensures `from app import ...` and `from __main__ import ...` resolve to the same module object with shared `_g` globals dict.
 
 ### GPU job queue (`core/job_manager.py`)
 
@@ -54,20 +85,32 @@ Worker functions receive a `Job` object and must:
 - Check `job.stop_event.is_set()` for cancellation
 - Set `job.output` on success
 
-GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s).
+```python
+def my_worker(job: Job, input_path, param):
+    job.update(status="running", progress=10, message="Starting…")
+    for step in work_steps:
+        if job.stop_event.is_set():
+            return
+        job.update(progress=step_pct, message=step_label)
+    job.update(status="done", progress=100, output=output_path)
+```
+
+GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s). Between GPU jobs, `gc.collect()` + `torch.cuda.empty_cache()` free VRAM.
 
 ### LLM routing (`core/llm_router.py`)
 
 All AI calls go through `LLMRouter.route()` or `LLMRouter.route_vision()`. The provider is read from config on each call (hot-switchable via Settings UI):
 - **auto** (default): tries Anthropic key → OpenAI key → Ollama
-- Three tiers: `TIER_FAST`, `TIER_BALANCED`, `TIER_POWER` — mapped to different models per provider
+- Three tiers: `TIER_FAST = "fast"`, `TIER_BALANCED = "balanced"`, `TIER_POWER = "power"` — always pass the constant, never its name as a string literal
 - Retry with exponential backoff; respects `Retry-After` on 429s; permanent errors fail immediately
+
+`core/llm_client.py` also exports `parse_json_response(text)` — strips markdown code fences and extracts the outermost JSON object/array from an LLM response. Use this instead of writing raw `re.search` for JSON extraction.
 
 ### Config system (`core/config.py`)
 
 Single `config.json` with 53+ namespaced keys (prefixes: `i2v_`, `fun_`, `bridge_`, `sd_`, `tools_`). Global keys shared across features. `DEFAULTS` dict is the canonical key registry — only keys present in `DEFAULTS` are accepted via the API.
 
-Thread-safe via `RLock` (allows nested `load()` inside `save()`). File mtime caching avoids repeated disk reads. Type validation runs once on first load.
+Thread-safe via `RLock` (allows nested `load()` inside `save()`). File mtime caching avoids repeated disk reads.
 
 ### Session tracking (`core/session.py`)
 
@@ -83,16 +126,29 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 - **`components.js`** — shared UI factory (`el()`, `toast()`, `createDropZone()`, `createSlider()`, etc.)
 - **`handoff.js`** — cross-tab data passing (e.g., Fun Videos output → Bridges input)
 
+### Express tab (`tab-express.js`) — inline polling model
+
+The Express tab polls its own job and renders progress + output inline. Non-loop single-run jobs must follow this pattern: show a progress bar on submit, call `pollJob()`, update the bar on each tick, render the video player on done, show the error in red on failure. **Do not fire-and-forget.** The user has no other place to see what is happening unless the Queue tab is open.
+
 ### Shell layer (`static/js/shell/`)
 
 Cross-cutting concerns owned by the shell, not per-tab:
 
 - **`toast.js`** — global toast host + `apiFetch()` with error-log integration. Every fetch in shell/tab code should use `apiFetch()` so failures populate the error log.
-- **`gallery.js`** — persistent cross-tab gallery. Pulls from `/api/gallery` (SQLite-backed). Tabs call `pushFromTab(tab, savedPath, prompt, seed, settings)` on generation success. Detail view has "Load Settings" (apply in-place) and "Branch & Tweak" (apply + jump to source tab). The gallery renders in `#split-gallery` inside `#gallery-overlay` — a full-screen overlay toggled by the Gallery header button. It is **never** a persistent side panel. Do not add a split-pane/side-column gallery back; it steals workspace.
+- **`gallery.js`** — persistent cross-tab gallery. Pulls from `/api/gallery` (SQLite-backed). Tabs call `pushFromTab(tab, savedPath, prompt, seed, settings)` on generation success. Detail view has "Load Settings" (apply in-place) and "Branch & Tweak" (apply + jump to source tab). The gallery renders in `#split-gallery` inside `#gallery-overlay` — a full-screen overlay toggled by the **Gallery** rail button (bottom of left rail). It is **never** a persistent side panel. Do not add a split-pane/side-column gallery back; it steals workspace.
 - **`presets.js`** — save/load named preset bundles per tab. Backed by `/api/presets`. Presets surface in the command palette as "Preset: <name>". Save is Ctrl+S (uses native `prompt()` for name).
 - **`command-palette.js`** — Ctrl+K. Fuzzy-matches registered items (tabs, actions, presets). If the active tab has an AI applier registered and the query doesn't match, shows `✦ Ask AI: "<query>"` as the last row. Empty palette surfaces last 5 AI queries as "Recent AI" for replay.
 - **`shortcuts.js`** — global keyboard shortcut registry. Registered in `app.js` init. Respects input focus.
 - **`ai-intent.js`** — palette-driven natural-language mutation. Each tab calls `registerTabAI(tabId, {getContext, applySettings})` at init time. Palette's Ask AI row calls `askAI(query)` which POSTs to `/api/ai-intent` and dispatches the result to the active tab's applier. Also exposes `applySettingsToTab()` for gallery "Load Settings".
+
+### Header (`static/index.html` — `#app-header`)
+
+The header contains three zones:
+- **Left:** logo + app name
+- **Center:** service status pills (`#service-cluster-btn`) — green/red dots for Forge SD, WanGP, ACE-Step. Click opens service panel.
+- **Right:** `#ai-badge` (shows effective AI provider: "✦ AI: Anthropic" / "✦ AI: Local" / "✦ AI") + Settings gear.
+
+**Do not add provider-switch controls to the header.** LLM provider selection lives in Settings only. The badge is read-only status + click-to-configure.
 
 ### Smart wildcards (sd-prompts)
 
@@ -105,11 +161,59 @@ Cross-cutting concerns owned by the shell, not per-tab:
 | Service | Port | Purpose | Startup |
 |---------|------|---------|---------|
 | WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
-| ACE-Step | 8019 | Music generation | Set path in Settings → auto-starts |
+| ACE-Step | 8019 | Music generation | Deferred — only starts when music is needed (keeps VRAM free for Ollama) |
 | Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
 | Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
 
-Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging.
+Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging. ACE-Step is intentionally deferred to avoid VRAM contention with Ollama.
+
+### WanGP worker (`services/wangp_worker.py`)
+
+The worker runs as a persistent subprocess on port 7899. DCS communicates via HTTP (`POST /generate`, `GET /status`, `GET /health`). Key behaviour:
+
+- **After DCS restarts**, the old worker stays alive on 7899 but DCS loses its stdout pipe. The `[wangp-worker]` log lines only appear while DCS owns the pipe from the original `subprocess.Popen`. Restart the worker via `POST /api/services/restart/wangp` to get a fresh pipe and fresh error capture.
+- **Error capture:** `process_tasks_cli` in WanGP returns `False` when `generate_video` raises internally. The actual error is printed to worker stdout but only visible if the drain thread is active. The worker monkey-patches `builtins.print` during `process_tasks_cli` to capture `[ERROR]` / traceback lines and exposes them in the `/status` error field — so the real WanGP error propagates back to the job failure message.
+- **SAFE_DEFAULTS** in `core/wangp_models.py` is the single source of truth for required WanGP input keys. When WanGP is updated (Pinokio pulls), new keys may appear in `models/_settings.json`; add them to `SAFE_DEFAULTS` if WanGP raises `KeyError` on them.
+- **VRAM profile** in `C:\pinokio\api\wan.git\app\wgp_config.json`: keep `profile / video_profile / image_profile = 3` (LowRAM_HighVRAM_Medium -- full model in VRAM with int8 quant). The WanGP default is **4** (LowRAM_LowVRAM_Slow) which streams model layers from system RAM per step -- on Andrew's 16GB RTX 5080 this drops step time from ~14s to ~3-4s (3-5x speedup). Profile 4 is correct for 6-8GB cards only. If a Pinokio update overwrites this back to 4, flip it back to 3.
+- **`compile: ""` (off)** in `wgp_config.json`. Empirically tested 2026-05-11 on LTX-2 2.0 Distilled fp8 with profile 3 (model fully resident, no streaming -- the precondition that made it safe to try). Result: compile DID work (no hang, no crash), but the actual speedup was ~12% per step (1.7s -> 1.5s) instead of the documented 20-40%, AND the first clip of each worker session paid ~100s of compile warmup. The torch.fx logs showed several `[12/N_1]` symbolic-shape recompile guards firing during warmup, meaning the dynamic input shapes (variable frame counts, image dimensions) prevent a clean compile -- inductor keeps re-tracing. Math: break-even at 3+ clips per worker session, net-negative for 1-clip jobs. Not worth the UX hit for typical use. **If a future LTX model has more static shapes (or torch.compile gets a fix for dynamic recompiles on Blackwell), re-test by flipping to `"transformer"` and watching for the same `[N/M_1]` recompile guards in the log.**
+- **`vae_config: 1`** in the same file: forces the largest VAE tile size (256/32) which is designed for >= 24GB cards but works on 16GB after int8 quantization frees up headroom. Saves ~5-8s of VAE decode per clip. If WanGP OOMs during the decode phase, drop back to `0` (auto by VRAM) or `2` (medium tiles).
+- **`attention_mode: "auto"`** auto-picks sage2 on sm_120 (RTX 5080). Do NOT switch to `xformers` or `sdpa` -- both are slower. Don't enable `sage3` (manual install, quality risk).
+
+### GPU orchestrator (`core/gpu_orchestrator.py`)
+
+Single coordinator for which service owns the GPU at any moment. WanGP (8-13GB), ACE-Step (6-8GB), Forge (4-6GB), and Ollama (4-8GB) cannot coexist on 16GB VRAM; loading two at once forces one into CPU offloading mode (catastrophic slowdown).
+
+Usage from pipelines:
+```python
+from core.gpu_orchestrator import gpu
+gpu.acquire("wangp", reason="multi-clip 5 clips")    # evicts anything else, ensures wangp alive
+# ... do GPU work ...
+gpu.acquire("acestep", reason="music gen")           # evicts wangp, starts acestep
+```
+
+The orchestrator owns eviction policy: WanGP/ACE-Step are killed via `stop_service`; Forge is "unloaded" (checkpoint dropped, server stays alive); Ollama gets `keep_alive=0` pings to free its models. A held service stays loaded across same-service calls -- only different-service `acquire` triggers eviction.
+
+Endpoints: `GET /api/gpu/status` returns `{current, history[]}`. `POST /api/gpu/release` force-evicts everything.
+
+The pre-orchestrator pattern of scattered `unload_checkpoint()` + `stop_service("acestep")` + `start_acestep` calls in each pipeline has been removed. Don't add them back; route through the orchestrator.
+
+**KNOWN BUG (not yet fixed):** `services/manager.py:_watchdog_loop` auto-restarts WanGP and ACE-Step when their subprocesses die unexpectedly. That respawn path **bypasses the orchestrator**, so the restarted service can end up loaded alongside whatever else currently holds the GPU -- 11 GB WanGP + 4.7 GB ACE-Step on a 16 GB card produces VRAM thrashing and indefinite "Step 0/8" hangs. Observed on 2026-05-11 after a `/api/services/restart/wangp` call cascaded through the Job Object and killed ACE-Step, which the watchdog then resurrected silently. Fix should route watchdog respawns through `gpu.acquire(name)` so the orchestrator can decide whether to evict the current holder first.
+
+**OPERATIONAL RULE -- DO NOT RESTART WANGP MID-SESSION.** Restarting `/api/services/restart/wangp` while a user job is in flight kills the worker the job is talking to; DCS-side polling never realizes its request was orphaned and the job sits at "Step 0/8" forever. Config changes that require a WanGP restart (compile, profile, vae_config in `wgp_config.json`) should be staged and applied between sessions, not while the user has jobs queued or running. The `compile` experiment on 2026-05-11 made this lesson very expensive in real time.
+
+### Per-model step floors
+
+`/api/fun/make-it` and `/api/fun/make-it-multi` apply a server-side floor on `steps` AFTER auto-pick has chosen the actual model. The UI slider value was tuned for whatever model was visible in the dropdown, but auto-pick can swap models, so the floor protects against e.g. sending 4 steps to Wan I2V (which produces a blob below 20). See `_MODEL_MIN_STEPS_SINGLE` / `_MODEL_MIN_STEPS` in `features/fun_videos/routes.py`. Bumps are logged as `[make-it] step floor: ui=4 -> 20 for Wan2.1-I2V-14B-480P`.
+
+### Ollama is opt-in (not the auto fallback)
+
+`llm_router._provider()` in `auto` mode resolves Anthropic -> OpenAI -> error. Ollama is NEVER chosen automatically. The user must either explicitly set `llm_provider = "ollama"` in Settings, or check **Allow Ollama as a local fallback** (`allow_ollama_fallback = true` in config). The fallback flag only kicks in when no cloud key is configured.
+
+Vision call sites that used to hard-code `force_provider="ollama"` (the NSFW-safe path) have been removed. Vision now follows the configured provider; cloud APIs refuse explicit NSFW but the failure is now user-visible instead of silently routing to a slow local model.
+
+### `_resolve_path` caveat (`features/fun_videos/routes.py`)
+
+`_resolve_path(raw)` only resolves URL-style paths starting with `/output/...` into absolute filesystem paths. It does **not** handle `/uploads/...` paths. The upload endpoint returns the absolute filesystem path in `f.path` — always send that absolute path (not the URL) as `photo_path` in make-it requests.
 
 ---
 
@@ -117,6 +221,8 @@ Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `
 
 - **Config:** `config.json` in project root (auto-created from `DEFAULTS`)
 - **API keys precedence:** `config.json` (highest) → `C:\JSON Credentials\QB_WC_credentials.json` (fallback)
+- **Key lookup aliases in credentials file:** `anthropic_key` or `anthropic_api_key`; `openai_key`, `openai_api_key`, or `open_ai_key`
+- **Default provider:** `"auto"` — resolves to Anthropic if key set, else OpenAI if key set, else Ollama
 - **Key namespacing:** `i2v_*`, `fun_*`, `bridge_*`, `sd_*`, `tools_*`, plus globals
 
 ---
@@ -124,6 +230,8 @@ Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `
 ## Theme & Layout
 
 **Circus theme** in `static/css/design-system.css`: dark crimson/gold palette (`#0d0606` bg, `#d4a017` gold, `#c41e3a` crimson, `#f0e6d0` cream text).
+
+Fix CSS directly — never build theme-switching UI or provider-switch controls in the header.
 
 **Responsive breakpoints** prepared for Andrew's 49" ultrawide (5120x1440):
 - `< 1100px` single column → `1100-1600px` sidebar + main → `> 2560px` 3-column with info panel → `> 4000px` ultrawide widths
@@ -145,6 +253,7 @@ Schemas live inline in `app.py` via `CREATE TABLE IF NOT EXISTS`. No migration s
 2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works. The watchdog in `services/manager.py` re-checks externally-launched Forge every 30s.
 3. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
 4. **First AI intent call** takes ~14s because Ollama cold-loads the model. Subsequent calls are ~3s. The palette shows a "Thinking…" spinner for the duration.
+5. **`launch.bat` `%~dp0` trailing backslash** — `%~dp0` expands to `C:\DropCat-Studio\` (trailing `\`). Wrapping it in quotes as `"%~dp0"` makes `\"` an escaped quote, breaking the argument. Strip it: `set "_X=%~dp0"` then `if "%_X:~-1%"=="\" set "_X=%_X:~0,-1%"` before using in commands like `git -C`.
 
 ---
 

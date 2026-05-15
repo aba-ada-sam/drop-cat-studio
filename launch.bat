@@ -1,11 +1,15 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
+
+:: -- Immediate visual feedback (fires before git pull and server start) -----
+:: pythonw suppresses the console window; splash closes when .dcs-port appears.
+where pythonw >nul 2>&1 && start "" pythonw "%~dp0pre_splash.py"
+
 title Drop Cat Go Studio
 
 echo ============================================
-echo   Drop Cat Go Studio
-echo   AI Video Production
+echo   Drop Cat Go Studio  -  AI Video Production
 echo ============================================
 
 :: -- Python check -------------------------------------------------------
@@ -17,35 +21,105 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: -- Install dependencies -----------------------------------------------
-echo Checking dependencies...
-pip install -q -r "%~dp0requirements.txt" 2>nul
+:: -- Remove startup folder entry if we accidentally created it before ----
+set "_STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\DropCatGoStudio.lnk"
+if exist "%_STARTUP%" (
+    echo Removing auto-startup entry ^(not needed^)...
+    del "%_STARTUP%" >nul 2>&1
+)
 
-:: -- Check if server is already running --------------------------------
-:: Probe 7860..7879. If any responds, open Chrome there and exit.
-for /l %%P in (7860,1,7879) do (
-    python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:%%P/api/system', timeout=1)" >nul 2>&1
-    if not errorlevel 1 (
-        echo Server is already running on port %%P.
-        start chrome http://127.0.0.1:%%P
+:: -- Create / refresh the desktop shortcut pointing to manager.pyw ------
+:: manager.pyw owns git pull, splash, server start, tray, and single-instance mutex.
+:: The shortcut is also self-healed by manager.pyw on each run.
+set "_DESKTOP_LNK=%USERPROFILE%\Desktop\Drop Cat Go Studio.lnk"
+for /f "delims=" %%i in ('where pythonw 2^>nul') do set "_PYTHONW=%%i" & goto :have_pythonw
+:have_pythonw
+if not defined _PYTHONW (
+    for /f "delims=" %%i in ('where python 2^>nul') do (
+        if exist "%%~dpi\pythonw.exe" (set "_PYTHONW=%%~dpi\pythonw.exe" & goto :have_pythonw2)
+    )
+)
+:have_pythonw2
+if defined _PYTHONW (
+    powershell -NoProfile -Command ^
+        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='C:\Windows\System32\wscript.exe'; $sc.Arguments='\"\"\"C:\DropCat-Studio\launch-silent.vbs\"\"\"'; $sc.WorkingDirectory='C:\DropCat-Studio'; $sc.IconLocation='C:\DropCat-Studio\dropcat.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+)
+
+:: -- Auto-update from GitHub --------------------------------------------
+:: Strip trailing backslash from %~dp0 so git -C "path\" doesn't mis-parse the quote.
+set "_REPO=%~dp0"
+if "%_REPO:~-1%"=="\" set "_REPO=%_REPO:~0,-1%"
+
+set _GOT_UPDATE=0
+git --version >nul 2>&1
+if not errorlevel 1 (
+    echo Checking for updates...
+    for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_BEFORE=%%i
+    git -C "%_REPO%" pull --ff-only origin master >nul 2>&1
+    for /f %%i in ('git -C "%_REPO%" rev-parse HEAD 2^>nul') do set _SHA_AFTER=%%i
+    if not "!_SHA_BEFORE!"=="!_SHA_AFTER!" (
+        echo New version pulled -- restarting server if running.
+        set _GOT_UPDATE=1
+    ) else (
+        echo Already up to date.
+    )
+) else (
+    echo [update] Git not on PATH -- skipping update check.
+)
+
+:: -- Install / update dependencies only when new code was pulled --------
+if "%_GOT_UPDATE%"=="1" (
+    echo Updating dependencies...
+    pip install -q -r "%~dp0requirements.txt" 2>nul
+)
+
+:: -- Check if server is already running (read .dcs-port first, no blind scan) -
+set _RUNNING_PORT=0
+if exist "%~dp0.dcs-port" (
+    for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"port\"" "%~dp0.dcs-port" 2^>nul') do (
+        for /f "tokens=* delims= " %%q in ("%%p") do (
+            python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:%%q/api/system', timeout=2)" >nul 2>&1
+            if not errorlevel 1 set _RUNNING_PORT=%%q
+        )
+    )
+)
+
+if not "!_RUNNING_PORT!"=="0" (
+    if "%_GOT_UPDATE%"=="1" (
+        echo Restarting server to apply updates...
+        if exist "%~dp0.dcs-port" (
+            for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"pid\"" "%~dp0.dcs-port" 2^>nul') do (
+                for /f "tokens=* delims= " %%q in ("%%p") do taskkill /PID %%q /F >nul 2>&1
+            )
+            del "%~dp0.dcs-port" >nul 2>&1
+        )
+    ) else (
+        echo Server running on port !_RUNNING_PORT! -- opening app.
+        :: Same left-third positioning as open_browser.bat.
+        set "SCREEN_W=1920"
+        set "SCREEN_H=1080"
+        for /f "usebackq tokens=1,2 delims=," %%a in (`powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($b.Width),$($b.Height)\""`) do (
+            set "SCREEN_W=%%a"
+            set "SCREEN_H=%%b"
+        )
+        set /a WIN_W=!SCREEN_W! / 3
+        set /a WIN_H=!SCREEN_H!
+        if !WIN_W! LSS 480 set WIN_W=640
+        if !WIN_H! LSS 480 set WIN_H=720
+        start "" chrome --app=http://127.0.0.1:!_RUNNING_PORT!/ --window-position=0,0 --window-size=!WIN_W!,!WIN_H!
         exit /b 0
     )
 )
 
-:: -- Kill a previous DCS instance by PID (only if we own the port file) --
-if exist ".dcs-port" (
-    for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"pid\"" ".dcs-port" 2^>nul') do (
-        for /f "tokens=* delims= " %%q in ("%%p") do (
-            taskkill /PID %%q /F >nul 2>&1
-        )
+:: -- Kill any stale port file -------------------------------------------
+if exist "%~dp0.dcs-port" (
+    for /f "tokens=2 delims=:," %%p in ('findstr /c:"\"pid\"" "%~dp0.dcs-port" 2^>nul') do (
+        for /f "tokens=* delims= " %%q in ("%%p") do taskkill /PID %%q /F >nul 2>&1
     )
-    del ".dcs-port" >nul 2>&1
+    del "%~dp0.dcs-port" >nul 2>&1
 )
 
-:: -- Start the server --------------------------------------------------
-:: The python server picks a free port from 7860..7879 and writes the
-:: chosen port to .dcs-port. We poll for the file (up to 60s) so Chrome
-:: opens at the right port even when Python startup takes 10-15s.
+:: -- Start the server ---------------------------------------------------
 echo Starting server...
 start "" /b "%~dp0open_browser.bat"
 python "%~dp0app.py"

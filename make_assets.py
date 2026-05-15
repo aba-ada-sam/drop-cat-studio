@@ -1,10 +1,10 @@
-"""Generate Drop Cat Go Studio assets — circus / burlesque theme."""
+"""Generate Drop Cat Go Studio assets -- circus / burlesque theme."""
 from PIL import Image, ImageDraw, ImageFont
 import math, os
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-# ── Circus palette ────────────────────────────────────────────────────────────
+# -- Circus palette ------------------------------------------------------------
 BG       = (13,  6,  6)      # near-black with red tinge
 SURFACE  = (30, 10, 10)      # deep burgundy-dark
 CRIMSON  = (139,  0,  0)     # dark circus red
@@ -25,7 +25,7 @@ def draw_cat_logo(draw, cx, cy, size, body_col, accent_col):
     fy = cy - fh // 2 + int(s * 0.04)
     r  = int(s * 0.12)
 
-    # Film frame — double border for ornate look
+    # Film frame -- double border for ornate look
     draw.rounded_rectangle([fx - 3, fy - 3, fx + fw + 3, fy + fh + 3],
                             radius=r + 2, outline=accent_col, width=max(2, int(s * 0.025)))
     draw.rounded_rectangle([fx, fy, fx + fw, fy + fh],
@@ -152,7 +152,7 @@ def make_logo(size=512):
     except Exception:
         font_name = font_sub = font_ital = ImageFont.load_default()
 
-    # "Andrew's" — small italic above
+    # "Andrew's" -- small italic above
     andy_y = cy + int(size * 0.335)
     draw.text((cx+2, andy_y+2), "Andrew's", font=font_ital, fill=(0,0,0,100), anchor="mm")
     draw.text((cx,   andy_y),   "Andrew's", font=font_ital, fill=CREAM,        anchor="mm")
@@ -163,12 +163,12 @@ def make_logo(size=512):
     draw.line([(cx-dw, div_y), (cx+dw, div_y)], fill=GOLD, width=max(1, int(size*0.01)))
     draw.ellipse([cx-4, div_y-4, cx+4, div_y+4], fill=GOLD)
 
-    # "DROP CAT GO" — big Impact
+    # "DROP CAT GO" -- big Impact
     title_y = div_y + int(size * 0.072)
     for dx, dy, col in [(2, 2, (0,0,0,120)), (0, 0, GOLD)]:
         draw.text((cx+dx, title_y+dy), "DROP CAT GO", font=font_name, fill=col, anchor="mm")
 
-    # "STUDIO" — smaller, spaced
+    # "STUDIO" -- smaller, spaced
     studio_y = title_y + int(size * 0.095)
     draw.text((cx+1, studio_y+1), "S T U D I O", font=font_sub, fill=(0,0,0,100), anchor="mm")
     draw.text((cx,   studio_y),   "S T U D I O", font=font_sub, fill=CREAM,        anchor="mm")

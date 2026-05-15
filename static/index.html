@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Drop Cat Go Studio</title>
-  <link rel="icon" href="/static/favicon.ico">
-  <link rel="apple-touch-icon" href="/static/logo-192.png">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260422e">
+  <link rel="manifest" href="/static/manifest.json?v=20260506">
+  <link rel="icon" href="/static/favicon.ico?v=20260506" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=20260506">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/logo-192.png?v=20260506">
+  <link rel="apple-touch-icon" href="/static/logo-192.png?v=20260506">
+  <meta name="theme-color" content="#c41e3a">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260426j">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260418">
 </head>
 <body>
@@ -30,7 +34,7 @@
         <div class="splash-check loading" id="chk-acestep"><span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span></div>
       </div>
       <div id="splash-load-anyway" class="hidden" style="text-align:center;margin-top:20px">
-        <button class="btn btn-primary" id="btn-load-anyway" style="padding:8px 28px;font-size:.85rem;opacity:.85">Load without waiting</button>
+        <button class="btn btn-primary splash-skip-btn" id="btn-load-anyway">Load without waiting</button>
       </div>
       <div id="splash-error" class="hidden">
         <p class="splash-err-msg"></p>
@@ -56,14 +60,54 @@
         </div>
 
         <div class="header-center">
-          <button id="service-cluster-btn" class="service-pills" aria-label="Service status — click for details" title="Click for service details">
-            <span class="pill" id="pill-forge"><span class="dot" aria-hidden="true"></span> Image generation</span>
-            <span class="pill" id="pill-wangp"><span class="dot" aria-hidden="true"></span> Video generation</span>
-            <span class="pill" id="pill-acestep"><span class="dot" aria-hidden="true"></span> Music generation</span>
-          </button>
+          <div class="ai-pills" id="ai-pills">
+            <div class="ai-pill" id="ap-text">
+              <button class="ai-pill-btn" title="Text AI provider -- click to switch">
+                <span class="dot unknown" id="ap-text-dot" aria-hidden="true"></span>
+                <span class="ap-label">Text</span>
+                <span class="ap-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="ap-menu" id="ap-text-menu" hidden></div>
+            </div>
+            <div class="ai-pill" id="ap-image">
+              <button class="ai-pill-btn" title="Image generation -- click to manage">
+                <span class="dot unknown" id="ap-image-dot" aria-hidden="true"></span>
+                <span class="ap-label">Image</span>
+                <span class="ap-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="ap-menu" id="ap-image-menu" hidden></div>
+            </div>
+            <div class="ai-pill" id="ap-video">
+              <button class="ai-pill-btn" title="Video generation model -- click to switch">
+                <span class="dot unknown" id="ap-video-dot" aria-hidden="true"></span>
+                <span class="ap-label">Video</span>
+                <span class="ap-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="ap-menu" id="ap-video-menu" hidden></div>
+            </div>
+            <div class="ai-pill" id="ap-sound">
+              <button class="ai-pill-btn" title="Sound / music generation -- click to manage">
+                <span class="dot unknown" id="ap-sound-dot" aria-hidden="true"></span>
+                <span class="ap-label">Sound</span>
+                <span class="ap-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="ap-menu" id="ap-sound-menu" hidden></div>
+            </div>
+          </div>
         </div>
 
         <div class="header-right">
+          <div id="gpu-indicator" title="Which service currently holds the GPU"
+               style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:var(--surface-2);
+                      border:1px solid var(--border-1);border-radius:14px;font-size:.72rem;
+                      color:var(--text-muted);margin-right:8px;cursor:help;user-select:none;">
+            <span id="gpu-indicator-dot" style="width:6px;height:6px;border-radius:50%;background:#555;"></span>
+            <span id="gpu-indicator-label">GPU: idle</span>
+          </div>
+          <button class="btn-icon header-btn" id="btn-mute-all" title="Mute / unmute all videos">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            <span id="mute-label">Mute</span>
+          </button>
           <button class="btn-icon header-btn" id="btn-settings" title="Settings and configuration">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             <span>Settings</span>
@@ -78,15 +122,15 @@
       <!-- Left rail: Creative Pipeline Navigator -->
       <nav id="app-rail" aria-label="Creative Pipeline">
 
-        <!-- Gallery -->
-        <button class="rail-tab" id="btn-gallery-rail" title="Toggle generation gallery">
-          <span>Gallery</span>
-          <span class="rail-tab-hint">View generations</span>
+        <!-- Express -->
+        <button class="rail-tab active" data-tab="express" title="Quick Video -- drop image, describe idea, create video">
+          <span>Quick Video</span>
+          <span class="rail-tab-hint">Quick start</span>
         </button>
 
-        <button class="rail-tab active" data-tab="sd-prompts" aria-current="page" title="Generate images from prompts">
+        <button class="rail-tab" data-tab="sd-prompts" title="Generate images from prompts">
           <span>Generate Images</span>
-          <span class="rail-tab-hint">Prompts → Images</span>
+          <span class="rail-tab-hint">Prompts -> Images</span>
         </button>
 
         <button class="rail-tab" data-tab="image-gen" title="Direct image generation via Forge or DALL-E 3">
@@ -95,18 +139,20 @@
         </button>
 
         <button class="rail-tab" data-tab="fun-videos" title="Turn images into AI videos">
+
+<button class="rail-tab" data-tab="create-videos" title="Create Videos -- images to video with AI music">
           <span>Create Videos</span>
-          <span class="rail-tab-hint">Images → Videos</span>
+          <span class="rail-tab-hint">Video + Audio</span>
         </button>
 
-        <button class="rail-tab" data-tab="bridges" title="Generate transition clips between videos">
-          <span>Create Transitions</span>
-          <span class="rail-tab-hint">Connect clips</span>
+        <button class="rail-tab" data-tab="song-video" title="Music Video -- drop a song, get a full-length video">
+          <span>Music Video</span>
+          <span class="rail-tab-hint">Song -> video</span>
         </button>
 
-        <button class="rail-tab" data-tab="video-tools" title="Add AI music to videos">
-          <span>Audio</span>
-          <span class="rail-tab-hint">Add music</span>
+        <button class="rail-tab" data-tab="bridges" title="Add Transitions -- AI bridge clips between video clips">
+          <span>Add Transitions</span>
+          <span class="rail-tab-hint">Sequence builder</span>
         </button>
 
         <button class="rail-tab" data-tab="video-tools-batch" title="Batch video transforms">
@@ -114,6 +160,24 @@
           <span class="rail-tab-hint">Transforms</span>
         </button>
 
+        <button class="rail-tab" data-tab="adobe" title="Adobe Tools -- control Premiere Pro and After Effects with AI">
+          <span>Adobe Tools</span>
+          <span class="rail-tab-hint">Premiere + AE</span>
+        </button>
+
+        <button class="rail-tab" data-tab="queue" title="Job queue -- running and pending generations">
+          <span>Queue</span>
+          <span class="rail-tab-hint" id="queue-rail-hint">(no items processing)</span>
+        </button>
+
+        <!-- Live job feed -->
+        <div id="job-feed" aria-label="Active jobs"></div>
+
+        <!-- Gallery -->
+        <button class="rail-tab" id="btn-gallery-rail" title="Toggle generation gallery">
+          <span>Gallery</span>
+          <span class="rail-tab-hint">View generations</span>
+        </button>
 
       </nav>
 
@@ -133,12 +197,16 @@
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
-            <section class="tab-panel active" id="panel-sd-prompts" aria-label="SD Prompts"></section>
+            <section class="tab-panel" id="panel-express" aria-label="Express"></section>
+            <section class="tab-panel" id="panel-sd-prompts" aria-label="SD Prompts"></section>
             <section class="tab-panel" id="panel-image-gen" aria-label="Direct Generate"></section>
-            <section class="tab-panel" id="panel-fun-videos" aria-label="Make Videos"></section>
+            <section class="tab-panel" id="panel-create-videos" aria-label="Create Videos"></section>
+            <section class="tab-panel" id="panel-song-video" aria-label="Music Video"></section>
             <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
             <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
             <section class="tab-panel" id="panel-video-tools-batch" aria-label="Batch Processing"></section>
+            <section class="tab-panel" id="panel-adobe" aria-label="Adobe Tools"></section>
+            <section class="tab-panel" id="panel-queue" aria-label="Job Queue"></section>
           </div>
 
         </div>
@@ -149,9 +217,10 @@
     <!-- Log panel footer -->
     <footer id="log-panel">
       <button class="log-toggle" id="log-toggle" aria-expanded="true" aria-controls="log-content">
-        <span>Server Logs</span>
+        <span>Activity Log</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full log" onclick="event.stopPropagation()">&#128196; full log</a>
+        <span id="app-version" style="font-size:.6rem; color:var(--text-3); opacity:.55; margin-left:6px; font-weight:400; letter-spacing:.02em;"></span>
+        <a href="/api/logs/file?lines=500" target="_blank" class="log-file-link" title="Open full app log in browser -- paste this to your AI when troubleshooting" onclick="event.stopPropagation()">&#128196; copy for AI</a>
       </button>
       <div class="log-content" id="log-content">
         <div class="log-entries" id="log-entries" aria-live="polite" aria-atomic="false"></div>
@@ -160,7 +229,7 @@
 
   </div><!-- /#app -->
 
-  <!-- ── OVERLAYS ──────────────────────────────────────────────────────────── -->
+  <!-- -- OVERLAYS ------------------------------------------------------------ -->
 
   <!-- Command palette -->
   <div id="cmd-palette-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
@@ -251,30 +320,32 @@
         </div>
         <div class="settings-section">
           <h4 class="settings-section-label">AI Prompt Engine</h4>
-          <div class="ai-provider-card">
-            <div class="provider-side" id="provider-side-ollama">
-              <div class="provider-icon-glyph">&#128421;</div>
-              <div class="provider-name">OLLAMA</div>
-              <div class="provider-sub">Local &middot; No internet</div>
-            </div>
-            <div class="big-toggle-wrap">
-              <input type="checkbox" id="provider-toggle-input" class="big-toggle-input">
-              <label for="provider-toggle-input" class="big-toggle-label" title="Toggle Anthropic Claude API">
-                <span class="big-toggle-thumb"></span>
-              </label>
-            </div>
-            <div class="provider-side" id="provider-side-anthropic">
-              <div class="provider-icon-glyph">&#9729;</div>
-              <div class="provider-name">ANTHROPIC</div>
-              <div class="provider-sub">Cloud &middot; Claude API</div>
-            </div>
+          <div class="form-group">
+            <label for="cfg-llm_provider">Provider</label>
+            <select id="cfg-llm_provider">
+              <option value="auto">Auto -- Anthropic -> OpenAI (cloud only)</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="ollama">Ollama (Local)</option>
+            </select>
+            <span class="hint-text" id="ai-effective-hint"></span>
           </div>
-          <div id="llm-anthropic-section" style="display:none;margin-top:14px">
-            <div class="form-group">
-              <label for="cfg-anthropic_key">Anthropic API Key</label>
-              <input type="text" id="cfg-anthropic_key" class="masked-key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
-              <span class="hint-text" id="anthropic-key-hint"></span>
-            </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-allow_ollama_fallback" style="width:auto">
+              <span>Allow Ollama as a local fallback when no cloud key is configured</span>
+            </label>
+            <span class="hint-text">Off by default. When enabled, Auto mode falls back to local Ollama if no Anthropic/OpenAI key is set. Vision calls still prefer cloud unless this is on AND Ollama is the active provider.</span>
+          </div>
+          <div class="form-group">
+            <label for="cfg-anthropic_key">Anthropic API Key</label>
+            <input type="text" id="cfg-anthropic_key" class="masked-key" placeholder="sk-ant-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
+            <span class="hint-text" id="anthropic-key-hint"></span>
+          </div>
+          <div class="form-group">
+            <label for="cfg-openai_key">OpenAI API Key</label>
+            <input type="text" id="cfg-openai_key" class="masked-key" placeholder="sk-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
+            <span class="hint-text" id="openai-key-hint"></span>
           </div>
           <div id="llm-ollama-section" style="margin-top:14px">
             <div class="form-group">
@@ -292,6 +363,7 @@
           </div>
         </div>
         <button class="btn btn-primary" id="btn-save-settings" type="button" style="margin-top:8px">Save Settings</button>
+        <button class="btn btn-sm" id="btn-restart-app" type="button" style="margin-top:6px;opacity:.7" title="Reload server code without touching the manager process">Restart Server</button>
       </form>
     </div>
   </div>
@@ -334,6 +406,6 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260423f"></script>
+  <script type="module" src="/static/js/app.js?v=20260512a"></script>
 </body>
 </html>

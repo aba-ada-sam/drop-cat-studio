@@ -4,7 +4,7 @@
  * free text in the command palette and picks "Ask AI", we dispatch to the
  * currently active tab's applier.
  */
-import { apiFetch, toast } from './toast.js?v=20260419i';
+import { apiFetch, toast } from './toast.js?v=20260503a';
 
 const _appliers = {};
 const _HISTORY_KEY = 'dropcat_ai_intent_history';
@@ -71,7 +71,7 @@ export function undoLast() {
   }
   const applier = _appliers[entry.tabId];
   if (!applier) {
-    toast(`Can't undo — ${entry.tabId} tab isn't available`, 'info');
+    toast(`Can't undo -- ${entry.tabId} tab isn't available`, 'info');
     return false;
   }
   try {
@@ -90,7 +90,7 @@ export async function askAI(query) {
   const tabId = _activeTabId();
   const entry = _appliers[tabId];
   if (!entry) {
-    toast(`AI assist not wired for ${tabId || 'this tab'}`, 'info');
+    toast('AI assist is not available on this tab', 'info');
     return;
   }
   let context = {};
@@ -122,7 +122,7 @@ export async function askAI(query) {
     const summary = applied.length <= 3
       ? applied.join(', ')
       : `${applied.length} settings`;
-    toast(`${res.reply || 'Done'} (${summary}) — Ctrl+K → Undo to revert`, 'success', { duration: 6000 });
+    toast(`${res.reply || 'Done'} (${summary}) -- Ctrl+K -> Undo to revert`, 'success', { duration: 6000 });
   } catch (e) {
     toast(e.message || 'AI request failed', 'error');
   }

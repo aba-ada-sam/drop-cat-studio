@@ -1,4 +1,4 @@
-"""WanGP module loader — dynamic import of wgp.py with environment setup.
+"""WanGP module loader -- dynamic import of wgp.py with environment setup.
 
 Direct copy from Github Video Editor/wangp_runtime.py (identical across
 Fun-Videos, BRIDGES, and Github Video Editor).
