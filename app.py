@@ -210,14 +210,14 @@ async def lifespan(app: FastAPI):
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 
-    # Periodic job cleanup -- purge completed/errored jobs older than 24h
+    # Periodic job cleanup -- purge terminal jobs older than 15 minutes
     def _cleanup_jobs():
         import time as _time
         while True:
-            _time.sleep(3600)
+            _time.sleep(300)
             jm = _g.get("job_manager")
             if jm:
-                jm.cleanup()
+                jm.cleanup(max_age_hours=0.25)
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
 
 
