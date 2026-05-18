@@ -1146,24 +1146,26 @@ export function init(panel) {
     };
   }
 
-  // Show the inline path-input row so the user can paste a folder path.
+  // Open a native OS folder-picker dialog then immediately start the loop.
   // Called by both the Loop Folder button and the drop-zone pick-folder link.
-  function _startLoopFolder() {
+  async function _startLoopFolder() {
     if (_folderActive) {
       // Loop is running -- request stop
       api('/api/fun/folder-loop/stop', { method: 'POST' }).catch(() => {});
       toast('Loop Folder: stop requested', 'info');
-      // Keep polling -- next tick will show active=false and clean up
       return;
     }
-    // Pre-populate with last-used path, or parent of currently-loaded image
-    if (!folderPathInput.value && _imagePath) {
-      const sep = _imagePath.includes('\\') ? '\\' : '/';
-      folderPathInput.value = _imagePath.substring(0, _imagePath.lastIndexOf(sep));
+    let picked;
+    try {
+      const r = await api('/api/browse-folder', { method: 'POST' });
+      picked = r.path;
+    } catch (_) {
+      picked = null;
     }
-    folderInputRow.style.display = 'flex';
-    folderPathInput.focus();
-    folderPathInput.select();
+    if (!picked) return;  // dialog cancelled or errored
+    folderPathInput.value = picked;
+    localStorage.setItem('dcs-loop-folder', picked);
+    _submitFolderPath();
   }
 
   // Actually start the loop with the path currently in folderPathInput.

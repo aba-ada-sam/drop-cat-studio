@@ -701,6 +701,30 @@ async def list_jobs():
     return _g["job_manager"].queue_status()
 
 
+@app.post("/api/browse-folder")
+async def browse_folder():
+    """Open a native OS folder-picker dialog and return the selected path."""
+    import asyncio as _asyncio
+
+    def _pick():
+        try:
+            import tkinter as _tk
+            from tkinter import filedialog as _fd
+            root = _tk.Tk()
+            root.withdraw()
+            root.wm_attributes("-topmost", True)
+            path = _fd.askdirectory(title="Select a folder of photos")
+            root.destroy()
+            return path or None
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    result = await _asyncio.to_thread(_pick)
+    if isinstance(result, dict):
+        return JSONResponse(result, 500)
+    return {"path": result}
+
+
 _THUMBNAIL_VIDEO_EXT  = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
 _THUMBNAIL_NO_SUPPORT = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
 
