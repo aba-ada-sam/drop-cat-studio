@@ -15,7 +15,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
 import { consumeHandoff } from './handoff.js?v=20260508a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260517b';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260518a';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260509a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260503h';
@@ -254,7 +254,19 @@ async function runSplash() {
     if (pollInterval) clearInterval(pollInterval);
     document.getElementById('splash-error')?.classList.remove('hidden');
     const errMsg = document.querySelector('.splash-err-msg');
-    if (errMsg) errMsg.textContent = 'Cannot connect. Make sure launch.bat is running.';
+    if (errMsg) errMsg.textContent = 'Cannot connect -- waiting for server...';
+    // Show "Load anyway" immediately so the user isn't trapped.
+    if (loadAnywayDiv) loadAnywayDiv.classList.remove('hidden');
+    // Poll /api/system every 3s so the splash auto-proceeds when the server starts.
+    const retryInterval = setInterval(async () => {
+      if (settled) { clearInterval(retryInterval); return; }
+      try {
+        await fetch('/api/system').then(r => r.json());
+        clearInterval(retryInterval);
+        // Server is back -- reload so the full splash runs clean from the top.
+        window.location.reload();
+      } catch (_) {}
+    }, 3000);
   }
 }
 
