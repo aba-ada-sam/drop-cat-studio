@@ -446,7 +446,21 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/shutdown":
             self._send_json({"ok": True, "message": "Shutting down"})
-            threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0)), daemon=True).start()
+            def _graceful_exit():
+                time.sleep(0.3)
+                # Flush CUDA before exiting so the GPU driver can reclaim VRAM
+                # cleanly. Skipping this causes a driver-level reset that makes
+                # the monitor go dark for 1-2 seconds on RTX cards.
+                try:
+                    import gc, torch
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                except Exception:
+                    pass
+                os._exit(0)
+            threading.Thread(target=_graceful_exit, daemon=True).start()
         else:
             self._send_json({"error": "Not found"}, 404)
 

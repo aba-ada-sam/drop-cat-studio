@@ -179,6 +179,7 @@ _service_status: dict = {
 
 _wangp_worker_proc: subprocess.Popen | None = None
 _acestep_proc: subprocess.Popen | None = None
+_watchdog_stop = threading.Event()   # set by shutdown_all() to halt the watchdog
 
 # BUG-11: guard against two concurrent calls both passing the alive-check and
 # starting duplicate worker processes.
@@ -933,8 +934,12 @@ def start_ollama() -> tuple[bool, str | None]:
 
 def _watchdog_loop():
     """Periodically check managed services and restart crashed ones."""
-    while True:
-        time.sleep(30)
+    while not _watchdog_stop.is_set():
+        # Interruptible sleep -- wakes immediately when shutdown_all() fires
+        _watchdog_stop.wait(30)
+        if _watchdog_stop.is_set():
+            log.debug("[watchdog] stop event received -- exiting")
+            return
         try:
             status = get_status()
 
@@ -1008,6 +1013,25 @@ def start_watchdog():
 def shutdown_all():
     """Cleanly shut down managed services."""
     global _wangp_worker_proc, _acestep_proc, _forge_proc
+
+    # Stop the watchdog first so it cannot respawn a service we are about to
+    # kill. Without this there is a race: the watchdog wakes, sees a dead proc,
+    # and calls gpu.acquire() to restart it while shutdown_all() is mid-kill.
+    _watchdog_stop.set()
+
+    # Ask WanGP worker to flush CUDA memory before we force-kill it.
+    # The /shutdown endpoint runs torch.cuda.empty_cache/synchronize so the
+    # GPU driver can reclaim VRAM cleanly -- skipping this causes the CUDA
+    # context to die mid-flight and the display driver resets the GPU, which
+    # makes the monitor go dark for 1-2 seconds.
+    try:
+        import urllib.request as _ur
+        _ur.urlopen(f"http://127.0.0.1:{WANGP_WORKER_PORT}/shutdown", timeout=3)
+        log.info("[shutdown] WanGP graceful shutdown requested -- waiting 2s for CUDA flush")
+        time.sleep(2)
+    except Exception:
+        pass   # worker not running or already dead -- fall through to force-kill
+
     for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc),
                         ("Forge", _forge_proc)]:
         _kill_proc(proc, label)
