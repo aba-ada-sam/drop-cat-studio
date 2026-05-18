@@ -237,6 +237,7 @@ export function init(panel) {
 
   dropZone.addEventListener('click', e => {
     if (preview.contains(e.target) || e.target === preview) return;
+    if (pickFolderLink.contains(e.target) || e.target === pickFolderLink) return;
     imgInput.click();
   });
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
