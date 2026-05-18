@@ -13,10 +13,10 @@ let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from rend
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
 
-// Jobs that finished before this page loaded are old history -- hide them
-// automatically so reopening the browser gives a clean queue view.
-// Jobs that finish AFTER page load are shown normally until dismissed.
-const _PAGE_LOAD_TIME = Date.now() / 1000;  // unix seconds, matches server timestamps
+// Jobs that finished before the Queue tab was first opened this session are old
+// history -- hide them automatically so opening the Queue gives a clean view.
+// Set inside init() so it reflects when the user actually visits, not module load.
+let _PAGE_LOAD_TIME = Date.now() / 1000;  // unix seconds, matches server timestamps
 
 // localStorage key for persisting dismissed IDs across page reloads / app restarts.
 const _DISMISSED_KEY = 'dcs-dismissed-jobs';
@@ -44,6 +44,7 @@ export function init(panel) {
   _root = panel;
   _root.innerHTML = '';
   _root.style.cssText = 'display:flex; flex-direction:column; height:100%; overflow:hidden;';
+  _PAGE_LOAD_TIME = Date.now() / 1000;  // reset to actual tab-open time
   _loadDismissed();
   _injectStyles();
   _buildShell();
