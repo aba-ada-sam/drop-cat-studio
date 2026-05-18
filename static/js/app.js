@@ -992,7 +992,10 @@ async function _runStartupFetches() {
   _applySoundPillState(cfg.audio_provider || 'acestep');
 }
 
-// Show the offline overlay and poll until the server responds, then recover.
+// Show the offline overlay and poll until the server responds, then reload.
+// A full reload is intentional: after a server restart the page state (job
+// queue, dismissed-ids, PAGE_LOAD_TIME) is stale. A reload gives a clean
+// slate identical to the user manually refreshing the tab.
 async function _startReconnectLoop() {
   const overlay = document.getElementById('offline-overlay');
   if (overlay) overlay.hidden = false;
@@ -1000,8 +1003,7 @@ async function _startReconnectLoop() {
     await new Promise(r => setTimeout(r, 3000));
     try {
       await apiFetch('/api/version', { context: 'reconnect', silent: true });
-      if (overlay) overlay.hidden = true;
-      await _runStartupFetches();
+      window.location.reload();
       return;
     } catch (_) { /* keep polling */ }
   }
