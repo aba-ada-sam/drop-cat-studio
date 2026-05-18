@@ -137,40 +137,60 @@ async def lifespan(app: FastAPI):
     _threading.Thread(target=_bg_pull, daemon=True, name="git-pull").start()
 
     # Ensure runtime directories exist
-    UPLOADS_DIR.mkdir(exist_ok=True)
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    try:
+        UPLOADS_DIR.mkdir(exist_ok=True)
+        OUTPUT_DIR.mkdir(exist_ok=True)
+    except Exception as _e:
+        log.warning("[startup] could not create runtime dirs (non-fatal): %s", _e)
 
     # Migrate config from old apps on first run
-    cfg.migrate_from_old_apps()
+    try:
+        cfg.migrate_from_old_apps()
+    except Exception as _e:
+        log.warning("[startup] config migration failed (non-fatal): %s", _e)
 
-    # Initialize job manager
+    # Initialize job manager -- critical, re-raise on failure
     _g["job_manager"] = JobManager()
 
     # Initialize LLM client + router
-    _g["llm_client"] = LLMClient(
-        host=cfg.get("ollama_host") or "http://localhost:11434",
-        fast_model=cfg.get("ollama_fast_model") or "qwen3-vl:8b",
-        balanced_model=cfg.get("ollama_balanced_model") or "qwen3-vl:8b",
-        power_model=cfg.get("ollama_power_model") or "qwen3-vl:30b",
-        vision_model=cfg.get("ollama_vision_model") or "qwen3-vl:8b",
-    )
-    _g["llm_router"] = LLMRouter(_g["llm_client"])
+    try:
+        _g["llm_client"] = LLMClient(
+            host=cfg.get("ollama_host") or "http://localhost:11434",
+            fast_model=cfg.get("ollama_fast_model") or "qwen3-vl:8b",
+            balanced_model=cfg.get("ollama_balanced_model") or "qwen3-vl:8b",
+            power_model=cfg.get("ollama_power_model") or "qwen3-vl:30b",
+            vision_model=cfg.get("ollama_vision_model") or "qwen3-vl:8b",
+        )
+        _g["llm_router"] = LLMRouter(_g["llm_client"])
+    except Exception as _e:
+        log.warning("[startup] LLM init failed (non-fatal, AI features disabled): %s", _e)
+
     # Auto-seed Anthropic key from credentials file if not already saved
-    if not cfg.get("anthropic_key") and keys.get_key("anthropic"):
-        cfg.save({"anthropic_key": keys.get_key("anthropic")})
-        log.info("Auto-loaded Anthropic key from credentials file")
+    try:
+        if not cfg.get("anthropic_key") and keys.get_key("anthropic"):
+            cfg.save({"anthropic_key": keys.get_key("anthropic")})
+            log.info("Auto-loaded Anthropic key from credentials file")
+    except Exception as _e:
+        log.warning("[startup] key auto-seed failed (non-fatal): %s", _e)
 
     # Detect GPU encoders
-    _g["available_encoders"] = detect_encoders()
-    if _g["available_encoders"]:
-        hw = [e[1] for e in _g["available_encoders"] if e[2]]
-        log.info("Encoders: %s", ", ".join(hw) if hw else "CPU only")
+    try:
+        _g["available_encoders"] = detect_encoders()
+        if _g["available_encoders"]:
+            hw = [e[1] for e in _g["available_encoders"] if e[2]]
+            log.info("Encoders: %s", ", ".join(hw) if hw else "CPU only")
+    except Exception as _e:
+        log.warning("[startup] encoder detection failed (non-fatal): %s", _e)
+        _g["available_encoders"] = []
 
     # Synchronous: evict any orphan WanGP / ACE-Step workers from a prior DCS
     # session BEFORE we accept user requests. Without this, clicking Create on
     # the new app would queue work behind the dying old worker, making restarts
     # feel like the program never closed.
-    svc.kill_orphans_at_startup()
+    try:
+        svc.kill_orphans_at_startup()
+    except Exception as _e:
+        log.warning("[startup] orphan eviction failed (non-fatal): %s", _e)
 
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()

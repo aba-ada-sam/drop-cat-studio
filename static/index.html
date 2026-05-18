@@ -391,6 +391,14 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <script type="module" src="/static/js/app.js?v=20260512a"></script>
+  <!-- Server offline reconnect overlay -->
+  <div id="offline-overlay" hidden aria-live="assertive" role="alert">
+    <div class="offline-card">
+      <span class="spinner"></span>
+      <p>Server offline &mdash; reconnecting&hellip;</p>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/app.js?v=20260517a"></script>
 </body>
 </html>

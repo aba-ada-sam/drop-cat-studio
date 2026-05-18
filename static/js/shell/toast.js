@@ -211,11 +211,13 @@ export async function apiFetch(path, opts = {}) {
       // Network error (offline, refused, CORS)
       const errMsg = `Network error: ${context}`;
       _logError(errMsg, context, e.message);
-      toast(errMsg, 'error', {
-        context,
-        details: e.message,
-        onRetry: opts.onRetry,
-      });
+      if (!opts.silent) {
+        toast(errMsg, 'error', {
+          context,
+          details: e.message,
+          onRetry: opts.onRetry,
+        });
+      }
     }
     throw e;
   }

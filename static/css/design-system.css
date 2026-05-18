@@ -938,6 +938,39 @@ select option { background: var(--surface-2); }
 .log-entry.info    { color: var(--text-2); }
 .log-entry.debug   { color: var(--text-3); }
 
+/* -- Offline overlay -------------------------------------------------------- */
+#offline-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 6, 6, .82);
+  backdrop-filter: blur(4px);
+}
+#offline-overlay[hidden] { display: none; }
+.offline-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 32px 48px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  color: var(--text-2);
+  font-size: .95rem;
+  letter-spacing: .02em;
+}
+.offline-card .spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+.offline-card p { margin: 0; }
+
 /* -- Toast ------------------------------------------------------------------ */
 
 #toast-wrap {

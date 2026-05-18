@@ -975,28 +975,44 @@ window.addEventListener('unhandledrejection', e => {
   _reportClientError(e.reason?.message || String(e.reason), 'promise', 0);
 });
 
+// Fetch version label and seed header pills from config + llm state.
+// Uses silent:true so network failures don't toast -- caller handles recovery.
+async function _runStartupFetches() {
+  const [d, cfg, llm] = await Promise.all([
+    apiFetch('/api/version',    { context: 'startup.version', silent: true }),
+    apiFetch('/api/config',     { context: 'startup.cfg',     silent: true }),
+    apiFetch('/api/llm/config', { context: 'startup.llm',     silent: true }),
+  ]);
+  const vEl = document.getElementById('app-version');
+  if (vEl && d.version) vEl.textContent = d.version;
+  _applyLLMState(llm);
+  _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
+  _configVideoModel = cfg.wan_model || '';
+  _applyVideoPillState(_tabVideoModel || _configVideoModel);
+  _applySoundPillState(cfg.audio_provider || 'acestep');
+}
+
+// Show the offline overlay and poll until the server responds, then recover.
+async function _startReconnectLoop() {
+  const overlay = document.getElementById('offline-overlay');
+  if (overlay) overlay.hidden = false;
+  while (true) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      await apiFetch('/api/version', { context: 'reconnect', silent: true });
+      if (overlay) overlay.hidden = true;
+      await _runStartupFetches();
+      return;
+    } catch (_) { /* keep polling */ }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Hide startup spinner when app is ready
   window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
-    // Version label
-    apiFetch('/api/version', { context: 'startup.version' }).then(d => {
-      const vEl = document.getElementById('app-version');
-      if (vEl && d.version) vEl.textContent = d.version;
-    }).catch(() => {});
-
-    // Seed pill labels from config on first load
-    Promise.all([
-      apiFetch('/api/config',     { context: 'startup.cfg' }),
-      apiFetch('/api/llm/config', { context: 'startup.llm' }),
-    ]).then(([cfg, llm]) => {
-      _applyLLMState(llm);
-      _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
-      _configVideoModel = cfg.wan_model || '';
-      _applyVideoPillState(_tabVideoModel || _configVideoModel);
-      _applySoundPillState(cfg.audio_provider || 'acestep');
-    }).catch(() => {});
+    _runStartupFetches().catch(() => _startReconnectLoop());
   }, { once: true });
 
   runSplash();
