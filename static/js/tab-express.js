@@ -803,8 +803,7 @@ export function init(panel) {
     class: 'btn',
     text: '∞  Loop',
     title: 'Generate continuously until stopped',
-    style: 'display:none;',
-    style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
+    style: 'display:none; font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
   const loopFolderBtn = el('button', {
     class: 'btn',
@@ -934,14 +933,7 @@ export function init(panel) {
 
   // -- Core generation -------------------------------------------------------
   // Returns Promise<boolean> -- true = queued/success, false = failure
-  async function _generateOne(fromLoop = false) {
-    // Optionally vary the prompt on loop iterations
-    if (fromLoop && _varyPrompt && _loopCount > 1 && _imagePath) {
-      try {
-        await _brainstorm('Create a slightly different variation -- same subject and energy but change the action, timing, or camera movement');
-      } catch (_) {}
-    }
-
+  async function _generateOne() {
     let motionPrompt = ideaInput.value.trim();
     const needIdea   = !motionPrompt;
     const needLyric  = !lyricInput.value.trim();
@@ -1326,9 +1318,8 @@ export function init(panel) {
       toast('Drop an image or type a video idea first', 'error');
       return;
     }
-    _loopCount = 0;
     _showProgress(1, 'Getting started...');
-    const submitted = _multiVideo ? await _generateMulti() : await _generateOne(false);
+    const submitted = _multiVideo ? await _generateMulti() : await _generateOne();
     if (submitted && _jobId) {
       _pendingCount++;
       _refreshCreateBtn();
