@@ -1158,7 +1158,7 @@ export function init(panel) {
     try {
       await api('/api/fun/folder-loop/start', {
         method: 'POST',
-        body: JSON.stringify({ folder_path: picked, repeat: true, settings }),
+        body: JSON.stringify({ folder: picked, repeat: true, settings }),
       });
       toast('Loop Folder started', 'success');
       _fvFolderActive = true;
