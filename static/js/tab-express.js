@@ -774,16 +774,9 @@ export function init(panel) {
     // Hide the whole Customize expander when multi-video is off -- the
     // controls inside are meaningless for single-clip mode.
     multiSettingsDetails.style.display = _multiVideo ? '' : 'none';
-    if (!_looping) {
-      createBtn.textContent = _multiVideo ? 'Create Extended Video' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
-    }
+    createBtn.textContent = _multiVideo ? 'Create Extended Video' : (_pendingCount > 0 ? '+ Add to Queue' : 'Create');
     _refreshClipInfo();
   });
-
-  // -- Loop state ------------------------------------------------------------
-  let _looping    = false;
-  let _varyPrompt = false;
-  let _loopCount  = 0;
 
   // -- Queue-depth tracking for Create button --------------------------------
   let _pendingCount = 0;
@@ -810,6 +803,7 @@ export function init(panel) {
     class: 'btn',
     text: '∞  Loop',
     title: 'Generate continuously until stopped',
+    style: 'display:none;',
     style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
   const loopFolderBtn = el('button', {
@@ -819,29 +813,6 @@ export function init(panel) {
     style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
   root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn, loopFolderBtn]));
-
-  // Loop Folder modifier: repeat forever vs stop after one pass.
-  // Persisted in localStorage so the setting carries across sessions.
-  const folderRepeatChk = el('input', {
-    type: 'checkbox',
-    id: 'express-folder-repeat',
-    style: 'cursor:pointer; width:13px; height:13px;',
-  });
-  folderRepeatChk.checked = localStorage.getItem('dcs-loop-folder-repeat') === '1';
-  folderRepeatChk.addEventListener('change', () => {
-    localStorage.setItem('dcs-loop-folder-repeat', folderRepeatChk.checked ? '1' : '0');
-  });
-  const folderRepeatRow = el('div', {
-    style: 'display:flex; align-items:center; gap:6px; padding:6px 2px 0; font-size:.74rem; color:var(--text-3);',
-  }, [
-    folderRepeatChk,
-    el('label', {
-      for: 'express-folder-repeat',
-      style: 'cursor:pointer; user-select:none;',
-      text: 'Loop Folder: repeat forever (restart from the first image after the last; click Stop to break out)',
-    }),
-  ]);
-  root.appendChild(folderRepeatRow);
 
   // Folder path input -- replaces window.prompt() so the user has a proper
   // labelled text box to paste into. Shown/hidden by _startLoopFolder().
@@ -866,17 +837,6 @@ export function init(panel) {
     style: 'display:none; align-items:center; gap:6px; padding:4px 2px 0;',
   }, [folderPathInput, folderStartBtn, folderCancelLink]);
   root.appendChild(folderInputRow);
-
-  // Vary-prompt toggle (only visible when loop is active)
-  const varyChk   = el('input', { type: 'checkbox', id: 'express-vary-prompt', style: 'cursor:pointer;' });
-  const varyRow   = el('div', {
-    style: 'display:none; align-items:center; gap:6px; padding:0 2px;',
-  }, [
-    varyChk,
-    el('label', { for: 'express-vary-prompt', style: 'font-size:.76rem; color:var(--text-3); cursor:pointer; user-select:none;', text: 'Vary prompt each time (AI generates slight variation)' }),
-  ]);
-  root.appendChild(varyRow);
-  varyChk.addEventListener('change', () => { _varyPrompt = varyChk.checked; });
 
   // -- Progress + result area ------------------------------------------------
   const progressWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
@@ -1103,54 +1063,6 @@ export function init(panel) {
     });
   }
 
-  // -- Loop runner -----------------------------------------------------------
-  async function _runLoop() {
-    while (_looping) {
-      _loopCount++;
-      // Dispatch to whichever generator matches the current mode so Loop works
-      // for both single-clip and multi-clip story generation.
-      // _generateOne / _generateMulti return as soon as the job is submitted;
-      // await the watch promise for completion.
-      const submitted = _multiVideo
-        ? await _generateMulti()
-        : await _generateOne(true);
-      if (!submitted) { _stopLoop(); toast('Loop stopped -- failed to submit job', 'error'); break; }
-      const ok = await _watchJob(_jobId);
-      if (!ok) { _stopLoop(); toast('Loop stopped -- generation failed', 'error'); break; }
-      if (!_looping) break;
-      // Brief pause so the user can see the result before next run kicks in
-      await new Promise(r => setTimeout(r, 2500));
-    }
-    if (!_looping) {
-      loopBtn.textContent = '∞  Loop';
-      loopBtn.classList.remove('btn-primary');
-      varyRow.style.display = 'none';
-    }
-  }
-
-  function _stopLoop() {
-    _looping = false;
-    loopBtn.textContent = '∞  Loop';
-    loopBtn.classList.remove('btn-primary');
-    varyRow.style.display = 'none';
-  }
-
-  loopBtn.addEventListener('click', async () => {
-    if (_looping) {
-      _stopLoop();
-      if (_jobId) stopJob(_jobId).catch(() => {});
-      toast('Loop stopped', 'info');
-    } else {
-      if (!_imagePath && !ideaInput.value.trim()) { toast('Drop an image or type a video idea first', 'error'); return; }
-      _looping = true;
-      _loopCount = 0;
-      loopBtn.textContent = '*  Stop';
-      loopBtn.classList.add('btn-primary');
-      varyRow.style.display = 'flex';
-      _runLoop();
-    }
-  });
-
   // -- Loop Folder: server-side runner tied to a browser heartbeat ---------
   //
   // The actual loop runs in the server (features/fun_videos/folder_loop.py),
@@ -1274,7 +1186,7 @@ export function init(panel) {
           folder,
           settings:    _collectFolderLoopSettings(),
           multi_video: _multiVideo,
-          repeat:      folderRepeatChk.checked,
+          repeat:      true,
         }),
       });
       _folderPath = snap.folder;
