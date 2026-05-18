@@ -932,8 +932,17 @@ def start_ollama() -> tuple[bool, str | None]:
 
 # -- Health watchdog ----------------------------------------------------------
 
+# Stuck-WanGP detection: track the last time the step counter changed.
+# If busy=True but the step hasn't advanced in _WANGP_STUCK_SECS, the
+# generation is deadlocked and we restart. 300s (5 min) is very generous --
+# even the slowest model step (LTX-2 19B step 0) takes ~14s.
+_WANGP_STUCK_SECS = 300
+_wangp_last_step: int | None = None
+_wangp_last_step_time: float = 0.0
+
 def _watchdog_loop():
     """Periodically check managed services and restart crashed ones."""
+    global _wangp_last_step, _wangp_last_step_time
     while not _watchdog_stop.is_set():
         # Interruptible sleep -- wakes immediately when shutdown_all() fires
         _watchdog_stop.wait(30)
@@ -958,6 +967,7 @@ def _watchdog_loop():
             if wangp_proc and wangp_proc.poll() is not None:
                 log.warning("[watchdog] WanGP worker died -- restarting via orchestrator")
                 _set_status("wangp", state="error", message="Worker crashed -- restarting...")
+                _wangp_last_step = None  # reset stuck tracker on respawn
                 try:
                     from core.gpu_orchestrator import gpu
                     gpu.acquire("wangp", reason="watchdog respawn after crash")
@@ -965,6 +975,40 @@ def _watchdog_loop():
                     log.error("[watchdog] orchestrator-aware WanGP respawn failed: %s; "
                               "falling back to direct start", e)
                     start_wangp_worker()
+            elif wangp_proc and wangp_proc.poll() is None:
+                # Process is alive -- check for stuck generation (busy=True but
+                # step hasn't advanced for _WANGP_STUCK_SECS).
+                try:
+                    with urllib.request.urlopen(
+                        "http://127.0.0.1:7899/status"
+                    ) as _r:
+                        _ws = json.loads(_r.read())
+                    if _ws.get("busy"):
+                        _cur_step = _ws.get("step", 0)
+                        if _wangp_last_step != _cur_step:
+                            _wangp_last_step = _cur_step
+                            _wangp_last_step_time = time.time()
+                        elif time.time() - _wangp_last_step_time > _WANGP_STUCK_SECS:
+                            log.warning(
+                                "[watchdog] WanGP busy but step stuck at %d for >%ds"
+                                " -- treating as deadlocked, restarting",
+                                _cur_step, _WANGP_STUCK_SECS,
+                            )
+                            _set_status("wangp", state="error",
+                                        message="Generation deadlocked -- restarting...")
+                            _wangp_last_step = None
+                            try:
+                                from core.gpu_orchestrator import gpu
+                                gpu.acquire("wangp", reason="watchdog deadlock recovery")
+                            except Exception as _e:
+                                log.error("[watchdog] deadlock recovery failed: %s", _e)
+                                start_wangp_worker()
+                    else:
+                        # Not busy -- reset tracker so next busy phase starts fresh
+                        _wangp_last_step = None
+                        _wangp_last_step_time = 0.0
+                except Exception:
+                    pass  # WanGP temporarily unreachable -- not fatal
 
             # Check ACE-Step (same snapshot pattern as WanGP).
             # Same orchestrator-aware respawn rationale as WanGP above.
