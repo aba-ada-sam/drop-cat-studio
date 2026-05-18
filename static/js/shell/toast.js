@@ -189,20 +189,24 @@ export async function apiFetch(path, opts = {}) {
         errMsg = d.detail || d.error || errMsg;
         details = JSON.stringify(d);
       } catch (_) {}
-      _logError(errMsg, context, details);
-      toast(errMsg, 'error', {
-        context,
-        details,
-        onRetry: opts.onRetry,
-      });
+      if (!opts.silent) {
+        _logError(errMsg, context, details);
+        toast(errMsg, 'error', {
+          context,
+          details,
+          onRetry: opts.onRetry,
+        });
+      }
       throw new Error(errMsg);
     }
     try {
       return await res.json();
     } catch (_parseErr) {
       const errMsg = `Server returned non-JSON response (${res.status})`;
-      _logError(errMsg, context, '');
-      toast(errMsg, 'error', { context });
+      if (!opts.silent) {
+        _logError(errMsg, context, '');
+        toast(errMsg, 'error', { context });
+      }
       throw new Error(errMsg);
     }
   } catch (e) {

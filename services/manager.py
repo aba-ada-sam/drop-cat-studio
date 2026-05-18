@@ -1024,11 +1024,33 @@ def shutdown_all():
     # GPU driver can reclaim VRAM cleanly -- skipping this causes the CUDA
     # context to die mid-flight and the display driver resets the GPU, which
     # makes the monitor go dark for 1-2 seconds.
+    #
+    # Sequence:
+    #   1. POST /abort  -- sets abort flag; generation stops at next tqdm step
+    #                      (up to ~14s on profile 3). Without this, synchronize()
+    #                      in the /shutdown handler blocks until the step finishes.
+    #   2. POST /shutdown -- flushes CUDA then calls os._exit(0)
+    #   3. Poll proc.poll() up to 20s -- the process dies on its own once the
+    #      flush completes; only force-kill if it hasn't exited by then.
     try:
         import urllib.request as _ur
+        try:
+            _ur.urlopen(f"http://127.0.0.1:{WANGP_WORKER_PORT}/abort",
+                        data=b'', timeout=2)
+            log.info("[shutdown] WanGP abort signal sent")
+        except Exception:
+            pass   # not busy or not running -- continue to /shutdown
         _ur.urlopen(f"http://127.0.0.1:{WANGP_WORKER_PORT}/shutdown", timeout=3)
-        log.info("[shutdown] WanGP graceful shutdown requested -- waiting 2s for CUDA flush")
-        time.sleep(2)
+        log.info("[shutdown] WanGP graceful shutdown requested -- waiting for CUDA flush")
+        # Poll until the process exits or 20s elapses (covers worst-case 14s step)
+        proc = _wangp_worker_proc
+        deadline = time.time() + 20
+        while proc is not None and proc.poll() is None and time.time() < deadline:
+            time.sleep(0.5)
+        if proc is not None and proc.poll() is None:
+            log.warning("[shutdown] WanGP still alive after 20s -- force-killing")
+        else:
+            log.info("[shutdown] WanGP exited cleanly")
     except Exception:
         pass   # worker not running or already dead -- fall through to force-kill
 

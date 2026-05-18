@@ -15,7 +15,7 @@ import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
 import { consumeHandoff } from './handoff.js?v=20260508a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260503a';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260517b';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260509a';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260503h';
@@ -1014,7 +1014,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('dcs:ready', () => {
     const s = document.getElementById('startup-spinner');
     if (s) s.style.display = 'none';
-    _runStartupFetches().catch(() => _startReconnectLoop());
+    _runStartupFetches().catch(e => {
+      // Only show the offline overlay for actual network failures (server not
+      // reachable). If the server is up but an endpoint returned an HTTP error,
+      // the error is already logged/toasted -- don't reload in a loop.
+      if (e.name === 'TypeError') _startReconnectLoop();
+    });
   }, { once: true });
 
   runSplash();
