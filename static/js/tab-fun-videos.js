@@ -1088,6 +1088,98 @@ export function init(panel) {
   root.appendChild(genBtn);
   root.appendChild(fvQueueBtn);
 
+  // -- Loop Folder -----------------------------------------------------------
+  const loopFolderBtn = el('button', {
+    class: 'btn',
+    text: 'Loop Folder...',
+    style: 'width:100%; margin-top:6px; font-size:.9rem;',
+    title: 'Pick a folder of photos and generate videos one-by-one, forever',
+  });
+  root.appendChild(loopFolderBtn);
+
+  const loopFolderStatus = el('div', {
+    style: 'display:none; margin-top:6px; padding:8px 10px; background:var(--surface-2); border-radius:6px; font-size:.8rem; color:var(--accent);',
+  });
+  root.appendChild(loopFolderStatus);
+
+  let _fvFolderActive = false;
+  let _fvFolderPoll = null;
+
+  function _fvUpdateLoopStatus(state) {
+    if (!state || !state.active) {
+      _fvFolderActive = false;
+      loopFolderBtn.textContent = 'Loop Folder...';
+      loopFolderBtn.style.borderColor = '';
+      loopFolderStatus.style.display = 'none';
+      if (_fvFolderPoll) { clearInterval(_fvFolderPoll); _fvFolderPoll = null; }
+      return;
+    }
+    _fvFolderActive = true;
+    loopFolderBtn.textContent = 'Stop Loop Folder';
+    loopFolderBtn.style.borderColor = 'var(--red)';
+    const msg = state.current_file
+      ? `Looping: ${state.current_file.split(/[/\\]/).pop()}`
+      : 'Loop Folder running...';
+    loopFolderStatus.textContent = msg;
+    loopFolderStatus.style.display = '';
+  }
+
+  async function _fvStartLoopFolder() {
+    if (_fvFolderActive) {
+      api('/api/fun/folder-loop/stop', { method: 'POST' }).catch(() => {});
+      toast('Loop Folder: stop requested', 'info');
+      return;
+    }
+    let picked;
+    try {
+      const r = await api('/api/browse-folder', { method: 'POST' });
+      picked = r.path;
+    } catch (_) { picked = null; }
+    if (!picked) return;
+
+    const base = _buildFvPayload();
+    const settings = {
+      video_prompt:     base.video_prompt,
+      music_prompt:     base.music_prompt,
+      model:            base.model,
+      duration:         base.duration,
+      steps:            base.steps,
+      guidance:         base.guidance,
+      seed:             base.seed,
+      skip_audio:       base.skip_audio,
+      instrumental:     base.instrumental,
+      lyric_direction:  base.lyric_direction,
+      output_width:     base.output_width,
+      output_height:    base.output_height,
+      auto_pick_model:  base.auto_pick_model,
+      motion_style:     base.motion_style,
+    };
+
+    try {
+      await api('/api/fun/folder-loop/start', {
+        method: 'POST',
+        body: JSON.stringify({ folder_path: picked, repeat: true, settings }),
+      });
+      toast('Loop Folder started', 'success');
+      _fvFolderActive = true;
+      _fvUpdateLoopStatus({ active: true, current_file: null });
+      if (_fvFolderPoll) clearInterval(_fvFolderPoll);
+      _fvFolderPoll = setInterval(async () => {
+        try {
+          const s = await api('/api/fun/folder-loop/status');
+          _fvUpdateLoopStatus(s);
+        } catch (_) {}
+      }, 3000);
+    } catch (e) {
+      toast(e.message || 'Failed to start loop', 'error');
+    }
+  }
+
+  loopFolderBtn.addEventListener('click', _fvStartLoopFolder);
+
+  // Check if a folder loop is already running when the tab first loads
+  api('/api/fun/folder-loop/status').then(s => _fvUpdateLoopStatus(s)).catch(() => {});
+
   const progWrap = el('div');
   root.appendChild(progWrap);
   const prog = createProgressCard(progWrap);
