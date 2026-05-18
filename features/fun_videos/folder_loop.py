@@ -317,6 +317,10 @@ def _runner() -> None:
             with _state_lock:
                 if ok:
                     _state["succeeded"] += 1
+                elif err in ("Browser disconnected", "Loop stopped"):
+                    # Job was abandoned mid-queue, not a generation failure --
+                    # don't penalise the success rate.
+                    pass
                 else:
                     _state["failed"] += 1
                     _record_error(f"{img['name']}: {err}")

@@ -258,13 +258,18 @@ def parse_json_response(text: str) -> dict | list | None:
     except json.JSONDecodeError:
         pass
 
-    # 3. Fallback: find the first {...} or [...] span in the text
-    match = re.search(r"[\[{][\s\S]*[\]}]", text)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
+    # 3. Scan every { and [ position; use raw_decode so trailing text is ignored.
+    # The greedy-regex approach ([\[{][\s\S]*[\]}]) fails when the LLM's
+    # preamble contains any bracket before the JSON object, e.g. "[10 clips]" or
+    # "[verse]", causing the regex to anchor at the wrong position.
+    _decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch in '{[':
+            try:
+                val, _ = _decoder.raw_decode(text, i)
+                return val
+            except json.JSONDecodeError:
+                continue
 
     return None
 

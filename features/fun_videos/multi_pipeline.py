@@ -465,7 +465,7 @@ def _generate_story_arc(
             result = _parse_clips(text)
             if result:
                 return result, "vision"
-            log.warning("[multi] Story arc vision returned unparseable response -- trying text-only fallback")
+            log.warning("[multi] Story arc vision returned unparseable response (first 200 chars: %r) -- trying text-only fallback", text[:200])
         except Exception as e:
             log.warning("[multi] Story arc Ollama vision failed (%s) -- trying cloud vision", e)
 
@@ -481,7 +481,7 @@ def _generate_story_arc(
             result = _parse_clips(text)
             if result:
                 return result, "vision"
-            log.warning("[multi] Story arc cloud vision returned unparseable response -- trying text-only")
+            log.warning("[multi] Story arc cloud vision returned unparseable response (first 200 chars: %r) -- trying text-only", text[:200])
         except Exception as e:
             log.warning("[multi] Story arc cloud vision failed (%s) -- trying text-only", e)
 
@@ -496,7 +496,7 @@ def _generate_story_arc(
         result = _parse_clips(text)
         if result:
             return result, "text"
-        log.warning("[multi] Story arc text-only returned unparseable response -- using fallback")
+        log.warning("[multi] Story arc text-only returned unparseable response (first 200 chars: %r) -- using fallback", text[:200])
     except Exception as e:
         log.warning("[multi] Story arc text-only call failed (%s) -- using fallback", e)
 
