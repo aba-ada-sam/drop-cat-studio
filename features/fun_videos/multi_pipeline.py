@@ -332,20 +332,22 @@ def _generate_story_arc(
         user_text = (initial_idea or "").strip()
 
         if resolved_style == "calm":
-            # Subject completely still, only environment moves. Best subject
-            # identity preservation but lowest visible motion ("Ken Burns").
-            # IMPORTANT: no particle/dust/mote language -- LTX-2 Distilled
-            # takes it literally and renders rain/falling-debris artifacts.
+            # Subject completely still, single environmental effect only.
+            # LTX-2 fills unanchored background areas with invented motion
+            # (manifests as rain/debris). Fix: one effect + explicit anchors.
+            # Research: "one environment effect not five"; cinematographic
+            # framing; explicit "background static, sky unchanged" to prevent
+            # empty-region hallucination. No negative language in pos prompt.
             motion_clause = (
-                "static subject, no body or face movement. "
-                "Environment animates: warm light shifts across surfaces, "
-                "fabric sways in a slow breeze, leaves and grass sway gently, "
-                "shadows glide across the scene."
+                "Breathing photograph, fixed camera. "
+                "Subject holds perfectly still. "
+                "Warm light shifts slowly across the scene, casting long moving shadows. "
+                "Background static, sky unchanged, horizon holds."
             )
             fallback = (
-                "atmospheric scene, subject preserved exactly as in the photo, "
-                "gentle environmental motion (light shift, fabric drift, "
-                "leaves stir), static camera, photorealistic style"
+                "breathing photograph, static wide shot, subject perfectly still, "
+                "single slow light shift across the scene, background static, "
+                "fixed frame, photorealistic"
             )
         else:  # "gentle"
             # Subject allowed to move SUBTLY (head turn, breath, hand
@@ -354,17 +356,15 @@ def _generate_story_arc(
             # motion within each clip. The chain anchor still carries the
             # last frame across, which preserves most of the identity.
             motion_clause = (
-                "subject moves subtly while staying in place: gentle head "
-                "turn, eye blink, slow breath, small hand gesture, fabric "
-                "shifting on the body, hair stirring. "
-                "Environment also animates: warm light shifts, shadows glide, "
-                "background stirs gently. Static camera framing."
+                "Fixed camera, static wide shot. "
+                "Subject makes one subtle movement: slow breath, slight head turn, "
+                "or gentle eye blink. "
+                "Single light shift across the scene. Background static, sky unchanged."
             )
             fallback = (
-                "atmospheric scene, subject moves subtly (head turn, breath, "
-                "fabric stir, slight gesture), environment animates around "
-                "them (warm light shifts, shadows drift, background stirs), static "
-                "camera, photorealistic style"
+                "static wide shot, fixed camera, subject breathes gently, "
+                "single slow light shift, background holds still, "
+                "photorealistic style"
             )
 
         if user_text:
