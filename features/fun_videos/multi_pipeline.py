@@ -334,11 +334,13 @@ def _generate_story_arc(
         if resolved_style == "calm":
             # Subject completely still, only environment moves. Best subject
             # identity preservation but lowest visible motion ("Ken Burns").
+            # IMPORTANT: no particle/dust/mote language -- LTX-2 Distilled
+            # takes it literally and renders rain/falling-debris artifacts.
             motion_clause = (
                 "static subject, no body or face movement. "
                 "Environment animates: light shifts across surfaces, fabric "
-                "drifts in unseen air, leaves and grass stir, dust motes "
-                "drift, particles in the air."
+                "catches unseen air currents, leaves and grass stir gently, "
+                "shadows drift slowly. No falling particles, no rain, no debris."
             )
             fallback = (
                 "atmospheric scene, subject preserved exactly as in the photo, "
@@ -355,13 +357,13 @@ def _generate_story_arc(
                 "subject moves subtly while staying in place: gentle head "
                 "turn, eye blink, slow breath, small hand gesture, fabric "
                 "shifting on the body, hair stirring. "
-                "Environment also animates: light shifts, particles drift, "
-                "background movement. Static camera framing."
+                "Environment also animates: light shifts, shadows drift, "
+                "background movement. Static camera framing. No falling particles, no rain."
             )
             fallback = (
                 "atmospheric scene, subject moves subtly (head turn, breath, "
                 "fabric stir, slight gesture), environment animates around "
-                "them (light shifts, particles, distant motion), static "
+                "them (light shifts, shadows drift, distant motion), static "
                 "camera, photorealistic style"
             )
 

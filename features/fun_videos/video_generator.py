@@ -25,14 +25,16 @@ _NEG_LTX = (
     "worst quality, inconsistent motion, blurry, jittery, distorted, camera shake, "
     "shaky, wobble, warping edges, flicker, stutter, erratic motion, temporal artifacts, "
     "ghosting, morphing, smear, judder, particle noise, ash floating, dust in air, "
-    "floating debris, handheld instability, rolling shutter wobble, watermark, text, logo"
+    "floating debris, handheld instability, rolling shutter wobble, watermark, text, logo, "
+    "rain, falling rain, precipitation, dripping water, falling particles, falling debris, "
+    "snow, hail, sparks, embers, confetti, streaks falling from sky"
 )
 _NEG_WAN = (
     "low quality, blurry, distorted faces, unnatural movement, text, watermark, "
     "shaky camera, rolling shutter wobble, handheld instability, motion smear, "
     "heavy motion blur, ghost trails, micro-jitter, warping edges, wobble, flicker, "
     "jitter, stutter, erratic motion, temporal artifacts, ash floating, dust in air, "
-    "floating debris, particles in air"
+    "floating debris, particles in air, rain, falling rain, precipitation, falling particles"
 )
 
 def negative_prompt_for(model_name: str) -> str:
