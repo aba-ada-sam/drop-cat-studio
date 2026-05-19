@@ -412,7 +412,7 @@ def run_pipeline(job, photo_path, settings):
         # Don't also pass start_video or it takes precedence over the image in WanGP.
         start_video_path=None if video_mode == "continuation" else settings.get("start_video_path"),
         loras=settings.get("loras", []),
-        negative_prompt=video_generator.negative_prompt_for(_mn),
+        negative_prompt=video_generator.negative_prompt_for(_mn, _motion_style_here),
         stop_check=_stopped,
         log_fn=_log,
         progress_fn=_video_progress,

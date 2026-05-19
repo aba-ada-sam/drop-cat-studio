@@ -18,29 +18,41 @@ log = logging.getLogger(__name__)
 
 WANGP_WORKER_PORT = 7899
 
-# Negative prompts tuned per model family.
-# LTX-2 and Wan2.1 both accept negative_prompt; models that don't (HunyuanVideo etc.)
-# pop it internally via their no_negative_prompt flag, so it's safe to always send.
-_NEG_LTX = (
-    "worst quality, inconsistent motion, blurry, jittery, distorted, camera shake, "
-    "shaky, wobble, warping edges, flicker, stutter, erratic motion, temporal artifacts, "
-    "ghosting, morphing, smear, judder, particle noise, ash floating, dust in air, "
-    "floating debris, handheld instability, rolling shutter wobble, watermark, text, logo, "
-    "rain, falling rain, precipitation, dripping water, falling particles, falling debris, "
-    "snow, hail, sparks, embers, confetti, streaks falling from sky"
+# Negative prompts tuned per model family and motion style.
+# Research: 5-8 targeted terms outperform exhaustive lists (crepal.ai).
+# LTX HuggingFace card includes "static" in negatives -- this tells the
+# model to avoid fully-frozen frames and is correct for dynamic clips.
+# For calm/gentle mode, "static" is intentionally absent: adding it pushes
+# LTX to hallucinate motion (rain, debris) to fill anchored regions.
+
+# LTX-2 calm/gentle: no "static" -- we want minimal motion, not invented motion.
+_NEG_LTX_CALM = (
+    "shaky, glitchy, low quality, worst quality, deformed, distorted, "
+    "motion smear, motion artifacts, watermark, text, "
+    "rain, precipitation, falling particles, falling debris"
 )
+# LTX-2 dynamic (Dev13B or Distilled in dynamic mode): "static" included per
+# HuggingFace card -- prevents fully frozen non-animating output.
+_NEG_LTX_DYNAMIC = (
+    "shaky, glitchy, low quality, worst quality, deformed, distorted, "
+    "motion smear, motion artifacts, watermark, text, static, "
+    "rain, precipitation, falling particles, falling debris"
+)
+# Wan2.1: strong subject anchoring, handles longer neg lists, but still concise.
+# No "static" needed -- Wan doesn't have LTX's empty-region hallucination problem.
 _NEG_WAN = (
-    "low quality, blurry, distorted faces, unnatural movement, text, watermark, "
-    "shaky camera, rolling shutter wobble, handheld instability, motion smear, "
-    "heavy motion blur, ghost trails, micro-jitter, warping edges, wobble, flicker, "
-    "jitter, stutter, erratic motion, temporal artifacts, ash floating, dust in air, "
-    "floating debris, particles in air, rain, falling rain, precipitation, falling particles"
+    "low quality, blurry, distorted faces, unnatural movement, "
+    "text, watermark, shaky camera, motion smear, temporal artifacts, "
+    "rain, precipitation, falling particles, falling debris"
 )
 
-def negative_prompt_for(model_name: str) -> str:
-    """Return the appropriate negative prompt for the given WanGP model."""
+
+def negative_prompt_for(model_name: str, motion_style: str = "dynamic") -> str:
+    """Return the appropriate negative prompt for the given model and motion style."""
     if "ltx" in model_name.lower():
-        return _NEG_LTX
+        if motion_style in ("calm", "gentle"):
+            return _NEG_LTX_CALM
+        return _NEG_LTX_DYNAMIC
     return _NEG_WAN
 
 MODELS = {

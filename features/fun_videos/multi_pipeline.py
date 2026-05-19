@@ -342,11 +342,11 @@ def _generate_story_arc(
                 "Breathing photograph, fixed camera. "
                 "Subject holds perfectly still. "
                 "Warm light shifts slowly across the scene, casting long moving shadows. "
-                "Background static, sky unchanged, horizon holds."
+                "Background unchanged, sky clear and steady, horizon locked."
             )
             fallback = (
-                "breathing photograph, static wide shot, subject perfectly still, "
-                "single slow light shift across the scene, background static, "
+                "breathing photograph, fixed wide shot, subject perfectly still, "
+                "single slow light shift across the scene, background unchanged, "
                 "fixed frame, photorealistic"
             )
         else:  # "gentle"
@@ -356,14 +356,14 @@ def _generate_story_arc(
             # motion within each clip. The chain anchor still carries the
             # last frame across, which preserves most of the identity.
             motion_clause = (
-                "Fixed camera, static wide shot. "
+                "Fixed camera, locked frame. "
                 "Subject makes one subtle movement: slow breath, slight head turn, "
                 "or gentle eye blink. "
-                "Single light shift across the scene. Background static, sky unchanged."
+                "Single light shift across the scene. Background unchanged, sky clear and steady."
             )
             fallback = (
-                "static wide shot, fixed camera, subject breathes gently, "
-                "single slow light shift, background holds still, "
+                "locked wide shot, fixed camera, subject breathes gently, "
+                "single slow light shift, background unchanged, "
                 "photorealistic style"
             )
 
@@ -391,14 +391,43 @@ def _generate_story_arc(
         default_idea = "Create an exciting action-packed short film"
     idea_text = (initial_idea or "").strip() or default_idea
     total_secs = target_total_secs or (n_clips * default_clip_dur)
+    # style_hint is injected into the LLM prompt. Research findings per model:
+    # LTX Distilled (8 steps): one motion per clip, cinematographic anchoring,
+    #   explicit subject+background locks, no particle/atmospheric effects.
+    # LTX Dev13B (40 steps): can handle deliberate motion; cinematic specificity
+    #   (lens, lighting); "one clean move beats three messy ones".
+    # Wan I2V: 80-120 words works well; structured sequence (opening -> camera
+    #   move -> payoff); explicit camera verbs (pan, track, dolly, pull back);
+    #   speed cues (slow, smooth glide); strong subject anchoring across clips.
+    # Wan T2V: same as I2V but needs fuller scene description (no reference image).
+    is_wan_t2v = "t2v" in (model_name or "").lower()
     if resolved_style == "calm":
-        style_hint = "CALM -- environment-only motion, subject completely still"
+        style_hint = "CALM -- environment-only motion, subject completely still, one environmental effect per clip, explicit background anchor"
     elif is_ltx and is_ltx_dev13:
-        style_hint = "LTX Dev13B -- deliberate physical motion OK (strides, gestures, turns), strong image conditioning"
+        style_hint = (
+            "LTX Dev13B (40 steps) -- deliberate physical motion OK (strides, gestures, turns). "
+            "Use cinematic specificity: name the lens (85mm, 50mm), lighting quality (soft window light, golden hour). "
+            "One clean motion per clip. Avoid stacking effects."
+        )
     elif is_ltx:
-        style_hint = "LTX Distilled -- gentle micro-motion only, avoid large subject movement"
+        style_hint = (
+            "LTX Distilled (8 steps) -- subtle motion only. "
+            "Cinematographic framing required: 'static wide shot', 'fixed camera'. "
+            "One motion element per clip. Anchor background explicitly ('background unchanged, sky steady')."
+        )
+    elif is_wan_t2v:
+        style_hint = (
+            "Wan T2V -- needs full scene description (no reference image). "
+            "Vivid concrete nouns and active verbs. Specify time of day, lighting, atmosphere explicitly. "
+            "Structure as sequence: opening -> action -> resolution. 80-120 words ideal."
+        )
     else:
-        style_hint = "Wan I2V -- kinetic action OK"
+        style_hint = (
+            "Wan I2V -- strong subject anchoring, handles kinetic action well. "
+            "Structure as sequence: opening view -> camera movement -> reveal/payoff. "
+            "Use cinematography verbs (pan, track, dolly, pull back, tilt). "
+            "Add speed cues (slow glide, smooth track). 80-120 words ideal per clip."
+        )
     # In calm mode, prefix the idea with a hard reminder so the LLM overrides any
     # kinetic words the user (or a JS default) may have included in the prompt.
     # The system prompt already bans "erupts, slams" etc., but a repeated prompt-level
@@ -827,7 +856,7 @@ def _run_director_pass(
                 steps=steps,
                 guidance=guidance,
                 seed=seed,
-                negative_prompt=video_generator.negative_prompt_for(model_name),
+                negative_prompt=video_generator.negative_prompt_for(model_name, motion_style or "dynamic"),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_vprog,
@@ -1370,7 +1399,7 @@ def run_multi_pipeline(job, photo_path, settings):
                       steps=steps,
                       guidance=effective_guidance,
                       seed=seed,
-                      negative_prompt=video_generator.negative_prompt_for(model_name),
+                      negative_prompt=video_generator.negative_prompt_for(model_name, motion_style or "dynamic"),
                       stop_check=_stopped,
                       log_fn=_log,
                       progress_fn=_video_progress,
