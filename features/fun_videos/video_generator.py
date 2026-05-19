@@ -473,8 +473,7 @@ def merge_video_audio(video_path: str, audio_path: str, out_path: str, log_fn=No
     # Pin output to exact video duration so we never go longer than the video
     # (apad could theoretically run forever without a stop condition).
     if video_dur > 0:
-        cmd.insert(-1, str(video_dur))
-        cmd.insert(-1, "-t")
+        cmd = cmd[:-1] + ["-t", str(video_dur), cmd[-1]]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode == 0 and os.path.isfile(out_path):

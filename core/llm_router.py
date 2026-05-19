@@ -7,7 +7,7 @@ import logging
 import time
 
 from core import config as cfg
-from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER  # re-exported for features
+from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER, _is_ollama_oom  # re-exported for features
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +330,6 @@ class LLMRouter:
                 # wastes ~15 seconds and makes the error message more confusing.
                 # LLMClient.chat() already attempted a vision-model fallback before
                 # this exception propagated up, so we are truly out of options.
-                from core.llm_client import _is_ollama_oom
                 if _is_ollama_oom(exc) or "requires more memory than available" in exc_str:
                     log.error("Ollama OOM (no retry): %s", exc)
                     raise
