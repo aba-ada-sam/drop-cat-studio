@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from core.ffmpeg_utils import probe_duration
-from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
+from core.llm_client import TIER_FAST, TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt, _sample_music_frames
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,102 @@ _FALLBACK_PHASES_NARRATIVE = [
     "stands up slowly, weight shifting as they rise to full height",
     "opens their hand and looks down at what rests in their palm",
 ]
+
+
+# -- Audio-sync arc refinement ------------------------------------------------
+
+_AUDIO_SYNC_SYSTEM = """\
+You are synchronizing a music video. You have the original video clip prompts and,
+for each clip, the lyrics being sung and an energy level (0.0=quiet verse, 1.0=full chorus).
+
+Your task: add 4-8 words of visual context to each existing prompt so it reflects
+the musical moment. Do NOT rewrite or shorten the prompt -- only APPEND to it.
+
+Rules:
+- High energy (>= 0.7) or energy-peak clips: append movement-amplifying words
+  ("cresting into full intensity", "radiant burst", "peak moment of force")
+- Low energy (< 0.3) clips: append atmosphere words
+  ("quiet held moment", "suspended stillness", "hushed and waiting")
+- If lyrics mention a concrete visual (fire, water, light, shadow, tears, gold, etc.):
+  translate that into a visual word appended to the prompt
+- NEVER paste the lyrics literally into a video prompt -- video models do not
+  understand lyrics; translate them into physical scene elements
+- Keep each appended addition SHORT (4-8 words, comma-separated from existing text)
+- Return ONLY valid JSON: {"clips": [{"prompt": "full enhanced prompt"}, ...]}
+  with exactly the same number of clips as the input.\
+"""
+
+
+def _refine_arc_with_audio(
+    llm_router,
+    story_arc: list[dict],
+    clip_audio_ctx: list[dict],
+    model_name: str,
+    motion_style: str | None,
+) -> list[dict]:
+    """Refine story arc prompts with lyric and energy context from generated audio.
+
+    One TIER_FAST LLM call for all clips -- appends visual hooks derived from
+    what is being sung and how loud that moment is. Falls back to the original
+    arc if the call fails or returns unparseable output.
+    """
+    has_lyrics = any(ctx.get("lyric_text", "").strip() for ctx in clip_audio_ctx)
+    if not has_lyrics:
+        log.info("[audio_sync] No lyric segments found -- skipping prompt refinement")
+        return story_arc
+
+    lines = []
+    for i, (clip, ctx) in enumerate(zip(story_arc, clip_audio_ctx)):
+        prompt = clip.get("prompt", "") if isinstance(clip, dict) else str(clip)
+        lyrics = ctx.get("lyric_text", "")
+        energy = ctx.get("energy_level", 0.5)
+        peak_tag = " [ENERGY PEAK]" if ctx.get("has_energy_peak") else ""
+        lines.append(
+            f"Clip {i + 1}: {ctx['time_start']:.0f}s-{ctx['time_end']:.0f}s"
+            f" | energy={energy:.1f}{peak_tag}"
+            f" | lyrics: \"{lyrics}\"\n"
+            f"  Prompt: {prompt}"
+        )
+    user_msg = (
+        "\n\n".join(lines)
+        + f"\n\nReturn enhanced prompts for all {len(story_arc)} clips."
+    )
+
+    try:
+        text = llm_router.route(
+            [{"role": "user", "content": user_msg}],
+            tier=TIER_FAST,
+            system=_AUDIO_SYNC_SYSTEM,
+            max_tokens=900,
+        )
+        data = parse_json_response(text)
+        if not data or not isinstance(data.get("clips"), list):
+            log.warning("[audio_sync] Unparseable refinement response -- keeping original arc")
+            return story_arc
+
+        refined = []
+        clips_data = data["clips"]
+        for i, orig in enumerate(story_arc):
+            if i < len(clips_data) and isinstance(clips_data[i], dict):
+                new_prompt = (clips_data[i].get("prompt") or "").strip()
+                if len(new_prompt) >= len(
+                    orig.get("prompt", "") if isinstance(orig, dict) else str(orig)
+                ):
+                    entry = dict(orig) if isinstance(orig, dict) else {"prompt": str(orig), "duration": 5.0}
+                    entry["prompt"] = new_prompt
+                    refined.append(entry)
+                    continue
+            refined.append(orig)
+
+        log.info("[audio_sync] Refined %d/%d clip prompts with audio context",
+                 sum(1 for a, b in zip(refined, story_arc)
+                     if (a.get("prompt") if isinstance(a, dict) else str(a)) !=
+                        (b.get("prompt") if isinstance(b, dict) else str(b))),
+                 len(refined))
+        return refined
+    except Exception as e:
+        log.warning("[audio_sync] Arc refinement failed (%s) -- keeping original arc", e)
+        return story_arc
 
 
 # -- Story arc generation ------------------------------------------------------
@@ -1390,7 +1486,96 @@ def run_multi_pipeline(job, photo_path, settings):
         src_copy = job_dir / f"source{Path(photo_path).suffix}"
         shutil.copy2(photo_path, src_copy)
 
-    # -- GPU: acquire WanGP exclusively (orchestrator evicts everything else) -
+    # -- Phase 0: Music-first -- generate audio BEFORE clips so we can sync ---
+    # ACE-Step produces the track, faster-whisper transcribes it, librosa finds
+    # beats and energy peaks, then we snap clip cut points to strong beats and
+    # refine each clip's motion prompt with the lyric/energy context.
+    # If this phase fails for any reason we fall back to post-clip audio (original flow).
+    _audio_phase0_path: str | None = None
+    _transcript: list[dict] = []
+    _audio_events: dict = {}
+
+    if not skip_audio and music_prompt and not _stopped():
+        job.update(progress=10, message="Generating audio for sync analysis...")
+        try:
+            from core.gpu_orchestrator import gpu as _gp0
+            _gp0.acquire("acestep", reason="music-first audio gen before clips")
+
+            planned_dur = sum(
+                float(c.get("duration", clip_dur)) if isinstance(c, dict) else clip_dur
+                for c in story_arc
+            )
+            audio_dur_p0 = min(planned_dur * _CHAIN_TRIM_RATIO + 4.0, 300.0)
+
+            def _p0_audio_progress(elapsed_s):
+                job.update(
+                    progress=10 + min(10, int(elapsed_s) // 5),
+                    message=f"Generating audio... {elapsed_s:.0f}s elapsed",
+                )
+
+            _ap0, _aerr0 = audio_generator.generate_audio(
+                prompt=music_prompt,
+                duration=audio_dur_p0,
+                output_dir=str(job_dir),
+                audio_format=settings.get("audio_format", "mp3"),
+                bpm=settings.get("bpm"),
+                steps=int(settings.get("audio_steps", 8)),
+                guidance=float(settings.get("audio_guidance", 7.0)),
+                seed=-1,
+                lyrics=lyrics,
+                instrumental=instrumental,
+                stop_event=job.stop_event,
+                progress_cb=_p0_audio_progress,
+            )
+            if _ap0 and not _stopped():
+                _audio_phase0_path = _ap0
+                job.update(progress=22, message="Transcribing audio...")
+                from features.fun_videos import audio_analyzer as _aa
+                _transcript = _aa.transcribe_audio(_ap0)
+
+                job.update(progress=23, message="Analysing beat structure...")
+                _audio_events = _aa.detect_audio_events(_ap0)
+                if _audio_events.get("bpm"):
+                    settings["_detected_bpm"] = _audio_events["bpm"]
+
+                # Snap clip boundaries to strong beats so cuts land on musical moments
+                story_arc = _aa.snap_durations_to_beats(
+                    story_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
+                )
+
+                # Build per-clip audio context and refine prompts with lyric hints
+                planned_clip_durs = [
+                    float(c.get("duration", clip_dur)) if isinstance(c, dict) else clip_dur
+                    for c in story_arc
+                ]
+                clip_audio_ctx = _aa.build_clip_audio_context(
+                    _transcript, _audio_events, n_clips, planned_clip_durs,
+                    _audio_events.get("duration", audio_dur_p0),
+                )
+                job.update(progress=24, message="Syncing clip prompts to music...")
+                story_arc = _refine_arc_with_audio(
+                    llm_router, story_arc, clip_audio_ctx, model_name, motion_style
+                )
+
+                job.meta["transcript"] = _transcript
+                job.meta["audio_events"] = {
+                    "bpm": _audio_events.get("bpm"),
+                    "energy_peaks": _audio_events.get("energy_peaks", []),
+                    "duration": _audio_events.get("duration"),
+                }
+                job.meta["clip_audio_context"] = clip_audio_ctx
+                log.info("[multi] Music-first done: %d lyric segments, BPM=%.1f, %d clips refined",
+                         len(_transcript), _audio_events.get("bpm", 0.0), n_clips)
+            else:
+                log.warning("[multi] Phase 0 audio failed (%s) -- will generate audio after clips", _aerr0)
+        except Exception as _p0e:
+            log.warning("[multi] Phase 0 audio exception (%s) -- will generate audio after clips", _p0e)
+            _audio_phase0_path = None
+
+    if _stopped():
+        return
+
+    # -- GPU: acquire WanGP exclusively (orchestrator evicts ACE-Step if loaded) -
     from core.gpu_orchestrator import gpu
     gpu.acquire("wangp", reason=f"multi-clip {n_clips} clips")
     try:
@@ -1407,9 +1592,15 @@ def run_multi_pipeline(job, photo_path, settings):
       # clips, we deliberately reset back to the source to break compounding
       # quality drift on long stories.
 
-      # Compress the clip-generation progress window when director passes will follow
-      # so there is room for review/re-shoot phases before the audio phase at 76%+.
-      _clip_pct_range = {0: 65, 1: 45, 2: 35}.get(director_passes, 35)
+      # Compress the clip-generation progress window when director passes will follow.
+      # If audio was pre-generated (Phase 0), clip window starts at 25 instead of 10
+      # to leave space for the audio/transcribe phase that already ran.
+      _clip_pct_start = 25 if _audio_phase0_path else 10
+      _clip_pct_range = (
+          {0: 50, 1: 40, 2: 30}.get(director_passes, 30)
+          if _audio_phase0_path
+          else {0: 65, 1: 45, 2: 35}.get(director_passes, 35)
+      )
 
       clip_paths: list[str] = []
       clip_durations: list[float] = []     # actual probed durations for director frame extraction
@@ -1441,8 +1632,8 @@ def run_multi_pipeline(job, photo_path, settings):
               this_clip_dur = clip_dur
 
           clip_num = i + 1
-          pct_start = 10 + int((i / n_clips) * _clip_pct_range)
-          pct_end   = 10 + int(((i + 1) / n_clips) * _clip_pct_range)
+          pct_start = _clip_pct_start + int((i / n_clips) * _clip_pct_range)
+          pct_end   = _clip_pct_start + int(((i + 1) / n_clips) * _clip_pct_range)
 
           job.update(progress=pct_start, message=f"Generating clip {clip_num} of {n_clips}...")
 
@@ -1538,7 +1729,7 @@ def run_multi_pipeline(job, photo_path, settings):
           raw = _last_error[0] or "No clips generated -- check WanGP is running"
           raise RuntimeError(f"Multi-video failed: {raw}")
 
-      clips_end_pct = 10 + _clip_pct_range
+      clips_end_pct = _clip_pct_start + _clip_pct_range
       job.update(progress=clips_end_pct, message=f"All {len(clip_paths)} clips done -- generating transitions...")
       job.meta["clips_generated"] = len(clip_paths)
       job.meta["clip_paths"] = clip_paths
@@ -1620,74 +1811,103 @@ def run_multi_pipeline(job, photo_path, settings):
           job.message = f"Multi-video done ({len(clip_paths)} clips, no audio)"
           return
 
-      # Warm up ACE-Step while we do analysis
-      # -- GPU: hand off from WanGP to ACE-Step (orchestrator evicts WanGP) --
-      gpu.acquire("acestep", reason="music gen after WanGP phase")
+      # If Phase 0 already generated audio, skip regeneration entirely.
+      # Otherwise fall back to post-clip audio (original flow).
+      audio_path: str | None = _audio_phase0_path
+      audio_err: str | None = None
 
-      if not music_prompt:
-          job.update(progress=78, message="Analyzing video for music direction...")
-          try:
-              frames = _sample_music_frames(concat_path, llm_router)
-              if frames:
-                  result = analyzer.generate_music_prompt(llm_router, frames, user_dir)
-                  music_prompt = result.get("music_prompt", "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere")
-                  if not settings.get("bpm") and result.get("bpm"):
-                      settings["bpm"] = result["bpm"]
-          except Exception as e:
-              log.warning("[multi] Post-video music analysis failed: %s", e)
-          if not music_prompt:
-              music_prompt = "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere"
+      if audio_path:
+          job.update(progress=82, message="Audio ready (generated before clips)...")
+          if lyrics and not job.meta.get("lyrics"):
+              job.meta["lyrics"] = lyrics
+          # Transcribe if we haven't already (Phase 0 should have done this, but guard it)
+          if not _transcript and not instrumental:
+              try:
+                  from features.fun_videos import audio_analyzer as _aa
+                  _tx = _aa.transcribe_audio(audio_path)
+                  if _tx:
+                      job.meta["transcript"] = _tx
+              except Exception:
+                  pass
       else:
-          job.update(progress=78, message="Using pre-generated music direction...")
+          # Fallback: generate audio after clips (Phase 0 failed or was skipped)
+          # -- GPU: hand off from WanGP to ACE-Step (orchestrator evicts WanGP) --
+          gpu.acquire("acestep", reason="music gen after WanGP phase (Phase 0 skipped)")
 
-      if not instrumental and not lyrics:
-          job.update(progress=80, message="Writing lyrics...")
-          try:
-              frames = _sample_music_frames(concat_path, llm_router)
-              lyrics = analyzer.generate_lyrics(
-                  llm_router, frames, music_prompt, lyric_dir or user_dir,
+          if not music_prompt:
+              job.update(progress=78, message="Analysing video for music direction...")
+              try:
+                  frames = _sample_music_frames(concat_path, llm_router)
+                  if frames:
+                      result = analyzer.generate_music_prompt(llm_router, frames, user_dir)
+                      music_prompt = result.get("music_prompt", "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere")
+                      if not settings.get("bpm") and result.get("bpm"):
+                          settings["bpm"] = result["bpm"]
+              except Exception as e:
+                  log.warning("[multi] Post-video music analysis failed: %s", e)
+              if not music_prompt:
+                  music_prompt = "dark cabaret, accordion, upright bass, brushed snare, smoky bistro atmosphere"
+          else:
+              job.update(progress=78, message="Using pre-generated music direction...")
+
+          if not instrumental and not lyrics:
+              job.update(progress=80, message="Writing lyrics...")
+              try:
+                  frames = _sample_music_frames(concat_path, llm_router)
+                  lyrics = analyzer.generate_lyrics(
+                      llm_router, frames, music_prompt, lyric_dir or user_dir,
+                  )
+              except Exception as e:
+                  log.warning("[multi] Lyrics generation failed: %s", e)
+
+          if not instrumental and not lyrics:
+              lyrics = (
+                  "[verse]\nFrames in motion, stories unfold\n"
+                  "Every moment worth its weight in gold\n"
+                  "[chorus]\nLife in motion, frame by frame\n"
+                  "Nothing ever stays the same"
               )
-          except Exception as e:
-              log.warning("[multi] Lyrics generation failed: %s", e)
 
-      if not instrumental and not lyrics:
-          lyrics = (
-              "[verse]\nFrames in motion, stories unfold\n"
-              "Every moment worth its weight in gold\n"
-              "[chorus]\nLife in motion, frame by frame\n"
-              "Nothing ever stays the same"
+          if lyrics:
+              job.meta["lyrics"] = lyrics
+          job.update(progress=82, message="Generating audio for full story...")
+
+          total_dur = probe_duration(concat_path)
+          audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
+              d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
+              for d in story_arc
+          ) + 2.0)
+
+          def _audio_progress(elapsed_s):
+              job.update(
+                  progress=82 + min(8, int(elapsed_s) // 10),
+                  message=f"Generating audio... {elapsed_s:.0f}s elapsed",
+              )
+
+          audio_path, audio_err = audio_generator.generate_audio(
+              prompt=music_prompt,
+              duration=audio_dur,
+              output_dir=str(job_dir),
+              audio_format=settings.get("audio_format", "mp3"),
+              bpm=settings.get("bpm"),
+              steps=int(settings.get("audio_steps", 8)),
+              guidance=float(settings.get("audio_guidance", 7.0)),
+              seed=-1,
+              lyrics=lyrics,
+              instrumental=instrumental,
+              stop_event=job.stop_event,
+              progress_cb=_audio_progress,
           )
 
-      if lyrics:
-          job.meta["lyrics"] = lyrics
-      job.update(progress=82, message="Generating audio for full story...")
-
-      total_dur = probe_duration(concat_path)
-      audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
-          d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
-          for d in story_arc
-      ) + 2.0)
-
-      def _audio_progress(elapsed_s):
-          job.update(
-              progress=82 + min(8, int(elapsed_s) // 10),
-              message=f"Generating audio... {elapsed_s}s elapsed",
-          )
-
-      audio_path, audio_err = audio_generator.generate_audio(
-          prompt=music_prompt,
-          duration=audio_dur,
-          output_dir=str(job_dir),
-          audio_format=settings.get("audio_format", "mp3"),
-          bpm=settings.get("bpm"),
-          steps=int(settings.get("audio_steps", 8)),
-          guidance=float(settings.get("audio_guidance", 7.0)),
-          seed=-1,
-          lyrics=lyrics,
-          instrumental=instrumental,
-          stop_event=job.stop_event,
-          progress_cb=_audio_progress,
-      )
+          if not audio_path and not instrumental:
+              # Post-clip transcription of fallback audio
+              try:
+                  from features.fun_videos import audio_analyzer as _aa
+                  _tx = _aa.transcribe_audio(audio_path) if audio_path else []
+                  if _tx:
+                      job.meta["transcript"] = _tx
+              except Exception:
+                  pass
 
       if _stopped():
           return

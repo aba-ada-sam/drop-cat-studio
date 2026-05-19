@@ -582,6 +582,26 @@ def run_pipeline(job, photo_path, settings):
         _gallery(video_path)
         return
 
+    # Transcribe the generated audio and store beat markers as metadata.
+    # This lets the UI show what was sung and marks where musical events fall.
+    try:
+        from features.fun_videos import audio_analyzer as _aa
+        job.update(progress=85, message="Transcribing audio...")
+        _tx = _aa.transcribe_audio(audio_path)
+        _evts = _aa.detect_audio_events(audio_path)
+        if _tx:
+            job.meta["transcript"] = _tx
+        if _evts.get("bpm") or _evts.get("energy_peaks"):
+            job.meta["audio_events"] = {
+                "bpm": _evts.get("bpm"),
+                "energy_peaks": _evts.get("energy_peaks", []),
+                "duration": _evts.get("duration"),
+            }
+        log.info("[pipeline] Transcribed %d segments, BPM=%.1f",
+                 len(_tx), _evts.get("bpm", 0.0))
+    except Exception as _txe:
+        log.debug("[pipeline] Transcription skipped: %s", _txe)
+
     job.update(progress=85, message="Audio generated!")
     job.meta["audio_path"] = audio_path
     job.meta["music_prompt"] = music_prompt
