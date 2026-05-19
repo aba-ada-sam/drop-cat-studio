@@ -248,20 +248,37 @@ def run_prep(job, photo_path, settings):
         job.update(progress=8, message="Writing lyrics...")
         for _force in (None, _cloud):
             try:
-                lyrics = analyzer.generate_lyrics(
-                    llm_router, [],
-                    music_prompt, lyric_direction or user_direction,
-                    scene_description=scene_desc,
-                )
+                if _force:
+                    from core.llm_client import parse_json_response
+                    from features.fun_videos.analyzer import LYRICS_SYSTEM
+                    parts = ["Write sardonic song lyrics matching this music and scene."]
+                    if music_prompt:
+                        parts.append(f'Music style: "{music_prompt}"')
+                    if scene_desc:
+                        parts.append(f'Scene: "{scene_desc}"')
+                    if lyric_direction or user_direction:
+                        parts.append(f'Creative direction: "{lyric_direction or user_direction}"')
+                    _txt = llm_router.route(
+                        [{"role": "user", "content": "\n\n".join(parts)}],
+                        tier="balanced", system=LYRICS_SYSTEM, max_tokens=300,
+                        force_provider=_force,
+                    )
+                    lyrics = (_txt or "").strip()
+                else:
+                    lyrics = analyzer.generate_lyrics(
+                        llm_router, [],
+                        music_prompt, lyric_direction or user_direction,
+                        scene_description=scene_desc,
+                    )
                 if lyrics:
-                    log.info("[info] Lyrics generated (force=%s)", _force)
+                    log.info("[info] Lyrics generated (force=%s)", _force or "configured")
                     settings["_prepped_lyrics"] = lyrics
                     break
                 if _force is None and _cloud:
                     continue  # retry with cloud
                 break
             except Exception as e:
-                log.warning("[warning] Lyrics failed (force=%s): %s", _force, e)
+                log.warning("[warning] Lyrics failed (force=%s): %s", _force or "configured", e)
                 if _force is not None or not _cloud:
                     break
 

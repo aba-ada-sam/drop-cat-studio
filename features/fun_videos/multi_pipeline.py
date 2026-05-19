@@ -1656,10 +1656,23 @@ def run_multi_pipeline(job, photo_path, settings):
                 if _audio_events.get("bpm"):
                     settings["_detected_bpm"] = _audio_events["bpm"]
 
-                # Snap clip boundaries to strong beats so cuts land on musical moments
-                story_arc = _aa.snap_durations_to_beats(
-                    story_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
+                # Snap clip boundaries to strong beats so cuts land on musical moments.
+                # story_arc durations are inflated by 1/TRIM_RATIO for planning;
+                # audio beat times are in real seconds. Deflate to real time before
+                # snapping, then re-inflate so planning compensation is preserved.
+                _real_arc = [
+                    dict(c, duration=float(c.get("duration", clip_dur)) * _CHAIN_TRIM_RATIO)
+                    if isinstance(c, dict) else c
+                    for c in story_arc
+                ]
+                _snapped_real = _aa.snap_durations_to_beats(
+                    _real_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
                 )
+                story_arc = [
+                    dict(c, duration=round(float(c.get("duration", clip_dur)) / _CHAIN_TRIM_RATIO, 2))
+                    if isinstance(c, dict) else c
+                    for c in _snapped_real
+                ]
 
                 # Build per-clip audio context and refine prompts with lyric hints
                 planned_clip_durs = [
@@ -2017,11 +2030,11 @@ def run_multi_pipeline(job, photo_path, settings):
               progress_cb=_audio_progress,
           )
 
-          if not audio_path and not instrumental:
-              # Post-clip transcription of fallback audio
+          if audio_path and not instrumental:
+              # Transcribe the post-clip fallback audio so metadata matches
               try:
                   from features.fun_videos import audio_analyzer as _aa
-                  _tx = _aa.transcribe_audio(audio_path) if audio_path else []
+                  _tx = _aa.transcribe_audio(audio_path)
                   if _tx:
                       job.meta["transcript"] = _tx
               except Exception:
