@@ -1054,6 +1054,57 @@ def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps
 
 # -- Prep phase (runs before GPU queue) ---------------------------------------
 
+def _free_vram_for_llm(llm_router, reason: str) -> bool:
+    """Evict WanGP from VRAM before an Ollama LLM/vision call.
+
+    Only acts when:
+      - The configured provider is Ollama (local, needs VRAM headroom)
+      - WanGP is currently loaded (gpu.current == "wangp")
+      - No GPU job is actively running (safe to evict without killing a live gen)
+
+    Returns True if eviction happened (caller may proceed with vision),
+    False if WanGP is busy (caller should skip vision and use text-only fallback).
+    """
+    if llm_router._provider() != "ollama":
+        return True  # cloud providers don't load into local VRAM
+    from core.gpu_orchestrator import gpu as _gpu
+    if _gpu.current != "wangp":
+        return True  # WanGP not loaded, no VRAM conflict
+    # Check whether a GPU job is currently running
+    try:
+        from app import get_job_manager as _gjm
+        from core.job_manager import GPU_JOB_TYPES
+        _busy = any(
+            j.type in GPU_JOB_TYPES and j.status == "running"
+            for j in _gjm()._jobs.values()
+        )
+    except Exception:
+        _busy = True  # assume busy if we can't check
+    if _busy:
+        log.info("[prep] WanGP is running a job -- skipping Ollama vision for %s (will use text-only)", reason)
+        return False
+    log.info("[prep] Evicting idle WanGP to free VRAM for Ollama (%s)", reason)
+    _gpu.acquire("ollama", reason=f"prep-phase LLM: {reason}")
+    return True
+
+
+def _release_ollama_vram():
+    """Send keep_alive=0 to Ollama after prep LLM calls so WanGP gets full VRAM.
+
+    The GPU orchestrator does this automatically when gpu.acquire('wangp') is
+    called, but that happens later in run_multi_pipeline. Doing it here too
+    means the VRAM is freed as soon as prep finishes rather than holding the
+    model for the duration of the GPU queue wait.
+    """
+    try:
+        from core.gpu_orchestrator import gpu as _gpu
+        if _gpu.current == "ollama":
+            _gpu._ollama_unload()
+            log.info("[prep] Ollama model unloaded after prep phase")
+    except Exception as e:
+        log.debug("[prep] Ollama unload skipped: %s", e)
+
+
 def run_multi_prep(job, photo_path, settings):
     """Phase 0: Story arc + music direction -- LLM only, no GPU.
 
@@ -1144,13 +1195,23 @@ def run_multi_prep(job, photo_path, settings):
     plan_total = (target_total / _CHAIN_TRIM_RATIO) if target_total else None
     plan_clip_dur = clip_dur / _CHAIN_TRIM_RATIO
 
+    # VRAM guard: if Ollama is the LLM provider and WanGP is idle-but-loaded,
+    # evict WanGP now so Ollama's vision model fits. If WanGP is actively
+    # running a job, _free_vram_for_llm returns False and we skip vision so
+    # we don't interrupt a live generation. gpu.acquire("wangp") in
+    # run_multi_pipeline will reclaim VRAM from Ollama at the right time.
+    _vision_ok = _free_vram_for_llm(llm_router, "story arc")
+    # If VRAM is not free for Ollama, generate arc without passing photo frames
+    # (_generate_story_arc has a text-only fallback path when photo is None).
+    arc_photo = effective_photo if _vision_ok else None
+
     job.update(progress=3, message="Planning story arc...")
     is_continuation = bool(start_video_path) and video_mode == "continuation"
     # In continuation mode, force "gentle" so the AI clip actually moves --
     # "calm" (static subject) looks wrong when stitched after a live video.
     arc_motion = "gentle" if is_continuation and (motion_style or "calm") == "calm" else motion_style
     arc, arc_method = _generate_story_arc(
-        llm_router, user_idea, n_clips, effective_photo,
+        llm_router, user_idea, n_clips, arc_photo,
         progress_fn=lambda msg: job.update(message=msg),
         target_total_secs=plan_total,
         default_clip_dur=plan_clip_dur,
@@ -1225,6 +1286,12 @@ def run_multi_prep(job, photo_path, settings):
                 settings["_prepped_lyrics"] = lyrics
         except Exception as e:
             log.warning("[multi] Lyrics prep failed: %s", e)
+
+    # Release Ollama's model from VRAM now that prep is done.
+    # WanGP needs full VRAM when run_multi_pipeline starts.
+    # gpu.acquire("wangp") will also do this, but freeing it here
+    # means the queue wait time doesn't hold the model unnecessarily.
+    _release_ollama_vram()
 
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
 

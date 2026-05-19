@@ -187,17 +187,22 @@ def run_prep(job, photo_path, settings):
     if not needs_audio or (music_prompt and instrumental):
         return  # no audio prep needed -- video prompt is already set above
 
+    # VRAM guard: evict idle WanGP so Ollama's model fits.
+    # Returns False if WanGP is running a live job -- in that case skip vision.
+    from features.fun_videos.multi_pipeline import _free_vram_for_llm, _release_ollama_vram
+    _vision_ok = _free_vram_for_llm(llm_router, "music direction")
+
     job.update(progress=5, message="Getting music direction...")
     try:
         # Cloud providers (Anthropic/OpenAI) must not receive NSFW images.
-        # Pass frames only when Ollama is active; cloud gets text context instead.
+        # Pass frames only when Ollama is active AND VRAM is free.
         provider = llm_router._provider()
         if not music_prompt:
-            if provider == "ollama" and photo_path and os.path.isfile(photo_path):
+            if provider == "ollama" and _vision_ok and photo_path and os.path.isfile(photo_path):
                 src_b64 = encode_image_b64(photo_path)
                 frames = [src_b64] if src_b64 else []
             else:
-                frames = []  # cloud path: text-only, no image sent
+                frames = []  # cloud path or no VRAM: text-only, no image sent
             music_result = analyzer.generate_music_prompt(
                 llm_router, frames, user_direction, video_prompt=video_prompt
             )
@@ -222,6 +227,9 @@ def run_prep(job, photo_path, settings):
             settings["_prepped_music_prompt"] = music_prompt
     except Exception as e:
         log.warning("[warning] Pre-analysis failed: %s -- will retry during GPU phase", e)
+
+    # Release Ollama's model now so WanGP has full VRAM when the GPU phase starts.
+    _release_ollama_vram()
 
     job.update(progress=9, message="Analysis complete, waiting for GPU...")
 
