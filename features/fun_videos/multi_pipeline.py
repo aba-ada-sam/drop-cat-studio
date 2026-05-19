@@ -1271,12 +1271,25 @@ def run_multi_pipeline(job, photo_path, settings):
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
-    # reanchor_every=0: every clip chains from the last frame of the previous one,
-    # creating a coherent story. LTX at 8 steps has strong image conditioning so
-    # chained frames stay anchored. Reset to source only when the user overrides.
     _is_ltx = "ltx" in model_name.lower()
-    reanchor_every   = int(settings.get("reanchor_every", 0))
     motion_style     = settings.get("motion_style") or ("calm" if _is_ltx else "dynamic")
+
+    # reanchor_every: periodically reset the chain start-image back to the source
+    # photo so artifact drift cannot compound. Without this, LTX at 8 steps can
+    # develop faint rain/particle artifacts by clip 2 that get baked into the chain
+    # frame, then amplified by clip 3, then by clip 4 -- "copy of a copy of a copy."
+    # Defaults: LTX every 2 clips (aggressive -- low step count drifts fast),
+    #           Wan every 3 clips (gentler -- 25 steps holds subject better).
+    # User can override by passing reanchor_every explicitly (0 = never reanchor).
+    _user_reanchor = settings.get("reanchor_every")
+    if _user_reanchor is not None:
+        reanchor_every = int(_user_reanchor)
+    elif n_clips <= 2:
+        reanchor_every = 0  # no drift possible in 2 clips, don't disturb continuity
+    elif _is_ltx:
+        reanchor_every = 2  # LTX: reset to source every 2 clips
+    else:
+        reanchor_every = 3  # Wan: reset to source every 3 clips
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""

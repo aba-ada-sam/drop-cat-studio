@@ -29,21 +29,26 @@ WANGP_WORKER_PORT = 7899
 _NEG_LTX_CALM = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
     "motion smear, motion artifacts, watermark, text, "
-    "rain, snow, snowflakes, precipitation, falling particles, falling debris, blizzard, hail"
+    "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
+    "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
+    "floating debris, orbs, bokeh balls, lens flare artifacts"
 )
 # LTX-2 dynamic (Dev13B or Distilled in dynamic mode): "static" included per
 # HuggingFace card -- prevents fully frozen non-animating output.
 _NEG_LTX_DYNAMIC = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
     "motion smear, motion artifacts, watermark, text, static, "
-    "rain, snow, snowflakes, precipitation, falling particles, falling debris, blizzard, hail"
+    "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
+    "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
+    "floating debris, orbs, bokeh balls, lens flare artifacts"
 )
 # Wan2.1: strong subject anchoring, handles longer neg lists, but still concise.
 # No "static" needed -- Wan doesn't have LTX's empty-region hallucination problem.
 _NEG_WAN = (
     "low quality, blurry, distorted faces, unnatural movement, "
     "text, watermark, shaky camera, motion smear, temporal artifacts, "
-    "rain, precipitation, falling particles, falling debris"
+    "rain, drizzle, snow, precipitation, falling particles, falling debris, droplets, "
+    "sparks, embers, floating debris, lens flare artifacts"
 )
 
 
@@ -442,21 +447,34 @@ def _generate_via_subprocess(
 
 
 def merge_video_audio(video_path: str, audio_path: str, out_path: str, log_fn=None) -> str | None:
-    """Merge video and audio via ffmpeg."""
+    """Merge video and audio via ffmpeg.
+
+    Duration rule: the output is always exactly as long as the video.
+    Audio is padded with silence if it ends before the video (apad),
+    and truncated if it runs longer (-t video_dur). This prevents
+    '-shortest' from chopping the video when _trim_silence_tail trimmed
+    a few seconds off the audio tail -- which was cutting lyrics mid-word.
+    """
+    from core.ffmpeg_utils import probe_duration as _probe
+    video_dur = _probe(video_path) or 0.0
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path,
         "-i", audio_path,
         "-map", "0:v", "-map", "1:a",
         "-c:v", "copy",
-        # loudnorm brings the whole track to -14 LUFS so quiet intros
-        # play at the same perceived level as the main musical section.
-        "-af", "loudnorm=I=-14:TP=-2:LRA=11",
+        # loudnorm + apad: normalise loudness then pad silence to fill any
+        # gap between end-of-audio and end-of-video (so the full video plays).
+        "-af", "loudnorm=I=-14:TP=-2:LRA=11,apad",
         "-c:a", "aac", "-b:a", "192k",
-        "-shortest",
         "-movflags", "+faststart",
         out_path,
     ]
+    # Pin output to exact video duration so we never go longer than the video
+    # (apad could theoretically run forever without a stop condition).
+    if video_dur > 0:
+        cmd.insert(-1, str(video_dur))
+        cmd.insert(-1, "-t")
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode == 0 and os.path.isfile(out_path):
