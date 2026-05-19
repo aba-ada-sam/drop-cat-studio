@@ -338,9 +338,9 @@ def _generate_story_arc(
             # takes it literally and renders rain/falling-debris artifacts.
             motion_clause = (
                 "static subject, no body or face movement. "
-                "Environment animates: light shifts across surfaces, fabric "
-                "catches unseen air currents, leaves and grass stir gently, "
-                "shadows drift slowly. No falling particles, no rain, no debris."
+                "Environment animates: warm light shifts across surfaces, "
+                "fabric sways in a slow breeze, leaves and grass sway gently, "
+                "shadows glide across the scene."
             )
             fallback = (
                 "atmospheric scene, subject preserved exactly as in the photo, "
@@ -357,13 +357,13 @@ def _generate_story_arc(
                 "subject moves subtly while staying in place: gentle head "
                 "turn, eye blink, slow breath, small hand gesture, fabric "
                 "shifting on the body, hair stirring. "
-                "Environment also animates: light shifts, shadows drift, "
-                "background movement. Static camera framing. No falling particles, no rain."
+                "Environment also animates: warm light shifts, shadows glide, "
+                "background stirs gently. Static camera framing."
             )
             fallback = (
                 "atmospheric scene, subject moves subtly (head turn, breath, "
                 "fabric stir, slight gesture), environment animates around "
-                "them (light shifts, shadows drift, distant motion), static "
+                "them (warm light shifts, shadows drift, background stirs), static "
                 "camera, photorealistic style"
             )
 
