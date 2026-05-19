@@ -36,10 +36,11 @@ from typing import Any, Optional
 log = logging.getLogger("folder_loop")
 
 # If the browser stops polling /status for this long, runner self-terminates.
-# Browsers throttle background-tab timers but still fire at least every
-# ~30s, so 60s gives enough slack for an unfocused tab while still being
-# tight enough that a closed tab dies within ~1 minute.
-HEARTBEAT_TIMEOUT_SEC = 60
+# Chrome throttles background-tab timers to once per minute, so 60s was too
+# tight -- a single throttled poll cycle would kill the loop while a job was
+# still running. 120s gives two throttled cycles of headroom while still
+# dying within ~2 minutes of a true browser close.
+HEARTBEAT_TIMEOUT_SEC = 120
 
 # How often the runner polls a submitted job's status.
 _JOB_POLL_INTERVAL_SEC = 2.0
