@@ -29,14 +29,14 @@ WANGP_WORKER_PORT = 7899
 _NEG_LTX_CALM = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
     "motion smear, motion artifacts, watermark, text, "
-    "rain, precipitation, falling particles, falling debris"
+    "rain, snow, snowflakes, precipitation, falling particles, falling debris, blizzard, hail"
 )
 # LTX-2 dynamic (Dev13B or Distilled in dynamic mode): "static" included per
 # HuggingFace card -- prevents fully frozen non-animating output.
 _NEG_LTX_DYNAMIC = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
     "motion smear, motion artifacts, watermark, text, static, "
-    "rain, precipitation, falling particles, falling debris"
+    "rain, snow, snowflakes, precipitation, falling particles, falling debris, blizzard, hail"
 )
 # Wan2.1: strong subject anchoring, handles longer neg lists, but still concise.
 # No "static" needed -- Wan doesn't have LTX's empty-region hallucination problem.

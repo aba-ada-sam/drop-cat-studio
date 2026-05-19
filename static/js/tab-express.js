@@ -852,16 +852,35 @@ export function init(panel) {
   const resultActions = el('div', { style: 'display:flex; gap:8px; justify-content:center; align-items:center; flex-wrap:wrap;' });
   const newBtn  = el('button', { class: 'btn btn-sm', text: '+ New video' });
   const sendBtn = el('button', { class: 'btn btn-sm', text: 'Open in Create Videos ->' });
-  const muteBtn = el('button', { class: 'btn btn-sm', text: '🔊 Mute', title: 'Toggle mute' });
+  const muteBtn = el('button', { class: 'btn btn-sm', text: 'Mute', title: 'Toggle mute' });
   muteBtn.addEventListener('click', () => {
     resultVideo.muted = !resultVideo.muted;
-    muteBtn.textContent = resultVideo.muted ? '🔇 Unmute' : '🔊 Mute';
+    muteBtn.textContent = resultVideo.muted ? 'Unmute' : 'Mute';
   });
   resultActions.appendChild(newBtn);
   resultActions.appendChild(sendBtn);
   resultActions.appendChild(muteBtn);
+  // Lyric sheet -- shown after generation when lyrics were produced.
+  // Pre-populated by _showResult when job.meta.lyrics is present.
+  const lyricsWrap = el('details', {
+    style: 'display:none; margin-top:4px; background:var(--bg-raised); border:1px solid var(--border-2); border-radius:8px; padding:0;',
+  }, [
+    el('summary', {
+      style: 'cursor:pointer; font-size:.75rem; color:var(--text-3); padding:8px 12px; outline:none; user-select:none; list-style:none;',
+      text: '+ Show lyrics',
+    }),
+  ]);
+  const lyricsBody = el('pre', {
+    style: [
+      'margin:0; padding:8px 14px 12px;',
+      'font-size:.8rem; line-height:1.65; color:var(--text-2);',
+      'font-family:inherit; white-space:pre-wrap; word-break:break-word;',
+    ].join(' '),
+  });
+  lyricsWrap.appendChild(lyricsBody);
   resultWrap.appendChild(resultVideo);
   resultWrap.appendChild(resultActions);
+  resultWrap.appendChild(lyricsWrap);
   root.appendChild(resultWrap);
 
   // High-water mark: progress should only ever climb, never recede. The
@@ -884,11 +903,17 @@ export function init(panel) {
     progressFill.style.width = '0%';
   }
 
-  function _showResult(videoPath) {
+  function _showResult(videoPath, lyrics) {
     progressWrap.style.display = 'none';
     resultWrap.style.display   = 'flex';
     resultVideo.src = pathToUrl(videoPath);
     resultVideo.load();
+    if (lyrics && typeof lyrics === 'string' && lyrics.trim()) {
+      lyricsBody.textContent = lyrics.trim();
+      lyricsWrap.style.display = '';
+    } else {
+      lyricsWrap.style.display = 'none';
+    }
   }
 
   function _showError(msg) {
@@ -1045,7 +1070,7 @@ export function init(panel) {
           _activePoller = null;
           const outputs = Array.isArray(j.output) ? j.output : [j.output];
           const best = outputs.length > 1 ? outputs[1] : outputs[0];
-          if (best) _showResult(best);
+          if (best) _showResult(best, j.meta?.lyrics);
           else _hideProgress();
           resolve(true);
         },

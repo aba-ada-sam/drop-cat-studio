@@ -538,9 +538,13 @@ async def refine_prompt(request: Request):
 # spastic AI slop we saw when LTX was in 'dynamic' mode.
 _PICK_TO_MODEL = {
     "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    "action":       ("LTX-2 Dev19B Distilled", "calm"),
-    "action_hd":    ("LTX-2 Dev19B Distilled", "calm"),
-    "story_action": ("LTX-2 Dev19B Distilled", "calm"),
+    # action buckets: use "gentle" motion so the subject visibly moves
+    # (head turns, gestures, breath) instead of being frozen. "calm" produced
+    # "boring results" complaints. "dynamic" causes spastic micro-jitter on
+    # LTX at 8 steps. "gentle" is the sweet spot: visible but artifact-free.
+    "action":       ("LTX-2 Dev19B Distilled", "gentle"),
+    "action_hd":    ("LTX-2 Dev19B Distilled", "gentle"),
+    "story_action": ("LTX-2 Dev19B Distilled", "gentle"),
     "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
 }
 # Hardware reality on 16GB VRAM cards (RTX 5080):

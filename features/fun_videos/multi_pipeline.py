@@ -1578,6 +1578,8 @@ def run_multi_pipeline(job, photo_path, settings):
               "Nothing ever stays the same"
           )
 
+      if lyrics:
+          job.meta["lyrics"] = lyrics
       job.update(progress=82, message="Generating audio for full story...")
 
       total_dur = probe_duration(concat_path)

@@ -43,6 +43,10 @@ _PROMPT_SUFFIXES = {
     # Calm mode: environment-only motion. Subject-motion keywords directly contradict
     # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
     "ltx_calm":      "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
+    # Gentle mode: subtle subject motion (breath, head turn, gesture) + environment animates.
+    # Do NOT use the "ltx" dynamic suffix here -- "kinetic energy, subjects actively moving,
+    # motion blur" fights the gentle motion_clause and causes spastic micro-jitter artifacts.
+    "ltx_gentle":    "subtle natural movement, slight gesture, soft atmospheric motion, fixed camera, photorealistic, high quality",
     # Narrative mode: purposeful story-driven action, no kinetic extremes.
     "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, photorealistic, high quality",
     "wan":           "smooth animation, photorealistic, high quality, detailed",
@@ -61,6 +65,11 @@ def _finalize_prompt(prompt: str, model_name: str, motion_style: str | None = No
     if "ltx" in model_name.lower():
         if motion_style == "calm":
             key = "ltx_calm"
+        elif motion_style == "gentle":
+            # "gentle" is NOT dynamic. Using "ltx" (kinetic) here causes spastic
+            # micro-jitter because it fights the gentle motion_clause that says
+            # "slow breath, slight head turn, fixed camera". Use the gentle suffix.
+            key = "ltx_gentle"
         elif motion_style == "narrative":
             key = "ltx_narrative"
         else:
@@ -453,6 +462,8 @@ def run_pipeline(job, photo_path, settings):
     job.update(progress=60, message="Video generated!")
     job.meta["video_path"] = video_path
     job.meta["video_prompt"] = video_prompt
+    if lyrics:
+        job.meta["lyrics"] = lyrics
 
     # Start ACE-Step NOW -- WanGP has released the GPU, so ACE-Step gets full VRAM.
     # Phase 2 (music prompt via Ollama, ~30s) runs while ACE-Step loads.
