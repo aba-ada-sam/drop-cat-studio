@@ -1110,35 +1110,58 @@ async def brainstorm(request: Request):
     context_str = "\n".join(ctx_parts) or "Nothing set yet."
     user_content = f"{context_str}\n\nUser: {message}"
 
-    try:
-        if image_path and os.path.isfile(image_path):
-            # route_vision takes a single prompt string, not a messages array.
-            # Fold the last 8 history turns into the prompt as plain text so the
-            # AI has prior-turn context instead of treating every message as the first.
-            if history:
-                hist_lines = []
-                for h in history[-8:]:
-                    role = "Assistant" if h.get("role") == "assistant" else "User"
-                    hist_lines.append(f"{role}: {h.get('content', '').strip()}")
-                vision_prompt = "\n".join(hist_lines) + "\n\n" + user_content
+    # Build the shared vision prompt and text messages once so both the primary
+    # and cloud-fallback attempts use identical content.
+    if history:
+        hist_lines = []
+        for h in history[-8:]:
+            role = "Assistant" if h.get("role") == "assistant" else "User"
+            hist_lines.append(f"{role}: {h.get('content', '').strip()}")
+        vision_prompt = "\n".join(hist_lines) + "\n\n" + user_content
+    else:
+        vision_prompt = user_content
+    msgs = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
+    msgs.append({"role": "user", "content": user_content})
+
+    has_image = bool(image_path and os.path.isfile(image_path))
+    b64 = await asyncio.to_thread(encode_image_b64, image_path) if has_image else None
+
+    from features.fun_videos.multi_pipeline import _pick_cloud_provider
+    _cloud_force = _pick_cloud_provider(llm_router)
+
+    result = None
+    last_exc = None
+    # Try configured provider first, then force cloud if Ollama times out.
+    for _force in (None, _cloud_force):
+        if _force is not None and _force == llm_router._provider():
+            continue  # already tried this provider
+        try:
+            if has_image and b64:
+                result = await asyncio.to_thread(
+                    llm_router.route_vision,
+                    vision_prompt, [b64],
+                    system=system, tier=_TIER,
+                    force_provider=_force,
+                )
             else:
-                vision_prompt = user_content
-            b64 = await asyncio.to_thread(encode_image_b64, image_path)
-            result = await asyncio.to_thread(
-                llm_router.route_vision,
-                prompt=vision_prompt,
-                images_b64=[b64] if b64 else [],
-                system=system,
-                tier=_TIER,
-            )
-        else:
-            msgs = [{"role": h["role"], "content": h["content"]} for h in history[-8:]]
-            msgs.append({"role": "user", "content": user_content})
-            result = await asyncio.to_thread(
-                llm_router.route, messages=msgs, system=system, tier=_TIER,
-            )
-    except Exception as exc:
-        msg = str(exc)
+                result = await asyncio.to_thread(
+                    llm_router.route, msgs,
+                    system=system, tier=_TIER,
+                    force_provider=_force,
+                )
+            break  # success
+        except Exception as exc:
+            last_exc = exc
+            msg = str(exc).lower()
+            is_timeout = "timeout" in msg or "timed out" in msg
+            is_ollama  = (llm_router._provider() if not _force else _force) == "ollama"
+            if is_timeout and is_ollama and _cloud_force and _force is None:
+                log.info("[brainstorm] Ollama timeout -- retrying via %s", _cloud_force)
+                continue
+            break  # non-retryable error
+
+    if result is None:
+        msg = str(last_exc) if last_exc else "unknown error"
         if "rate limit" in msg.lower() or "429" in msg:
             raise HTTPException(429, "AI rate limit reached -- try again in a moment")
         if "connection" in msg.lower() or "refused" in msg.lower():
