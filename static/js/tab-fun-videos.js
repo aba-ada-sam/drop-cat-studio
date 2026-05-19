@@ -496,10 +496,101 @@ export function init(panel) {
   promptCard.appendChild(promptStatus);
 
   // -- Create Story row ------------------------------------------------------
+  // Per-model prompt hints shown below the textarea.
+  // Keys: "<model>|<motion>" -- fallback "<model>|dynamic" then "default".
+  const PROMPT_GUIDES = {
+    'LTX-2 Dev19B Distilled|calm': {
+      placeholder: 'e.g. "A woman stands at a foggy harbor at dawn, breathes slowly. Mist drifts across still water. Fishing boats rest in the background. Static shot, fixed camera."',
+      hint:        'LTX Calm -- subject stays still, environment moves (mist, light, fabric, steam). 40-60 words. No action verbs on the subject.',
+    },
+    'LTX-2 Dev19B Distilled|gentle': {
+      placeholder: 'e.g. "A man in a grey coat tilts his head toward the window, eyes closing slowly. Curtains shift in a soft breeze. Warm afternoon light falls across his face. Fixed camera."',
+      hint:        'LTX Gentle -- ONE subtle subject gesture (head turn, exhale, hand lift) + ONE environmental motion. 45-65 words. No rapid actions.',
+    },
+    'LTX-2 Dev19B Distilled|narrative': {
+      placeholder: 'e.g. "A detective slides a photograph across the desk toward her partner, eyes locked on his reaction. Rain taps the grimy window behind them. Camera pushes in slowly."',
+      hint:        'LTX Narrative -- purposeful action with story weight (picking up object, turning to face someone). 50-70 words. Slow push-in or static camera.',
+    },
+    'LTX-2 Dev13B|dynamic': {
+      placeholder: 'e.g. "Red-haired woman in black jacket, backlit by streetlights. Pivots sharply -- jacket flares wide, hair whips across her face. Wet cobblestones reflect orange neon. Slow dolly-in."',
+      hint:        'LTX 13B Dynamic -- start with exact visual markers (hair, clothing, light). ONE kinetic action. ONE scene anchor. ONE camera move. 45-65 words.',
+    },
+    'Wan2.1-I2V-14B-480P|dynamic': {
+      placeholder: 'e.g. "Sprints full speed down a rain-soaked alley, dark hoodie plastered to skin, sneakers slapping wet asphalt. Camera tracks close behind at shoulder height, barely keeping pace. Puddles explode underfoot. Photorealistic, smooth motion, high quality."',
+      hint:        'Wan I2V 480P -- start with a STRONG ACTION VERB. Re-state key visual markers. ONE camera move that reacts to the action. 80-100 words.',
+    },
+    'Wan2.1-I2V-14B-720P|dynamic': {
+      placeholder: 'e.g. "Leaps from rooftop to rooftop at dusk, tailored coat catching wind, polished boots striking concrete. Camera matches height, panning right as figure lands. City lights smear into streaks below. Fine fabric detail, cinematic 720P, smooth motion."',
+      hint:        'Wan I2V 720P -- same as 480P but add fine textural detail (fabric weave, skin, specific light quality). 80-100 words. No dolly-out.',
+    },
+    'Wan2.1-T2V-14B|dynamic': {
+      placeholder: 'e.g. "Late afternoon, rain-slicked city street, neon signs bleeding orange into puddles. A young woman in a yellow raincoat steps off the curb and opens an umbrella. Camera dollies in slowly as she walks away. Photorealistic, smooth motion, cinematic color grade."',
+      hint:        'Wan T2V 14B -- no image, describe EVERYTHING: time of day + setting + subject appearance + action + camera move. 80-100 words.',
+    },
+    'Wan2.1-T2V-1.3B|dynamic': {
+      placeholder: 'e.g. "A cat sits on a sunlit windowsill and stretches lazily. Dust floats in the warm light. Static shot. Smooth motion, high quality."',
+      hint:        'Wan T2V 1.3B (fast) -- keep it simple: ONE subject, ONE action, ONE setting. 50-70 words max.',
+    },
+  };
+
+  // Dynamic hint text shown below prompt textarea.
+  const promptHint = el('div', {
+    style: 'font-size:.72rem; color:var(--text-3); margin-top:4px; line-height:1.5;',
+  });
+  promptCard.appendChild(promptHint);
+
+  // "Enhance" button -- calls /api/fun/enhance-prompt to rewrite current text.
+  const enhanceBtn = el('button', {
+    class: 'btn btn-sm',
+    text: 'Enhance',
+    title: 'AI rewrites your rough idea as a model-appropriate prompt',
+    style: 'flex-shrink:0;',
+  });
+
   const storyRow = el('div', { style: 'display:flex; gap:6px; align-items:center; margin-top:8px;' });
   const storyBtn = el('button', { class: 'btn btn-sm btn-primary', text: '* Create Story', title: 'Generate a motion prompt from your image using AI' });
   storyRow.appendChild(storyBtn);
+  storyRow.appendChild(enhanceBtn);
   promptCard.appendChild(storyRow);
+
+  function _updatePromptGuide(modelName, motionStyle) {
+    const key = modelName + '|' + (motionStyle || 'dynamic');
+    const dyn = modelName + '|dynamic';
+    const guide = PROMPT_GUIDES[key] || PROMPT_GUIDES[dyn] || null;
+    if (guide) {
+      promptTA.placeholder = guide.placeholder;
+      promptHint.textContent = guide.hint;
+      promptHint.style.display = '';
+    } else {
+      promptTA.placeholder = PROMPT_PLACEHOLDER;
+      promptHint.textContent = '';
+      promptHint.style.display = 'none';
+    }
+  }
+
+  enhanceBtn.addEventListener('click', async () => {
+    const raw = promptTA.value.trim();
+    if (!raw) { toast('Type a rough idea first, then click Enhance', 'warning'); return; }
+    enhanceBtn.disabled = true;
+    enhanceBtn.textContent = '...';
+    try {
+      const r = await apiFetch('/api/fun/enhance-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw, model: modelSel.value, motion: _motionStyle }),
+      });
+      const data = await r.json();
+      if (data.prompt) {
+        promptTA.value = data.prompt;
+        promptTA.dispatchEvent(new Event('input'));
+      }
+    } catch (e) {
+      toast('Enhance failed: ' + (e.message || e), 'error');
+    } finally {
+      enhanceBtn.disabled = false;
+      enhanceBtn.textContent = 'Enhance';
+    }
+  });
 
   let _autoPromptAbort = null;
 
@@ -822,6 +913,7 @@ export function init(panel) {
     if (typeof _setMotionStyle === 'function') {
       _setMotionStyle(m.motion || 'dynamic');
     }
+    _updatePromptGuide(modelSel.value, _motionStyle);
   }
 
   modelSel.addEventListener('change', () => {
@@ -1057,6 +1149,7 @@ export function init(panel) {
     msBtnCalm.setAttribute('style', _msBtnBase + (style === 'calm'      ? _msBtnOn : ''));
     msBtnDyn .setAttribute('style', _msBtnBase + (style === 'dynamic'   ? _msBtnOn : ''));
     msBtnNar .setAttribute('style', _msBtnBase + (style === 'narrative' ? _msBtnOn : ''));
+    _updatePromptGuide(modelSel.value, style);
   }
   msBtnCalm.addEventListener('click', () => _setMotionStyle('calm'));
   msBtnDyn .addEventListener('click', () => _setMotionStyle('dynamic'));

@@ -410,12 +410,39 @@ export function init(panel) {
     ]),
   ]);
 
+  // Per-model prompt hints for the Express idea field.
+  // Auto-pick resolves a model after submit; hints show before submit based on
+  // the quality chip selection (which maps to a likely model).
+  const EXPRESS_PROMPT_HINTS = {
+    'LTX-2 Dev19B Distilled': 'LTX (fast): describe atmosphere and subtle movement -- mist drifts, light shifts, hair stirs in a gentle breeze. Subject is mostly still. 1-2 sentences.',
+    'LTX-2 Dev13B':           'LTX 13B: one clear physical action with visual detail -- "spins sharply, jacket flares, neon reflections blur". 1-2 sentences.',
+    'Wan2.1-I2V-14B-480P':    'Wan I2V: strong action verb first -- "Sprints down the alley..." then environment reaction. The more specific the better. 2-3 sentences.',
+    'Wan2.1-I2V-14B-720P':    'Wan I2V 720P: strong action verb, fine detail (fabric texture, specific lighting). 2-3 sentences.',
+    'Wan2.1-T2V-14B':         'Wan T2V: no image -- describe everything: setting, time of day, subject appearance, action, camera move. 3-4 sentences.',
+    'Wan2.1-T2V-1.3B':        'Wan T2V Lite: keep it simple -- one subject, one action, one setting. 1-2 sentences.',
+  };
+
+  const ideaHint = el('div', {
+    style: 'display:none; font-size:.72rem; color:var(--text-3); line-height:1.5;',
+  });
+
+  function _updateExpressHint(modelName) {
+    const hint = EXPRESS_PROMPT_HINTS[modelName];
+    if (hint) {
+      ideaHint.textContent = hint;
+      ideaHint.style.display = '';
+    } else {
+      ideaHint.style.display = 'none';
+    }
+  }
+
   root.appendChild(el('div', { class: 'card', style: 'padding:14px; display:flex; flex-direction:column; gap:10px;' }, [
     el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
       el('div', { style: 'font-size:.75rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em;', text: 'Creative brief' }),
       sparkBtn,
     ]),
     ideaInput,
+    ideaHint,
     musicVibeBlock,
     talkReplyEl,
   ]));
@@ -507,6 +534,7 @@ export function init(panel) {
       durSlider.value = String(_duration);
       durLabel.textContent = `${_duration}s`;
     }
+    _updateExpressHint(modelName);
   }
 
   const { row: qualRow } = _makeChipGroup(

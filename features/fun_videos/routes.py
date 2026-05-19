@@ -1433,3 +1433,167 @@ async def sync_audio(request: Request):
 
     out_path = await asyncio.to_thread(_run)
     return {"output": out_path}
+
+
+# Per-model/motion system prompts for the AI prompt enhancer.
+# Keys are (model_name, motion_style) tuples. Fallback tries (model, "dynamic"),
+# then the first matching model prefix, then a generic default.
+_ENHANCE_SYSTEMS: dict[tuple[str, str], str] = {
+    ("LTX-2 Dev19B Distilled", "calm"): (
+        "You are a prompt engineer for the LTX-Video model (cinematic AI video generation).\n"
+        "Rewrite the user's rough idea as a polished LTX prompt for CALM / atmospheric motion.\n\n"
+        "Rules:\n"
+        "- 40-60 words total.\n"
+        "- Present tense, third-person (e.g. 'A woman stands...').\n"
+        "- The SUBJECT IS STILL. Only the environment moves: light shifts, steam rises, fabric drifts, leaves tremble.\n"
+        "- ONE environmental motion verb.\n"
+        "- Cinematographic terms (golden-hour light, soft bokeh, shallow depth of field).\n"
+        "- Structure: Subject description + static pose -> environment animation -> scene anchor -> end with 'Static shot, fixed camera.'\n"
+        "- No camera moves. No action verbs on the subject.\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("LTX-2 Dev19B Distilled", "gentle"): (
+        "You are a prompt engineer for the LTX-Video model (cinematic AI video generation).\n"
+        "Rewrite the user's rough idea as a polished LTX prompt for GENTLE / subtle motion.\n\n"
+        "Rules:\n"
+        "- 45-65 words total.\n"
+        "- Present tense, third-person.\n"
+        "- The subject makes ONE subtle movement: a slow exhale, a slight head turn, a gentle hand raise.\n"
+        "- The environment makes ONE complementary motion: soft light shifts, a gentle breeze, fabric ripples.\n"
+        "- Structure: Subject + subtle gesture -> environment response -> scene anchor -> end with 'Fixed camera.'\n"
+        "- No rapid actions, no camera moves, no dramatic motion.\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("LTX-2 Dev19B Distilled", "narrative"): (
+        "You are a prompt engineer for the LTX-Video model (cinematic AI video generation).\n"
+        "Rewrite the user's rough idea as a polished LTX prompt for NARRATIVE / story-beat motion.\n\n"
+        "Rules:\n"
+        "- 50-70 words total.\n"
+        "- Present tense, third-person.\n"
+        "- Describe a purposeful action that advances a story: picking up an object, turning to face someone, reading a letter.\n"
+        "- ONE environmental detail that reinforces mood.\n"
+        "- Structure: Scene context -> subject action with narrative weight -> mood detail -> camera note (slow push-in OR static).\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("LTX-2 Dev13B", "dynamic"): (
+        "You are a prompt engineer for LTX-Video 13B (cinematic AI video).\n"
+        "Rewrite the user's idea as a prompt for DYNAMIC physical motion.\n\n"
+        "Rules:\n"
+        "- 45-65 words total.\n"
+        "- Present tense, third-person.\n"
+        "- Start with exact visual markers: hair color, clothing color, setting lighting.\n"
+        "- ONE deliberate physical action with clear kinetic consequence (hair whips, jacket billows, dust kicks up).\n"
+        "- ONE scene anchor (cobblestones, rain-slicked street, forest path).\n"
+        "- End with ONE camera note (dolly-in, slow pan, static wide).\n"
+        "- No camera-transform verbs ('reveals', 'transitions', 'establishes'). No 'we see'.\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("Wan2.1-I2V-14B-480P", "dynamic"): (
+        "You are a prompt engineer for Wan2.1 Image-to-Video 480P (AI video generation).\n"
+        "Rewrite the user's idea as a Wan I2V prompt for DYNAMIC motion.\n\n"
+        "Rules:\n"
+        "- 80-100 words total.\n"
+        "- Begin with a STRONG ACTION VERB in present tense: 'Sprints', 'Leaps', 'Spins'.\n"
+        "- Re-state key visual markers from the image: hair color, clothing, setting light.\n"
+        "- ONE camera move that REACTS to the action (camera pulls back as they leap, follows the sprint).\n"
+        "- Describe environment's response to the action (dust cloud, splashing water, whipping fabric).\n"
+        "- End with: 'Photorealistic, smooth motion, high quality.'\n"
+        "- Dolly-in works; dolly-out causes artifacts -- avoid dolly-out.\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("Wan2.1-I2V-14B-720P", "dynamic"): (
+        "You are a prompt engineer for Wan2.1 Image-to-Video 720P (AI video generation).\n"
+        "Rewrite the user's idea as a Wan I2V 720P prompt for DYNAMIC high-definition motion.\n\n"
+        "Rules:\n"
+        "- 80-100 words total.\n"
+        "- Begin with a STRONG ACTION VERB in present tense: 'Sprints', 'Leaps', 'Spins'.\n"
+        "- Re-state key visual markers with fine textural detail: fabric weave, skin texture, specific light quality.\n"
+        "- ONE camera move reacting to the action (no dolly-out -- it causes artifacts).\n"
+        "- Environment response to the action.\n"
+        "- End with: 'Photorealistic, fine detail, cinematic 720P, smooth motion.'\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("Wan2.1-T2V-14B", "dynamic"): (
+        "You are a prompt engineer for Wan2.1 Text-to-Video 14B (AI video generation).\n"
+        "There is NO reference image -- you must describe EVERYTHING visually.\n"
+        "Rewrite the user's idea as a complete T2V prompt.\n\n"
+        "Rules:\n"
+        "- 80-100 words total.\n"
+        "- Open with time of day + setting + atmosphere: 'Late afternoon, rain-slicked city street, neon reflections.'\n"
+        "- Explicit subject description: appearance, clothing, position.\n"
+        "- ONE clear action the subject performs.\n"
+        "- ONE camera move (dolly-in, slow pan, tracking shot -- no dolly-out).\n"
+        "- End with: 'Photorealistic, smooth motion, cinematic color grade.'\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+    ("Wan2.1-T2V-1.3B", "dynamic"): (
+        "You are a prompt engineer for Wan2.1 Text-to-Video 1.3B (fast lightweight AI video).\n"
+        "This is a SMALL model -- keep prompts tight and unambiguous.\n"
+        "Rewrite the user's idea as a simple, direct T2V prompt.\n\n"
+        "Rules:\n"
+        "- 50-70 words total.\n"
+        "- ONE subject, ONE action, ONE setting -- no sub-plots.\n"
+        "- Plain descriptive language; no flowery adjectives.\n"
+        "- ONE camera note max.\n"
+        "- End with: 'Smooth motion, high quality.'\n"
+        "- Output ONLY the prompt text -- no quotes, no preamble."
+    ),
+}
+
+# Generic fallback used when no (model, motion) pair matches.
+_ENHANCE_SYSTEM_DEFAULT = (
+    "You are a prompt engineer for AI video generation.\n"
+    "Rewrite the user's rough idea as a polished, specific video prompt.\n"
+    "60-80 words. Present tense, third-person. Strong visual verbs. ONE camera note.\n"
+    "Output ONLY the prompt text -- no quotes, no preamble."
+)
+
+
+def _get_enhance_system(model_name: str, motion_style: str) -> str:
+    key = (model_name, motion_style)
+    if key in _ENHANCE_SYSTEMS:
+        return _ENHANCE_SYSTEMS[key]
+    # Try dynamic fallback for the same model
+    dyn_key = (model_name, "dynamic")
+    if dyn_key in _ENHANCE_SYSTEMS:
+        return _ENHANCE_SYSTEMS[dyn_key]
+    return _ENHANCE_SYSTEM_DEFAULT
+
+
+@router.post("/enhance-prompt")
+async def enhance_prompt(request: Request):
+    """Rewrite a rough user idea into a polished, model-appropriate video prompt.
+
+    Body:
+        prompt      -- the user's rough idea (required)
+        model       -- model name (optional, used to select system prompt style)
+        motion      -- motion style: calm/gentle/dynamic/narrative (optional)
+
+    Returns:
+        { "prompt": "<enhanced text>" }
+    """
+    from app import get_llm_router
+    from core.llm_client import TIER_FAST
+    body = await request.json()
+    raw = (body.get("prompt") or "").strip()
+    if not raw:
+        raise HTTPException(400, "Missing 'prompt'")
+    model_name = (body.get("model") or "LTX-2 Dev19B Distilled").strip()
+    motion_style = (body.get("motion") or "dynamic").strip()
+
+    system = _get_enhance_system(model_name, motion_style)
+    llm = get_llm_router()
+
+    def _call():
+        return llm.route(
+            system=system,
+            user=raw,
+            tier=TIER_FAST,
+            max_tokens=200,
+        )
+
+    result = await asyncio.to_thread(_call)
+    enhanced = (result or "").strip().strip('"').strip("'").strip()
+    if not enhanced:
+        raise HTTPException(500, "LLM returned empty response")
+    return {"prompt": enhanced}
