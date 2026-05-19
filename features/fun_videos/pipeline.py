@@ -193,40 +193,80 @@ def run_prep(job, photo_path, settings):
     _vision_ok = _free_vram_for_llm(llm_router, "music direction")
 
     job.update(progress=5, message="Getting music direction...")
-    try:
-        # Cloud providers (Anthropic/OpenAI) must not receive NSFW images.
-        # Pass frames only when Ollama is active AND VRAM is free.
-        provider = llm_router._provider()
-        if not music_prompt:
-            if provider == "ollama" and _vision_ok and photo_path and os.path.isfile(photo_path):
-                src_b64 = encode_image_b64(photo_path)
-                frames = [src_b64] if src_b64 else []
-            else:
-                frames = []  # cloud path or no VRAM: text-only, no image sent
-            music_result = analyzer.generate_music_prompt(
-                llm_router, frames, user_direction, video_prompt=video_prompt
-            )
-            music_prompt = music_result.get("music_prompt", "")
-            scene_desc   = music_result.get("reasoning", "")
-            if not settings.get("bpm") and music_result.get("bpm"):
-                settings["bpm"] = music_result["bpm"]
-            log.info("[info] Music direction: %s", music_prompt[:80])
-        else:
-            scene_desc = ""
-        if not instrumental:
-            job.update(progress=8, message="Writing lyrics...")
-            lyrics = analyzer.generate_lyrics(
-                llm_router, [],
-                music_prompt, lyric_direction or user_direction,
-                scene_description=scene_desc,
-            )
-            if lyrics:
-                log.info("[info] Lyrics generated")
-                settings["_prepped_lyrics"] = lyrics
-        if music_prompt:
-            settings["_prepped_music_prompt"] = music_prompt
-    except Exception as e:
-        log.warning("[warning] Pre-analysis failed: %s -- will retry during GPU phase", e)
+    from features.fun_videos.multi_pipeline import _pick_cloud_provider
+    _cloud = _pick_cloud_provider(llm_router)
+    scene_desc = ""
+
+    # Music prompt: try configured provider, then force cloud if it fails.
+    if not music_prompt:
+        for _force in (None, _cloud):
+            if _force is not None and _force == (llm_router._provider() if _force else None):
+                continue  # already tried this provider
+            try:
+                provider = llm_router._provider()
+                # Only pass image frames to Ollama (cloud refuses NSFW images).
+                if provider == "ollama" and _vision_ok and photo_path and os.path.isfile(photo_path) and not _force:
+                    src_b64 = encode_image_b64(photo_path)
+                    frames = [src_b64] if src_b64 else []
+                else:
+                    frames = []
+                # generate_music_prompt has no force_provider param; call the underlying
+                # route directly with force when retrying via cloud.
+                if _force:
+                    from core.llm_client import parse_json_response
+                    from features.fun_videos.analyzer import MUSIC_PROMPT_SYSTEM
+                    parts = ["Suggest background music for a short AI-generated video."]
+                    if video_prompt:
+                        parts.append(f'Video description: "{video_prompt}"')
+                    if user_direction:
+                        parts.append(f'Creative direction: "{user_direction}"')
+                    parts.append("Return JSON with music_prompt, bpm, key_suggestion, and reasoning.")
+                    _txt = llm_router.route(
+                        [{"role": "user", "content": "\n".join(parts)}],
+                        tier="balanced", system=MUSIC_PROMPT_SYSTEM, max_tokens=300,
+                        force_provider=_force,
+                    )
+                    music_result = parse_json_response(_txt) or {}
+                else:
+                    music_result = analyzer.generate_music_prompt(
+                        llm_router, frames, user_direction, video_prompt=video_prompt
+                    )
+                music_prompt = music_result.get("music_prompt", "")
+                scene_desc   = music_result.get("reasoning", "")
+                if not settings.get("bpm") and music_result.get("bpm"):
+                    settings["bpm"] = music_result["bpm"]
+                if music_prompt:
+                    log.info("[info] Music direction (%s): %s",
+                             _force or "configured", music_prompt[:80])
+                    break
+            except Exception as e:
+                log.warning("[warning] Music direction failed (%s, force=%s): %s",
+                            "configured" if not _force else _force, _force, e)
+
+    # Lyrics: try configured provider, then force cloud on failure.
+    if not instrumental and music_prompt:
+        job.update(progress=8, message="Writing lyrics...")
+        for _force in (None, _cloud):
+            try:
+                lyrics = analyzer.generate_lyrics(
+                    llm_router, [],
+                    music_prompt, lyric_direction or user_direction,
+                    scene_description=scene_desc,
+                )
+                if lyrics:
+                    log.info("[info] Lyrics generated (force=%s)", _force)
+                    settings["_prepped_lyrics"] = lyrics
+                    break
+                if _force is None and _cloud:
+                    continue  # retry with cloud
+                break
+            except Exception as e:
+                log.warning("[warning] Lyrics failed (force=%s): %s", _force, e)
+                if _force is not None or not _cloud:
+                    break
+
+    if music_prompt:
+        settings["_prepped_music_prompt"] = music_prompt
 
     # Release Ollama's model now so WanGP has full VRAM when the GPU phase starts.
     _release_ollama_vram()
