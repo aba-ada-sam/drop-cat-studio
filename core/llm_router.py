@@ -326,6 +326,14 @@ class LLMRouter:
                 if is_timeout and actual_provider == "ollama":
                     log.warning("Ollama timeout (no retry -- Ollama is busy): %s", exc)
                     raise
+                # Never retry OOM -- the model doesn't fit in RAM; retrying 3x just
+                # wastes ~15 seconds and makes the error message more confusing.
+                # LLMClient.chat() already attempted a vision-model fallback before
+                # this exception propagated up, so we are truly out of options.
+                from core.llm_client import _is_ollama_oom
+                if _is_ollama_oom(exc) or "requires more memory than available" in exc_str:
+                    log.error("Ollama OOM (no retry): %s", exc)
+                    raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1
                     wait = 2 ** attempt

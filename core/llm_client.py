@@ -31,6 +31,23 @@ DEFAULT_OLLAMA_MODELS = {
     TIER_POWER:    "gemma4:26b",
 }
 
+# Phrases that indicate Ollama cannot load a model due to RAM/VRAM shortage.
+# These are permanent failures -- retrying the same model won't help.
+_OOM_PHRASES = (
+    "more system memory",
+    "requires more system memory",
+    "not enough memory",
+    "out of memory",
+    "insufficient memory",
+    "cannot allocate",
+    "out of system memory",
+)
+
+
+def _is_ollama_oom(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return any(p in s for p in _OOM_PHRASES)
+
 
 def _disable_thinking(system: str, model: str) -> str:
     """Append /no_think for qwen3 models to prevent thinking mode from
@@ -165,7 +182,12 @@ class LLMClient:
         max_tokens: int = 1024,
         system: str = "",
     ) -> str:
-        """Send a text chat to Ollama. Returns response text."""
+        """Send a text chat to Ollama. Returns response text.
+
+        If the configured tier model is too large to load (OOM), automatically
+        retries with the vision model (smaller, always fits) so the job does not
+        fail with a confusing memory error.
+        """
         model = self._model(tier)
         all_messages = []
         if system:
@@ -176,9 +198,30 @@ class LLMClient:
                       options={"num_predict": max_tokens})
         if "qwen3" in model.lower():
             kwargs["think"] = False
-        with _ollama_lock:
-            resp = self._get_client().chat(**kwargs)
-        return _extract_content(resp)
+        try:
+            with _ollama_lock:
+                resp = self._get_client().chat(**kwargs)
+            return _extract_content(resp)
+        except Exception as exc:
+            if _is_ollama_oom(exc) and model != self._vision_model:
+                log.warning(
+                    "Ollama OOM on %s -- falling back to %s: %s",
+                    model, self._vision_model, exc,
+                )
+                # Rebuild with the smaller vision model
+                fallback_msgs = []
+                if system:
+                    fallback_msgs.append({"role": "system",
+                                          "content": _disable_thinking(system, self._vision_model)})
+                fallback_msgs.extend(messages)
+                fb_kwargs = dict(model=self._vision_model, messages=fallback_msgs,
+                                 options={"num_predict": max_tokens})
+                if "qwen3" in self._vision_model.lower():
+                    fb_kwargs["think"] = False
+                with _ollama_lock:
+                    resp = self._get_client().chat(**fb_kwargs)
+                return _extract_content(resp)
+            raise
 
     def chat_with_images(
         self,
@@ -211,8 +254,19 @@ class LLMClient:
             kwargs["think"] = False
         if format_json:
             kwargs["format"] = "json"
-        with _ollama_lock:
-            resp = self._get_client().chat(**kwargs)
+        try:
+            with _ollama_lock:
+                resp = self._get_client().chat(**kwargs)
+        except Exception as exc:
+            if _is_ollama_oom(exc):
+                # Vision model is already the smallest configured model.
+                # Re-raise with a clear message the user can act on.
+                raise RuntimeError(
+                    f"Ollama vision model '{model}' requires more memory than available. "
+                    f"Go to Settings and set a smaller vision model (e.g. moondream:latest or llava:7b). "
+                    f"Original error: {exc}"
+                ) from exc
+            raise
         elapsed = time.time() - t0
         content = _extract_content(resp)
         log.info("Ollama vision call done in %.1fs (response len=%d)", elapsed, len(content))
