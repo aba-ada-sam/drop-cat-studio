@@ -71,17 +71,35 @@ class GPUOrchestrator:
             }
 
     def _idle_eviction_loop(self) -> None:
-        """Background thread: release GPU services after prolonged idle."""
+        """Background thread: release GPU services after prolonged idle.
+
+        Skips eviction if WanGP is actively generating (busy=True from /status).
+        A 20-min clip at 25 steps would otherwise get killed mid-generation.
+        """
         while True:
             time.sleep(60)
             with self._lock:
-                if (self._current is not None
+                if not (self._current is not None
                         and self._last_acquire > 0
                         and time.time() - self._last_acquire > _IDLE_EVICT_SECS):
-                    idle_min = int((time.time() - self._last_acquire) / 60)
-                    log.info("[gpu] Idle eviction after %d min -- releasing %s to free VRAM/RAM",
-                             idle_min, self._current)
-                    self.release_all()
+                    continue
+                # Don't evict if WanGP is actively generating
+                if self._current == "wangp" and self._wangp_busy():
+                    log.debug("[gpu] Idle eviction deferred -- WanGP is still generating")
+                    self._last_acquire = time.time()  # reset clock, check again in 30 min
+                    continue
+                idle_min = int((time.time() - self._last_acquire) / 60)
+                log.info("[gpu] Idle eviction after %d min -- releasing %s to free VRAM/RAM",
+                         idle_min, self._current)
+                self.release_all()
+
+    def _wangp_busy(self) -> bool:
+        """Return True if WanGP reports an active generation in progress."""
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:7899/status", timeout=2) as r:
+                return json.loads(r.read()).get("busy", False)
+        except Exception:
+            return False  # unreachable = idle
 
     def acquire(self, service: ServiceName, reason: str = "") -> None:
         """Ensure `service` owns the GPU exclusively. Evicts everyone else.

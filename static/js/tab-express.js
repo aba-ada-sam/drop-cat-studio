@@ -1422,8 +1422,11 @@ export function init(panel) {
         }),
       });
       _jobId = job_id;
+      _pendingCount++;
+      _refreshCreateBtn();
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
       _watchJob(job_id);
+      _trackDone(job_id);
     } catch (e) {
       _showError(e.message);
     }

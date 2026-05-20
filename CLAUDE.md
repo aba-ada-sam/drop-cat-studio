@@ -57,6 +57,7 @@ static/                 — Vanilla JS frontend (ES modules, no framework, no bu
 |---------|-------------|------|
 | Fun Videos | `/api/fun/*` | Yes (WanGP) |
 | Video Bridges | `/api/bridges/*` | Yes (WanGP) |
+| Infinite Zoom | `/api/zoom/*` | Yes (WanGP) |
 | SD Prompts | `/api/prompts/*` | No |
 | Image-to-Video | `/api/i2v/*` | No |
 | Video Tools | `/api/tools/*` | No |
@@ -176,6 +177,18 @@ The multi-clip pipeline has three internal phases within `run_multi_pipeline`:
 **Scene-hold extension (LTX + calm/gentle):** When `is_ltx and resolved_style in ("calm", "gentle")`, `_generate_story_arc` bypasses the LLM entirely and returns N clips with varied per-clip environmental effects (light shift, steam, shadow creep, curtain stir, cloud pass, etc.) from a hardcoded list. Each clip's prompt is: `{user_text}. {anchor_language}. {effect_for_clip_i}`. This avoids the LLM choosing motion that LTX-8-step can't render cleanly, and prevents the "all clips identical" problem.
 
 **Phase 3 — Audio:** If Phase 0 already produced audio, uses it directly. Otherwise calls `gpu.acquire("acestep")` to evict WanGP and generate post-clip. Always computes `total_dur = probe_duration(concat_path)` before both branches so gallery metadata has the correct duration.
+
+### Infinite Zoom (`features/zoom/`)
+
+New tab (2026-05-20). Chains N WanGP clips with continuous zoom-in or zoom-out camera motion. Two phases via `submit_with_prep`: `run_zoom_prep` (LLM plans per-clip zoom level descriptions from the source image) + `run_zoom_pipeline` (WanGP chain, audio, merge).
+
+Key design rules that must not be violated:
+- `reanchor_every=0` always — resetting to the source frame breaks the parallax motion and produces visible jump cuts
+- Chain frame PNGs deleted in a `finally:` block after all clips are done
+- Output always written to `OUTPUT_DIR / YYYY-MM-DD / zoom_*` (never relative to source_path)
+- Source can be a photo or a video; videos are frame-extracted before pipeline starts (`zoom-out` → last frame, `zoom-in` → first frame)
+- Upload endpoint: `/api/fun/upload` for images, `/api/fun/upload-video` for videos (NOT a generic `/api/upload`)
+- Open-in-folder uses `/api/reveal` with `action: "explorer"` (NOT `/api/open-folder`)
 
 ### Audio analyzer (`features/fun_videos/audio_analyzer.py`)
 

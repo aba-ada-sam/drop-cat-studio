@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+
 from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, TIER_FAST, encode_image_b64, parse_json_response
 from core.llm_router import LLMRouter
@@ -334,9 +336,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
 
     # Output directory
     ts = time.strftime("%Y%m%d_%H%M%S")
-    out_root = Path(source_path).parent.parent / time.strftime("%Y-%m-%d")
-    job_tag = f"zoom_{direction}_{Path(source_path).stem[:12]}_{ts}"
-    job_dir = out_root / job_tag
+    job_dir = OUTPUT_DIR / time.strftime("%Y-%m-%d") / f"zoom_{direction}_{Path(source_path).stem[:12]}_{ts}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(source_path, job_dir / f"source{Path(source_path).suffix}")
