@@ -1431,6 +1431,7 @@ class _NoiseFilter(logging.Filter):
         "/api/jobs",
         "/api/logs",
         "/api/services",
+        "/api/gpu/status",
         "/api/gallery?limit=",
         "/api/fun/models",
         "/api/llm/config",

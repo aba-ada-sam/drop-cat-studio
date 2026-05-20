@@ -1958,6 +1958,7 @@ def run_multi_pipeline(job, photo_path, settings):
       # Otherwise fall back to post-clip audio (original flow).
       audio_path: str | None = _audio_phase0_path
       audio_err: str | None = None
+      total_dur = probe_duration(concat_path)  # needed for audio_dur and gallery metadata
 
       if audio_path:
           job.update(progress=82, message="Audio ready (generated before clips)...")
@@ -2015,7 +2016,6 @@ def run_multi_pipeline(job, photo_path, settings):
               job.meta["lyrics"] = lyrics
           job.update(progress=82, message="Generating audio for full story...")
 
-          total_dur = probe_duration(concat_path)
           audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else float(sum(
               d.get("duration", clip_dur) if isinstance(d, dict) else clip_dur
               for d in story_arc
