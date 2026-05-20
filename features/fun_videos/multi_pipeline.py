@@ -1869,6 +1869,10 @@ def run_multi_pipeline(job, photo_path, settings):
 
           clip_paths.append(clip_path)
           _log(f"[info] Clip {clip_num}/{n_clips} complete")
+          # Expose first clip immediately so the UI can show a preview
+          # before the remaining clips finish generating.
+          if len(clip_paths) == 1:
+              job.meta["first_clip"] = clip_path
 
           # Trim each clip and extract the chain anchor at the SAME timestamp
           # so the next clip starts exactly where this one ends -- frame-exact

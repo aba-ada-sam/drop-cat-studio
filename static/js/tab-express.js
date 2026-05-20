@@ -638,7 +638,7 @@ export function init(panel) {
   // 'extend one shot into a longer atmospheric video', not 'narrative arc'.
   // The narrative arc path drifts on 16GB and is reserved for Wan I2V (24GB+).
   let _multiVideo      = true;
-  let _targetSecs      = 24;
+  let _targetSecs      = 10;  // 10s default -> 2 clips -> ~2-3 min vs 5-7 min at 24s
   // Quick Video is built around music + lyrics. Default ON; user can untick
   // to ship a silent clip when iterating on the visuals alone.
   let _addMusic        = true;
@@ -839,7 +839,15 @@ export function init(panel) {
     title: 'Iterate through every image in a folder, running the current settings once per image.',
     style: 'font-size:.95rem; padding:14px 18px; white-space:nowrap;',
   });
-  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, loopBtn, loopFolderBtn]));
+  // Quick Preview: 1 clip, no audio, results in ~30-45s instead of 2-5 min.
+  // Lets the user validate the visual direction before committing to a full run.
+  const quickBtn = el('button', {
+    class: 'btn',
+    text: 'Quick',
+    title: 'Generate one silent clip in ~30-45 seconds -- validate your idea fast',
+    style: 'font-size:.9rem; padding:14px 16px; white-space:nowrap; opacity:.85;',
+  });
+  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, quickBtn, loopBtn, loopFolderBtn]));
 
   // Folder path input -- replaces window.prompt() so the user has a proper
   // labelled text box to paste into. Shown/hidden by _startLoopFolder().
@@ -1079,6 +1087,7 @@ export function init(panel) {
     _resetProgress();
     _showProgress(2, 'Added to queue...');
     return new Promise(resolve => {
+      let _firstClipShown = false;
       const poller = pollJob(job_id,
         j => {
           // Use server progress whenever it's reported (>= 1). For status=queued
@@ -1092,6 +1101,14 @@ export function init(panel) {
             _showProgress(reported >= 1 ? reported : 2, `In queue -- ${label}...`);
           } else {
             _showProgress(reported >= 1 ? reported : 2, j.message || `${reported}%`);
+          }
+          // Streaming preview: show clip 1 the moment it's ready -- users see
+          // a result in ~30s instead of waiting for the full multi-clip job.
+          if (!_firstClipShown && j.meta?.first_clip) {
+            _firstClipShown = true;
+            resultVideo.src = pathToUrl(j.meta.first_clip);
+            resultVideo.load();
+            resultWrap.style.display = 'flex';
           }
         },
         j => {
@@ -1379,6 +1396,36 @@ export function init(panel) {
       _pendingCount++;
       _refreshCreateBtn();
       _trackDone(_jobId);
+    }
+  });
+
+  // -- Quick Preview: 1 clip, no audio, ~30-45s turnaround ------------------
+  quickBtn.addEventListener('click', async () => {
+    if (!_imagePath && !ideaInput.value.trim()) {
+      dropZone.style.borderColor = 'var(--red)';
+      setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
+      toast('Drop an image or type an idea first', 'error');
+      return;
+    }
+    _showProgress(1, 'Quick Preview -- generating single clip...');
+    try {
+      const idea = ideaInput.value.trim();
+      const { job_id } = await api('/api/fun/make-it', {
+        method: 'POST',
+        body: JSON.stringify({
+          photo_path:   _imagePath || null,
+          video_prompt: idea,
+          skip_audio:   true,
+          duration:     5,
+          steps:        8,
+          model_name:   'LTX-2 Dev19B Distilled',
+        }),
+      });
+      _jobId = job_id;
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id } }));
+      _watchJob(job_id);
+    } catch (e) {
+      _showError(e.message);
     }
   });
 }
