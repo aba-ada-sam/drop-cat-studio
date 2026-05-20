@@ -1619,94 +1619,101 @@ def run_multi_pipeline(job, photo_path, settings):
     _audio_events: dict = {}
 
     if not skip_audio and music_prompt and not _stopped():
-        job.update(progress=10, message="Generating audio for sync analysis...")
-        try:
-            from core.gpu_orchestrator import gpu as _gp0
-            _gp0.acquire("acestep", reason="music-first audio gen before clips")
+        from core.gpu_orchestrator import gpu as _gp0
+        # Skip audio-first if WanGP is already loaded. Evicting it to run ACE-Step
+        # then reloading costs 3-8 min (model load), wiping out any sync benefit.
+        # Audio-first is only free when WanGP would cold-start anyway.
+        _wangp_warm = _gp0.current == "wangp"
+        if _wangp_warm:
+            log.info("[multi] Phase 0 skipped -- WanGP already warm, audio-first would cost 3-8 min reload")
+        else:
+            try:
+                job.update(progress=10, message="Generating audio for sync analysis...")
+                _gp0.acquire("acestep", reason="music-first audio gen before clips")
 
-            planned_dur = sum(
-                float(c.get("duration", clip_dur)) if isinstance(c, dict) else clip_dur
-                for c in story_arc
-            )
-            audio_dur_p0 = min(planned_dur * _CHAIN_TRIM_RATIO + 4.0, 300.0)
-
-            def _p0_audio_progress(elapsed_s):
-                job.update(
-                    progress=10 + min(10, int(elapsed_s) // 5),
-                    message=f"Generating audio... {elapsed_s:.0f}s elapsed",
-                )
-
-            _ap0, _aerr0 = audio_generator.generate_audio(
-                prompt=music_prompt,
-                duration=audio_dur_p0,
-                output_dir=str(job_dir),
-                audio_format=settings.get("audio_format", "mp3"),
-                bpm=settings.get("bpm"),
-                steps=int(settings.get("audio_steps", 8)),
-                guidance=float(settings.get("audio_guidance", 7.0)),
-                seed=-1,
-                lyrics=lyrics,
-                instrumental=instrumental,
-                stop_event=job.stop_event,
-                progress_cb=_p0_audio_progress,
-            )
-            if _ap0 and not _stopped():
-                _audio_phase0_path = _ap0
-                job.update(progress=22, message="Transcribing audio...")
-                from features.fun_videos import audio_analyzer as _aa
-                _transcript = _aa.transcribe_audio(_ap0)
-
-                job.update(progress=23, message="Analysing beat structure...")
-                _audio_events = _aa.detect_audio_events(_ap0)
-                if _audio_events.get("bpm"):
-                    settings["_detected_bpm"] = _audio_events["bpm"]
-
-                # Snap clip boundaries to strong beats so cuts land on musical moments.
-                # story_arc durations are inflated by 1/TRIM_RATIO for planning;
-                # audio beat times are in real seconds. Deflate to real time before
-                # snapping, then re-inflate so planning compensation is preserved.
-                _real_arc = [
-                    dict(c, duration=float(c.get("duration", clip_dur)) * _CHAIN_TRIM_RATIO)
-                    if isinstance(c, dict) else c
-                    for c in story_arc
-                ]
-                _snapped_real = _aa.snap_durations_to_beats(
-                    _real_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
-                )
-                story_arc = [
-                    dict(c, duration=round(float(c.get("duration", clip_dur)) / _CHAIN_TRIM_RATIO, 2))
-                    if isinstance(c, dict) else c
-                    for c in _snapped_real
-                ]
-
-                # Build per-clip audio context and refine prompts with lyric hints
-                planned_clip_durs = [
+                planned_dur = sum(
                     float(c.get("duration", clip_dur)) if isinstance(c, dict) else clip_dur
                     for c in story_arc
-                ]
-                clip_audio_ctx = _aa.build_clip_audio_context(
-                    _transcript, _audio_events, n_clips, planned_clip_durs,
-                    _audio_events.get("duration", audio_dur_p0),
                 )
-                job.update(progress=24, message="Syncing clip prompts to music...")
-                story_arc = _refine_arc_with_audio(
-                    llm_router, story_arc, clip_audio_ctx, model_name, motion_style
-                )
+                audio_dur_p0 = min(planned_dur * _CHAIN_TRIM_RATIO + 4.0, 300.0)
 
-                job.meta["transcript"] = _transcript
-                job.meta["audio_events"] = {
-                    "bpm": _audio_events.get("bpm"),
-                    "energy_peaks": _audio_events.get("energy_peaks", []),
-                    "duration": _audio_events.get("duration"),
-                }
-                job.meta["clip_audio_context"] = clip_audio_ctx
-                log.info("[multi] Music-first done: %d lyric segments, BPM=%.1f, %d clips refined",
-                         len(_transcript), _audio_events.get("bpm", 0.0), n_clips)
-            else:
-                log.warning("[multi] Phase 0 audio failed (%s) -- will generate audio after clips", _aerr0)
-        except Exception as _p0e:
-            log.warning("[multi] Phase 0 audio exception (%s) -- will generate audio after clips", _p0e)
-            _audio_phase0_path = None
+                def _p0_audio_progress(elapsed_s):
+                    job.update(
+                        progress=10 + min(10, int(elapsed_s) // 5),
+                        message=f"Generating audio... {elapsed_s:.0f}s elapsed",
+                    )
+
+                _ap0, _aerr0 = audio_generator.generate_audio(
+                    prompt=music_prompt,
+                    duration=audio_dur_p0,
+                    output_dir=str(job_dir),
+                    audio_format=settings.get("audio_format", "mp3"),
+                    bpm=settings.get("bpm"),
+                    steps=int(settings.get("audio_steps", 8)),
+                    guidance=float(settings.get("audio_guidance", 7.0)),
+                    seed=-1,
+                    lyrics=lyrics,
+                    instrumental=instrumental,
+                    stop_event=job.stop_event,
+                    progress_cb=_p0_audio_progress,
+                )
+                if _ap0 and not _stopped():
+                    _audio_phase0_path = _ap0
+                    job.update(progress=22, message="Transcribing audio...")
+                    from features.fun_videos import audio_analyzer as _aa
+                    _transcript = _aa.transcribe_audio(_ap0)
+
+                    job.update(progress=23, message="Analysing beat structure...")
+                    _audio_events = _aa.detect_audio_events(_ap0)
+                    if _audio_events.get("bpm"):
+                        settings["_detected_bpm"] = _audio_events["bpm"]
+
+                    # Snap clip boundaries to strong beats so cuts land on musical moments.
+                    # story_arc durations are inflated by 1/TRIM_RATIO for planning;
+                    # audio beat times are in real seconds. Deflate to real time before
+                    # snapping, then re-inflate so planning compensation is preserved.
+                    _real_arc = [
+                        dict(c, duration=float(c.get("duration", clip_dur)) * _CHAIN_TRIM_RATIO)
+                        if isinstance(c, dict) else c
+                        for c in story_arc
+                    ]
+                    _snapped_real = _aa.snap_durations_to_beats(
+                        _real_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
+                    )
+                    story_arc = [
+                        dict(c, duration=round(float(c.get("duration", clip_dur)) / _CHAIN_TRIM_RATIO, 2))
+                        if isinstance(c, dict) else c
+                        for c in _snapped_real
+                    ]
+
+                    # Build per-clip audio context and refine prompts with lyric hints
+                    planned_clip_durs = [
+                        float(c.get("duration", clip_dur)) if isinstance(c, dict) else clip_dur
+                        for c in story_arc
+                    ]
+                    clip_audio_ctx = _aa.build_clip_audio_context(
+                        _transcript, _audio_events, n_clips, planned_clip_durs,
+                        _audio_events.get("duration", audio_dur_p0),
+                    )
+                    job.update(progress=24, message="Syncing clip prompts to music...")
+                    story_arc = _refine_arc_with_audio(
+                        llm_router, story_arc, clip_audio_ctx, model_name, motion_style
+                    )
+
+                    job.meta["transcript"] = _transcript
+                    job.meta["audio_events"] = {
+                        "bpm": _audio_events.get("bpm"),
+                        "energy_peaks": _audio_events.get("energy_peaks", []),
+                        "duration": _audio_events.get("duration"),
+                    }
+                    job.meta["clip_audio_context"] = clip_audio_ctx
+                    log.info("[multi] Music-first done: %d lyric segments, BPM=%.1f, %d clips refined",
+                             len(_transcript), _audio_events.get("bpm", 0.0), n_clips)
+                else:
+                    log.warning("[multi] Phase 0 audio failed (%s) -- will generate audio after clips", _aerr0)
+            except Exception as _p0e:
+                log.warning("[multi] Phase 0 audio exception (%s) -- will generate audio after clips", _p0e)
+                _audio_phase0_path = None
 
     if _stopped():
         return
