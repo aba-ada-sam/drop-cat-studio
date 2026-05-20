@@ -291,6 +291,60 @@ def main() -> int:
                 pass
         _test("POST /api/fun/upload image round-trip", zoom_upload_image)
 
+        # -- VRAM + models endpoint ----------------------------------------
+        print("\n[models + vram]")
+
+        def models_endpoint_shape():
+            r = client.get("/api/fun/models")
+            assert r.status_code == 200, r.status_code
+            data = r.json()
+            assert "models" in data, "missing 'models' key"
+            assert "default" in data, "missing 'default' key"
+            assert "gpu_vram_gb" in data, "missing 'gpu_vram_gb' key -- VRAM not exposed"
+            models = data["models"]
+            assert len(models) >= 4, f"expected at least 4 models, got {len(models)}"
+            for name, info in models.items():
+                assert "vram_min_gb" in info, f"{name} missing vram_min_gb"
+                assert isinstance(info["vram_min_gb"], (int, float)), f"{name} vram_min_gb not a number"
+                assert info["vram_min_gb"] > 0, f"{name} vram_min_gb must be positive"
+        _test("GET /api/fun/models has vram_min_gb + gpu_vram_gb", models_endpoint_shape)
+
+        def wan_i2v_threshold_correct():
+            r = client.get("/api/fun/models")
+            assert r.status_code == 200
+            models = r.json()["models"]
+            wan480 = models.get("Wan2.1-I2V-14B-480P", {})
+            wan720 = models.get("Wan2.1-I2V-14B-720P", {})
+            assert wan480.get("vram_min_gb", 0) >= 20, \
+                f"Wan I2V 480P vram_min_gb should be >=20 (deadlocks on 16GB), got {wan480.get('vram_min_gb')}"
+            assert wan720.get("vram_min_gb", 0) >= 20, \
+                f"Wan I2V 720P vram_min_gb should be >=20, got {wan720.get('vram_min_gb')}"
+        _test("Wan I2V vram_min_gb >= 20 (confirmed deadlock on 15.9 GB)", wan_i2v_threshold_correct)
+
+        def ltx_threshold_reasonable():
+            r = client.get("/api/fun/models")
+            assert r.status_code == 200
+            models = r.json()["models"]
+            ltx = models.get("LTX-2 Dev19B Distilled", {})
+            assert 8 <= ltx.get("vram_min_gb", 0) <= 12, \
+                f"LTX-2 Distilled vram_min_gb should be 8-12, got {ltx.get('vram_min_gb')}"
+        _test("LTX-2 vram_min_gb reasonable (8-12 GB)", ltx_threshold_reasonable)
+
+        def system_endpoint_has_vram():
+            r = client.get("/api/system")
+            assert r.status_code == 200, r.status_code
+            data = r.json()
+            assert "gpu_vram_gb" in data, "gpu_vram_gb missing from /api/system"
+        _test("GET /api/system includes gpu_vram_gb", system_endpoint_has_vram)
+
+        def auto_pick_always_ltx():
+            from features.fun_videos.routes import _get_pick_to_model
+            pick_map = _get_pick_to_model()
+            for bucket, (model, motion) in pick_map.items():
+                assert "LTX" in model, \
+                    f"auto-pick bucket '{bucket}' -> '{model}' -- Express must always use LTX for speed"
+        _test("auto-pick always resolves to LTX (no Wan I2V for Express)", auto_pick_always_ltx)
+
     # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
     print(f"  {len(_PASSED)} passed, {len(_FAILED)} failed")
