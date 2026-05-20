@@ -78,6 +78,8 @@ def main() -> int:
         from features.video_bridges import routes as _c  # noqa: F401
         from features.image2video import routes as _d  # noqa: F401
         from features.video_tools import routes as _e  # noqa: F401
+        from features.zoom import routes as _f  # noqa: F401
+        from features.zoom import pipeline as _g  # noqa: F401
     _test("import feature routes", import_features)
 
     def import_core():
@@ -238,6 +240,56 @@ def main() -> int:
                             json={"folder": "/no/such/path/xyz"})
             assert r.status_code == 400, r.status_code
         _test("POST /api/fun/folder-loop/start validates input", folder_loop_start_validates)
+
+        # -- Zoom route validation -----------------------------------------
+        print("\n[zoom]")
+
+        def zoom_make_no_source():
+            r = client.post("/api/zoom/make", json={})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/make no source -> 400", zoom_make_no_source)
+
+        def zoom_make_bad_direction():
+            r = client.post("/api/zoom/make", json={
+                "source_path": "/tmp/fake.jpg",
+                "zoom_direction": "sideways",
+            })
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/make bad direction -> 400", zoom_make_bad_direction)
+
+        def zoom_extract_frame_no_path():
+            r = client.post("/api/zoom/extract-frame", json={})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/extract-frame no path -> 400", zoom_extract_frame_no_path)
+
+        def zoom_extract_frame_missing_file():
+            r = client.post("/api/zoom/extract-frame",
+                            json={"video_path": "/no/such/video.mp4"})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/extract-frame missing file -> 400", zoom_extract_frame_missing_file)
+
+        def zoom_upload_image():
+            import io
+            from PIL import Image
+            buf = io.BytesIO()
+            Image.new("RGB", (64, 64), color=(100, 150, 200)).save(buf, format="PNG")
+            buf.seek(0)
+            r = client.post(
+                "/api/fun/upload",
+                files={"files": ("smoke_test.png", buf, "image/png")},
+            )
+            assert r.status_code == 200, f"upload failed: {r.status_code} {r.text[:200]}"
+            data = r.json()
+            assert "files" in data and len(data["files"]) == 1, f"unexpected shape: {data}"
+            saved = data["files"][0]
+            assert "path" in saved, f"no path in response: {saved}"
+            assert saved["path"].endswith(".png"), f"unexpected extension: {saved['path']}"
+            # Clean up
+            try:
+                Path(saved["path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+        _test("POST /api/fun/upload image round-trip", zoom_upload_image)
 
     # -- Summary -----------------------------------------------------------
     print("\n" + "=" * 48)
