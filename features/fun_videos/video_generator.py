@@ -62,27 +62,19 @@ def negative_prompt_for(model_name: str, motion_style: str = "dynamic") -> str:
 
 MODELS = {
     # Per-model defaults sent to the UI so controls change automatically on model switch.
-    # default_clips / default_dur: what the multi-clip slider resets to.
-    # motion: "calm" (environment-only, no subject movement) or "dynamic" (kinetic).
-    # Wan I2V: strong subject anchoring, handles 4 clips + dynamic motion fine.
-    # LTX Distilled: 12-step budget cannot maintain complex subject detail across clips;
-    #   cap at 2 clips and calm motion to prevent identity drift.
-    # LTX Dev13B: 40 steps, strong image conditioning, defaults to dynamic motion.
-    # Wan I2V: 80-100 frames at 16fps = 5-6s sweet spot per clip. 25 steps standard.
-    # poll_timeout_s: Wan models (15+ GB) stream from RAM when they exceed the 80% VRAM
-    # budget (~13 GB on a 16 GB card), resulting in ~14s/step vs ~3s/step for LTX in VRAM.
-    # 25 steps x 14s = 350s denoising + overhead; give 1800s (30 min) per clip so jobs
-    # complete instead of failing. LTX fits in VRAM cleanly so 600s is plenty.
-    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800},
-    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 2400},
-    # LTX-2 Distilled: two-stage schedule, 4-8 steps optimal (8 max -- more regresses quality).
-    # Guidance 3.0. Default 2 clips; chaining beyond 3 compounds softness drift.
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600},
-    # LTX-2 Dev13B: 40 steps, strong image conditioning. Handles deliberate motion
-    # (strides, gestures, turns). Preferred for painted/illustrated/fantasy subjects.
-    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200},
-    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800},
-    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 900},
+    # vram_min_gb: minimum VRAM to run this model without system thrashing.
+    #   Wan 14B: 11.95 GB preloaded (77.5% of 15.87 GB int8) + working memory = 12 GB min.
+    #   Wan 720P: higher resolution needs more headroom = 16 GB min.
+    #   LTX-2: ~9 GB, so 10 GB min for comfortable headroom.
+    #   Wan T2V 1.3B: tiny model, 4 GB min.
+    # poll_timeout_s: Wan 14B streams 22.5% from RAM via async shuttle (~14s/step on 16GB);
+    #   LTX fits fully in VRAM (~2s/step). Timeouts sized accordingly.
+    "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800, "vram_min_gb": 12},
+    "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 2400, "vram_min_gb": 16},
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600,  "vram_min_gb": 10},
+    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 10},
+    "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800, "vram_min_gb": 12},
+    "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 900,  "vram_min_gb": 4},
 }
 
 

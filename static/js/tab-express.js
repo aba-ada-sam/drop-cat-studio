@@ -95,10 +95,11 @@ export function init(panel) {
   }
 
   // Placeholders filled in when the UI section is built
-  let _dimsLabel  = null;
-  let _warnEl     = null;
-  let _ratioHint  = null;
-  let _ratioChips = {};
+  let _dimsLabel       = null;
+  let _warnEl          = null;
+  let _ratioHint       = null;
+  let _ratioChips      = {};
+  let _qualVramWarnEl  = null;
 
   function _refreshOutput() {
     [_outW, _outH] = _computeDims(_ratio, _qualityPx);
@@ -132,8 +133,10 @@ export function init(panel) {
   // Re-announce whenever this tab becomes active again
   document.addEventListener('dcs:tab-activated', e => { if (e.detail?.tab === 'express') _announceModel(); });
 
+  let _gpuVramGb = 0;
   api('/api/fun/models').then(data => {
     _allModels = data.models || {};
+    _gpuVramGb = data.gpu_vram_gb || 0;
     const models = Object.entries(_allModels);
     if (models.length) {
       const pref = _preferredModel();
@@ -142,7 +145,22 @@ export function init(panel) {
     }
     _updateRatioAvailability();
     _announceModel();
+    _updateQualityVramHints();
   }).catch(() => toast('Could not load video models -- using defaults', 'error'));
+
+  function _updateQualityVramHints() {
+    if (!_gpuVramGb || !_qualVramWarnEl) return;
+    const q = QUALITIES.find(q2 => q2.id === _qualityId);
+    if (!q) return;
+    const modelInfo = _allModels[q.model];
+    const needs = modelInfo?.vram_min_gb || 0;
+    if (needs && _gpuVramGb < needs) {
+      _qualVramWarnEl.textContent = `${q.label} needs ~${needs} GB -- your GPU has ${_gpuVramGb} GB. Generation may be slow or fail.`;
+      _qualVramWarnEl.style.display = '';
+    } else {
+      _qualVramWarnEl.style.display = 'none';
+    }
+  }
 
   // -- Heading ---------------------------------------------------------------
   root.appendChild(el('div', { style: 'text-align:center; padding-bottom:4px;' }, [
@@ -551,8 +569,15 @@ export function init(panel) {
       _refreshClipInfo();
       _updateRatioAvailability();
       _announceModel();
+      _updateQualityVramHints();
     },
   );
+
+  // VRAM warning shown when the selected quality requires more than the detected GPU
+  const qualVramWarn = el('div', {
+    style: 'display:none; font-size:.72rem; color:#e88; padding-top:2px;',
+  });
+  _qualVramWarnEl = qualVramWarn;
 
   const ratioHintEl = el('div', {
     style: 'display:none; font-size:.72rem; color:var(--text-3); padding-top:2px;',
@@ -595,6 +620,7 @@ export function init(panel) {
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Quality' }),
       qualRow,
     ]),
+    qualVramWarn,
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:.78rem; color:var(--text-3); width:82px; flex-shrink:0;', text: 'Aspect ratio' }),
       ratioRow,

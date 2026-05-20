@@ -523,30 +523,43 @@ async def refine_prompt(request: Request):
 # T2V models are intentionally NOT in the auto-pick set: every Express/Fun-Videos
 # job has a photo, so I2V is always the right family. T2V stays manual-only.
 
-# SAFETY: every auto-pick bucket resolves to LTX-2 Distilled (fits 16GB
-# cleanly). Wan I2V 14B at int8 is 15.87 GB which is larger than the
-# 13 GB safety budget WanGP allows on a 16GB card -- attempting it
-# causes the GPU to thrash at 100% util and 97% VRAM, dragging the
-# whole machine to a halt. We will NOT let auto-pick reach for Wan
-# until this DCS install detects a 20GB+ card. Power users who want
-# Wan I2V can disable auto-pick in the Express tab and pick it from
-# the dropdown manually.
+# Auto-pick model map is VRAM-aware. Resolved at call time via _get_pick_to_model().
 #
-# Motion style still varies by bucket; LTX Distilled handles all of
-# them via its calm denoising character. Even prompts that read as
-# action (sprint, leap) render as atmospheric motion -- not the
-# spastic AI slop we saw when LTX was in 'dynamic' mode.
-_PICK_TO_MODEL = {
-    "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    # action buckets: use "gentle" motion so the subject visibly moves
-    # (head turns, gestures, breath) instead of being frozen. "calm" produced
-    # "boring results" complaints. "dynamic" causes spastic micro-jitter on
-    # LTX at 8 steps. "gentle" is the sweet spot: visible but artifact-free.
-    "action":       ("LTX-2 Dev19B Distilled", "gentle"),
-    "action_hd":    ("LTX-2 Dev19B Distilled", "gentle"),
-    "story_action": ("LTX-2 Dev19B Distilled", "gentle"),
-    "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
-}
+# VRAM tiers (based on vram_min_gb in MODELS dict):
+#   < 12 GB  -- LTX-2 Distilled only (Wan 14B needs 12 GB min for async shuttle)
+#   12-15 GB -- Wan I2V 480P for action buckets; LTX-2 for calm/story
+#   >= 16 GB -- Wan I2V 720P available for action_hd
+#   Unknown  -- conservative: LTX-2 only (same as < 12 GB)
+#
+# History: originally hard-blocked at 16 GB because profile=4 (RAM streaming)
+# caused thrashing. With profile=3 (int8, 77.5% preloaded), Wan I2V 480P
+# runs on 12-16 GB cards including the RTX 5080 (15.9 GB).
+
+def _get_pick_to_model() -> dict:
+    """Return auto-pick bucket -> (model, motion) map for the current GPU."""
+    try:
+        from app import _g as _app_g
+        vram = float(_app_g.get("gpu_vram_gb") or 0)
+    except Exception:
+        vram = 0.0
+    if vram >= 12:
+        # Wan I2V 480P fits; 720P only if 16+ GB headroom
+        hd_model = "Wan2.1-I2V-14B-720P" if vram >= 16 else "Wan2.1-I2V-14B-480P"
+        return {
+            "calm":         ("LTX-2 Dev19B Distilled", "calm"),
+            "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
+            "action_hd":    (hd_model,                  "dynamic"),
+            "story_action": ("Wan2.1-I2V-14B-480P",    "dynamic"),
+            "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
+        }
+    # < 12 GB or unknown: LTX-2 only
+    return {
+        "calm":         ("LTX-2 Dev19B Distilled", "calm"),
+        "action":       ("LTX-2 Dev19B Distilled", "gentle"),
+        "action_hd":    ("LTX-2 Dev19B Distilled", "gentle"),
+        "story_action": ("LTX-2 Dev19B Distilled", "gentle"),
+        "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
+    }
 # Hardware reality on 16GB VRAM cards (RTX 5080):
 #   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step,
 #                                              CALM motion only (atmospheric).
@@ -650,12 +663,14 @@ def _auto_pick_model(
         f"Pick the best model."
     )
 
+    _pick_map = _get_pick_to_model()
+
     def _try_parse(text: str) -> tuple[str, str] | None:
         """Return (pick, reason) on success, None on failure."""
         data = parse_json_response(text)
         pick = (data or {}).get("pick", "").strip().lower() if isinstance(data, dict) else ""
         reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
-        if pick in _PICK_TO_MODEL:
+        if pick in _pick_map:
             return (pick, reason or pick)
         return None
 
@@ -684,7 +699,7 @@ def _auto_pick_model(
             if parsed:
                 pick, reason = parsed
                 pick, reason = _apply_clip_guard(pick, reason)
-                model, motion = _PICK_TO_MODEL[pick]
+                model, motion = _pick_map[pick]
                 log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason)
                 return (model, motion, reason)
             log.warning("[auto-pick] ollama vision returned no usable pick -- trying text-only cloud")
@@ -712,8 +727,9 @@ def _auto_pick_model(
     except Exception as e:
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
-    # Step 3: hard fallback -- Wan I2V 480P works on all supported hardware.
-    return ("LTX-2 Dev19B Distilled", "calm", "fallback-LTX (Wan I2V blocked on 16GB)")
+    # Step 3: hard fallback -- use VRAM-appropriate default
+    fallback_model, fallback_motion = _pick_map.get("action", ("LTX-2 Dev19B Distilled", "gentle"))
+    return (fallback_model, fallback_motion, "classifier failed -- using best model for available VRAM")
 
 
 @router.post("/make-it")
@@ -1011,13 +1027,19 @@ async def make_it_multi(request: Request):
 async def list_models():
     config = cfg.load()
     configured = config.get("wan_model", "")
-    # Find the matching model key (config stores the short name used in MODELS)
     default_key = configured if configured in MODELS else next(
         (k for k in MODELS if configured and configured.lower() in k.lower()), None
     ) or "Wan2.1-I2V-14B-480P"
+    # Include detected VRAM so the frontend can show capability warnings
+    try:
+        from app import _g as _app_g
+        gpu_vram_gb = _app_g.get("gpu_vram_gb")
+    except Exception:
+        gpu_vram_gb = None
     return {
         "models": {name: info for name, info in MODELS.items()},
         "default": default_key,
+        "gpu_vram_gb": gpu_vram_gb,
     }
 
 

@@ -922,9 +922,19 @@ export function init(panel) {
 
   api('/api/fun/models').then(data => {
     _models = data.models || {};
+    const gpuVram = data.gpu_vram_gb || 0;
     modelSel.innerHTML = '';
-    for (const [name] of Object.entries(_models))
-      modelSel.appendChild(el('option', { value: name, text: name }));
+    for (const [name, info] of Object.entries(_models)) {
+      const opt = el('option', { value: name });
+      const needs = info.vram_min_gb || 0;
+      const fits = !gpuVram || gpuVram >= needs;
+      // Append a VRAM badge so users know at a glance if their GPU can run it
+      opt.textContent = fits
+        ? name
+        : `${name}  [needs ${needs} GB]`;
+      if (!fits) opt.style.color = '#e88';
+      modelSel.appendChild(opt);
+    }
     const preferred = data.default || Object.keys(_models).find(k => k.includes('Wan2.1-I2V-14B-480P')) || Object.keys(_models)[0];
     if (preferred && _models[preferred]) modelSel.value = preferred;
     modelSel.dispatchEvent(new Event('change'));

@@ -76,6 +76,7 @@ _g: dict = {
     "llm_client":         None,
     "llm_router":         None,
     "available_encoders": [],
+    "gpu_vram_gb":        None,   # float GB or None if undetectable
 }
 
 APP_DIR    = Path(__file__).resolve().parent
@@ -197,6 +198,20 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] encoder detection failed (non-fatal): %s", _e)
         _g["available_encoders"] = []
+
+    # Detect GPU VRAM via nvidia-smi (no torch import needed in main process)
+    try:
+        import subprocess as _sp2
+        _r = _sp2.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if _r.returncode == 0:
+            _mb = int(_r.stdout.strip().splitlines()[0].strip())
+            _g["gpu_vram_gb"] = round(_mb / 1024, 1)
+            log.info("GPU VRAM detected: %.1f GB", _g["gpu_vram_gb"])
+    except Exception as _e:
+        log.debug("[startup] VRAM detection failed (non-fatal): %s", _e)
 
     # Synchronous: evict any orphan WanGP / ACE-Step workers from a prior DCS
     # session BEFORE we accept user requests. Without this, clicking Create on
@@ -1011,6 +1026,7 @@ async def system_info():
         "ffmpeg": ffmpeg_available(),
         "encoders": [{"id": e[0], "label": e[1], "hw": e[2]} for e in _g["available_encoders"]],
         "best_encoder": best_encoder(_g["available_encoders"]),
+        "gpu_vram_gb": _g.get("gpu_vram_gb"),
         "ollama": ollama_st,
         "services": svc.get_status(),
     }

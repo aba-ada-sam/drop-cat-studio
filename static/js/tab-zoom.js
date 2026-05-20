@@ -289,6 +289,76 @@ export function init(panel) {
   });
   ideaGroup.append(ideaLabel, ideaInput);
 
+  // -- Model selector ---------------------------------------------------------
+  // Loaded from /api/fun/models; filtered to I2V models only (zoom needs a
+  // start image). Defaults to the best model the GPU can run based on vram_min_gb.
+  const modelGroup = el('div', { style: 'display:flex; flex-direction:column; gap:6px;' });
+  const modelLabelRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
+  const modelLbl = el('label', {
+    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
+  });
+  modelLbl.textContent = 'Model';
+  const vramBadge = el('span', {
+    style: 'font-size:11px; color:var(--text-muted); opacity:.7;',
+  });
+  modelLabelRow.append(modelLbl, vramBadge);
+
+  const modelSel = el('select', {
+    style: [
+      'width:100%; background:var(--bg-card); border:1px solid var(--border);',
+      'border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px;',
+      'cursor:pointer;',
+    ].join(''),
+  });
+
+  const modelWarning = el('div', {
+    style: 'font-size:11px; color:#e88; display:none; padding-top:2px;',
+  });
+
+  modelGroup.append(modelLabelRow, modelSel, modelWarning);
+
+  // Load models from server and populate selector
+  apiFetch('/api/fun/models').then(data => {
+    const gpuVram = data.gpu_vram_gb || 0;
+    if (gpuVram) vramBadge.textContent = `(${gpuVram} GB GPU)`;
+    const models = data.models || {};
+    const i2vModels = Object.entries(models).filter(([, m]) => m.i2v);
+    modelSel.innerHTML = '';
+    for (const [name, info] of i2vModels) {
+      const opt = el('option', { value: name });
+      const needs = info.vram_min_gb || 0;
+      const fits = !gpuVram || gpuVram >= needs;
+      opt.textContent = fits ? name : `${name} (needs ${needs} GB)`;
+      if (!fits) opt.style.color = '#e88';
+      modelSel.appendChild(opt);
+    }
+    // Default: best I2V model that fits available VRAM
+    const preferred = i2vModels
+      .filter(([, m]) => !gpuVram || gpuVram >= (m.vram_min_gb || 0))
+      .sort(([, a], [, b]) => (b.vram_min_gb || 0) - (a.vram_min_gb || 0))[0];
+    if (preferred) modelSel.value = preferred[0];
+    _checkModelVram();
+  }).catch(() => {
+    const opt = el('option', { value: 'Wan2.1-I2V-14B-480P' });
+    opt.textContent = 'Wan2.1-I2V-14B-480P';
+    modelSel.appendChild(opt);
+  });
+
+  function _checkModelVram() {
+    apiFetch('/api/fun/models').then(data => {
+      const gpuVram = data.gpu_vram_gb || 0;
+      const models = data.models || {};
+      const selected = models[modelSel.value];
+      if (gpuVram && selected && selected.vram_min_gb > gpuVram) {
+        modelWarning.textContent = `Warning: this model needs ${selected.vram_min_gb} GB VRAM but ${gpuVram} GB detected -- may thrash or fail`;
+        modelWarning.style.display = 'block';
+      } else {
+        modelWarning.style.display = 'none';
+      }
+    }).catch(() => {});
+  }
+  modelSel.addEventListener('change', _checkModelVram);
+
   // -- Generate button --------------------------------------------------------
   const generateBtn = el('button', {
     disabled: true,
@@ -365,7 +435,7 @@ export function init(panel) {
   outputArea.append(videoWrap, outputActions);
 
   // -- Assemble panel ---------------------------------------------------------
-  root.append(sourceSection, dirSection, controlsRow, ideaGroup, generateBtn, progressArea, outputArea);
+  root.append(sourceSection, dirSection, controlsRow, ideaGroup, modelGroup, generateBtn, progressArea, outputArea);
 
   // -- Generate logic ---------------------------------------------------------
   generateBtn.onclick = async () => {
@@ -391,6 +461,7 @@ export function init(panel) {
           n_clips:        nClips,
           clip_duration:  clipDur,
           idea:           ideaInput.value.trim(),
+          model_name:     modelSel.value || 'Wan2.1-I2V-14B-480P',
           skip_audio:     false,
         }),
       });
