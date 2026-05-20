@@ -35,7 +35,7 @@ async def zoom_make(request: Request):
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
     from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline, extract_frame_from_video
-    from core.wangp_models import resolve_model_name
+    from features.fun_videos.video_generator import MODELS as _VG_MODELS
 
     job_manager = get_job_manager()
 
@@ -54,7 +54,9 @@ async def zoom_make(request: Request):
 
     n_clips = max(2, min(8, int(body.get("n_clips", 5))))
     clip_dur = max(3.0, min(10.0, float(body.get("clip_duration", 5.0))))
-    model_name = resolve_model_name(body.get("model_name", "Wan2.1-I2V-14B-480P"))
+    model_name = body.get("model_name", "LTX-2 Dev13B")
+    if model_name not in _VG_MODELS:
+        model_name = "LTX-2 Dev13B"
 
     # If source is a video, extract the appropriate frame first
     ext = Path(source_path).suffix.lower()

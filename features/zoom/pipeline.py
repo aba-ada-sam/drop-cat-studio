@@ -116,7 +116,7 @@ def _plan_zoom_arc(
 
     def _parse(text) -> tuple[list[dict], str, str] | None:
         data = parse_json_response(text)
-        if not data:
+        if not isinstance(data, dict):
             return None
         raw = data.get("clips", [])
         if not isinstance(raw, list) or not raw:
@@ -153,8 +153,8 @@ def _plan_zoom_arc(
                 )
             else:
                 text = llm_router.route(
-                    user_msg, tier=TIER_BALANCED, system=system, max_tokens=1200,
-                    format_json=True,
+                    [{"role": "user", "content": user_msg}],
+                    tier=TIER_BALANCED, system=system, max_tokens=1200,
                 )
             result = _parse(text)
             if result:
@@ -166,7 +166,7 @@ def _plan_zoom_arc(
 
     # Hardcoded fallback
     log.warning("[zoom] LLM failed -- using template arc")
-    return _fallback_arc(direction, n_clips, idea), "", ""
+    return _fallback_arc(direction, n_clips, idea)
 
 
 def _fallback_arc(direction: str, n_clips: int, idea: str) -> tuple[list[dict], str, str]:
