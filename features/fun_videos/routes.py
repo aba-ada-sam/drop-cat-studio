@@ -588,21 +588,21 @@ breathing-photograph energy all belong in calm/long_story.
     Fast (~30s/clip).
 
   action
-    Wan2.1 I2V 480P. For REAL PHOTOS where the subject must do an
-    EXPLICITLY KINETIC action that calm motion cannot fake: sprinting,
-    leaping, throwing a punch, dancing energetically. The prompt must
-    contain action verbs (sprint, run, jump, slam, hit, throw, leap,
-    dance, kick). SLOW: ~3-5 min/clip on a 16GB card. Use only when
-    necessary.
+    LTX-2 Dev13B. For REAL PHOTOS where the subject must do an
+    EXPLICITLY KINETIC action: striding, turning sharply, gesturing
+    with force, dancing. 40 denoising steps gives real deliberate body
+    movement with identity preserved. Prompt must have action verbs
+    (sprint, stride, leap, punch, dance, throw, kick). ~3 min/clip.
+    Use only when calm motion would clearly fail the scene.
 
   action_hd
-    Wan2.1 I2V 720P. Same as 'action' but 720p output. Pick ONLY when
-    user explicitly asks for HD/sharp output. SLOWER: ~5-8 min/clip.
+    LTX-2 Dev13B, same as 'action'. Pick when user explicitly asks for
+    sharp detail or HD quality on a kinetic scene. Same time cost.
 
   story_action
-    Wan I2V 480P with dynamic motion across multiple clips. For
-    multi-clip stories where every clip needs kinetic action that
-    calm motion cannot render. Same VRAM and time cost as 'action'.
+    LTX-2 Dev13B with dynamic motion across multiple clips. For
+    multi-clip stories where every clip needs real deliberate movement
+    the subject makes. Same time cost as 'action'.
 
 DECISION TREE:
   1. Does the prompt contain explicit kinetic action verbs that calm
@@ -704,7 +704,7 @@ def _auto_pick_model(
         if parsed:
             pick, reason = parsed
             pick, reason = _apply_clip_guard(pick, reason)
-            model, motion = _PICK_TO_MODEL[pick]
+            model, motion = _pick_map[pick]
             log.info("[auto-pick] '%s' -> %s (%s) -- %s [text fallback]", idea_clean[:60], model, motion, reason)
             return (model, motion, reason)
         log.warning("[auto-pick] text fallback returned no usable pick -- defaulting to action")
@@ -712,7 +712,7 @@ def _auto_pick_model(
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
     # Step 3: hard fallback -- use VRAM-appropriate default
-    fallback_model, fallback_motion = _pick_map.get("action", ("LTX-2 Dev19B Distilled", "gentle"))
+    fallback_model, fallback_motion = _pick_map.get("action", ("LTX-2 Dev13B", "dynamic"))
     return (fallback_model, fallback_motion, "classifier failed -- using best model for available VRAM")
 
 

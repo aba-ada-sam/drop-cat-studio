@@ -487,45 +487,40 @@ def _generate_story_arc(
 
         user_text = (initial_idea or "").strip()
 
-        if resolved_style == "calm":
-            # Vary the environmental effect per clip so each clip has one distinct
-            # atmospheric detail. Using the same effect every clip produces a flat
-            # loop with no progression; varying them gives a sense of time passing
-            # while keeping the subject completely still.
-            # Keep re-anchoring OFF (caller sets reanchor_every=0): the clip chain
-            # starts from the last frame of the previous clip, so each clip's
-            # starting frame already has the prior clip's light/atmosphere baked in.
-            # Re-anchoring back to the static source photo resets that baked state
-            # and triggers LTX's background-fill heuristics, which manifest as
-            # rain/debris artifacts.
-            _CALM_EFFECTS = [
-                "Warm light shifts slowly across the scene, casting long moving shadows.",
-                "Steam or mist rises gently, wisps curling then dissipating in still air.",
-                "A shadow creeps across the surface as light angle changes softly.",
-                "Curtain or fabric edge stirs from unseen air, then settles.",
-                "Cloud shadow passes overhead, light quality briefly dims then brightens.",
-                "Distant background element drifts faintly, foreground subject unchanged.",
-                "Light warms to golden hue, texture catches a new angle of shine.",
-                "Faint atmospheric haze shifts in the background, depth breathes.",
-            ]
-            anchor = (
-                "Breathing photograph, fixed camera. "
-                "Subject holds perfectly still. "
-                "{effect} "
-                "Background unchanged, sky clear and steady, horizon locked."
-            )
-            fallback_base = (
-                "breathing photograph, fixed wide shot, subject perfectly still, "
-                "{effect} background unchanged, fixed frame, photorealistic"
-            )
-            clips = []
-            for i in range(n_clips):
-                effect = _CALM_EFFECTS[i % len(_CALM_EFFECTS)]
-                if user_text:
-                    prompt = f"{user_text}. {anchor.format(effect=effect)}"
-                else:
-                    prompt = fallback_base.format(effect=effect.lower())
-                clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
+        # Vary the environmental effect per clip: one distinct atmospheric detail
+        # per clip so there is a sense of time passing while the subject stays still.
+        # Re-anchoring is OFF (reanchor_every=0 set by caller): each clip chains
+        # from the previous clip's last frame, which already has the prior
+        # atmosphere baked in. Re-anchoring to the static source resets that state
+        # and triggers LTX background-fill heuristics (rain/debris artifacts).
+        _CALM_EFFECTS = [
+            "Warm light shifts slowly across the scene, casting long moving shadows.",
+            "Steam or mist rises gently, wisps curling then dissipating in still air.",
+            "A shadow creeps across the surface as light angle changes softly.",
+            "Curtain or fabric edge stirs from unseen air, then settles.",
+            "Cloud shadow passes overhead, light quality briefly dims then brightens.",
+            "Distant background element drifts faintly, foreground subject unchanged.",
+            "Light warms to golden hue, texture catches a new angle of shine.",
+            "Faint atmospheric haze shifts in the background, depth breathes.",
+        ]
+        anchor = (
+            "Breathing photograph, fixed camera. "
+            "Subject holds perfectly still. "
+            "{effect} "
+            "Background unchanged, sky clear and steady, horizon locked."
+        )
+        fallback_base = (
+            "breathing photograph, fixed wide shot, subject perfectly still, "
+            "{effect} background unchanged, fixed frame, photorealistic"
+        )
+        clips = []
+        for i in range(n_clips):
+            effect = _CALM_EFFECTS[i % len(_CALM_EFFECTS)]
+            if user_text:
+                prompt = f"{user_text}. {anchor.format(effect=effect)}"
+            else:
+                prompt = fallback_base.format(effect=effect.lower())
+            clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
 
         log.info("[multi] Scene-hold extension (%s): %d clips, varied effects, first='%s...'",
                  resolved_style, n_clips, clips[0]["prompt"][:80])

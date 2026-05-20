@@ -170,8 +170,6 @@ export function init(panel) {
         'background:var(--surface); cursor:pointer; transition:all .15s;',
       ].join(''),
     });
-    el('span', { style: 'font-size:15px; font-weight:700; color:var(--text);', text: label });
-    el('span', { style: 'font-size:11px; color:var(--text-3);', text: sub });
     b.append(
       el('span', { style: 'font-size:15px; font-weight:700; color:var(--text);', text: label }),
       el('span', { style: 'font-size:11px; color:var(--text-3);', text: sub }),
