@@ -877,11 +877,11 @@ def main() -> None:
     # If Chrome wasn't found (default browser), keep alive until the server dies.
     _diag("waiting for window close")
     if chrome_proc is not None:
-        # Guard: if Chrome exits within 4s of opening it was delegated to an
+        # Guard: if Chrome exits within 10s of opening it was delegated to an
         # existing instance (same --user-data-dir profile already running).
         # Don't treat that as the user closing the window -- just switch to
         # keepalive mode without close-tracking.
-        time.sleep(4)
+        time.sleep(10)
         if chrome_proc.poll() is not None:
             log.info("Initial Chrome open delegated to existing instance -- keepalive mode")
             srv._stop_event.wait()
@@ -900,7 +900,7 @@ def main() -> None:
                         _shutdown(srv)
                         break
                     # Same delegation guard for re-opened windows
-                    time.sleep(4)
+                    time.sleep(10)
                     if chrome_proc.poll() is not None:
                         log.info("Keep Running: Chrome delegated -- keepalive mode")
                         srv._stop_event.wait()
