@@ -1,91 +1,119 @@
 /**
  * Infinite Zoom tab -- zoom in or out from a photo or video.
- *
- * Source -> direction toggle -> clip count -> Generate
- * Chains WanGP clips with lossless frame anchoring (no re-anchor).
+ * Source -> direction -> steps -> Generate
  */
 import { pollJob, stopJob, apiUpload } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 
-const VERSION = '20260520a';
-
 export function init(panel) {
   panel.innerHTML = '';
   const root = el('div', {
-    style: 'max-width:720px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:22px;',
+    style: 'max-width:680px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:18px;',
   });
   panel.appendChild(root);
 
-  // -- State ------------------------------------------------------------------
-  let _sourcePath = null;      // absolute path to photo or video
-  let _sourceThumb = null;     // data URL or /uploads URL for preview
-  let _isVideo = false;
-  let _direction = 'out';
-  let _jobId = null;
-  let _stopRequested = false;
+  let _sourcePath = null;
+  let _isVideo    = false;
+  let _direction  = 'out';
+  let _jobId      = null;
+  let _modelData  = {};   // cached from /api/fun/models
+  let _gpuVram    = 0;
 
-  // -- Source drop zone -------------------------------------------------------
-  const sourceSection = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
-
-  const dropLabel = el('div', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
+  // ── helpers ────────────────────────────────────────────────────────────────
+  const LABEL = s => el('div', {
+    style: 'font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-3);',
+    text: s,
   });
-  dropLabel.textContent = 'Source photo or video';
-  sourceSection.appendChild(dropLabel);
+
+  function _chip(label, value, row, onSelect) {
+    const b = el('button', {
+      style: [
+        'flex:1; padding:7px 4px; border-radius:6px; border:1px solid var(--border-2);',
+        'background:var(--surface); cursor:pointer; font-size:13px; font-weight:600;',
+        'color:var(--text-2); transition:all .12s; white-space:nowrap;',
+      ].join(''),
+    });
+    b.textContent = label;
+    b.dataset.value = value;
+    b.onclick = () => {
+      row.querySelectorAll('button').forEach(x => {
+        x.style.borderColor = 'var(--border-2)';
+        x.style.background  = 'var(--surface)';
+        x.style.color       = 'var(--text-2)';
+        delete x.dataset.active;
+      });
+      b.style.borderColor = 'var(--accent-border)';
+      b.style.background  = 'var(--accent-bg)';
+      b.style.color       = 'var(--accent)';
+      b.dataset.active    = '1';
+      onSelect(value);
+    };
+    return b;
+  }
+
+  function _activeValue(row) {
+    return row.querySelector('button[data-active]')?.dataset.value;
+  }
+
+  function _card(content) {
+    const c = el('div', {
+      style: 'background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-lg); padding:16px;',
+    });
+    c.append(...[content].flat());
+    return c;
+  }
+
+  // ── source drop zone ───────────────────────────────────────────────────────
+  const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none' });
+  panel.appendChild(fileInput);
+
+  const previewImg = el('img', {
+    style: 'max-height:180px; max-width:100%; border-radius:6px; display:none; object-fit:contain; margin:0 auto;',
+  });
+  const dropHint = el('div', {
+    style: 'display:flex; flex-direction:column; align-items:center; gap:8px; padding:20px 0;',
+  });
+  const dropIcon = el('div', { style: 'font-size:36px; color:var(--text-3);', text: '+' });
+  const dropTextEl = el('div', {
+    style: 'font-size:13px; color:var(--text-2);',
+    text: 'Drop a photo or video, or click to browse',
+  });
+  dropHint.append(dropIcon, dropTextEl);
+
+  const sourceInfo = el('div', {
+    style: 'display:none; align-items:center; justify-content:space-between; font-size:12px; color:var(--text-2); padding-top:8px;',
+  });
+  const sourceNameEl = el('span');
+  const clearBtn = el('button', {
+    style: 'background:none; border:none; color:var(--red); cursor:pointer; font-size:11px; padding:0;',
+    text: 'clear',
+  });
+  clearBtn.onclick = e => { e.stopPropagation(); _clearSource(); };
+  sourceInfo.append(sourceNameEl, clearBtn);
 
   const dropArea = el('div', {
     style: [
-      'border:2px dashed var(--border); border-radius:10px; padding:32px 20px;',
-      'text-align:center; cursor:pointer; color:var(--text-muted);',
-      'transition:border-color .2s, background .2s; background:var(--bg-card);',
-      'position:relative; min-height:120px; display:flex; align-items:center;',
-      'justify-content:center; gap:12px; flex-direction:column;',
+      'border:2px dashed var(--border-2); border-radius:var(--r-lg); cursor:pointer;',
+      'transition:border-color .15s, background .15s; background:var(--surface);',
     ].join(''),
   });
-
-  const dropIcon = el('div', { style: 'font-size:32px; opacity:.5;' });
-  dropIcon.textContent = '+';
-  const dropText = el('div', { style: 'font-size:14px;' });
-  dropText.textContent = 'Drop a photo or video here, or click to browse';
-
-  const previewImg = el('img', {
-    style: 'max-height:160px; max-width:100%; border-radius:6px; display:none; object-fit:contain;',
-  });
-
-  const sourceNameRow = el('div', {
-    style: 'font-size:12px; color:var(--text-muted); display:none; align-items:center; gap:8px;',
-  });
-  const sourceNameLabel = el('span');
-  const clearBtn = el('button', {
-    style: 'background:none; border:none; color:var(--crimson); cursor:pointer; font-size:11px; padding:0;',
-  });
-  clearBtn.textContent = 'clear';
-  clearBtn.onclick = e => { e.stopPropagation(); _clearSource(); };
-  sourceNameRow.append(sourceNameLabel, clearBtn);
-
-  dropArea.append(dropIcon, dropText, previewImg);
-  sourceSection.append(dropArea, sourceNameRow);
-
-  // File input
-  const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none;' });
-  panel.appendChild(fileInput);
+  dropArea.append(dropHint, previewImg, sourceInfo);
 
   dropArea.addEventListener('dragover', e => {
     e.preventDefault();
-    dropArea.style.borderColor = 'var(--gold)';
-    dropArea.style.background = 'var(--bg-card-hover, rgba(212,160,23,.06))';
+    dropArea.style.borderColor = 'var(--accent)';
+    dropArea.style.background  = 'var(--accent-bg)';
   });
   dropArea.addEventListener('dragleave', () => {
-    dropArea.style.borderColor = 'var(--border)';
-    dropArea.style.background = 'var(--bg-card)';
+    dropArea.style.borderColor = 'var(--border-2)';
+    dropArea.style.background  = 'var(--surface)';
   });
   dropArea.addEventListener('drop', e => {
     e.preventDefault();
-    dropArea.style.borderColor = 'var(--border)';
-    dropArea.style.background = 'var(--bg-card)';
-    const file = e.dataTransfer.files[0];
-    if (file) _uploadFile(file);
+    dropArea.style.borderColor = 'var(--border-2)';
+    dropArea.style.background  = 'var(--surface)';
+    if (e.dataTransfer.files[0]) _uploadFile(e.dataTransfer.files[0]);
   });
   dropArea.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
@@ -94,362 +122,259 @@ export function init(panel) {
   });
 
   function _clearSource() {
-    _sourcePath = null;
-    _sourceThumb = null;
-    _isVideo = false;
-    previewImg.style.display = 'none';
-    previewImg.src = '';
-    dropIcon.style.display = '';
-    dropText.style.display = '';
-    sourceNameRow.style.display = 'none';
-    generateBtn.disabled = true;
+    _sourcePath = null; _isVideo = false;
+    previewImg.style.display = 'none'; previewImg.src = '';
+    dropHint.style.display = 'flex';
+    sourceInfo.style.display = 'none';
+    _updateBtn();
   }
 
   async function _uploadFile(file) {
     const isVid = file.type.startsWith('video/');
-    dropText.textContent = 'Uploading...';
-    dropIcon.style.display = 'none';
-
+    dropTextEl.textContent = 'Uploading...';
     try {
-      const endpoint = isVid ? '/api/fun/upload-video' : '/api/fun/upload';
-      const resp = await apiUpload(endpoint, [file]);
+      const resp = await apiUpload(isVid ? '/api/fun/upload-video' : '/api/fun/upload', [file]);
       const data = resp?.files?.[0];
-      if (!data?.path) throw new Error('Upload returned no path');
-      _sourcePath = data.path;
-      _isVideo = isVid;
+      if (!data?.path) throw new Error('No path returned');
+      _sourcePath = data.path; _isVideo = isVid;
 
       if (isVid) {
-        // Extract first/last frame for preview
-        const pos = _direction === 'out' ? -1 : 0.1;
         const fr = await apiFetch('/api/zoom/extract-frame', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_path: _sourcePath, time_sec: pos }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ video_path: _sourcePath, time_sec: _direction === 'out' ? -1 : 0.1 }),
         }).catch(() => null);
-        _sourceThumb = fr?.frame_url || null;
-        if (_sourceThumb) {
-          previewImg.src = _sourceThumb;
-          previewImg.style.display = 'block';
-        }
+        if (fr?.frame_url) { previewImg.src = fr.frame_url; previewImg.style.display = 'block'; }
       } else {
         previewImg.src = pathToUrl(data.path);
         previewImg.style.display = 'block';
-        _sourceThumb = previewImg.src;
       }
 
-      dropIcon.style.display = 'none';
-      dropText.style.display = 'none';
-      sourceNameRow.style.display = 'flex';
-      sourceNameLabel.textContent = file.name;
-      generateBtn.disabled = false;
-
+      dropHint.style.display = 'none';
+      sourceNameEl.textContent = file.name;
+      sourceInfo.style.display = 'flex';
+      _updateBtn();
     } catch (err) {
       toast('Upload failed: ' + err.message, 'error');
-      dropText.textContent = 'Drop a photo or video here, or click to browse';
-      dropIcon.style.display = '';
+      dropTextEl.textContent = 'Drop a photo or video, or click to browse';
     }
   }
 
-  // -- Direction toggle -------------------------------------------------------
-  const dirSection = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
-  const dirLabel = el('div', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
-  });
-  dirLabel.textContent = 'Direction';
-  dirSection.appendChild(dirLabel);
+  // ── direction ──────────────────────────────────────────────────────────────
+  const dirRow = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' });
 
-  const dirToggle = el('div', {
-    style: 'display:grid; grid-template-columns:1fr 1fr; gap:8px;',
-  });
-
-  function _makeDirectionBtn(label, icon, value, description) {
-    const btn = el('button', {
-      style: [
-        'display:flex; flex-direction:column; align-items:center; gap:6px;',
-        'padding:14px 12px; border-radius:8px; border:2px solid var(--border);',
-        'background:var(--bg-card); cursor:pointer; transition:all .15s;',
-        'color:var(--text-muted);',
-      ].join(''),
-    });
-    const ico = el('span', { style: 'font-size:22px; line-height:1;' });
-    ico.textContent = icon;
-    const lbl = el('span', { style: 'font-size:13px; font-weight:600; color:var(--text);' });
-    lbl.textContent = label;
-    const desc = el('span', { style: 'font-size:10px; text-align:center; opacity:.65;' });
-    desc.textContent = description;
-    btn.append(ico, lbl, desc);
-    btn.dataset.value = value;
-    btn.onclick = () => _setDirection(value);
-    return btn;
-  }
-
-  const btnOut = _makeDirectionBtn('Zoom Out', '->', 'out', 'Reveals surroundings');
-  const btnIn  = _makeDirectionBtn('Zoom In',  '<-', 'in',  'Approaches detail');
-  dirToggle.append(btnOut, btnIn);
-  dirSection.appendChild(dirToggle);
-
-  function _setDirection(dir) {
-    _direction = dir;
-    [btnOut, btnIn].forEach(b => {
-      const active = b.dataset.value === dir;
-      b.style.borderColor = active ? 'var(--gold)' : 'var(--border)';
-      b.style.background  = active ? 'rgba(212,160,23,.1)' : 'var(--bg-card)';
-      b.style.color       = active ? 'var(--gold)' : 'var(--text-muted)';
-    });
-  }
-  _setDirection('out');
-
-  // -- Controls ---------------------------------------------------------------
-  const controlsRow = el('div', {
-    style: 'display:grid; grid-template-columns:1fr 1fr; gap:16px;',
-  });
-
-  // Clip count
-  const clipGroup = el('div', { style: 'display:flex; flex-direction:column; gap:6px;' });
-  const clipLabel = el('label', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
-  });
-  clipLabel.textContent = 'Zoom steps';
-
-  const clipRow = el('div', { style: 'display:flex; gap:6px;' });
-  [3, 4, 5, 6].forEach(n => {
+  function _dirBtn(label, sub, value) {
     const b = el('button', {
       style: [
-        'flex:1; padding:7px 0; border-radius:6px; border:2px solid var(--border);',
-        'background:var(--bg-card); cursor:pointer; font-size:13px; font-weight:600;',
-        'color:var(--text-muted); transition:all .15s;',
+        'display:flex; flex-direction:column; align-items:center; gap:4px; padding:14px;',
+        'border-radius:var(--r-md); border:2px solid var(--border-2);',
+        'background:var(--surface); cursor:pointer; transition:all .15s;',
       ].join(''),
     });
-    b.textContent = n;
-    b.dataset.clips = n;
+    el('span', { style: 'font-size:15px; font-weight:700; color:var(--text);', text: label });
+    el('span', { style: 'font-size:11px; color:var(--text-3);', text: sub });
+    b.append(
+      el('span', { style: 'font-size:15px; font-weight:700; color:var(--text);', text: label }),
+      el('span', { style: 'font-size:11px; color:var(--text-3);', text: sub }),
+    );
+    b.dataset.value = value;
     b.onclick = () => {
-      clipRow.querySelectorAll('button').forEach(x => {
-        x.style.borderColor = 'var(--border)';
-        x.style.background  = 'var(--bg-card)';
-        x.style.color       = 'var(--text-muted)';
+      [btnOut, btnIn].forEach(x => {
+        x.style.borderColor = 'var(--border-2)';
+        x.style.background  = 'var(--surface)';
       });
-      b.style.borderColor = 'var(--gold)';
-      b.style.background  = 'rgba(212,160,23,.1)';
-      b.style.color       = 'var(--gold)';
+      b.style.borderColor = 'var(--accent-border)';
+      b.style.background  = 'var(--accent-bg)';
+      _direction = value;
     };
-    if (n === 5) b.click();
-    clipRow.appendChild(b);
-  });
-  clipGroup.append(clipLabel, clipRow);
+    return b;
+  }
 
-  // Clip duration
-  const durGroup = el('div', { style: 'display:flex; flex-direction:column; gap:6px;' });
-  const durLabel = el('label', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
+  const btnOut = _dirBtn('Zoom Out', 'Reveals surroundings', 'out');
+  const btnIn  = _dirBtn('Zoom In',  'Approaches detail',    'in');
+  dirRow.append(btnOut, btnIn);
+  btnOut.style.borderColor = 'var(--accent-border)';
+  btnOut.style.background  = 'var(--accent-bg)';
+
+  // ── steps + duration ───────────────────────────────────────────────────────
+  const stepsRow = el('div', { style: 'display:flex; gap:6px;' });
+  [3, 4, 5, 6].forEach((n, i) => {
+    const b = _chip(n, n, stepsRow, () => {});
+    if (i === 1) b.click();  // default 4 steps
+    stepsRow.appendChild(b);
   });
-  durLabel.textContent = 'Seconds per step';
 
   const durRow = el('div', { style: 'display:flex; gap:6px;' });
-  [4, 5, 6, 8].forEach(n => {
-    const b = el('button', {
-      style: [
-        'flex:1; padding:7px 0; border-radius:6px; border:2px solid var(--border);',
-        'background:var(--bg-card); cursor:pointer; font-size:13px; font-weight:600;',
-        'color:var(--text-muted); transition:all .15s;',
-      ].join(''),
-    });
-    b.textContent = n;
-    b.dataset.dur = n;
-    b.onclick = () => {
-      durRow.querySelectorAll('button').forEach(x => {
-        x.style.borderColor = 'var(--border)';
-        x.style.background  = 'var(--bg-card)';
-        x.style.color       = 'var(--text-muted)';
-      });
-      b.style.borderColor = 'var(--gold)';
-      b.style.background  = 'rgba(212,160,23,.1)';
-      b.style.color       = 'var(--gold)';
-    };
-    if (n === 5) b.click();
+  [4, 5, 6, 8].forEach((n, i) => {
+    const b = _chip(`${n}s`, n, durRow, () => {});
+    if (i === 1) b.click();  // default 5s
     durRow.appendChild(b);
   });
-  durGroup.append(durLabel, durRow);
 
-  controlsRow.append(clipGroup, durGroup);
+  const controlsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:16px;' });
+  const stepsGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
+  stepsGroup.append(LABEL('Zoom steps'), stepsRow);
+  const durGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
+  durGroup.append(LABEL('Per step'), durRow);
+  controlsGrid.append(stepsGroup, durGroup);
 
-  // -- Idea field -------------------------------------------------------------
-  const ideaGroup = el('div', { style: 'display:flex; flex-direction:column; gap:6px;' });
-  const ideaLabel = el('label', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
-  });
-  ideaLabel.textContent = 'What the zoom reveals (optional)';
+  // ── idea ───────────────────────────────────────────────────────────────────
   const ideaInput = el('textarea', {
-    placeholder: 'e.g. "zoom out to reveal a foggy mountain valley" or "zoom into the ring on her finger"',
+    placeholder: '"reveal a foggy mountain valley"  or  "zoom into the ring on her finger"',
     rows: 2,
     style: [
-      'width:100%; box-sizing:border-box; background:var(--bg-card); border:1px solid var(--border);',
-      'border-radius:8px; padding:10px 12px; color:var(--text); font-size:13px;',
-      'resize:vertical; font-family:inherit;',
+      'width:100%; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--border-2);',
+      'border-radius:var(--r-md); padding:10px 12px; color:var(--text); font-size:13px;',
+      'resize:none; font-family:inherit; outline:none;',
     ].join(''),
   });
-  ideaGroup.append(ideaLabel, ideaInput);
 
-  // -- Model selector ---------------------------------------------------------
-  // Loaded from /api/fun/models; filtered to I2V models only (zoom needs a
-  // start image). Defaults to the best model the GPU can run based on vram_min_gb.
-  const modelGroup = el('div', { style: 'display:flex; flex-direction:column; gap:6px;' });
-  const modelLabelRow = el('div', { style: 'display:flex; align-items:center; gap:8px;' });
-  const modelLbl = el('label', {
-    style: 'color:var(--text-muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase;',
+  // ── model ──────────────────────────────────────────────────────────────────
+  const vramNote = el('span', { style: 'font-size:11px; color:var(--text-3);' });
+  const modelLabelRow = el('div', {
+    style: 'display:flex; align-items:center; justify-content:space-between;',
   });
-  modelLbl.textContent = 'Model';
-  const vramBadge = el('span', {
-    style: 'font-size:11px; color:var(--text-muted); opacity:.7;',
-  });
-  modelLabelRow.append(modelLbl, vramBadge);
+  modelLabelRow.append(LABEL('Model'), vramNote);
 
   const modelSel = el('select', {
     style: [
-      'width:100%; background:var(--bg-card); border:1px solid var(--border);',
-      'border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px;',
-      'cursor:pointer;',
+      'width:100%; background:var(--surface-2); border:1px solid var(--border-2);',
+      'border-radius:var(--r-md); padding:9px 12px; color:var(--text); font-size:13px;',
+      'cursor:pointer; outline:none; margin-top:6px;',
     ].join(''),
   });
 
-  const modelWarning = el('div', {
-    style: 'font-size:11px; color:#e88; display:none; padding-top:2px;',
+  const modelWarn = el('div', {
+    style: 'font-size:11px; color:var(--red); display:none; padding-top:4px;',
   });
 
-  modelGroup.append(modelLabelRow, modelSel, modelWarning);
+  const modelGroup = el('div');
+  modelGroup.append(modelLabelRow, modelSel, modelWarn);
 
-  // Load models from server and populate selector
   apiFetch('/api/fun/models').then(data => {
-    const gpuVram = data.gpu_vram_gb || 0;
-    if (gpuVram) vramBadge.textContent = `(${gpuVram} GB GPU)`;
-    const models = data.models || {};
-    const i2vModels = Object.entries(models).filter(([, m]) => m.i2v);
+    _modelData = data.models || {};
+    _gpuVram   = data.gpu_vram_gb || 0;
+    if (_gpuVram) vramNote.textContent = `${_gpuVram} GB GPU`;
+
+    const i2v = Object.entries(_modelData).filter(([, m]) => m.i2v);
     modelSel.innerHTML = '';
-    for (const [name, info] of i2vModels) {
-      const opt = el('option', { value: name });
-      const needs = info.vram_min_gb || 0;
-      const fits = !gpuVram || gpuVram >= needs;
-      opt.textContent = fits ? name : `${name} (needs ${needs} GB)`;
-      if (!fits) opt.style.color = '#e88';
+    for (const [name, info] of i2v) {
+      const fits = !_gpuVram || _gpuVram >= (info.vram_min_gb || 0);
+      const opt  = el('option', { value: name });
+      opt.textContent = fits ? name : `${name}  (needs ${info.vram_min_gb} GB)`;
+      if (!fits) opt.style.color = 'var(--red)';
       modelSel.appendChild(opt);
     }
-    // Default: best I2V model that fits available VRAM
-    const preferred = i2vModels
-      .filter(([, m]) => !gpuVram || gpuVram >= (m.vram_min_gb || 0))
-      .sort(([, a], [, b]) => (b.vram_min_gb || 0) - (a.vram_min_gb || 0))[0];
-    if (preferred) modelSel.value = preferred[0];
+    const best = i2v.filter(([, m]) => !_gpuVram || _gpuVram >= (m.vram_min_gb || 0))
+                    .sort(([, a], [, b]) => (b.vram_min_gb || 0) - (a.vram_min_gb || 0))[0];
+    if (best) modelSel.value = best[0];
     _checkModelVram();
   }).catch(() => {
-    const opt = el('option', { value: 'Wan2.1-I2V-14B-480P' });
-    opt.textContent = 'Wan2.1-I2V-14B-480P';
-    modelSel.appendChild(opt);
+    modelSel.appendChild(el('option', { value: 'LTX-2 Dev13B', text: 'LTX-2 Dev13B' }));
   });
 
   function _checkModelVram() {
-    apiFetch('/api/fun/models').then(data => {
-      const gpuVram = data.gpu_vram_gb || 0;
-      const models = data.models || {};
-      const selected = models[modelSel.value];
-      if (gpuVram && selected && selected.vram_min_gb > gpuVram) {
-        modelWarning.textContent = `Warning: this model needs ${selected.vram_min_gb} GB VRAM but ${gpuVram} GB detected -- may thrash or fail`;
-        modelWarning.style.display = 'block';
-      } else {
-        modelWarning.style.display = 'none';
-      }
-    }).catch(() => {});
+    const info = _modelData[modelSel.value];
+    const needs = info?.vram_min_gb || 0;
+    if (_gpuVram && needs > _gpuVram) {
+      modelWarn.textContent = `This model needs ${needs} GB -- you have ${_gpuVram} GB. May fail.`;
+      modelWarn.style.display = 'block';
+    } else {
+      modelWarn.style.display = 'none';
+    }
   }
   modelSel.addEventListener('change', _checkModelVram);
 
-  // -- Generate button --------------------------------------------------------
+  // ── generate button ────────────────────────────────────────────────────────
   const generateBtn = el('button', {
     disabled: true,
     style: [
-      'padding:14px; border-radius:10px; border:none; cursor:pointer; font-size:15px;',
-      'font-weight:700; letter-spacing:.04em; background:var(--crimson); color:#fff;',
-      'transition:all .15s; opacity:.5;',
+      'padding:14px; border-radius:var(--r-lg); border:none; cursor:not-allowed;',
+      'font-size:15px; font-weight:700; letter-spacing:.04em;',
+      'background:var(--circus-red); color:var(--text); opacity:.45; transition:opacity .15s;',
     ].join(''),
+    text: 'Generate Zoom',
   });
-  generateBtn.textContent = 'Generate Zoom';
 
-  // Enable/disable styles
-  const _updateBtnState = () => {
-    const disabled = !_sourcePath;
-    generateBtn.disabled = disabled;
-    generateBtn.style.opacity = disabled ? '.5' : '1';
-    generateBtn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
-  };
+  function _updateBtn() {
+    const ok = !!_sourcePath;
+    generateBtn.disabled = !ok;
+    generateBtn.style.opacity = ok ? '1' : '.45';
+    generateBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+  }
 
-  // -- Progress area ----------------------------------------------------------
-  const progressArea = el('div', { style: 'display:none; flex-direction:column; gap:10px;' });
-
-  const progressLabel = el('div', {
-    style: 'font-size:13px; color:var(--text-muted);',
-  });
-  const progressBar = el('div', {
-    style: 'height:6px; background:var(--border); border-radius:3px; overflow:hidden;',
+  // ── progress ───────────────────────────────────────────────────────────────
+  const progressLabel = el('div', { style: 'font-size:13px; color:var(--text-2);' });
+  const progressTrack = el('div', {
+    style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;',
   });
   const progressFill = el('div', {
-    style: 'height:100%; width:0%; background:var(--gold); border-radius:3px; transition:width .4s;',
+    style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;',
   });
-  progressBar.appendChild(progressFill);
+  progressTrack.appendChild(progressFill);
 
-  const stopBtn = el('button', {
+  const cancelBtn = el('button', {
     style: [
-      'align-self:flex-start; padding:6px 14px; border-radius:6px; border:1px solid var(--border);',
-      'background:transparent; color:var(--text-muted); cursor:pointer; font-size:12px;',
+      'align-self:flex-start; padding:5px 12px; border-radius:var(--r-sm);',
+      'border:1px solid var(--border-2); background:transparent;',
+      'color:var(--text-3); cursor:pointer; font-size:11px;',
     ].join(''),
+    text: 'Cancel',
   });
-  stopBtn.textContent = 'Cancel';
-  stopBtn.onclick = () => {
-    if (_jobId) { stopJob(_jobId); _stopRequested = true; }
-  };
+  cancelBtn.onclick = () => { if (_jobId) stopJob(_jobId); };
 
-  progressArea.append(progressLabel, progressBar, stopBtn);
-
-  // -- Output area ------------------------------------------------------------
-  const outputArea = el('div', { style: 'display:none; flex-direction:column; gap:14px;' });
-
-  const videoWrap = el('div', {
-    style: 'border-radius:10px; overflow:hidden; background:#000; position:relative;',
+  const progressArea = el('div', {
+    style: 'display:none; flex-direction:column; gap:8px;',
   });
+  progressArea.append(progressLabel, progressTrack, cancelBtn);
+
+  // ── output ─────────────────────────────────────────────────────────────────
   const videoEl = el('video', {
     controls: true, loop: true, playsInline: true, src: '',
-    style: 'width:100%; display:block; max-height:480px;',
+    style: 'width:100%; display:block; border-radius:var(--r-lg); background:#000;',
   });
-  videoWrap.appendChild(videoEl);
+  const outputActions = el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' });
 
-  const outputActions = el('div', { style: 'display:flex; gap:10px; flex-wrap:wrap;' });
-
-  function _makeAction(label, icon, fn) {
+  function _actionBtn(label, fn) {
     const b = el('button', {
       style: [
-        'display:flex; align-items:center; gap:6px; padding:8px 14px;',
-        'border-radius:7px; border:1px solid var(--border); background:var(--bg-card);',
-        'color:var(--text); cursor:pointer; font-size:13px; transition:background .15s;',
+        'padding:7px 14px; border-radius:var(--r-sm);',
+        'border:1px solid var(--border-2); background:var(--surface);',
+        'color:var(--text-2); cursor:pointer; font-size:12px; transition:background .12s;',
       ].join(''),
+      text: label,
     });
-    b.innerHTML = `<span>${icon}</span><span>${label}</span>`;
     b.onclick = fn;
     return b;
   }
 
-  outputArea.append(videoWrap, outputActions);
+  const outputArea = el('div', { style: 'display:none; flex-direction:column; gap:12px;' });
+  outputArea.append(videoEl, outputActions);
 
-  // -- Assemble panel ---------------------------------------------------------
-  root.append(sourceSection, dirSection, controlsRow, ideaGroup, modelGroup, generateBtn, progressArea, outputArea);
+  // ── assemble ───────────────────────────────────────────────────────────────
+  root.append(
+    _card(dropArea),
+    el('div', { style: 'display:flex; flex-direction:column; gap:8px;' },
+      [LABEL('Direction'), dirRow]),
+    controlsGrid,
+    el('div', { style: 'display:flex; flex-direction:column; gap:6px;' },
+      [LABEL('What the zoom reveals (optional)'), ideaInput]),
+    _card(modelGroup),
+    generateBtn,
+    progressArea,
+    outputArea,
+  );
 
-  // -- Generate logic ---------------------------------------------------------
+  // ── generate ───────────────────────────────────────────────────────────────
   generateBtn.onclick = async () => {
-    if (!_sourcePath) { toast('Drop a photo or video first', 'warn'); return; }
+    if (!_sourcePath) return;
+    const nClips  = Number(_activeValue(stepsRow)) || 4;
+    const clipDur = Number(_activeValue(durRow))   || 5;
 
-    const nClips = parseInt(clipRow.querySelector('button[style*="gold"]')?.dataset.clips || '5');
-    const clipDur = parseFloat(durRow.querySelector('button[style*="gold"]')?.dataset.dur || '5');
-
-    generateBtn.style.display = 'none';
+    generateBtn.style.display  = 'none';
     progressArea.style.display = 'flex';
-    outputArea.style.display = 'none';
-    _stopRequested = false;
-    progressFill.style.width = '0%';
-    progressLabel.textContent = 'Submitting...';
+    outputArea.style.display   = 'none';
+    progressFill.style.width   = '0%';
+    progressLabel.textContent  = 'Planning zoom arc...';
 
     try {
       const res = await apiFetch('/api/zoom/make', {
@@ -461,74 +386,60 @@ export function init(panel) {
           n_clips:        nClips,
           clip_duration:  clipDur,
           idea:           ideaInput.value.trim(),
-          model_name:     modelSel.value || 'Wan2.1-I2V-14B-480P',
+          model_name:     modelSel.value,
           skip_audio:     false,
         }),
       });
-
       _jobId = res.job_id;
 
-      pollJob(
-        _jobId,
-        // onProgress -- receives full job object
+      pollJob(_jobId,
         j => {
-          const pct = Number(j.progress) || 0;
-          progressFill.style.width = pct + '%';
-          progressLabel.textContent = j.message || `${pct}%`;
-          // Streaming first-clip preview
-          if (j.meta?.first_clip && videoEl.src === '') {
+          progressFill.style.width  = (Number(j.progress) || 0) + '%';
+          progressLabel.textContent = j.message || 'Generating...';
+          if (j.meta?.first_clip && !videoEl.src) {
             videoEl.src = pathToUrl(j.meta.first_clip);
-            videoEl.load();
-            videoEl.style.opacity = '0.5';
-          }
-        },
-        // onDone -- receives full job object
-        j => {
-          const outputPath = Array.isArray(j.output) ? j.output[0] : j.output;
-          progressArea.style.display = 'none';
-          generateBtn.style.display  = '';
-          _updateBtnState();
-
-          if (outputPath) {
-            videoEl.src = pathToUrl(outputPath);
-            videoEl.style.opacity = '1';
+            videoEl.style.opacity = '.5';
             videoEl.load();
             outputArea.style.display = 'flex';
           }
-
+        },
+        j => {
+          const out = Array.isArray(j.output) ? j.output[0] : j.output;
+          progressArea.style.display = 'none';
+          generateBtn.style.display  = '';
+          _updateBtn();
+          if (out) {
+            videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+            outputArea.style.display = 'flex';
+          }
           outputActions.innerHTML = '';
           outputActions.append(
-            _makeAction('Open in folder', '[>]', () =>
+            _actionBtn('Open in folder', () =>
               apiFetch('/api/reveal', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: outputPath, action: 'explorer' }),
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: out, action: 'explorer' }),
               }).catch(() => {})),
-            _makeAction('Send to Bridges', '[~]', () => {
-              document.dispatchEvent(new CustomEvent('dcs:handoff', {
-                detail: { from: 'zoom', to: 'bridges', path: outputPath },
-              }));
-              toast('Sent to Bridges tab', 'success');
+            _actionBtn('Send to Bridges', () => {
+              document.dispatchEvent(new CustomEvent('dcs:handoff',
+                { detail: { from: 'zoom', to: 'bridges', path: out } }));
+              toast('Sent to Bridges', 'success');
             }),
           );
-
           toast(`Zoom ${_direction} complete!`, 'success');
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
-        // onError
         msg => {
           progressArea.style.display = 'none';
           generateBtn.style.display  = '';
-          _updateBtnState();
+          _updateBtn();
           toast('Error: ' + msg, 'error');
         },
       );
-
     } catch (err) {
       progressArea.style.display = 'none';
       generateBtn.style.display  = '';
-      _updateBtnState();
-      toast('Failed to start: ' + err.message, 'error');
+      _updateBtn();
+      toast('Failed: ' + err.message, 'error');
     }
   };
 }

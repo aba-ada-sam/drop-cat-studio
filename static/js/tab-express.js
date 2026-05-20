@@ -850,7 +850,7 @@ export function init(panel) {
     class: 'btn',
     text: 'Quick',
     title: 'Fast 30-45s preview -- validates composition and atmosphere, not motion',
-    style: 'font-size:.9rem; padding:14px 16px; white-space:nowrap; opacity:.85;',
+    style: 'font-size:.9rem; padding:14px 16px; white-space:nowrap;',
   });
   root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, quickBtn, loopBtn, loopFolderBtn]));
 
@@ -1217,7 +1217,7 @@ export function init(panel) {
       output_width:        _outW,
       output_height:       _outH,
       auto_pick_model:     _autoPick,
-      motion_style:        isLtx ? _motionIntensity : 'dynamic',
+      motion_style:        isLtx ? 'calm' : 'dynamic',
     };
   }
 
