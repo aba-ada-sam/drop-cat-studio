@@ -877,28 +877,34 @@ def main() -> None:
     # If Chrome wasn't found (default browser), keep alive until the server dies.
     _diag("waiting for window close")
     if chrome_proc is not None:
-        while True:
-            chrome_proc.wait()
-            log.info("App window closed -- asking user")
-            if _confirm_quit():
-                _shutdown(srv)
-                break
-            else:
-                # User said keep running -- reopen the window and wait again
-                log.info("User chose to keep running -- reopening window")
-                chrome_proc = open_app_window(srv.port) if srv.port else None
-                if chrome_proc is None:
-                    # Can't reopen (Chrome gone) -- shut down anyway
+        # Guard: if Chrome exits within 4s of opening it was delegated to an
+        # existing instance (same --user-data-dir profile already running).
+        # Don't treat that as the user closing the window -- just switch to
+        # keepalive mode without close-tracking.
+        time.sleep(4)
+        if chrome_proc.poll() is not None:
+            log.info("Initial Chrome open delegated to existing instance -- keepalive mode")
+            srv._stop_event.wait()
+        else:
+            while True:
+                chrome_proc.wait()
+                log.info("App window closed -- asking user")
+                if _confirm_quit():
                     _shutdown(srv)
                     break
-                # Guard: if Chrome exits within 3s the new process was delegated to
-                # an existing instance (Chrome profile already open). Give it time
-                # to settle; if it exits immediately, skip waiting and just continue.
-                time.sleep(3)
-                if chrome_proc.poll() is not None:
-                    log.info("Chrome delegated to existing instance -- continuing without tracking")
-                    srv._stop_event.wait()  # keep manager alive, no close tracking
-                    break
+                else:
+                    # User said keep running -- reopen the window and wait again
+                    log.info("User chose to keep running -- reopening window")
+                    chrome_proc = open_app_window(srv.port) if srv.port else None
+                    if chrome_proc is None:
+                        _shutdown(srv)
+                        break
+                    # Same delegation guard for re-opened windows
+                    time.sleep(4)
+                    if chrome_proc.poll() is not None:
+                        log.info("Keep Running: Chrome delegated -- keepalive mode")
+                        srv._stop_event.wait()
+                        break
     else:
         # No trackable window -- keep manager alive as a watchdog indefinitely
         srv._stop_event.wait()
