@@ -144,18 +144,15 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] could not create runtime dirs (non-fatal): %s", _e)
 
-    # Discard any stale queue_save.json from a previous session. The file is
-    # only useful in the brief window right after a crash/restart; leaving it
-    # around causes the Restore button to appear unexpectedly on later sessions
-    # and makes old queued jobs look like they "came back".
+    # Always delete queue_save.json on startup. Restoring a previous queue
+    # causes deadlocked or failed jobs to re-run immediately, which is worse
+    # than starting fresh. The Restore button still exists for manual use if
+    # the user explicitly saved the queue before a planned restart.
     try:
         from core.job_manager import QUEUE_SAVE_FILE as _QSF
-        import time as _t
         if _QSF.exists():
-            age = _t.time() - _QSF.stat().st_mtime
-            if age > 300:   # older than 5 minutes -- definitely stale
-                _QSF.unlink()
-                log.info("[startup] removed stale queue_save.json (%.0fs old)", age)
+            _QSF.unlink()
+            log.info("[startup] cleared queue_save.json -- fresh session")
     except Exception as _e:
         log.warning("[startup] queue_save cleanup failed (non-fatal): %s", _e)
 
