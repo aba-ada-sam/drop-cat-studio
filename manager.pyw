@@ -891,6 +891,14 @@ def main() -> None:
                     # Can't reopen (Chrome gone) -- shut down anyway
                     _shutdown(srv)
                     break
+                # Guard: if Chrome exits within 3s the new process was delegated to
+                # an existing instance (Chrome profile already open). Give it time
+                # to settle; if it exits immediately, skip waiting and just continue.
+                time.sleep(3)
+                if chrome_proc.poll() is not None:
+                    log.info("Chrome delegated to existing instance -- continuing without tracking")
+                    srv._stop_event.wait()  # keep manager alive, no close tracking
+                    break
     else:
         # No trackable window -- keep manager alive as a watchdog indefinitely
         srv._stop_event.wait()
