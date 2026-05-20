@@ -481,7 +481,7 @@ def _generate_story_arc(
     # frame-of-clip-N+1) carry continuity. Result: a single extended
     # atmospheric shot of the SAME subject in the SAME scene, breathing for
     # the requested total duration.
-    if is_ltx and resolved_style in ("calm", "gentle") and not continuation_mode:
+    if is_ltx and resolved_style == "calm" and not continuation_mode:
         if progress_fn:
             progress_fn("Locking scene for coherent extension...")
 
@@ -525,37 +525,6 @@ def _generate_story_arc(
                     prompt = f"{user_text}. {anchor.format(effect=effect)}"
                 else:
                     prompt = fallback_base.format(effect=effect.lower())
-                clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
-        else:  # "gentle"
-            # Subject allowed to move SUBTLY (head turn, breath, hand
-            # gesture, small weight shift) AND environment animates. Some
-            # risk of subject drift across clips but visible character
-            # motion within each clip. The chain anchor still carries the
-            # last frame across, which preserves most of the identity.
-            _GENTLE_EFFECTS = [
-                "Single slow light shift across the scene.",
-                "Subject takes one slow breath, chest barely rising.",
-                "Subject's gaze drifts slightly to the side, then holds.",
-                "Soft wind stirs hair or fabric edge for a moment.",
-                "Subject blinks slowly, eyes re-settle with quiet focus.",
-                "Light brightens slightly as a cloud shifts overhead.",
-                "Subject's hand relaxes, fingers settle by gravity.",
-                "Background detail stirs faintly, subject holds expression.",
-            ]
-            clips = []
-            for i in range(n_clips):
-                effect = _GENTLE_EFFECTS[i % len(_GENTLE_EFFECTS)]
-                motion_clause = (
-                    f"Fixed camera, locked frame. {effect} "
-                    "Background unchanged, sky clear and steady."
-                )
-                if user_text:
-                    prompt = f"{user_text}. {motion_clause}"
-                else:
-                    prompt = (
-                        f"locked wide shot, fixed camera. {effect.lower()} "
-                        "background unchanged, photorealistic style"
-                    )
                 clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
 
         log.info("[multi] Scene-hold extension (%s): %d clips, varied effects, first='%s...'",
