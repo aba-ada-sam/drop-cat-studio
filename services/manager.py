@@ -588,7 +588,17 @@ def startup_all():
         _set_status("wangp", **wangp_status)
         wan_root = cfg.get("wan2gp_root")
         if wan_root and wangp_status["state"] == "ready":
-            start_wangp_worker()
+            ok, _ = start_wangp_worker()
+            if ok:
+                # Tell the GPU orchestrator WanGP owns the GPU so the first
+                # multi-clip job sees it as warm and skips Phase 0 audio-first.
+                # Without this, gpu.current stays None despite WanGP being loaded,
+                # and Phase 0 evicts the freshly-loaded worker on every first job.
+                try:
+                    from core.gpu_orchestrator import gpu as _gpu
+                    _gpu._current = "wangp"
+                except Exception:
+                    pass
         elif wangp_status["state"] == "not_configured":
             log.info("WanGP path not configured")
 
