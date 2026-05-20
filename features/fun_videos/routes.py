@@ -265,6 +265,29 @@ async def folder_loop_start(request: Request):
     if not isinstance(settings, dict):
         raise HTTPException(400, "'settings' must be an object")
 
+    # Warn if the selected model is known to deadlock on low-VRAM cards.
+    # Wan I2V 14B needs 20 GB; submitting a folder loop of 15 images with
+    # it on a 16 GB card fills the queue with deadlocked jobs.
+    try:
+        from features.fun_videos.video_generator import MODELS
+        from app import _g as _app_g
+        _req_model = settings.get("model") or settings.get("model_name") or ""
+        _model_info = MODELS.get(_req_model, {})
+        _vram_needed = _model_info.get("vram_min_gb", 0)
+        _vram_avail = (_app_g.get("gpu_vram_gb") or 0)
+        if _vram_needed and _vram_avail and _vram_avail < _vram_needed:
+            raise HTTPException(
+                400,
+                f"Model '{_req_model}' needs {_vram_needed} GB VRAM but "
+                f"{_vram_avail} GB detected. Folder loop would queue "
+                f"{len(images)} deadlocked jobs. Change the model in "
+                f"Create Videos settings before starting the loop."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # VRAM check is best-effort; don't block if it fails
+
     multi_video = bool(body.get("multi_video", True))
     repeat = bool(body.get("repeat", False))
     endpoint = "/api/fun/make-it-multi" if multi_video else "/api/fun/make-it"
