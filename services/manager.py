@@ -997,6 +997,12 @@ def _watchdog_loop():
                             _set_status("wangp", state="error",
                                         message="Generation deadlocked -- restarting...")
                             _wangp_last_step = None
+                            # Kill by port first -- the tracked _wangp_worker_proc
+                            # reference may point to a newer process started by a
+                            # previous recovery attempt, leaving the original stuck
+                            # process still alive and holding VRAM. Port-kill catches
+                            # ALL processes on 7899 regardless of which one we spawned.
+                            _kill_by_port(WANGP_WORKER_PORT, "WanGP (deadlock)", wait_release=True)
                             try:
                                 from core.gpu_orchestrator import gpu
                                 gpu.acquire("wangp", reason="watchdog deadlock recovery")
