@@ -488,53 +488,78 @@ def _generate_story_arc(
         user_text = (initial_idea or "").strip()
 
         if resolved_style == "calm":
-            # Subject completely still, single environmental effect only.
-            # LTX-2 fills unanchored background areas with invented motion
-            # (manifests as rain/debris). Fix: one effect + explicit anchors.
-            # Research: "one environment effect not five"; cinematographic
-            # framing; explicit "background static, sky unchanged" to prevent
-            # empty-region hallucination. No negative language in pos prompt.
-            motion_clause = (
+            # Vary the environmental effect per clip so each clip has one distinct
+            # atmospheric detail. Using the same effect every clip produces a flat
+            # loop with no progression; varying them gives a sense of time passing
+            # while keeping the subject completely still.
+            # Keep re-anchoring OFF (caller sets reanchor_every=0): the clip chain
+            # starts from the last frame of the previous clip, so each clip's
+            # starting frame already has the prior clip's light/atmosphere baked in.
+            # Re-anchoring back to the static source photo resets that baked state
+            # and triggers LTX's background-fill heuristics, which manifest as
+            # rain/debris artifacts.
+            _CALM_EFFECTS = [
+                "Warm light shifts slowly across the scene, casting long moving shadows.",
+                "Steam or mist rises gently, wisps curling then dissipating in still air.",
+                "A shadow creeps across the surface as light angle changes softly.",
+                "Curtain or fabric edge stirs from unseen air, then settles.",
+                "Cloud shadow passes overhead, light quality briefly dims then brightens.",
+                "Distant background element drifts faintly, foreground subject unchanged.",
+                "Light warms to golden hue, texture catches a new angle of shine.",
+                "Faint atmospheric haze shifts in the background, depth breathes.",
+            ]
+            anchor = (
                 "Breathing photograph, fixed camera. "
                 "Subject holds perfectly still. "
-                "Warm light shifts slowly across the scene, casting long moving shadows. "
+                "{effect} "
                 "Background unchanged, sky clear and steady, horizon locked."
             )
-            fallback = (
+            fallback_base = (
                 "breathing photograph, fixed wide shot, subject perfectly still, "
-                "single slow light shift across the scene, background unchanged, "
-                "fixed frame, photorealistic"
+                "{effect} background unchanged, fixed frame, photorealistic"
             )
+            clips = []
+            for i in range(n_clips):
+                effect = _CALM_EFFECTS[i % len(_CALM_EFFECTS)]
+                if user_text:
+                    prompt = f"{user_text}. {anchor.format(effect=effect)}"
+                else:
+                    prompt = fallback_base.format(effect=effect.lower())
+                clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
         else:  # "gentle"
             # Subject allowed to move SUBTLY (head turn, breath, hand
             # gesture, small weight shift) AND environment animates. Some
             # risk of subject drift across clips but visible character
             # motion within each clip. The chain anchor still carries the
             # last frame across, which preserves most of the identity.
-            motion_clause = (
-                "Fixed camera, locked frame. "
-                "Subject makes one subtle movement: slow breath, slight head turn, "
-                "or gentle eye blink. "
-                "Single light shift across the scene. Background unchanged, sky clear and steady."
-            )
-            fallback = (
-                "locked wide shot, fixed camera, subject breathes gently, "
-                "single slow light shift, background unchanged, "
-                "photorealistic style"
-            )
+            _GENTLE_EFFECTS = [
+                "Single slow light shift across the scene.",
+                "Subject takes one slow breath, chest barely rising.",
+                "Subject's gaze drifts slightly to the side, then holds.",
+                "Soft wind stirs hair or fabric edge for a moment.",
+                "Subject blinks slowly, eyes re-settle with quiet focus.",
+                "Light brightens slightly as a cloud shifts overhead.",
+                "Subject's hand relaxes, fingers settle by gravity.",
+                "Background detail stirs faintly, subject holds expression.",
+            ]
+            clips = []
+            for i in range(n_clips):
+                effect = _GENTLE_EFFECTS[i % len(_GENTLE_EFFECTS)]
+                motion_clause = (
+                    f"Fixed camera, locked frame. {effect} "
+                    "Background unchanged, sky clear and steady."
+                )
+                if user_text:
+                    prompt = f"{user_text}. {motion_clause}"
+                else:
+                    prompt = (
+                        f"locked wide shot, fixed camera. {effect.lower()} "
+                        "background unchanged, photorealistic style"
+                    )
+                clips.append({"prompt": prompt, "duration": float(default_clip_dur)})
 
-        if user_text:
-            # Append motion guidance to the user's idea so LTX has explicit
-            # instructions to put motion in the frame. The user's words stay
-            # in front so subject identity / scene reads first.
-            scene_prompt = f"{user_text}. {motion_clause}"
-        else:
-            scene_prompt = fallback
-
-        clips = [{"prompt": scene_prompt, "duration": float(default_clip_dur)}
-                 for _ in range(n_clips)]
-        log.info("[multi] Scene-hold extension (%s): %d clips, prompt='%s...'",
-                 resolved_style, n_clips, scene_prompt[:80])
+        log.info("[multi] Scene-hold extension (%s): %d clips, varied effects, first='%s...'",
+                 resolved_style, n_clips, clips[0]["prompt"][:80])
         return clips, "scene-hold"
 
     if resolved_style == "calm":
@@ -1456,9 +1481,14 @@ def run_multi_prep(job, photo_path, settings):
         log.info("[multi] Story arc via %s (%d clips): %s", arc_method, n_clips, arc_prompts)
         job.update(message="Story arc planned (text-only, no photo analysis)")
     elif arc_method == "scene-hold":
-        log.info("[multi] Scene-hold extension (%d clips, same prompt each): %s",
+        log.info("[multi] Scene-hold extension (%d clips, varied effects): %s",
                  n_clips, arc_prompts[0] if arc_prompts else "")
-        job.update(message="Extending single shot across clips (no narrative drift)")
+        job.update(message="Extending single shot across clips (varied environmental effects)")
+        # Disable re-anchoring for scene-hold: each clip chains from the previous
+        # clip's last frame, which already has the prior atmospheric state baked in.
+        # Re-anchoring back to the static source photo resets that state and causes
+        # LTX to hallucinate background motion (rain/debris artifacts).
+        settings["reanchor_every"] = 0
     else:
         log.warning("[multi] Story arc using built-in fallback: %s", arc_prompts)
         job.update(message="Story arc using default motion phases -- AI planning unavailable")
