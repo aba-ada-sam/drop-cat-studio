@@ -523,36 +523,21 @@ async def refine_prompt(request: Request):
 # T2V models are intentionally NOT in the auto-pick set: every Express/Fun-Videos
 # job has a photo, so I2V is always the right family. T2V stays manual-only.
 
-# Auto-pick model map is VRAM-aware. Resolved at call time via _get_pick_to_model().
+# Express auto-pick always uses LTX-2 Distilled regardless of VRAM.
 #
-# VRAM tiers (based on vram_min_gb in MODELS dict):
-#   < 12 GB  -- LTX-2 Distilled only (Wan 14B needs 12 GB min for async shuttle)
-#   12-15 GB -- Wan I2V 480P for action buckets; LTX-2 for calm/story
-#   >= 16 GB -- Wan I2V 720P available for action_hd
-#   Unknown  -- conservative: LTX-2 only (same as < 12 GB)
+# Express is the zero-friction fast path -- the user expectation is results
+# in 1-3 min, not 10-15 min. Wan I2V at 25 steps is ~6 min/clip; even on a
+# 16GB card that makes a 2-clip Extended Video take 12+ min before any result,
+# which feels broken. Wan I2V is available in Create Videos where the user
+# explicitly picks it and understands the time cost.
 #
-# History: originally hard-blocked at 16 GB because profile=4 (RAM streaming)
-# caused thrashing. With profile=3 (int8, 77.5% preloaded), Wan I2V 480P
-# runs on 12-16 GB cards including the RTX 5080 (15.9 GB).
+# Motion style varies by bucket so the result has visible character:
+#   calm/long_story -> "calm" (environment breathes, subject still)
+#   action buckets  -> "gentle" (subject makes small deliberate moves)
+# "dynamic" on LTX-2 8-step produces spastic micro-jitter and is banned here.
 
 def _get_pick_to_model() -> dict:
-    """Return auto-pick bucket -> (model, motion) map for the current GPU."""
-    try:
-        from app import _g as _app_g
-        vram = float(_app_g.get("gpu_vram_gb") or 0)
-    except Exception:
-        vram = 0.0
-    if vram >= 12:
-        # Wan I2V 480P fits; 720P only if 16+ GB headroom
-        hd_model = "Wan2.1-I2V-14B-720P" if vram >= 16 else "Wan2.1-I2V-14B-480P"
-        return {
-            "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-            "action":       ("Wan2.1-I2V-14B-480P",    "dynamic"),
-            "action_hd":    (hd_model,                  "dynamic"),
-            "story_action": ("Wan2.1-I2V-14B-480P",    "dynamic"),
-            "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
-        }
-    # < 12 GB or unknown: LTX-2 only
+    """Return auto-pick bucket -> (model, motion) map. Always LTX-2 for Express speed."""
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
         "action":       ("LTX-2 Dev19B Distilled", "gentle"),
