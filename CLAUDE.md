@@ -97,6 +97,21 @@ def my_worker(job: Job, input_path, param):
 
 GPU jobs have a configurable timeout (`gpu_job_timeout_seconds`, default 600s). Between GPU jobs, `gc.collect()` + `torch.cuda.empty_cache()` free VRAM.
 
+**`submit_with_prep` pattern** — multi-clip jobs split across two functions:
+
+```python
+job_manager.submit_with_prep(
+    JOB_FUN_MULTI_VIDEO, run_multi_prep, run_multi_pipeline,
+    photo_path, settings, label=label, timeout_seconds=timeout,
+)
+```
+
+`run_multi_prep(job, photo_path, settings)` runs immediately in a background thread with **no GPU lock** — it does LLM calls (story arc, music direction, lyrics), and optionally ACE-Step audio-first generation. Results are written into `settings` with `_` prefixes (`_story_arc`, `_prepped_music_prompt`, `_prepped_lyrics`). When prep finishes, the job is automatically queued for the GPU phase.
+
+`run_multi_pipeline(job, photo_path, settings)` is the GPU-locked worker — it pops `_`-prefixed keys from settings and skips any work that prep already did.
+
+**Job timeout grace period:** When a GPU job times out, `stop_event.set()` is called and the job manager waits 30s for the thread to exit naturally. If still alive, WanGP is restarted (to force-close the blocked HTTP connection to `/generate`), then waits 15s more. If still alive, the next job starts anyway — risking VRAM contention. This is the expected path when WanGP deadlocks mid-step.
+
 ### LLM routing (`core/llm_router.py`)
 
 All AI calls go through `LLMRouter.route()` or `LLMRouter.route_vision()`. The provider is read from config on each call (hot-switchable via Settings UI):
@@ -119,7 +134,7 @@ Every generated file is registered via `session.add_file()` so outputs from one 
 ### Frontend (`static/js/`)
 
 - **ES modules** loaded via `<script type="module">` — no bundler
-- **Cache busting** — every import in `app.js` has `?v=YYYYMMDD[letter]` (e.g. `?v=20260419h`). Bump the letter whenever any module changes, or bulk-bump to a new day. All modules use the same stamp.
+- **Cache busting** — every import in `app.js` has `?v=YYYYMMDD[letter]` (e.g. `?v=20260419h`). Bump the letter whenever any module changes, or bulk-bump to a new day. **All modules must use the same stamp** — if `app.js` imports `tab-express.js?v=20260419h` but `tab-express.js` was updated to `?v=20260419j`, the browser loads the old `app.js` whose import still points to the old stamp, and the new file is never fetched.
 - **Tabs initialize lazily** — `app.js` calls each tab's `init(panel)` once on first visit, wrapped in try/catch with error banner
 - **Job polling** — `api.js:pollJob()` polls `GET /api/jobs/{id}` every 1.5s with a max-poll safety cap (400 polls ≈ 10 min)
 - **`session-updated` event** — dispatched by `pollJob` on job completion; session pickers auto-refresh if visible
@@ -149,6 +164,26 @@ The header contains three zones:
 - **Right:** `#ai-badge` (shows effective AI provider: "✦ AI: Anthropic" / "✦ AI: Local" / "✦ AI") + Settings gear.
 
 **Do not add provider-switch controls to the header.** LLM provider selection lives in Settings only. The badge is read-only status + click-to-configure.
+
+### Multi-clip pipeline (`features/fun_videos/multi_pipeline.py`)
+
+The multi-clip pipeline has three internal phases within `run_multi_pipeline`:
+
+**Phase 0 — Audio-first (conditional):** Generates ACE-Step music *before* clips so clip boundaries can snap to beats. Skipped if `gpu.current == "wangp"` — evicting a warm WanGP worker to run ACE-Step then reloading it costs 3-8 minutes with no benefit. Only runs when WanGP would cold-start anyway (first job of session or ACE-Step was already the GPU holder). If Phase 0 fails for any reason, falls back to post-clip audio transparently.
+
+**Phase 1 — Clip generation:** N sequential WanGP clips, each starting from the last frame of the previous (`_chain_anchor` extracts the PNG). Re-anchoring periodically resets the chain start to the source photo to break compounding drift: LTX defaults to every 2 clips, Wan every 3, user-configurable via `reanchor_every` in settings (`0` = never). Scene-hold mode always sets `reanchor_every=0` because re-anchoring a static shot triggers LTX's background-fill heuristics, producing rain/debris artifacts.
+
+**Scene-hold extension (LTX + calm/gentle):** When `is_ltx and resolved_style in ("calm", "gentle")`, `_generate_story_arc` bypasses the LLM entirely and returns N clips with varied per-clip environmental effects (light shift, steam, shadow creep, curtain stir, cloud pass, etc.) from a hardcoded list. Each clip's prompt is: `{user_text}. {anchor_language}. {effect_for_clip_i}`. This avoids the LLM choosing motion that LTX-8-step can't render cleanly, and prevents the "all clips identical" problem.
+
+**Phase 3 — Audio:** If Phase 0 already produced audio, uses it directly. Otherwise calls `gpu.acquire("acestep")` to evict WanGP and generate post-clip. Always computes `total_dur = probe_duration(concat_path)` before both branches so gallery metadata has the correct duration.
+
+### Audio analyzer (`features/fun_videos/audio_analyzer.py`)
+
+Beat-sync pipeline used by Phase 0. Key functions:
+- `transcribe_audio(path)` — faster-whisper tiny/int8 on CPU, returns `[{start, end, text}]`
+- `detect_audio_events(path)` — librosa: returns `{bpm, beat_times, energy_peaks, sections, duration}`. Energy peaks filtered to 75th percentile, min 2s apart.
+- `snap_durations_to_beats(story_arc, events, audio_duration, snap_window=2.0)` — moves clip boundaries to the nearest strong beat (every 4th beat) or energy peak within `snap_window`. Clips that would become <3s after snap revert to original duration. Interior boundaries only — last boundary is never snapped.
+- `build_clip_audio_context(...)` — per-clip lyric/energy context dicts for prompt refinement.
 
 ### Smart wildcards (sd-prompts)
 
@@ -197,7 +232,9 @@ Endpoints: `GET /api/gpu/status` returns `{current, history[]}`. `POST /api/gpu/
 
 The pre-orchestrator pattern of scattered `unload_checkpoint()` + `stop_service("acestep")` + `start_acestep` calls in each pipeline has been removed. Don't add them back; route through the orchestrator.
 
-**KNOWN BUG (not yet fixed):** `services/manager.py:_watchdog_loop` auto-restarts WanGP and ACE-Step when their subprocesses die unexpectedly. That respawn path **bypasses the orchestrator**, so the restarted service can end up loaded alongside whatever else currently holds the GPU -- 11 GB WanGP + 4.7 GB ACE-Step on a 16 GB card produces VRAM thrashing and indefinite "Step 0/8" hangs. Observed on 2026-05-11 after a `/api/services/restart/wangp` call cascaded through the Job Object and killed ACE-Step, which the watchdog then resurrected silently. Fix should route watchdog respawns through `gpu.acquire(name)` so the orchestrator can decide whether to evict the current holder first.
+**Startup registration:** After `start_wangp_worker()` succeeds at boot, `startup_all()` sets `gpu._current = "wangp"` directly so the orchestrator knows WanGP owns the GPU. Without this, `gpu.current` stays `None` despite WanGP being loaded, and the first multi-clip job's Phase 0 audio-first would evict the freshly-loaded worker and force a reload.
+
+**Watchdog deadlock recovery:** When the stuck-step watchdog fires (`_WANGP_STUCK_SECS = 300`), it calls `_kill_by_port(WANGP_WORKER_PORT, wait_release=True)` **before** `gpu.acquire("wangp")`. This is necessary because `_wangp_worker_proc` may point to a newer process started by a previous recovery attempt, leaving the original stuck process (which holds VRAM) unkilled. Port-kill catches all processes on 7899 regardless of which one the reference tracks.
 
 **OPERATIONAL RULE -- DO NOT RESTART WANGP MID-SESSION.** Restarting `/api/services/restart/wangp` while a user job is in flight kills the worker the job is talking to; DCS-side polling never realizes its request was orphaned and the job sits at "Step 0/8" forever. Config changes that require a WanGP restart (compile, profile, vae_config in `wgp_config.json`) should be staged and applied between sessions, not while the user has jobs queued or running. The `compile` experiment on 2026-05-11 made this lesson very expensive in real time.
 
