@@ -582,6 +582,11 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
     job.meta.update({"final_path": merged, "music_prompt": music_prompt,
                      "direction": direction, "clips": len(clip_paths)})
     job.message = f"Zoom {direction} complete! ({len(clip_paths)} clips)"
+    try:
+        from core.session import get_current as get_session
+        get_session().add_file(Path(merged).name, "video", "zoom", path=merged)
+    except Exception:
+        pass
 
     # Gallery
     try:

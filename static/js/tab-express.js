@@ -1418,7 +1418,7 @@ export function init(panel) {
           skip_audio:   true,
           duration:     5,
           steps:        8,
-          model_name:   'LTX-2 Dev19B Distilled',
+          model:        'LTX-2 Dev19B Distilled',
         }),
       });
       _jobId = job_id;

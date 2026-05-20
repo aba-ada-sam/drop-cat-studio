@@ -653,6 +653,10 @@ def _generate_story_arc(
         if not result:
             return None
         src = len(result)
+        if src < n_clips:
+            log.warning("[multi] LLM returned %d clips but %d were requested -- "
+                        "padding with cyclic repeats (clips %d+ will be duplicates)",
+                        src, n_clips, src + 1)
         while len(result) < n_clips:
             result.append(dict(result[len(result) % src]))
         return result
