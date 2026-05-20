@@ -62,7 +62,6 @@ async def zoom_make(request: Request):
         frame_pos = "last" if direction == "out" else "first"
         tmp_dir = tempfile.mkdtemp(prefix="dcs_zoom_")
         frame_png = os.path.join(tmp_dir, "start_frame.png")
-        from features.zoom.pipeline import extract_frame_from_video
         ok = extract_frame_from_video(source_path, frame_png, position=frame_pos)
         if not ok:
             return JSONResponse({"error": "Could not extract frame from video"}, status_code=422)

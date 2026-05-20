@@ -383,8 +383,10 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             # Resize start image to match model resolution
             start_img = prev_frame or source_path
             try:
+                model_res = video_generator.MODELS.get(model_name, {}).get("res", (1032, 580))
+                tw, th = model_res
                 from features.fun_videos.pipeline import _prep_photo
-                prepped = _prep_photo(start_img, model_name)
+                prepped = _prep_photo(start_img, tw, th, job_dir)
             except Exception:
                 prepped = start_img
 
@@ -394,16 +396,16 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                     return
                 try:
                     result = video_generator.generate_video(
-                        photo_path=prepped,
-                        output_path=clip_out,
+                        image_path=prepped,
+                        out_path=clip_out,
                         prompt=prompt,
                         model_name=model_name,
                         steps=wangp_steps,
                         guidance=wangp_guidance,
                         duration=gen_dur,
                         seed=-1,
-                        stop_event=job.stop_event,
-                        progress_cb=lambda cur, tot: job.update(
+                        stop_check=job.stop_event.is_set,
+                        progress_fn=lambda cur, tot: job.update(
                             progress=pct + int(pct_per_clip * cur / max(tot, 1)),
                             message=f"Clip {i + 1}/{n_clips} step {cur}/{tot}",
                         ),

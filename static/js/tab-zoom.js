@@ -4,9 +4,9 @@
  * Source -> direction toggle -> clip count -> Generate
  * Chains WanGP clips with lossless frame anchoring (no re-anchor).
  */
-import { api, pollJob, stopJob } from './api.js?v=20260520a';
-import { el, pathToUrl } from './components.js?v=20260520a';
-import { toast, apiFetch } from './shell/toast.js?v=20260520a';
+import { pollJob } from './api.js?v=20260505e';
+import { el, pathToUrl } from './components.js?v=20260507a';
+import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 
 const VERSION = '20260520a';
 
@@ -300,8 +300,6 @@ export function init(panel) {
     ].join(''),
   });
   generateBtn.textContent = 'Generate Zoom';
-  generateBtn.addEventListener('change', () => {});
-  panel.addEventListener('dcs:source-ready', () => { generateBtn.disabled = false; });
 
   // Enable/disable styles
   const _updateBtnState = () => {
@@ -345,7 +343,7 @@ export function init(panel) {
     style: 'border-radius:10px; overflow:hidden; background:#000; position:relative;',
   });
   const videoEl = el('video', {
-    controls: true, loop: true, playsInline: true,
+    controls: true, loop: true, playsInline: true, src: '',
     style: 'width:100%; display:block; max-height:480px;',
   });
   videoWrap.appendChild(videoEl);
@@ -400,20 +398,33 @@ export function init(panel) {
 
       _jobId = res.job_id;
 
-      await pollJob(_jobId, {
-        onProgress(pct, msg) {
+      pollJob(
+        _jobId,
+        // onProgress -- receives full job object
+        j => {
+          const pct = Number(j.progress) || 0;
           progressFill.style.width = pct + '%';
-          progressLabel.textContent = msg || 'Working...';
+          progressLabel.textContent = j.message || `${pct}%`;
+          // Streaming first-clip preview
+          if (j.meta?.first_clip && videoEl.src === '') {
+            videoEl.src = pathToUrl(j.meta.first_clip);
+            videoEl.load();
+            videoEl.style.opacity = '0.5';
+          }
         },
-        onDone(outputPath) {
+        // onDone -- receives full job object
+        j => {
+          const outputPath = Array.isArray(j.output) ? j.output[0] : j.output;
           progressArea.style.display = 'none';
-          outputArea.style.display   = 'flex';
           generateBtn.style.display  = '';
           _updateBtnState();
 
-          const url = pathToUrl(outputPath);
-          videoEl.src = url;
-          videoEl.load();
+          if (outputPath) {
+            videoEl.src = pathToUrl(outputPath);
+            videoEl.style.opacity = '1';
+            videoEl.load();
+            outputArea.style.display = 'flex';
+          }
 
           outputActions.innerHTML = '';
           outputActions.append(
@@ -434,13 +445,14 @@ export function init(panel) {
           toast(`Zoom ${_direction} complete!`, 'success');
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
-        onError(msg) {
+        // onError
+        msg => {
           progressArea.style.display = 'none';
           generateBtn.style.display  = '';
           _updateBtnState();
           toast('Error: ' + msg, 'error');
         },
-      });
+      );
 
     } catch (err) {
       progressArea.style.display = 'none';
