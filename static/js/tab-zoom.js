@@ -4,7 +4,7 @@
  * Source -> direction toggle -> clip count -> Generate
  * Chains WanGP clips with lossless frame anchoring (no re-anchor).
  */
-import { pollJob } from './api.js?v=20260505e';
+import { pollJob, stopJob, apiUpload } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 
@@ -111,11 +111,10 @@ export function init(panel) {
     dropIcon.style.display = 'none';
 
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-      const data = await res.json();
+      const endpoint = isVid ? '/api/fun/upload-video' : '/api/fun/upload';
+      const resp = await apiUpload(endpoint, [file]);
+      const data = resp?.files?.[0];
+      if (!data?.path) throw new Error('Upload returned no path');
       _sourcePath = data.path;
       _isVideo = isVid;
 
@@ -429,10 +428,10 @@ export function init(panel) {
           outputActions.innerHTML = '';
           outputActions.append(
             _makeAction('Open in folder', '[>]', () =>
-              apiFetch('/api/open-folder', {
+              apiFetch('/api/reveal', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: outputPath }),
+                body: JSON.stringify({ path: outputPath, action: 'explorer' }),
               }).catch(() => {})),
             _makeAction('Send to Bridges', '[~]', () => {
               document.dispatchEvent(new CustomEvent('dcs:handoff', {
