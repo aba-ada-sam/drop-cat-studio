@@ -690,6 +690,61 @@ def _kill_by_cmdline(script: str, label: str) -> None:
         log.warning("Cmdline kill for %s failed: %s", label, e)
 
 
+def _confirm_quit() -> bool:
+    """Show a themed confirmation dialog. Returns True if user wants to quit."""
+    try:
+        import tkinter as tk
+    except ImportError:
+        return True  # no UI available -- just quit
+
+    result = [False]
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#0d0606")
+    root.attributes("-topmost", True)
+
+    W, H = 360, 190
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+
+    tk.Label(root, text="DROP CAT GO", bg="#0d0606", fg="#d4a017",
+             font=("Arial Black", 15, "bold")).pack(pady=(20, 2))
+    tk.Label(root, text="S T U D I O", bg="#0d0606", fg="#8a7a6a",
+             font=("Arial", 8)).pack()
+    tk.Label(root, text="Stop the server and quit?",
+             bg="#0d0606", fg="#f0e6d0", font=("Arial", 10)).pack(pady=(12, 2))
+    tk.Label(root, text="Any running generation will be cancelled.",
+             bg="#0d0606", fg="#6a5a4a", font=("Arial", 8)).pack()
+
+    btn_frame = tk.Frame(root, bg="#0d0606")
+    btn_frame.pack(pady=16)
+
+    def _yes():
+        result[0] = True
+        root.destroy()
+
+    def _no():
+        result[0] = False
+        root.destroy()
+
+    tk.Button(
+        btn_frame, text="  Stop & Quit  ", bg="#c41e3a", fg="#f0e6d0",
+        activebackground="#a01828", activeforeground="#f0e6d0",
+        relief="flat", bd=0, font=("Arial", 10, "bold"), cursor="hand2",
+        padx=14, pady=6, command=_yes,
+    ).pack(side="left", padx=8)
+
+    tk.Button(
+        btn_frame, text="  Keep Running  ", bg="#1a2a1a", fg="#8abf8a",
+        activebackground="#0a1a0a", activeforeground="#aadaaa",
+        relief="flat", bd=0, font=("Arial", 10), cursor="hand2",
+        padx=14, pady=6, command=_no,
+    ).pack(side="left", padx=8)
+
+    root.mainloop()
+    return result[0]
+
+
 def _shutdown(srv: "ServerManager") -> None:
     """Kill all DCS-related processes, then exit."""
     log.info("Shutting down")
@@ -818,13 +873,24 @@ def main() -> None:
         else:
             log.error("Server never became ready")
 
-    # Block until the Chrome window closes, then shut everything down.
+    # Block until the Chrome window closes, then ask before shutting down.
     # If Chrome wasn't found (default browser), keep alive until the server dies.
     _diag("waiting for window close")
     if chrome_proc is not None:
-        chrome_proc.wait()
-        log.info("App window closed -- shutting down")
-        _shutdown(srv)
+        while True:
+            chrome_proc.wait()
+            log.info("App window closed -- asking user")
+            if _confirm_quit():
+                _shutdown(srv)
+                break
+            else:
+                # User said keep running -- reopen the window and wait again
+                log.info("User chose to keep running -- reopening window")
+                chrome_proc = open_app_window(srv.port) if srv.port else None
+                if chrome_proc is None:
+                    # Can't reopen (Chrome gone) -- shut down anyway
+                    _shutdown(srv)
+                    break
     else:
         # No trackable window -- keep manager alive as a watchdog indefinitely
         srv._stop_event.wait()

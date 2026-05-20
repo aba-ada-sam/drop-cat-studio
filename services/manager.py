@@ -946,7 +946,7 @@ def start_ollama() -> tuple[bool, str | None]:
 # If busy=True but the step hasn't advanced in _WANGP_STUCK_SECS, the
 # generation is deadlocked and we restart. 300s (5 min) is very generous --
 # even the slowest model step (LTX-2 19B step 0) takes ~14s.
-_WANGP_STUCK_SECS = 300
+_WANGP_STUCK_SECS = 120  # 2 min -- faster zombie detection = less RAM held by stuck process
 _wangp_last_step: int | None = None
 _wangp_last_step_time: float = 0.0
 

@@ -36,10 +36,15 @@ ServiceName = Literal["wangp", "acestep", "forge", "ollama"]
 _ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge", "ollama")
 
 
+_IDLE_EVICT_SECS = 1800  # 30 min -- release GPU services when nothing has run for this long
+
+
 class GPUOrchestrator:
     """Single source of truth for which service owns the GPU right now.
 
     Thread-safe via RLock so reentrant acquire (same service) is cheap.
+    Idle eviction: if no acquire() is called for _IDLE_EVICT_SECS, all GPU
+    services are released so their VRAM + RAM is returned to the OS.
     """
 
     def __init__(self) -> None:
@@ -47,6 +52,9 @@ class GPUOrchestrator:
         self._current: Optional[ServiceName] = None
         self._transitions: list[dict] = []
         self._max_history = 50
+        self._last_acquire: float = 0.0
+        threading.Thread(target=self._idle_eviction_loop, daemon=True,
+                         name="gpu-idle-evict").start()
 
     # -- public api ---------------------------------------------------------
 
@@ -62,6 +70,19 @@ class GPUOrchestrator:
                 "history": list(self._transitions[-20:]),
             }
 
+    def _idle_eviction_loop(self) -> None:
+        """Background thread: release GPU services after prolonged idle."""
+        while True:
+            time.sleep(60)
+            with self._lock:
+                if (self._current is not None
+                        and self._last_acquire > 0
+                        and time.time() - self._last_acquire > _IDLE_EVICT_SECS):
+                    idle_min = int((time.time() - self._last_acquire) / 60)
+                    log.info("[gpu] Idle eviction after %d min -- releasing %s to free VRAM/RAM",
+                             idle_min, self._current)
+                    self.release_all()
+
     def acquire(self, service: ServiceName, reason: str = "") -> None:
         """Ensure `service` owns the GPU exclusively. Evicts everyone else.
 
@@ -69,6 +90,7 @@ class GPUOrchestrator:
         out-of-band (crash, OOM kill), this transparently restarts it.
         """
         with self._lock:
+            self._last_acquire = time.time()
             if self._current == service:
                 if not self._is_alive(service):
                     log.info("[gpu] holder %s is dead -- restarting", service)
