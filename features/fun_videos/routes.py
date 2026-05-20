@@ -523,26 +523,25 @@ async def refine_prompt(request: Request):
 # T2V models are intentionally NOT in the auto-pick set: every Express/Fun-Videos
 # job has a photo, so I2V is always the right family. T2V stays manual-only.
 
-# Express auto-pick always uses LTX-2 Distilled regardless of VRAM.
+# Auto-pick model map.
 #
-# Express is the zero-friction fast path -- the user expectation is results
-# in 1-3 min, not 10-15 min. Wan I2V at 25 steps is ~6 min/clip; even on a
-# 16GB card that makes a 2-clip Extended Video take 12+ min before any result,
-# which feels broken. Wan I2V is available in Create Videos where the user
-# explicitly picks it and understands the time cost.
+# calm / long_story -> LTX-2 Distilled + "calm": scene-hold extension produces
+#   atmospheric breathing-photograph. Fast (~30s/clip), visually stable.
 #
-# Motion style varies by bucket so the result has visible character:
-#   calm/long_story -> "calm" (environment breathes, subject still)
-#   action buckets  -> "gentle" (subject makes small deliberate moves)
-# "dynamic" on LTX-2 8-step produces spastic micro-jitter and is banned here.
+# action / action_hd / story_action -> LTX-2 Dev13B + "dynamic": 40 steps,
+#   designed for deliberate physical motion (strides, gestures, turns). Dev13B
+#   bypasses the scene-hold extension (scene-hold only fires for calm/gentle).
+#   The LLM writes a real kinetic story arc. ~3-4 min/clip vs ~30s for Distilled
+#   but produces actual visible motion. vram_min_gb=10, fits on RTX 5080 (15.9GB).
+#   Wan I2V is NOT used -- deadlocks on RTX 5080 (15.87GB > 80% VRAM budget).
 
 def _get_pick_to_model() -> dict:
-    """Return auto-pick bucket -> (model, motion) map. Always LTX-2 for Express speed."""
+    """Return auto-pick bucket -> (model, motion) map."""
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-        "action":       ("LTX-2 Dev19B Distilled", "gentle"),
-        "action_hd":    ("LTX-2 Dev19B Distilled", "gentle"),
-        "story_action": ("LTX-2 Dev19B Distilled", "gentle"),
+        "action":       ("LTX-2 Dev13B",           "dynamic"),
+        "action_hd":    ("LTX-2 Dev13B",           "dynamic"),
+        "story_action": ("LTX-2 Dev13B",           "dynamic"),
         "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
     }
 # Hardware reality on 16GB VRAM cards (RTX 5080):
