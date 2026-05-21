@@ -114,6 +114,9 @@ def _read_git_version() -> str:
 
 APP_VERSION = _read_git_version()
 
+# Written by /api/jobs/save-and-restart; read at next startup to auto-restore queue.
+PLANNED_RESTART_MARKER = APP_DIR / ".dcs-planned-restart"
+
 
 # -- Lifespan -----------------------------------------------------------------
 
@@ -149,17 +152,22 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] could not create runtime dirs (non-fatal): %s", _e)
 
-    # Always delete queue_save.json on startup. Restoring a previous queue
-    # causes deadlocked or failed jobs to re-run immediately, which is worse
-    # than starting fresh. The Restore button still exists for manual use if
-    # the user explicitly saved the queue before a planned restart.
-    try:
-        from core.job_manager import QUEUE_SAVE_FILE as _QSF
-        if _QSF.exists():
-            _QSF.unlink()
-            log.info("[startup] cleared queue_save.json -- fresh session")
-    except Exception as _e:
-        log.warning("[startup] queue_save cleanup failed (non-fatal): %s", _e)
+    # On an unplanned restart (crash, kill) delete any stale queue_save.json --
+    # those jobs may be in a bad state. On a PLANNED restart (user clicked
+    # "Save & Restart") the marker file is present, so we keep the save file
+    # and auto-restore after job manager init.
+    _planned_restart = PLANNED_RESTART_MARKER.exists()
+    if _planned_restart:
+        PLANNED_RESTART_MARKER.unlink(missing_ok=True)
+        log.info("[startup] planned restart detected -- queue will be restored")
+    else:
+        try:
+            from core.job_manager import QUEUE_SAVE_FILE as _QSF
+            if _QSF.exists():
+                _QSF.unlink()
+                log.info("[startup] cleared queue_save.json -- fresh session")
+        except Exception as _e:
+            log.warning("[startup] queue_save cleanup failed (non-fatal): %s", _e)
 
     # Migrate config from old apps on first run
     try:
@@ -169,6 +177,14 @@ async def lifespan(app: FastAPI):
 
     # Initialize job manager -- critical, re-raise on failure
     _g["job_manager"] = JobManager()
+
+    # Auto-restore queue if this was a planned restart
+    if _planned_restart:
+        try:
+            _g["job_manager"].restore_queue(_build_restore_registry(_g["job_manager"]))
+            log.info("[startup] queue auto-restored from planned restart")
+        except Exception as _e:
+            log.warning("[startup] queue auto-restore failed (non-fatal): %s", _e)
 
     # Initialize LLM client + router
     try:
@@ -642,20 +658,14 @@ async def save_queue():
     return {"ok": True, "saved": count}
 
 
-@app.post("/api/jobs/restore-queue")
-async def restore_queue():
-    """Re-submit jobs from queue_save.json."""
-    import asyncio as _asyncio
-    if _g["job_manager"] is None:
-        return JSONResponse({"error": "Not ready"}, 503)
-
+def _build_restore_registry(jm):
+    """Build the feature->handler registry used by both auto-restore and the manual endpoint."""
     from features.song_video.pipeline import run_song_prep, run_song_pipeline
     from features.fun_videos.pipeline import run_prep, run_pipeline
     from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
     from features.video_bridges.routes import _bridges_worker
+    from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline
     from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE
-
-    jm = _g["job_manager"]
 
     def _make_fun_video(args, label, timeout_seconds):
         photo_path = args[0] if args else None
@@ -682,15 +692,53 @@ async def restore_queue():
         settings = dict(args[1]) if len(args) > 1 else {}
         return jm.submit(JOB_BRIDGE, _bridges_worker, items, settings, label=label)
 
-    registry = {
+    def _make_zoom(args, label, timeout_seconds):
+        source_path = args[0] if args else None
+        settings    = dict(args[1]) if len(args) > 1 else {}
+        job = jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_zoom_prep, run_zoom_pipeline,
+                                  source_path, settings, label=label,
+                                  timeout_seconds=timeout_seconds)
+        if job:
+            job.meta["feature"] = "zoom"
+            job.meta["zoom_direction"] = settings.get("zoom_direction", "out")
+        return job
+
+    return {
         "fun_video":       _make_fun_video,
         "fun_multi_video": _make_fun_multi,
         "song_video":      _make_song_video,
         "bridge":          _make_bridge,
+        "zoom":            _make_zoom,
     }
 
-    restored, failed = await _asyncio.to_thread(jm.restore_queue, registry)
+
+@app.post("/api/jobs/restore-queue")
+async def restore_queue():
+    """Re-submit jobs from queue_save.json."""
+    import asyncio as _asyncio
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    jm = _g["job_manager"]
+    restored, failed = await _asyncio.to_thread(jm.restore_queue, _build_restore_registry(jm))
     return {"ok": True, "restored": restored, "failed": failed}
+
+
+@app.post("/api/jobs/save-and-restart")
+async def save_and_restart():
+    """Save the current queue then restart app.py via the manager watchdog."""
+    import asyncio as _asyncio, signal
+    if _g["job_manager"] is None:
+        return JSONResponse({"error": "Not ready"}, 503)
+    jm = _g["job_manager"]
+    count = await _asyncio.to_thread(jm.save_queue)
+    PLANNED_RESTART_MARKER.write_text("planned")
+    log.info("Save-and-restart: saved %d jobs -- triggering watchdog restart", count)
+    def _do_exit():
+        import time
+        time.sleep(0.4)
+        os.kill(os.getpid(), signal.SIGTERM)
+    threading.Thread(target=_do_exit, daemon=True).start()
+    return {"ok": True, "saved": count}
 
 
 @app.post("/api/jobs/{job_id}/retry")

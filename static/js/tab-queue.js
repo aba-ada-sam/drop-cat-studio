@@ -175,7 +175,29 @@ function _buildShell() {
     }
   });
 
-  toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, restoreBtn);
+  const saveRestartBtn = el('button', {
+    id: 'queue-save-restart-btn',
+    class: 'btn btn-sm',
+    text: 'Save & Restart',
+    title: 'Save the full queue to disk, restart the server, then auto-restore all jobs',
+    style: 'background:var(--accent); color:var(--bg-base); font-weight:600;',
+  });
+  saveRestartBtn.addEventListener('click', async () => {
+    if (!confirm('Save queue and restart the server? The app will be unavailable for ~10 seconds.')) return;
+    saveRestartBtn.disabled = true;
+    saveRestartBtn.textContent = 'Saving...';
+    try {
+      const r = await api('/api/jobs/save-and-restart', { method: 'POST' });
+      toast(`Saved ${r.saved} job${r.saved !== 1 ? 's' : ''} -- restarting server...`, 'info');
+      saveRestartBtn.textContent = 'Restarting...';
+    } catch (e) {
+      toast('Save & Restart failed: ' + e.message, 'error');
+      saveRestartBtn.disabled = false;
+      saveRestartBtn.textContent = 'Save & Restart';
+    }
+  });
+
+  toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, restoreBtn, saveRestartBtn);
   _root.appendChild(toolbar);
 
   // Check for a saved queue on first render
