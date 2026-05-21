@@ -200,6 +200,9 @@ export function init(panel) {
     style: 'font-size:11px; color:var(--text-3); text-align:right; align-self:flex-end; padding-bottom:2px;',
   });
 
+  const stepsRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  const durRow   = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+
   function _updateEst() {
     const clips = Number(_activeValue(stepsRow)) || 4;
     const secs  = Number(_activeValue(durRow))   || 5;
@@ -209,17 +212,15 @@ export function init(panel) {
     totalEstEl.textContent = `~${m > 0 ? m + 'm ' : ''}${s > 0 ? s + 's' : ''} video`;
   }
 
-  const stepsRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
   [3, 4, 5, 6, 8, 10, 12].forEach((n, i) => {
     const b = _chip(n, n, stepsRow, _updateEst);
-    if (i === 1) b.click();  // default 4 clips
+    if (i === 1) b.click();
     stepsRow.appendChild(b);
   });
 
-  const durRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
   [4, 5, 6, 8, 10, 12, 15].forEach((n, i) => {
     const b = _chip(`${n}s`, n, durRow, _updateEst);
-    if (i === 1) b.click();  // default 5s
+    if (i === 1) b.click();
     durRow.appendChild(b);
   });
 

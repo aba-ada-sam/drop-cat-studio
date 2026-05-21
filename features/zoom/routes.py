@@ -13,6 +13,8 @@ log = logging.getLogger("zoom")
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
+from features.fun_videos.video_generator import MODELS as _VG_MODELS
+
 # Timeout per clip (seconds) -- Wan I2V 14B at 25 steps can take ~10 min each
 _PER_CLIP_TIMEOUT_S = 900
 _AUDIO_BUFFER_S = 300
@@ -37,7 +39,7 @@ async def zoom_make(request: Request):
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
     from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline, extract_frame_from_video
-    from features.fun_videos.video_generator import MODELS as _VG_MODELS, negative_prompt_for as _neg_for
+    from features.fun_videos.video_generator import negative_prompt_for as _neg_for
 
     job_manager = get_job_manager()
 
