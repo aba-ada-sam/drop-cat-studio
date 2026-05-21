@@ -183,7 +183,20 @@ function _buildShell() {
     style: 'background:var(--accent); color:var(--bg-base); font-weight:600;',
   });
   saveRestartBtn.addEventListener('click', async () => {
-    if (!confirm('Save queue and restart the server? The app will be unavailable for ~10 seconds.')) return;
+    // Check for actively running jobs before allowing restart
+    let running = [];
+    try {
+      const qs = await api('/api/jobs');
+      running = (qs.running || []).filter(j => j.status === 'running');
+    } catch {}
+
+    if (running.length) {
+      const names = running.map(j => j.label || j.type).join(', ');
+      if (!confirm(`WARNING: ${running.length} job${running.length > 1 ? 's are' : ' is'} actively generating right now (${names}).\n\nRestarting will kill it mid-generation. The output will be lost.\n\nRestart anyway?`)) return;
+    } else {
+      if (!confirm('Save queue and restart the server? The app will be unavailable for ~10 seconds.')) return;
+    }
+
     saveRestartBtn.disabled = true;
     saveRestartBtn.textContent = 'Saving...';
     try {
