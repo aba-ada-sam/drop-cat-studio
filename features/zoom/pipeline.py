@@ -32,46 +32,48 @@ log = logging.getLogger("zoom")
 # ---------------------------------------------------------------------------
 
 _ZOOM_OUT_SYSTEM = """\
-You are planning a smooth continuous zoom-out video from a still photograph.
-The camera pulls back across {n} sequential clips. Each clip starts from the
-last frame of the previous -- the audience sees one unbroken retreating move.
+You are writing prompts for {n} sequential AI video clips that together form
+a continuous zoom-out from a still photograph. Each clip starts from the last
+frame of the previous -- one unbroken retreating move seen by the audience.
 
-TASK: Describe what the camera sees at each stage as it retreats, grounded
-in what is plausible given the photo. Do not invent elements inconsistent
-with the visible scene (lighting, season, setting).
+GOAL: Real spatial depth and parallax -- NOT a digital zoom effect. Each clip
+must describe the environment physically expanding around the subject as the
+camera retreats through space.
 
 RULES:
-- Every prompt MUST open with the subject anchor: exact colour, material, shape.
-- State the zoom level: "fills 90% of frame" / "50% of frame" / "25%" / "tiny figure".
-- Name what appears at the frame edges as the camera retreats (walls, sky, trees, etc.).
-- Close every prompt with: "Camera pulls back steadily -- smooth fluid motion, no shake."
-- Prompts 50-70 words each. Vary duration: action=4-5s, atmosphere=6-8s.
-- Do NOT use negative words (avoid "no X", "without X") -- use positive description only.
+- Describe what NEW elements physically appear at the frame edges each clip
+  (wall, doorframe, street, trees, sky, crowd -- whatever fits the scene).
+- Describe the subject becoming smaller within the growing scene.
+- Include ambient motion: light shifting, leaves moving, people in background.
+- End every prompt with one of: "smooth continuous pullback" / "steady retreat through space".
+- Prompts 40-60 words. Do NOT use negative words.
+- Do NOT describe zoom percentages or camera instructions -- describe the SCENE.
 
-Return ONLY valid JSON, no other text:
-{"subject_anchor": "exact one-line description", "clips": [{"prompt": "...", "duration": 5}, ...]}
+Return ONLY valid JSON:
+{"subject_anchor": "brief one-line subject description", "clips": [{"prompt": "...", "duration": 5}, ...]}
 """
 
 _ZOOM_IN_SYSTEM = """\
-You are planning a smooth continuous zoom-in video from a still photograph.
-The camera pushes forward across {n} sequential clips. Each clip starts from
-the last frame of the previous -- one unbroken advancing move.
+You are writing prompts for {n} sequential AI video clips that together form
+a continuous zoom-in from a still photograph. Each clip starts from the last
+frame of the previous -- one unbroken advancing move.
 
-TASK: Choose ONE compelling focal target visible in the photo (a face, an
-object, a texture). Describe what the camera sees at each stage as it
-advances toward that target.
+GOAL: Real spatial depth and parallax -- NOT a digital zoom effect. Each clip
+must describe the environment physically contracting as the camera advances
+through space toward a specific focal point.
 
 RULES:
-- Every prompt MUST open with the subject anchor: exact colour, material, shape.
-- Name the focal target explicitly every clip.
-- State zoom progress: "full frame" / "upper body fills frame" / "face fills frame" / "eye fills frame".
-- Name what leaves the frame edges as the camera advances.
-- Close every prompt with: "Camera pushes in steadily -- smooth fluid motion, no shake."
-- Prompts 50-70 words each. Later clips shorter (5-6s) as detail gets tighter.
-- Do NOT use negative words -- positive description only.
+- Choose ONE focal target (face, eye, texture, object detail) and advance toward it.
+- Describe what leaves the frame edges as the scene narrows (walls, furniture,
+  background objects falling out of view).
+- Describe increasing detail becoming visible on the focal target itself.
+- Include ambient texture: grain, fabric weave, skin pores, material surface.
+- End every prompt with: "smooth continuous push forward through space".
+- Prompts 40-60 words. Do NOT use negative words.
+- Do NOT describe zoom percentages or camera instructions -- describe the SCENE.
 
-Return ONLY valid JSON, no other text:
-{"subject_anchor": "exact one-line description", "focal_target": "what camera zooms toward", "clips": [{"prompt": "...", "duration": 5}, ...]}
+Return ONLY valid JSON:
+{"subject_anchor": "brief one-line subject description", "focal_target": "specific feature being approached", "clips": [{"prompt": "...", "duration": 5}, ...]}
 """
 
 
@@ -175,36 +177,36 @@ def _fallback_arc(direction: str, n_clips: int, idea: str, clip_dur: float = 5.0
     idea_prefix = f"{idea}. " if idea else ""
     if direction == "out":
         phrases = [
-            "Subject fills 100% of frame, camera begins smooth steady pullback, revealing edges.",
-            "Subject fills 80% of frame, edges of surrounding environment appearing.",
-            "Subject fills 60% of frame, immediate surroundings visible on all sides.",
-            "Subject fills 45% of frame, full context of location becoming clear.",
-            "Subject fills 30% of frame, wide view of the setting established.",
-            "Subject fills 20% of frame, broad landscape or street visible beyond.",
-            "Subject fills 12% of frame, sweeping wide vista, environment dominates.",
-            "Subject fills 8% of frame, grand scale of environment fully revealed.",
-            "Subject fills 5% of frame, vast panoramic view, subject a clear landmark.",
-            "Subject fills 3% of frame, extreme wide shot, world stretches in all directions.",
-            "Subject fills 2% of frame, maximum pullback, full epic scale of the world.",
-            "Subject a tiny point, ultimate wide shot, entire landscape fills the frame.",
+            "The scene retreats through space, walls and ceiling emerging at frame edges.",
+            "The room opens up, doorways and furniture appearing as the pullback continues.",
+            "The building exterior emerges, street and sky visible at frame edges.",
+            "The street scene widens, neighboring buildings and environment expanding outward.",
+            "A full block of environment revealed, depth and parallax filling the frame.",
+            "The neighborhood opens outward, rooftops and treetops framing the widening scene.",
+            "A broad vista emerges, rich spatial depth stretching to the horizon.",
+            "The landscape expands outward, the original scene now part of the wider world.",
+            "An aerial-scale view unfolds, environment vast and deep in all directions.",
+            "The world opens to its full scale with rich parallax and spatial depth.",
+            "Maximum pullback, the environment stretches with full dimensional depth.",
+            "The ultimate wide view, a vast world of spatial depth and distance.",
         ]
-        verb = "Camera pulls back steadily -- smooth fluid motion, no shake."
+        verb = "Smooth continuous pullback through real space, full parallax depth."
     else:
         phrases = [
-            "Full scene visible, subject centered at 15% of frame, camera begins push forward.",
-            "Subject grows to 25% of frame, surroundings beginning to recede.",
-            "Subject fills 35% of frame, peripheral details falling away at edges.",
-            "Subject fills 50% of frame, fine surface detail starting to emerge.",
-            "Subject fills 65% of frame, background fully blurred, subject sharp.",
-            "Upper portion fills 75% of frame, texture and material clearly visible.",
-            "Central feature fills 85% of frame, intricate detail revealed.",
-            "Key element fills 90% of frame, fine texture and depth visible.",
-            "Detail fills 95% of frame, intimate close-up, single feature dominant.",
-            "Extreme close-up, surface texture fills the entire frame.",
-            "Macro detail, fine structure visible in full clarity, background gone.",
-            "Ultimate close-up, microscopic-scale texture, abstract and intimate.",
+            "Advancing through space, background elements receding at the edges of frame.",
+            "Closing in, peripheral details falling away, fine surface coming into view.",
+            "The focal surface expands to fill the frame, surrounding context narrowing.",
+            "Advancing further, background soft, fine material detail becoming visible.",
+            "The focal surface fills the frame, texture and grain emerging with clarity.",
+            "Fine material detail dominates, depth and surface relief richly visible.",
+            "Intimate proximity, individual texture elements visible across the surface.",
+            "Extreme closeness, fine grain and microscopic detail across the surface.",
+            "The texture becomes abstract and rich, depth and complexity at macro scale.",
+            "Full macro view, the surface an intricate landscape of detail and shadow.",
+            "Ultimate close-up, fine structure of the surface fills the entire frame.",
+            "Maximum proximity, pure surface texture, abstract and extraordinary.",
         ]
-        verb = "Camera pushes in steadily -- smooth fluid motion, no shake."
+        verb = "Smooth continuous push forward through real space, full parallax depth."
 
     clips = []
     for i in range(n_clips):
