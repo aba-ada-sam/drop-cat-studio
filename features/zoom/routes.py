@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 log = logging.getLogger("zoom")
 
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
 # Timeout per clip (seconds) -- Wan I2V 14B at 25 steps can take ~10 min each
 _PER_CLIP_TIMEOUT_S = 900
 _AUDIO_BUFFER_S = 300
@@ -103,6 +105,29 @@ async def zoom_make(request: Request):
     job.meta["feature"] = "zoom"
     job.meta["zoom_direction"] = direction
     return {"job_id": job.id, "label": label}
+
+
+@router.post("/api/zoom/scan-folder")
+async def zoom_scan_folder(request: Request):
+    """Return sorted list of images in a folder for batch queuing."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    folder = body.get("folder", "").strip()
+    if not folder or not os.path.isdir(folder):
+        return JSONResponse({"error": "folder must be an existing directory"}, status_code=400)
+
+    images = sorted(
+        [
+            {"path": str(p), "name": p.name}
+            for p in Path(folder).iterdir()
+            if p.suffix.lower() in _IMAGE_EXTS and p.is_file()
+        ],
+        key=lambda x: x["name"].lower(),
+    )
+    return {"folder": folder, "images": images, "total": len(images)}
 
 
 @router.post("/api/zoom/extract-frame")
