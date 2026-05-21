@@ -470,11 +470,12 @@ export function init(panel) {
     if (_loopActive) return;
     try {
       const r = await apiFetch('/api/browse-folder', { method: 'POST' });
-      if (r.folder) {
-        _folderPath = r.folder;
-        folderNameEl.textContent = r.folder.split(/[\\/]/).pop() || r.folder;
-        folderNameEl.title = r.folder;
-        await _scanFolder(r.folder);
+      const picked = r.folder || r.path;
+      if (picked) {
+        _folderPath = picked;
+        folderNameEl.textContent = picked.split(/[\\/]/).pop() || picked;
+        folderNameEl.title = picked;
+        await _scanFolder(picked);
       }
     } catch {}
   };
