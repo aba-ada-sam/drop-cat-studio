@@ -399,16 +399,11 @@ export function init(panel) {
     const nClips  = Number(_activeValue(stepsRow)) || 4;
     const clipDur = Number(_activeValue(durRow))   || 5;
 
-    // Pre-flight queue depth check
     let queueDepth = 0;
     try {
       const qs = await apiFetch('/api/jobs');
       queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0);
     } catch {}
-    if (queueDepth >= 10) {
-      toast(`Queue is full (${queueDepth} jobs already running/waiting) -- let some finish first`, 'error');
-      return;
-    }
 
     generateBtn.disabled = true;
     generateBtn.textContent = 'Queuing...';

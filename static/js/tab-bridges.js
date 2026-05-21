@@ -302,16 +302,11 @@ export function init(panel) {
       return;
     }
 
-    // Pre-flight queue depth check
     let queueDepth = 0;
     try {
       const qs = await api('/api/jobs');
       queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0);
     } catch {}
-    if (queueDepth >= 10) {
-      toast(`Queue is full (${queueDepth} jobs) -- let some finish first`, 'error');
-      return;
-    }
 
     genBtn.disabled = true;
     prog.show();
