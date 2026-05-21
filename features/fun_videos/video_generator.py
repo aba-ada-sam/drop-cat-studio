@@ -28,7 +28,8 @@ WANGP_WORKER_PORT = 7899
 # LTX-2 calm/gentle: no "static" -- we want minimal motion, not invented motion.
 _NEG_LTX_CALM = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
-    "motion smear, motion artifacts, watermark, text, "
+    "flickering, flicker, jitter, jittery, temporal artifacts, stutter, "
+    "motion smear, motion artifacts, watermark, text, abrupt transition, jump cut, "
     "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
     "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
     "floating debris, orbs, bokeh balls, lens flare artifacts"
@@ -37,7 +38,8 @@ _NEG_LTX_CALM = (
 # HuggingFace card -- prevents fully frozen non-animating output.
 _NEG_LTX_DYNAMIC = (
     "shaky, glitchy, low quality, worst quality, deformed, distorted, "
-    "motion smear, motion artifacts, watermark, text, static, "
+    "flickering, flicker, jitter, jittery, temporal artifacts, stutter, "
+    "motion smear, motion artifacts, watermark, text, static, abrupt transition, jump cut, "
     "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
     "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
     "floating debris, orbs, bokeh balls, lens flare artifacts"

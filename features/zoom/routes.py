@@ -37,7 +37,7 @@ async def zoom_make(request: Request):
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
     from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline, extract_frame_from_video
-    from features.fun_videos.video_generator import MODELS as _VG_MODELS
+    from features.fun_videos.video_generator import MODELS as _VG_MODELS, negative_prompt_for as _neg_for
 
     job_manager = get_job_manager()
 
@@ -72,13 +72,17 @@ async def zoom_make(request: Request):
         source_path = frame_png
         log.info("[zoom] Extracted %s frame from video -> %s", frame_pos, frame_png)
 
+    _model_info = _VG_MODELS.get(model_name, {})
+    _default_guidance = _model_info.get("guidance", 3.5)
+    _default_steps    = _model_info.get("steps", 25)
+
     settings = {
         "zoom_direction": direction,
         "n_clips": n_clips,
         "clip_duration": clip_dur,
         "model_name": model_name,
-        "steps": int(body.get("steps", 25)),
-        "guidance": float(body.get("guidance", 5.0)),
+        "steps": int(body.get("steps", _default_steps)),
+        "guidance": float(body.get("guidance", _default_guidance)),
         "idea": body.get("idea", "").strip(),
         "skip_audio": bool(body.get("skip_audio", False)),
         "instrumental": bool(body.get("instrumental", False)),

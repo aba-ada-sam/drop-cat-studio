@@ -175,22 +175,34 @@ def _fallback_arc(direction: str, n_clips: int, idea: str, clip_dur: float = 5.0
     idea_prefix = f"{idea}. " if idea else ""
     if direction == "out":
         phrases = [
-            "Subject fills the entire frame. Camera begins smooth steady pullback.",
-            "Subject now fills half the frame, environment visible at edges. Camera retreats.",
-            "Subject occupies a quarter of the frame, full surroundings visible. Camera pulls back.",
-            "Subject is a small figure in the wide environment. Camera continues retreating.",
-            "Establishing wide shot, subject small, full context of location revealed.",
-            "Extreme wide, subject barely visible, grand scale of environment established.",
+            "Subject fills 100% of frame, camera begins smooth steady pullback, revealing edges.",
+            "Subject fills 80% of frame, edges of surrounding environment appearing.",
+            "Subject fills 60% of frame, immediate surroundings visible on all sides.",
+            "Subject fills 45% of frame, full context of location becoming clear.",
+            "Subject fills 30% of frame, wide view of the setting established.",
+            "Subject fills 20% of frame, broad landscape or street visible beyond.",
+            "Subject fills 12% of frame, sweeping wide vista, environment dominates.",
+            "Subject fills 8% of frame, grand scale of environment fully revealed.",
+            "Subject fills 5% of frame, vast panoramic view, subject a clear landmark.",
+            "Subject fills 3% of frame, extreme wide shot, world stretches in all directions.",
+            "Subject fills 2% of frame, maximum pullback, full epic scale of the world.",
+            "Subject a tiny point, ultimate wide shot, entire landscape fills the frame.",
         ]
         verb = "Camera pulls back steadily -- smooth fluid motion, no shake."
     else:
         phrases = [
-            "Full scene visible, subject centered. Camera begins slow steady push forward.",
-            "Subject fills half the frame, surroundings receding. Camera advances.",
-            "Upper body fills the frame, detail beginning to emerge. Camera pushes in.",
-            "Face or central feature fills the frame, texture visible. Camera advances.",
-            "Extreme close-up, fine detail fills the frame, surrounding falls away.",
-            "Macro detail, texture and surface visible in full clarity.",
+            "Full scene visible, subject centered at 15% of frame, camera begins push forward.",
+            "Subject grows to 25% of frame, surroundings beginning to recede.",
+            "Subject fills 35% of frame, peripheral details falling away at edges.",
+            "Subject fills 50% of frame, fine surface detail starting to emerge.",
+            "Subject fills 65% of frame, background fully blurred, subject sharp.",
+            "Upper portion fills 75% of frame, texture and material clearly visible.",
+            "Central feature fills 85% of frame, intricate detail revealed.",
+            "Key element fills 90% of frame, fine texture and depth visible.",
+            "Detail fills 95% of frame, intimate close-up, single feature dominant.",
+            "Extreme close-up, surface texture fills the entire frame.",
+            "Macro detail, fine structure visible in full clarity, background gone.",
+            "Ultimate close-up, microscopic-scale texture, abstract and intimate.",
         ]
         verb = "Camera pushes in steadily -- smooth fluid motion, no shake."
 
@@ -406,6 +418,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                         guidance=wangp_guidance,
                         duration=gen_dur,
                         seed=-1,
+                        negative_prompt=video_generator.negative_prompt_for(model_name, "dynamic"),
                         stop_check=job.stop_event.is_set,
                         progress_fn=lambda cur, tot: job.update(
                             progress=pct + int(pct_per_clip * cur / max(tot, 1)),
