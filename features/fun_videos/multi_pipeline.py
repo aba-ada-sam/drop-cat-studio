@@ -1163,21 +1163,15 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     new_dur = probe_duration(clip_path) or cut_to
 
     # Extract the last frame of the trimmed clip.
-    # Strategy: try two approaches so one always succeeds.
-    # 1. Output seek (accurate, decodes up to seek point):
-    #    -ss AFTER -i avoids keyframe snapping that causes input-seek to
-    #    miss the last few frames and write nothing.
-    # 2. sseof fallback (always finds a frame, may be a few frames early):
-    #    acceptable -- a 2-frame-early junction is invisible compared to
-    #    resetting the entire chain back to the source photo.
-    seek_to = max(0.0, new_dur - 0.1)
+    # sseof -0.1 is tried first: seeks from end of file, decodes only the
+    # last 0.1s -- almost instant regardless of clip length. The 2-3 frame
+    # inaccuracy is invisible. Output seek (decodes full clip) is the fallback
+    # only if sseof fails for any reason.
     _anchor_cmds = [
-        # Output seek -- accurate
-        ["ffmpeg", "-y", "-i", clip_path,
-         "-ss", f"{seek_to:.4f}", "-frames:v", "1", anchor_png],
-        # sseof fallback -- always works
-        ["ffmpeg", "-y", "-sseof", "-0.5", "-i", clip_path,
+        ["ffmpeg", "-y", "-sseof", "-0.1", "-i", clip_path,
          "-frames:v", "1", anchor_png],
+        ["ffmpeg", "-y", "-i", clip_path,
+         "-ss", f"{max(0.0, new_dur - 0.1):.4f}", "-frames:v", "1", anchor_png],
     ]
     for _cmd in _anchor_cmds:
         fr = subprocess.run(_cmd, capture_output=True, timeout=30)
