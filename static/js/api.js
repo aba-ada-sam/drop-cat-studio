@@ -75,9 +75,9 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
       timer = setTimeout(tick, interval);
     } catch (e) {
       if (stopped) return;
-      // Network error while server is restarting -- retry up to 8 times (40s window)
-      // before declaring failure. Avoids toast-spam when Save & Restart is used.
-      if (++_netErrors <= 8) {
+      // Only retry genuine network errors (TypeError = server unreachable / restarting).
+      // HTTP errors like "Job not found" (404) are definitive -- retrying won't help.
+      if (e instanceof TypeError && ++_netErrors <= 8) {
         timer = setTimeout(tick, 5000);
       } else {
         onError(e.message);

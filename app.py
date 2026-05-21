@@ -974,6 +974,10 @@ async def delete_output(request: Request):
         else:
             file_path.unlink(missing_ok=True)
         return {"ok": True}
+    except PermissionError as e:
+        # WinError 32: file locked by another process (browser streaming it).
+        log.warning("delete_output locked: %s", e)
+        return JSONResponse({"error": "File is in use (close the video player first, then delete)"}, status_code=423)
     except Exception as e:
         log.warning("delete_output error: %s", e)
         return JSONResponse({"error": str(e)}, status_code=500)
