@@ -1430,6 +1430,31 @@ def run_multi_prep(job, photo_path, settings):
     )
     settings["_story_arc"] = arc
 
+    # Extract a concrete subject description from the source image so every
+    # clip prompt is anchored to the actual visual content, not the LLM's
+    # memory of what it hallucinated for clip 1.
+    subject_anchor = ""
+    if arc_photo and os.path.isfile(arc_photo):
+        try:
+            b64 = encode_image_b64(arc_photo)
+            if b64:
+                anchor_raw = llm_router.route_vision(
+                    "Describe the main subject in this image in 12-15 words. "
+                    "Use exact visual details only: hair color, clothing color and type, "
+                    "skin tone, species, material, expression. No interpretation. "
+                    "Example: 'Red-haired woman in blue denim jacket, pale skin, hazel eyes.'",
+                    [b64],
+                    tier=TIER_FAST,
+                    max_tokens=60,
+                )
+                subject_anchor = anchor_raw.strip().strip('"').strip("'")
+                if subject_anchor and not subject_anchor.endswith("."):
+                    subject_anchor += "."
+                log.info("[multi] Subject anchor: %s", subject_anchor)
+        except Exception as e:
+            log.warning("[multi] Subject anchor extraction failed (non-fatal): %s", e)
+    settings["_subject_anchor"] = subject_anchor
+
     # Inspired mode: first-frame temp file was only needed for story-arc vision.
     # Delete it now so it doesn't leak into the OS temp dir.
     _inspired_tmp = settings.pop("_inspired_frame_tmp", None)
@@ -1554,26 +1579,24 @@ def run_multi_pipeline(job, photo_path, settings):
     music_prompt     = settings.get("music_prompt", "") or settings.pop("_prepped_music_prompt", "")
     lyrics           = settings.pop("_prepped_lyrics", "")
     story_arc        = settings.pop("_story_arc", [])
+    subject_anchor   = settings.pop("_subject_anchor", "")
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
     _is_ltx = "ltx" in model_name.lower()
     motion_style     = settings.get("motion_style") or ("calm" if _is_ltx else "dynamic")
 
     # reanchor_every: periodically reset the chain start-image back to the source
-    # photo so artifact drift cannot compound. Without this, LTX at 8 steps can
-    # develop faint rain/particle artifacts by clip 2 that get baked into the chain
-    # frame, then amplified by clip 3, then by clip 4 -- "copy of a copy of a copy."
-    # Defaults: LTX every 2 clips (aggressive -- low step count drifts fast),
-    #           Wan every 3 clips (gentler -- 25 steps holds subject better).
-    # User can override by passing reanchor_every explicitly (0 = never reanchor).
+    # photo to break compounding drift. Default 0 (pure chain, no reset) because
+    # snapping back to the source photo every N clips creates visible jump cuts
+    # that are far worse than any gradual drift. The Infinite Zoom feature proved
+    # this conclusively: reanchor_every=0 + lossless PNG chaining produces smooth,
+    # coherent output. The subject_anchor prefix in each prompt handles identity
+    # consistency without needing to hard-reset the visual chain.
+    # User can override by passing reanchor_every explicitly in settings.
     _user_reanchor = settings.get("reanchor_every")
     if _user_reanchor is not None:
         reanchor_every = int(_user_reanchor)
-    elif n_clips <= 2:
-        reanchor_every = 0  # no drift possible in 2 clips, don't disturb continuity
-    elif _is_ltx:
-        reanchor_every = 2  # LTX: reset to source every 2 clips
     else:
-        reanchor_every = 3  # Wan: reset to source every 3 clips
+        reanchor_every = 0  # pure chain -- never reset to source photo
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
@@ -1782,6 +1805,11 @@ def run_multi_pipeline(job, photo_path, settings):
               pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
               job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}")
 
+          # Prepend subject anchor if the prompt doesn't already open with it.
+          # This guards against LLM drift where later clip prompts describe a
+          # different-looking subject than the source photo.
+          if subject_anchor and not clip_prompt.lower().startswith(subject_anchor[:20].lower()):
+              clip_prompt = subject_anchor + " " + clip_prompt
           finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
           clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
