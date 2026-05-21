@@ -126,7 +126,7 @@ class JobManager:
 
         with self._lock:
             if job_type in GPU_JOB_TYPES:
-                max_depth = int(cfg.get("gpu_queue_max_depth") or 3)
+                max_depth = int(cfg.get("gpu_queue_max_depth") or 20)
                 active_gpu = sum(
                     1 for j in self._jobs.values()
                     if j.type in GPU_JOB_TYPES and j.status in ("running", "queued")
@@ -251,7 +251,7 @@ class JobManager:
 
         with self._lock:
             if job_type in GPU_JOB_TYPES:
-                max_depth = int(cfg.get("gpu_queue_max_depth") or 3)
+                max_depth = int(cfg.get("gpu_queue_max_depth") or 20)
                 # Only count jobs that actually hold or are waiting for the GPU.
                 # "preparing" jobs are doing CPU work (LLM calls) and have not
                 # yet entered the GPU queue -- counting them would block new

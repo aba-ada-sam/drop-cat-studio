@@ -282,7 +282,9 @@ export function init(panel) {
   }
   modelSel.addEventListener('change', _checkModelVram);
 
-  // ── generate button ────────────────────────────────────────────────────────
+  // ── generate button + queue badge ──────────────────────────────────────────
+  let _activeCount = 0;
+
   const generateBtn = el('button', {
     disabled: true,
     style: [
@@ -293,12 +295,20 @@ export function init(panel) {
     text: 'Generate Zoom',
   });
 
+  const queueBadge = el('div', {
+    style: 'display:none; font-size:12px; color:var(--text-2); text-align:center; padding-top:4px;',
+  });
+
   function _updateBtn() {
     const ok = !!_sourcePath;
     generateBtn.disabled = !ok;
     generateBtn.style.opacity = ok ? '1' : '.45';
     generateBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+    generateBtn.textContent = _activeCount > 0 ? `+ Add to Queue (${_activeCount} running)` : 'Generate Zoom';
   }
+
+  function _incActive() { _activeCount++; _updateBtn(); queueBadge.style.display = 'block'; queueBadge.textContent = `${_activeCount} zoom job${_activeCount > 1 ? 's' : ''} in queue -- see Queue tab for progress`; }
+  function _decActive() { _activeCount = Math.max(0, _activeCount - 1); _updateBtn(); if (_activeCount === 0) queueBadge.style.display = 'none'; }
 
   // ── progress ───────────────────────────────────────────────────────────────
   const progressLabel = el('div', { style: 'font-size:13px; color:var(--text-2);' });
@@ -358,7 +368,7 @@ export function init(panel) {
       [LABEL('What the zoom reveals (optional)'), ideaInput]),
     _card(modelGroup),
     generateBtn,
-    progressArea,
+    queueBadge,
     outputArea,
   );
 
@@ -368,11 +378,19 @@ export function init(panel) {
     const nClips  = Number(_activeValue(stepsRow)) || 4;
     const clipDur = Number(_activeValue(durRow))   || 5;
 
-    generateBtn.style.display  = 'none';
-    progressArea.style.display = 'flex';
-    outputArea.style.display   = 'none';
-    progressFill.style.width   = '0%';
-    progressLabel.textContent  = 'Planning zoom arc...';
+    // Pre-flight queue depth check
+    let queueDepth = 0;
+    try {
+      const qs = await apiFetch('/api/jobs');
+      queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0);
+    } catch {}
+    if (queueDepth >= 10) {
+      toast(`Queue is full (${queueDepth} jobs already running/waiting) -- let some finish first`, 'error');
+      return;
+    }
+
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Queuing...';
 
     try {
       const res = await apiFetch('/api/zoom/make', {
@@ -388,56 +406,52 @@ export function init(panel) {
           skip_audio:     false,
         }),
       });
-      _jobId = res.job_id;
 
-      pollJob(_jobId,
+      _incActive();
+      toast(`Zoom ${_direction} queued (#${queueDepth + 1}) -- check Queue tab for progress`, 'info');
+
+      // Watch in background -- form stays active for more submissions
+      pollJob(res.job_id,
+        () => {},
         j => {
-          progressFill.style.width  = (Number(j.progress) || 0) + '%';
-          progressLabel.textContent = j.message || 'Generating...';
-          if (j.meta?.first_clip && !videoEl.src) {
-            videoEl.src = pathToUrl(j.meta.first_clip);
-            videoEl.style.opacity = '.5';
+          _decActive();
+          const out = Array.isArray(j.output) ? j.output[0] : j.output;
+          if (out) {
+            videoEl.src = pathToUrl(out);
+            videoEl.style.opacity = '1';
             videoEl.load();
             outputArea.style.display = 'flex';
+            outputActions.innerHTML = '';
+            outputActions.append(
+              _actionBtn('Open in folder', () =>
+                apiFetch('/api/reveal', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ path: out, action: 'explorer' }),
+                }).catch(() => {})),
+              _actionBtn('Send to Bridges', () => {
+                document.dispatchEvent(new CustomEvent('dcs:handoff',
+                  { detail: { from: 'zoom', to: 'bridges', path: out } }));
+                toast('Sent to Bridges', 'success');
+              }),
+            );
           }
-        },
-        j => {
-          const out = Array.isArray(j.output) ? j.output[0] : j.output;
-          progressArea.style.display = 'none';
-          generateBtn.style.display  = '';
-          _updateBtn();
-          if (out) {
-            videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
-            outputArea.style.display = 'flex';
-          }
-          outputActions.innerHTML = '';
-          outputActions.append(
-            _actionBtn('Open in folder', () =>
-              apiFetch('/api/reveal', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: out, action: 'explorer' }),
-              }).catch(() => {})),
-            _actionBtn('Send to Bridges', () => {
-              document.dispatchEvent(new CustomEvent('dcs:handoff',
-                { detail: { from: 'zoom', to: 'bridges', path: out } }));
-              toast('Sent to Bridges', 'success');
-            }),
-          );
           toast(`Zoom ${_direction} complete!`, 'success');
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
         msg => {
-          progressArea.style.display = 'none';
-          generateBtn.style.display  = '';
-          _updateBtn();
-          toast('Error: ' + msg, 'error');
+          _decActive();
+          toast(`Zoom failed: ${msg}`, 'error');
         },
       );
+
     } catch (err) {
-      progressArea.style.display = 'none';
-      generateBtn.style.display  = '';
+      if (err.status === 429 || /queue.*full|full.*queue/i.test(err.message)) {
+        toast('Queue is full -- open the Queue tab and wait for a job to finish', 'error');
+      } else {
+        toast('Failed: ' + err.message, 'error');
+      }
+    } finally {
       _updateBtn();
-      toast('Failed: ' + err.message, 'error');
     }
   };
 }

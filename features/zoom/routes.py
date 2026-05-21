@@ -100,6 +100,8 @@ async def zoom_make(request: Request):
     except RuntimeError as e:
         raise __import__("fastapi").HTTPException(429, str(e))
 
+    job.meta["feature"] = "zoom"
+    job.meta["zoom_direction"] = direction
     return {"job_id": job.id, "label": label}
 
 

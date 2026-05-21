@@ -301,6 +301,18 @@ export function init(panel) {
       toast('Add at least 2 clips above first', 'error');
       return;
     }
+
+    // Pre-flight queue depth check
+    let queueDepth = 0;
+    try {
+      const qs = await api('/api/jobs');
+      queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0);
+    } catch {}
+    if (queueDepth >= 10) {
+      toast(`Queue is full (${queueDepth} jobs) -- let some finish first`, 'error');
+      return;
+    }
+
     genBtn.disabled = true;
     prog.show();
     prog.update(0, 'Submitting...');
@@ -325,12 +337,15 @@ export function init(panel) {
         }),
       });
 
-      prog.onCancel(async () => { await stopJob(data.job_id).catch(() => {}); genBtn.disabled = false; });
+      // Re-enable button immediately after submit -- user can queue more while this runs
+      genBtn.disabled = false;
+      toast(`Bridge queued (#${queueDepth + 1})`, 'info');
+
+      prog.onCancel(async () => { await stopJob(data.job_id).catch(() => {}); });
       pollJob(data.job_id,
         j => prog.update(j.progress || 0, j.message || 'Working...'),
         j => {
           prog.hide();
-          genBtn.disabled = false;
           if (j.output) {
             _lastOutput = j.output;
             player.show(pathToUrl(j.output), j.output);
@@ -342,12 +357,20 @@ export function init(panel) {
               clip_count:      _items.length,
             });
             sendCard.style.display = '';
-            toast('Bridges generated!', 'success');
+            toast('Bridge complete!', 'success');
           }
         },
-        err => { prog.hide(); genBtn.disabled = false; toast(err, 'error'); },
+        err => { prog.hide(); toast(err, 'error'); },
       );
-    } catch (e) { prog.hide(); genBtn.disabled = false; toast(e.message, 'error'); }
+    } catch (e) {
+      prog.hide();
+      genBtn.disabled = false;
+      if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
+        toast('Queue is full -- open the Queue tab and wait for a job to finish', 'error');
+      } else {
+        toast(e.message, 'error');
+      }
+    }
   });
 
   player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; _lastOutput = null; });

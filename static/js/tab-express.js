@@ -1395,6 +1395,15 @@ export function init(panel) {
       toast('Drop an image or type a video idea first', 'error');
       return;
     }
+    // Pre-flight queue depth check
+    try {
+      const qs = await api('/api/jobs');
+      const depth = (qs.running?.length || 0) + (qs.queued?.length || 0);
+      if (depth >= 10) {
+        toast(`Queue is full (${depth} jobs) -- let some finish first`, 'error');
+        return;
+      }
+    } catch {}
     _showProgress(1, 'Getting started...');
     const submitted = _multiVideo ? await _generateMulti() : await _generateOne();
     if (submitted && _jobId) {
