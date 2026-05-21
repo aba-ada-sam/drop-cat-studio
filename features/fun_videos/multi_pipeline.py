@@ -1161,21 +1161,31 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     os.replace(trimmed, clip_path)
 
     new_dur = probe_duration(clip_path) or cut_to
-    # Pull the actual last frame of the trimmed clip. Seek to new_dur - 0.04s
-    # (one frame at 25fps) using the ACTUAL trimmed duration, not cut_to.
-    # cut_to - 0.04 could land past EOF when frame rounding makes new_dur
-    # slightly shorter than cut_to, causing the PNG write to produce nothing.
-    seek_to = max(0.0, new_dur - 0.04)
-    fr = subprocess.run(
-        ["ffmpeg", "-y",
-         "-ss", f"{seek_to:.4f}", "-i", clip_path,
+
+    # Extract the last frame of the trimmed clip.
+    # Strategy: try two approaches so one always succeeds.
+    # 1. Output seek (accurate, decodes up to seek point):
+    #    -ss AFTER -i avoids keyframe snapping that causes input-seek to
+    #    miss the last few frames and write nothing.
+    # 2. sseof fallback (always finds a frame, may be a few frames early):
+    #    acceptable -- a 2-frame-early junction is invisible compared to
+    #    resetting the entire chain back to the source photo.
+    seek_to = max(0.0, new_dur - 0.1)
+    _anchor_cmds = [
+        # Output seek -- accurate
+        ["ffmpeg", "-y", "-i", clip_path,
+         "-ss", f"{seek_to:.4f}", "-frames:v", "1", anchor_png],
+        # sseof fallback -- always works
+        ["ffmpeg", "-y", "-sseof", "-0.5", "-i", clip_path,
          "-frames:v", "1", anchor_png],
-        capture_output=True, timeout=30,
-    )
-    if fr.returncode != 0 or not Path(anchor_png).exists():
-        log.warning("[chain] anchor extract failed for %s", clip_path)
-        return False, new_dur
-    return True, new_dur
+    ]
+    for _cmd in _anchor_cmds:
+        fr = subprocess.run(_cmd, capture_output=True, timeout=30)
+        if fr.returncode == 0 and Path(anchor_png).exists():
+            return True, new_dur
+
+    log.warning("[chain] anchor extract failed for %s", clip_path)
+    return False, new_dur
 
 
 # -- ffmpeg clip concatenation -------------------------------------------------
