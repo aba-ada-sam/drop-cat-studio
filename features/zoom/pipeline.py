@@ -98,7 +98,7 @@ def _plan_zoom_arc(
         progress_fn("Planning zoom arc from photo...")
 
     system_tpl = _ZOOM_OUT_SYSTEM if direction == "out" else _ZOOM_IN_SYSTEM
-    system = system_tpl.format(n=n_clips)
+    system = system_tpl.replace("{n}", str(n_clips))
 
     idea_line = f"\nUser's idea: {idea}" if idea else ""
     user_msg = (
