@@ -100,10 +100,13 @@ def _plan_zoom_arc(
     system_tpl = _ZOOM_OUT_SYSTEM if direction == "out" else _ZOOM_IN_SYSTEM
     system = system_tpl.replace("{n}", str(n_clips))
 
+    _clip_dur = total_secs / max(n_clips, 1)  # user's requested duration per clip
+
     idea_line = f"\nUser's idea: {idea}" if idea else ""
     user_msg = (
         f"Direction: zoom {direction}\n"
         f"Clips: {n_clips}\n"
+        f"Seconds per clip: {_clip_dur:.0f}s\n"
         f"Target total duration: {int(total_secs)}s{idea_line}\n\n"
         f"Generate exactly {n_clips} clip prompts."
     )
@@ -128,11 +131,10 @@ def _plan_zoom_arc(
             prompt = str(item.get("prompt", "")).strip()
             if not prompt:
                 continue
-            try:
-                dur = max(4.0, min(10.0, float(item.get("duration", 5.0))))
-            except (TypeError, ValueError):
-                dur = 5.0
-            clips.append({"prompt": prompt, "duration": dur})
+            # Always use the user's requested duration -- the LLM's hint is
+            # clamped to 4-10s in its system prompt and would override the
+            # user's selection (e.g. 15s clips coming out as 5s clips).
+            clips.append({"prompt": prompt, "duration": _clip_dur})
         if not clips:
             return None
         # Pad if LLM returned fewer than requested
@@ -166,10 +168,10 @@ def _plan_zoom_arc(
 
     # Hardcoded fallback
     log.warning("[zoom] LLM failed -- using template arc")
-    return _fallback_arc(direction, n_clips, idea)
+    return _fallback_arc(direction, n_clips, idea, _clip_dur)
 
 
-def _fallback_arc(direction: str, n_clips: int, idea: str) -> tuple[list[dict], str, str]:
+def _fallback_arc(direction: str, n_clips: int, idea: str, clip_dur: float = 5.0) -> tuple[list[dict], str, str]:
     idea_prefix = f"{idea}. " if idea else ""
     if direction == "out":
         phrases = [
@@ -197,7 +199,7 @@ def _fallback_arc(direction: str, n_clips: int, idea: str) -> tuple[list[dict], 
         phrase = phrases[min(i, len(phrases) - 1)]
         clips.append({
             "prompt": f"{idea_prefix}{phrase} {verb}",
-            "duration": 5.0,
+            "duration": clip_dur,
         })
     return clips, "", ""
 
@@ -329,7 +331,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
 
     # Build fallback arc if prep didn't run
     if not arc:
-        arc, subject_anchor, focal_target = _fallback_arc(direction, n_clips, settings.get("idea", ""))
+        arc, subject_anchor, focal_target = _fallback_arc(direction, n_clips, settings.get("idea", ""), clip_dur)
 
     def _stopped() -> bool:
         return job.stop_event.is_set()

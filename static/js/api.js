@@ -44,6 +44,8 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
   let stopped = false;
   let polls = 0;
 
+  let _netErrors = 0;
+
   async function tick() {
     if (stopped) return;
     if (++polls > maxPolls) {
@@ -53,6 +55,7 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
     try {
       const job = await api(`/api/jobs/${jobId}`);
       if (stopped) return;
+      _netErrors = 0; // reset on any successful response
 
       if (job.status === 'done') {
         window.dispatchEvent(new CustomEvent('session-updated'));
@@ -71,7 +74,14 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
       onProgress(job);
       timer = setTimeout(tick, interval);
     } catch (e) {
-      if (!stopped) onError(e.message);
+      if (stopped) return;
+      // Network error while server is restarting -- retry up to 8 times (40s window)
+      // before declaring failure. Avoids toast-spam when Save & Restart is used.
+      if (++_netErrors <= 8) {
+        timer = setTimeout(tick, 5000);
+      } else {
+        onError(e.message);
+      }
     }
   }
 
