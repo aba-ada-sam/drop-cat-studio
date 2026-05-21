@@ -52,8 +52,8 @@ async def zoom_make(request: Request):
     if direction not in ("in", "out"):
         return JSONResponse({"error": "zoom_direction must be 'in' or 'out'"}, status_code=400)
 
-    n_clips = max(2, min(8, int(body.get("n_clips", 5))))
-    clip_dur = max(3.0, min(10.0, float(body.get("clip_duration", 5.0))))
+    n_clips = max(2, min(15, int(body.get("n_clips", 5))))
+    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
     model_name = body.get("model_name", "LTX-2 Dev13B")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev13B"

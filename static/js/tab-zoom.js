@@ -193,26 +193,47 @@ export function init(panel) {
   btnOut.style.borderColor = 'var(--accent-border)';
   btnOut.style.background  = 'var(--accent-bg)';
 
-  // ── steps + duration ───────────────────────────────────────────────────────
-  const stepsRow = el('div', { style: 'display:flex; gap:6px;' });
-  [3, 4, 5, 6].forEach((n, i) => {
-    const b = _chip(n, n, stepsRow, () => {});
-    if (i === 1) b.click();  // default 4 steps
+  // ── clips + duration ───────────────────────────────────────────────────────
+  // Each "clip" = one WanGP generation. They chain losslessly (last frame ->
+  // next clip's first frame) to produce a continuous zoom movement.
+  const totalEstEl = el('div', {
+    style: 'font-size:11px; color:var(--text-3); text-align:right; align-self:flex-end; padding-bottom:2px;',
+  });
+
+  function _updateEst() {
+    const clips = Number(_activeValue(stepsRow)) || 4;
+    const secs  = Number(_activeValue(durRow))   || 5;
+    const total = clips * secs;
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    totalEstEl.textContent = `~${m > 0 ? m + 'm ' : ''}${s > 0 ? s + 's' : ''} video`;
+  }
+
+  const stepsRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  [3, 4, 5, 6, 8, 10, 12].forEach((n, i) => {
+    const b = _chip(n, n, stepsRow, _updateEst);
+    if (i === 1) b.click();  // default 4 clips
     stepsRow.appendChild(b);
   });
 
-  const durRow = el('div', { style: 'display:flex; gap:6px;' });
-  [4, 5, 6, 8].forEach((n, i) => {
-    const b = _chip(`${n}s`, n, durRow, () => {});
+  const durRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  [4, 5, 6, 8, 10, 12, 15].forEach((n, i) => {
+    const b = _chip(`${n}s`, n, durRow, _updateEst);
     if (i === 1) b.click();  // default 5s
     durRow.appendChild(b);
   });
 
+  _updateEst();
+
   const controlsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:16px;' });
   const stepsGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
-  stepsGroup.append(LABEL('Zoom steps'), stepsRow);
+  stepsGroup.append(LABEL('Clips in chain'), stepsRow);
   const durGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
-  durGroup.append(LABEL('Per step'), durRow);
+  durGroup.append(
+    el('div', { style: 'display:flex; justify-content:space-between; align-items:baseline;' },
+      [LABEL('Seconds per clip'), totalEstEl]),
+    durRow,
+  );
   controlsGrid.append(stepsGroup, durGroup);
 
   // ── idea ───────────────────────────────────────────────────────────────────

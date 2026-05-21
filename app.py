@@ -11,13 +11,18 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
-# Single-instance guard -- only when run as the server entry point, not when
-# imported by tests or other modules. Uses os._exit so atexit/lifespan don't run.
+# Single-instance guard -- socket lock on 127.0.0.1:7849.
+# Reliable on all privilege levels; OS auto-releases when the process dies.
+# Only runs when launched as the server entry point, not when imported by tests.
 if _sys.modules.get("__main__") is _sys.modules.get("app"):
-    import ctypes as _ctypes, os as _os
-    _mutex = _ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\DropCatGoStudio_SingleInstance")
-    if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        _sys.stderr.write("Drop Cat Go Studio is already running.\n")
+    import socket as _sock_mod, os as _os
+    _lock_socket = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
+    _lock_socket.setsockopt(_sock_mod.SOL_SOCKET, _sock_mod.SO_REUSEADDR, 0)
+    try:
+        _lock_socket.bind(("127.0.0.1", 7849))
+        _lock_socket.listen(1)
+    except OSError:
+        _sys.stderr.write("Drop Cat Go Studio is already running -- exiting.\n")
         _os._exit(0)
 
 import asyncio
