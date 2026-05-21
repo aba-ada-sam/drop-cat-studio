@@ -831,7 +831,7 @@ export function init(panel) {
           hrUpscalerSel.appendChild(el('option', { value: u, text: u }));
 
       } else {
-        genBtn.disabled      = true;
+        if (_backend !== 'openai') genBtn.disabled = true;
         modelSel.style.display = 'none';
         if (!_forgeAutoStarted) {
           // First detection: kick off auto-start immediately, no user action needed
@@ -852,7 +852,7 @@ export function init(panel) {
         if (!_retryTimer) _retryTimer = setInterval(checkForge, 5000);
       }
     } catch (_) {
-      genBtn.disabled      = true;
+      if (_backend !== 'openai') genBtn.disabled = true;
       modelSel.style.display = 'none';
       if (!_forgeAutoStarted) {
         _forgeAutoStarted = true;
