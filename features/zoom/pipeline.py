@@ -150,13 +150,13 @@ def _plan_zoom_arc(
             if use_frames:
                 text = llm_router.route_vision(
                     user_msg, use_frames,
-                    tier=TIER_BALANCED, system=system, max_tokens=1200,
+                    tier=TIER_BALANCED, system=system, max_tokens=2500,
                     format_json=True,
                 )
             else:
                 text = llm_router.route(
                     [{"role": "user", "content": user_msg}],
-                    tier=TIER_BALANCED, system=system, max_tokens=1200,
+                    tier=TIER_BALANCED, system=system, max_tokens=2500,
                 )
             result = _parse(text)
             if result:

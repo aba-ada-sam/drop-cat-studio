@@ -1161,12 +1161,11 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     os.replace(trimmed, clip_path)
 
     new_dur = probe_duration(clip_path) or cut_to
-    # Pull the actual last frame of the trimmed clip. Forward-seek to the
-    # last frame slot (cut_to - 0.04s ~ 1 frame at 25fps) so the anchor
-    # matches what the concat shows as clip i's final frame. The previous
-    # -sseof -0.10 approach landed 2-3 frames early, creating a visible
-    # snap-back at every junction.
-    seek_to = max(0.0, cut_to - 0.04)
+    # Pull the actual last frame of the trimmed clip. Seek to new_dur - 0.04s
+    # (one frame at 25fps) using the ACTUAL trimmed duration, not cut_to.
+    # cut_to - 0.04 could land past EOF when frame rounding makes new_dur
+    # slightly shorter than cut_to, causing the PNG write to produce nothing.
+    seek_to = max(0.0, new_dur - 0.04)
     fr = subprocess.run(
         ["ffmpeg", "-y",
          "-ss", f"{seek_to:.4f}", "-i", clip_path,
