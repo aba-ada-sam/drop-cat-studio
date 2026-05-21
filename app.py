@@ -152,22 +152,17 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] could not create runtime dirs (non-fatal): %s", _e)
 
-    # On an unplanned restart (crash, kill) delete any stale queue_save.json --
-    # those jobs may be in a bad state. On a PLANNED restart (user clicked
-    # "Save & Restart") the marker file is present, so we keep the save file
-    # and auto-restore after job manager init.
+    # On a PLANNED restart (user clicked "Save & Restart") auto-restore the queue.
+    # On an unplanned restart (crash, kill) keep any existing queue_save.json so
+    # the user can click "Restore Queue" to get their jobs back -- don't wipe it.
     _planned_restart = PLANNED_RESTART_MARKER.exists()
     if _planned_restart:
         PLANNED_RESTART_MARKER.unlink(missing_ok=True)
-        log.info("[startup] planned restart detected -- queue will be restored")
+        log.info("[startup] planned restart -- queue will be auto-restored")
     else:
-        try:
-            from core.job_manager import QUEUE_SAVE_FILE as _QSF
-            if _QSF.exists():
-                _QSF.unlink()
-                log.info("[startup] cleared queue_save.json -- fresh session")
-        except Exception as _e:
-            log.warning("[startup] queue_save cleanup failed (non-fatal): %s", _e)
+        from core.job_manager import QUEUE_SAVE_FILE as _QSF
+        if _QSF.exists():
+            log.info("[startup] queue_save.json found -- Restore Queue button will be available")
 
     # Migrate config from old apps on first run
     try:

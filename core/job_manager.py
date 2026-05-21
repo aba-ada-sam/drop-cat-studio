@@ -294,6 +294,11 @@ class JobManager:
             self._gpu_event.set()
             log.info("Job %s (%s) prep done, queued for GPU -- position %d",
                      job.id, job_type, len(self._gpu_queue))
+            # Auto-save queue so an unexpected restart can restore it.
+            try:
+                self.save_queue()
+            except Exception as _e:
+                log.debug("Auto-save queue failed (non-fatal): %s", _e)
 
         t = threading.Thread(target=_run_prep, daemon=True)
         t.start()
