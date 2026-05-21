@@ -111,9 +111,13 @@ async def zoom_make(request: Request):
     return {"job_id": job.id, "label": label}
 
 
+_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
+_ALL_EXTS   = _IMAGE_EXTS | _VIDEO_EXTS
+
+
 @router.post("/api/zoom/scan-folder")
 async def zoom_scan_folder(request: Request):
-    """Return sorted list of images in a folder for batch queuing."""
+    """Return sorted list of images and videos in a folder."""
     try:
         body = await request.json()
     except Exception:
@@ -123,15 +127,82 @@ async def zoom_scan_folder(request: Request):
     if not folder or not os.path.isdir(folder):
         return JSONResponse({"error": "folder must be an existing directory"}, status_code=400)
 
-    images = sorted(
+    files = sorted(
         [
-            {"path": str(p), "name": p.name}
+            {"path": str(p), "name": p.name, "is_video": p.suffix.lower() in _VIDEO_EXTS}
             for p in Path(folder).iterdir()
-            if p.suffix.lower() in _IMAGE_EXTS and p.is_file()
+            if p.suffix.lower() in _ALL_EXTS and p.is_file()
         ],
         key=lambda x: x["name"].lower(),
     )
-    return {"folder": folder, "images": images, "total": len(images)}
+    return {"folder": folder, "files": files, "total": len(files)}
+
+
+@router.post("/api/zoom/folder-loop/start")
+async def zoom_folder_loop_start(request: Request):
+    """Start a server-side zoom folder loop."""
+    import asyncio as _asyncio
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    folder = body.get("folder", "").strip()
+    if not folder or not os.path.isdir(folder):
+        return JSONResponse({"error": "folder must be an existing directory"}, status_code=400)
+
+    from features.zoom.folder_loop import ALL_EXTS, start as _loop_start
+
+    files = sorted(
+        [
+            {"path": str(p), "name": p.name, "is_video": p.suffix.lower() in _VIDEO_EXTS}
+            for p in Path(folder).iterdir()
+            if p.suffix.lower() in ALL_EXTS and p.is_file()
+        ],
+        key=lambda x: x["name"].lower(),
+    )
+    if not files:
+        return JSONResponse({"error": "No supported image or video files found in that folder"}, status_code=400)
+
+    n_clips  = max(2, min(15, int(body.get("n_clips", 4))))
+    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
+    model_name = body.get("model_name", "LTX-2 Dev13B")
+    if model_name not in _VG_MODELS:
+        model_name = "LTX-2 Dev13B"
+    _model_info = _VG_MODELS.get(model_name, {})
+
+    settings = {
+        "zoom_direction":  body.get("zoom_direction", "out"),
+        "n_clips":         n_clips,
+        "clip_duration":   clip_dur,
+        "model_name":      model_name,
+        "steps":           int(body.get("steps", _model_info.get("steps", 25))),
+        "guidance":        float(body.get("guidance", _model_info.get("guidance", 3.5))),
+        "idea":            body.get("idea", "").strip(),
+        "skip_audio":      bool(body.get("skip_audio", False)),
+        "instrumental":    bool(body.get("instrumental", False)),
+        "music_prompt":    body.get("music_prompt", ""),
+        "_timeout_seconds": n_clips * _PER_CLIP_TIMEOUT_S + _AUDIO_BUFFER_S,
+    }
+
+    repeat = bool(body.get("repeat", False))
+    snap = await _asyncio.to_thread(_loop_start, folder, files, settings, repeat)
+    return snap
+
+
+@router.get("/api/zoom/folder-loop/status")
+async def zoom_folder_loop_status():
+    """Heartbeat + state for the folder loop."""
+    from features.zoom.folder_loop import status as _loop_status
+    return _loop_status()
+
+
+@router.post("/api/zoom/folder-loop/stop")
+async def zoom_folder_loop_stop():
+    """Stop the folder loop."""
+    from features.zoom.folder_loop import stop as _loop_stop
+    _loop_stop()
+    return {"ok": True}
 
 
 @router.post("/api/zoom/extract-frame")

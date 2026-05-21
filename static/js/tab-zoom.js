@@ -380,143 +380,229 @@ export function init(panel) {
   outputArea.append(videoEl, outputActions);
 
   // ── folder batch ───────────────────────────────────────────────────────────
-  let _folderImages = [];
+  let _folderFiles  = [];
+  let _folderPath   = '';
+  let _loopActive   = false;
+  let _loopPollTimer = null;
 
   const batchDivider = el('div', {
-    style: 'display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:11px;',
+    style: 'display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:11px; padding-top:4px;',
   });
   batchDivider.innerHTML = '<hr style="flex:1;border:none;border-top:1px solid var(--border-2)"> or process a whole folder <hr style="flex:1;border:none;border-top:1px solid var(--border-2)">';
 
-  const folderInput = el('input', {
-    type: 'text', placeholder: 'Paste folder path here  e.g. C:\\Photos\\batch',
+  // folder picker row
+  const folderNameEl = el('div', {
+    style: 'flex:1; font-size:13px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:9px 0;',
+    text: 'No folder selected',
+  });
+  const browseFolderBtn = el('button', {
+    text: 'Choose Folder',
     style: [
-      'flex:1; background:var(--surface-2); border:1px solid var(--border-2);',
-      'border-radius:var(--r-md); padding:9px 12px; color:var(--text); font-size:13px; outline:none;',
+      'padding:9px 16px; border-radius:var(--r-md); border:1px solid var(--accent-border);',
+      'background:var(--accent-bg); color:var(--accent); cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap;',
     ].join(''),
   });
 
-  const browseBtn = el('button', {
-    text: 'Browse',
-    style: [
-      'padding:9px 14px; border-radius:var(--r-md); border:1px solid var(--border-2);',
-      'background:var(--surface); color:var(--text-2); cursor:pointer; font-size:13px; white-space:nowrap;',
-    ].join(''),
+  // loop toggle
+  const loopToggle = el('label', {
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
   });
-  browseBtn.onclick = async () => {
-    try {
-      const r = await apiFetch('/api/browse-folder', { method: 'POST' });
-      if (r.folder) { folderInput.value = r.folder; await _scanFolder(); }
-    } catch {}
-  };
+  const loopCheck = el('input', { type: 'checkbox' });
+  loopCheck.style.accentColor = 'var(--accent)';
+  loopToggle.append(loopCheck, 'Loop continuously');
 
   const folderStatus = el('div', {
     style: 'font-size:12px; color:var(--text-3); min-height:16px;',
   });
 
-  const queueAllBtn = el('button', {
+  const batchBtn = el('button', {
     text: 'Queue All',
     disabled: true,
     style: [
       'padding:11px; border-radius:var(--r-lg); border:none; cursor:not-allowed;',
-      'font-size:14px; font-weight:700; background:var(--accent); color:var(--bg-base); opacity:.45;',
+      'font-size:14px; font-weight:700; background:var(--circus-red); color:var(--text); opacity:.45;',
     ].join(''),
   });
 
-  async function _scanFolder() {
-    const folder = folderInput.value.trim();
-    if (!folder) return;
+  function _setBatchReady() {
+    const n = _folderFiles.length;
+    if (!n) {
+      batchBtn.disabled = true;
+      batchBtn.style.opacity = '.45';
+      batchBtn.style.cursor = 'not-allowed';
+      batchBtn.textContent = 'Queue All';
+      return;
+    }
+    batchBtn.disabled = false;
+    batchBtn.style.opacity = '1';
+    batchBtn.style.cursor = 'pointer';
+    batchBtn.textContent = loopCheck.checked ? `Start Loop (${n} files)` : `Queue All ${n} Files`;
+  }
+
+  loopCheck.addEventListener('change', _setBatchReady);
+
+  async function _scanFolder(folder) {
     folderStatus.textContent = 'Scanning...';
-    queueAllBtn.disabled = true;
-    queueAllBtn.style.opacity = '.45';
-    queueAllBtn.style.cursor = 'not-allowed';
+    _folderFiles = [];
+    _setBatchReady();
     try {
       const r = await apiFetch('/api/zoom/scan-folder', {
         method: 'POST', body: JSON.stringify({ folder }),
       });
-      _folderImages = r.images || [];
-      folderStatus.textContent = _folderImages.length
-        ? `${_folderImages.length} image${_folderImages.length !== 1 ? 's' : ''} found`
-        : 'No images found in that folder';
-      if (_folderImages.length) {
-        queueAllBtn.disabled = false;
-        queueAllBtn.style.opacity = '1';
-        queueAllBtn.style.cursor = 'pointer';
-        queueAllBtn.textContent = `Queue All ${_folderImages.length} Images`;
+      _folderFiles = r.files || [];
+      const imgs   = _folderFiles.filter(f => !f.is_video).length;
+      const vids   = _folderFiles.filter(f =>  f.is_video).length;
+      if (!_folderFiles.length) {
+        folderStatus.textContent = 'No supported files found (jpg, png, mp4, mov, ...)';
+      } else {
+        const parts = [];
+        if (imgs) parts.push(`${imgs} image${imgs !== 1 ? 's' : ''}`);
+        if (vids) parts.push(`${vids} video${vids !== 1 ? 's' : ''}`);
+        folderStatus.textContent = parts.join(', ') + ' found';
       }
+      _setBatchReady();
     } catch (e) {
       folderStatus.textContent = 'Error: ' + e.message;
     }
   }
 
-  folderInput.addEventListener('change', _scanFolder);
-  folderInput.addEventListener('keydown', e => { if (e.key === 'Enter') _scanFolder(); });
+  browseFolderBtn.onclick = async () => {
+    if (_loopActive) return;
+    try {
+      const r = await apiFetch('/api/browse-folder', { method: 'POST' });
+      if (r.folder) {
+        _folderPath = r.folder;
+        folderNameEl.textContent = r.folder.split(/[\\/]/).pop() || r.folder;
+        folderNameEl.title = r.folder;
+        await _scanFolder(r.folder);
+      }
+    } catch {}
+  };
 
-  queueAllBtn.onclick = async () => {
-    if (!_folderImages.length) return;
+  // -- loop poll --
+  function _stopLoopPoll() {
+    if (_loopPollTimer) { clearInterval(_loopPollTimer); _loopPollTimer = null; }
+  }
+
+  async function _pollLoop() {
+    try {
+      const snap = await apiFetch('/api/zoom/folder-loop/status');
+      const total = snap.files?.length || _folderFiles.length;
+      if (snap.active) {
+        const lap  = snap.lap > 0 ? ` lap ${snap.lap + 1}` : '';
+        batchBtn.textContent = `Stop Loop (${snap.index}/${total}${lap})`;
+        batchBtn.disabled = false;
+        batchBtn.style.opacity = '1';
+        folderStatus.textContent = snap.current_file
+          ? `Processing: ${snap.current_file} -- ${snap.succeeded} done, ${snap.failed} failed`
+          : `Running...`;
+      } else {
+        // Loop finished
+        _loopActive = false;
+        _stopLoopPoll();
+        batchBtn.textContent = `Start Loop (${total} files)`;
+        browseFolderBtn.disabled = false;
+        const msg = snap.status === 'done'
+          ? `Loop done -- ${snap.succeeded} succeeded, ${snap.failed} failed`
+          : `Loop stopped -- ${snap.succeeded} done, ${snap.failed} failed`;
+        folderStatus.textContent = msg;
+        toast(msg, snap.failed ? 'error' : 'success');
+      }
+    } catch {}
+  }
+
+  batchBtn.onclick = async () => {
+    if (!_folderFiles.length && !_loopActive) return;
+
+    // Stop loop if running
+    if (_loopActive) {
+      await apiFetch('/api/zoom/folder-loop/stop', { method: 'POST' }).catch(() => {});
+      _loopActive = false;
+      _stopLoopPoll();
+      batchBtn.textContent = `Start Loop (${_folderFiles.length} files)`;
+      folderStatus.textContent = 'Loop stopped.';
+      browseFolderBtn.disabled = false;
+      return;
+    }
+
     const nClips  = Number(_activeValue(stepsRow)) || 4;
     const clipDur = Number(_activeValue(durRow))   || 5;
     const idea    = ideaInput.value.trim();
+    const body    = {
+      folder:         _folderPath,
+      zoom_direction: _direction,
+      n_clips:        nClips,
+      clip_duration:  clipDur,
+      idea,
+      model_name:     modelSel.value,
+      skip_audio:     false,
+      repeat:         loopCheck.checked,
+    };
 
-    queueAllBtn.disabled = true;
-    queueAllBtn.style.cursor = 'not-allowed';
-
-    let queued = 0;
-    for (const img of _folderImages) {
-      queueAllBtn.textContent = `Queuing ${queued + 1}/${_folderImages.length}...`;
+    if (loopCheck.checked) {
+      // Server-side loop
+      batchBtn.disabled = true;
+      browseFolderBtn.disabled = true;
       try {
-        const res = await apiFetch('/api/zoom/make', {
-          method: 'POST',
-          body: JSON.stringify({
-            source_path:    img.path,
-            zoom_direction: _direction,
-            n_clips:        nClips,
-            clip_duration:  clipDur,
-            idea,
-            model_name:     modelSel.value,
-            skip_audio:     false,
-          }),
-        });
-        _incActive();
-        pollJob(res.job_id, () => {}, j => {
-          _decActive();
-          const out = Array.isArray(j.output) ? j.output[0] : j.output;
-          if (out) {
-            videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
-            outputArea.style.display = 'flex';
-            outputActions.innerHTML = '';
-            outputActions.append(
-              _actionBtn('Open in folder', () =>
-                apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-            );
-          }
-          toast(`Zoom done: ${img.name}`, 'success');
-          document.dispatchEvent(new CustomEvent('session-updated'));
-        }, msg => { _decActive(); toast(`Zoom failed (${img.name}): ${msg}`, 'error'); });
-        queued++;
+        await apiFetch('/api/zoom/folder-loop/start', { method: 'POST', body: JSON.stringify(body) });
+        _loopActive = true;
+        batchBtn.disabled = false;
+        batchBtn.textContent = `Stop Loop (0/${_folderFiles.length})`;
+        folderStatus.textContent = 'Loop started -- processing one file at a time...';
+        _loopPollTimer = setInterval(_pollLoop, 5000);
       } catch (e) {
-        if (e.status === 429 || /queue.*full/i.test(e.message)) {
-          toast(`Queue full at image ${queued + 1} -- ${_folderImages.length - queued} images not queued`, 'error');
-          break;
-        }
-        toast(`Failed to queue ${img.name}: ${e.message}`, 'error');
+        batchBtn.disabled = false;
+        browseFolderBtn.disabled = false;
+        toast('Failed to start loop: ' + e.message, 'error');
+        _setBatchReady();
       }
+    } else {
+      // Queue all at once
+      batchBtn.disabled = true;
+      let queued = 0;
+      for (const f of _folderFiles) {
+        batchBtn.textContent = `Queuing ${queued + 1}/${_folderFiles.length}...`;
+        try {
+          const res = await apiFetch('/api/zoom/make', {
+            method: 'POST',
+            body: JSON.stringify({ source_path: f.path, ...body }),
+          });
+          _incActive();
+          pollJob(res.job_id, () => {}, j => {
+            _decActive();
+            const out = Array.isArray(j.output) ? j.output[0] : j.output;
+            if (out) {
+              videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+              outputArea.style.display = 'flex';
+              outputActions.innerHTML = '';
+              outputActions.append(_actionBtn('Open in folder', () =>
+                apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})));
+            }
+            toast(`Zoom done: ${f.name}`, 'success');
+            document.dispatchEvent(new CustomEvent('session-updated'));
+          }, msg => { _decActive(); toast(`Zoom failed (${f.name}): ${msg}`, 'error'); });
+          queued++;
+        } catch (e) {
+          if (e.status === 429 || /queue.*full/i.test(e.message)) {
+            toast(`Queue full at file ${queued + 1} -- ${_folderFiles.length - queued} files not queued`, 'error');
+            break;
+          }
+          toast(`Failed to queue ${f.name}: ${e.message}`, 'error');
+        }
+      }
+      batchBtn.disabled = false;
+      batchBtn.textContent = `Queued ${queued} -- check Queue tab`;
+      setTimeout(_setBatchReady, 4000);
     }
-
-    queueAllBtn.textContent = `Queued ${queued}/${_folderImages.length} -- check Queue tab`;
-    setTimeout(() => {
-      queueAllBtn.textContent = `Queue All ${_folderImages.length} Images`;
-      queueAllBtn.disabled = false;
-      queueAllBtn.style.cursor = 'pointer';
-      queueAllBtn.style.opacity = '1';
-    }, 4000);
   };
 
   const batchSection = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
   batchSection.append(
     batchDivider,
-    el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderInput, browseBtn]),
+    el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]),
+    loopToggle,
     folderStatus,
-    queueAllBtn,
+    batchBtn,
   );
 
   // ── assemble ───────────────────────────────────────────────────────────────
