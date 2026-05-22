@@ -222,7 +222,7 @@ async def lifespan(app: FastAPI):
                 capture_output=True, text=True, timeout=5,
             )
             return r
-        _r = await _asyncio.to_thread(_detect_vram)
+        _r = await asyncio.to_thread(_detect_vram)
         if _r.returncode == 0:
             _mb = int(_r.stdout.strip().splitlines()[0].strip())
             _g["gpu_vram_gb"] = round(_mb / 1024, 1)

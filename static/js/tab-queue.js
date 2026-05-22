@@ -152,30 +152,7 @@ function _buildShell() {
     saveBtn.textContent = '💾 Save Queue';
   });
 
-  const restoreBtn = el('button', {
-    id: 'queue-restore-btn',
-    class: 'btn btn-sm',
-    title: 'Re-queue jobs saved before last restart',
-    style: 'display:none; background:var(--accent); color:var(--bg-base);',
-  });
-  restoreBtn.addEventListener('click', async () => {
-    restoreBtn.disabled = true;
-    restoreBtn.textContent = '...';
-    const r = await api('/api/jobs/restore-queue', { method: 'POST' }).catch(() => null);
-    restoreBtn.disabled = false;
-    restoreBtn.style.display = 'none';
-    if (r?.restored != null) {
-      const msg = r.failed > 0
-        ? `Restored ${r.restored} job${r.restored !== 1 ? 's' : ''} (${r.failed} failed)`
-        : `Restored ${r.restored} job${r.restored !== 1 ? 's' : ''}`;
-      toast(msg, 'info');
-      _poll();
-    } else {
-      toast('Restore failed', 'error');
-    }
-  });
-
-  const saveRestartBtn = el('button', {
+const saveRestartBtn = el('button', {
     id: 'queue-save-restart-btn',
     class: 'btn btn-sm',
     text: 'Save & Restart',
@@ -210,11 +187,9 @@ function _buildShell() {
     }
   });
 
-  toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, restoreBtn, saveRestartBtn);
+  toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, saveRestartBtn);
   _root.appendChild(toolbar);
 
-  // Check for a saved queue on first render
-  _checkRestoreBtn();
 
   // -- Scrollable list --
   const list = el('div', {
@@ -233,21 +208,6 @@ function _buildShell() {
   list.appendChild(empty);
 }
 
-async function _checkRestoreBtn() {
-  const btn = document.getElementById('queue-restore-btn');
-  if (!btn) return;
-  try {
-    const info = await api('/api/jobs/save-queue');
-    if (info?.has_save && info.count > 0) {
-      btn.textContent = `♻ Restore ${info.count} saved job${info.count !== 1 ? 's' : ''}`;
-      btn.style.display = '';
-    } else {
-      btn.style.display = 'none';
-    }
-  } catch (_) {
-    btn.style.display = 'none';
-  }
-}
 
 function _syncPauseBtn() {
   const btn = document.getElementById('queue-pause-btn');

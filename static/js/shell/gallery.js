@@ -49,7 +49,9 @@ export async function addItem(item) {
     });
     _items.unshift(saved);
     _renderGrid();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[gallery] addItem failed:', e?.message || e);
+  }
 }
 
 // Tabs call this when a generation succeeds. Converts a filesystem path to
@@ -82,7 +84,9 @@ async function _load() {
     _totalItems = data.total ?? _items.length;
     _loadedOffset = _items.length;
     _renderGrid();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[gallery] load failed:', e?.message || e);
+  }
 }
 
 async function _loadMore() {
@@ -93,7 +97,9 @@ async function _loadMore() {
     _totalItems = data.total ?? _items.length;
     _loadedOffset = _items.length;
     _renderGrid();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[gallery] loadMore failed:', e?.message || e);
+  }
 }
 
 function _render() {

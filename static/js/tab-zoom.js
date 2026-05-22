@@ -5,6 +5,7 @@
 import { pollJob, stopJob, apiUpload } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260518a';
+import { handoff } from './handoff.js?v=20260422a';
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -723,7 +724,7 @@ export function init(panel) {
                   apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
                 _actionBtn('Send to Bridges', () => {
-                  document.dispatchEvent(new CustomEvent('dcs:handoff', { detail: { from: 'zoom', to: 'bridges', path: out } }));
+                  handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
                   toast('Sent to Bridges', 'success');
                 }),
                 _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection)),
@@ -829,8 +830,7 @@ export function init(panel) {
                   body: JSON.stringify({ path: out, action: 'explorer' }),
                 }).catch(() => {})),
               _actionBtn('Send to Bridges', () => {
-                document.dispatchEvent(new CustomEvent('dcs:handoff',
-                  { detail: { from: 'zoom', to: 'bridges', path: out } }));
+                handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
                 toast('Sent to Bridges', 'success');
               }),
               _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
