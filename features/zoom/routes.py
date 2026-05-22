@@ -101,8 +101,9 @@ async def zoom_make(request: Request):
         "music_prompt": body.get("music_prompt", ""),
         "audio_format": body.get("audio_format", "mp3"),
         "audio_first": bool(body.get("audio_first", False)),
-        "upscale": bool(body.get("upscale", False)),
-        "upscale_scale": float(body.get("upscale_scale", 2.0)),
+        "upscale":        bool(body.get("upscale", True)),
+        "upscale_scale":  float(body.get("upscale_scale", 2.0)),
+        "upscale_method": body.get("upscale_method", "ai") if body.get("upscale_method") in ("ffmpeg", "ai") else "ai",
         "_tmp_dir": _tmp_dir_to_clean,
     }
 
@@ -196,8 +197,9 @@ async def zoom_extend(request: Request):
         "bpm":                body.get("bpm"),
         "audio_first":        bool(body.get("audio_first", False)),
         "extend_base_path":   existing_path,
-        "upscale":            bool(body.get("upscale", False)),
-        "upscale_scale":      float(body.get("upscale_scale", 2.0)),
+        "upscale":        bool(body.get("upscale", True)),
+        "upscale_scale":  float(body.get("upscale_scale", 2.0)),
+        "upscale_method": body.get("upscale_method", "ai") if body.get("upscale_method") in ("ffmpeg", "ai") else "ai",
         "_tmp_dir":           _ext_tmp_dir,
     }
 

@@ -23,6 +23,11 @@ from features.fun_videos.video_generator import MODELS
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+# Models that generate at reduced resolution and need AI upscaling to recover detail.
+# When auto-pick or the user selects one of these, DCS forces method="ai" scale=4x
+# so the final output is 2560x1440 from a 640x360 source (Real-ESRGAN x4plus).
+_LOW_RES_AI_MODELS = {"LTX-2 Dev13B 360P"}
+
 
 def _safe_float(val, default: float) -> float:
     """Convert val to float, returning default on any parse error."""
@@ -579,7 +584,7 @@ def _get_pick_to_model() -> dict:
     if not gpu_vram or gpu_vram >= 20:
         action_model = "LTX-2 Dev13B"         # full res, needs 24GB
     else:
-        action_model = "LTX-2 Dev13B 480P"    # 480P: real kinetic action, fits 16GB
+        action_model = "LTX-2 Dev13B 360P"    # 480P: real kinetic action, fits 16GB
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
         "action":       (action_model,              "dynamic"),
@@ -821,7 +826,7 @@ async def make_it(request: Request):
     _MODEL_MIN_STEPS_SINGLE = {
         "LTX-2 Dev19B Distilled": 4,
         "LTX-2 Dev13B":            20,
-        "LTX-2 Dev13B 480P":       20,
+        "LTX-2 Dev13B 360P":       20,
         "Wan2.1-I2V-14B-480P":     20,
         "Wan2.1-I2V-14B-720P":     20,
         "Wan2.1-T2V-14B":          20,
@@ -864,8 +869,8 @@ async def make_it(request: Request):
         "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
         "loras":          body.get("loras", []),
         "upscale":        body.get("upscale", True),
-        "upscale_scale":  max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 2.0))),
-        "upscale_method": body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg",
+        "upscale_scale":  max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0))),
+        "upscale_method": "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
     }
 
     if photo_path:
@@ -962,7 +967,7 @@ async def make_it_multi(request: Request):
     _MODEL_MIN_STEPS = {
         "LTX-2 Dev19B Distilled": 4,
         "LTX-2 Dev13B":            20,
-        "LTX-2 Dev13B 480P":       20,
+        "LTX-2 Dev13B 360P":       20,
         "Wan2.1-I2V-14B-480P":     20,
         "Wan2.1-I2V-14B-720P":     20,
         "Wan2.1-T2V-14B":          20,
@@ -998,8 +1003,8 @@ async def make_it_multi(request: Request):
         "bpm":                  body.get("bpm"),
         "target_story_length":  target_secs,
         "upscale":              body.get("upscale", True),
-        "upscale_scale":        max(0.5, min(4.0, float(body.get("upscale_scale", 2.0)))),
-        "upscale_method":       body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg",
+        "upscale_scale":        max(0.5, min(4.0, float(body.get("upscale_scale", 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0)))),
+        "upscale_method":       "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
         "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
         "motion_style":         requested_motion,
         "start_video_path":          _resolve_path(body.get("start_video_path", "")),

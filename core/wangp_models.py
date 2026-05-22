@@ -12,7 +12,7 @@ MODEL_MAP: dict[str, str] = {
     "Wan2.1-VACE-1.3B":         "vace_1.3B",
     "LTX-2 Dev19B Distilled":   "ltx2_distilled",
     "LTX-2 Dev13B":             "ltxv_13B",
-    "LTX-2 Dev13B 480P":        "ltxv_13B",   # same model, resolution capped by DCS to fit 16GB
+    "LTX-2 Dev13B 360P":        "ltxv_13B",   # same model, 360P capped by DCS; Real-ESRGAN 4x post-proc
 }
 
 
