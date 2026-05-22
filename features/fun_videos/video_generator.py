@@ -19,38 +19,34 @@ log = logging.getLogger(__name__)
 WANGP_WORKER_PORT = 7899
 
 # Negative prompts tuned per model family and motion style.
-# Research: 5-8 targeted terms outperform exhaustive lists (crepal.ai).
-# LTX HuggingFace card includes "static" in negatives -- this tells the
-# model to avoid fully-frozen frames and is correct for dynamic clips.
-# For calm/gentle mode, "static" is intentionally absent: adding it pushes
-# LTX to hallucinate motion (rain, debris) to fill anchored regions.
+#
+# LTX-2 research (ltx.io official + community testing):
+#   - 5-8 terms max. Stacking 20+ terms produces weird outputs (quality degrades).
+#   - Particle artifacts (snow, dust, debris) are NOT suppressed by negative prompts --
+#     they're caused by positive prompt wording that asks for particle-generating motion.
+#     The fix is in the positive prompt, not the negative.
+#   - "static" in neg forces LTX to prove it's not static, which triggers hallucinated
+#     particle motion on anchored/chained frames. Include only for unconstrained dynamic.
+#
+# Wan2.1 research: negative prompts are inconsistent in 2.1. Keep them minimal and
+# reactive (suppress problems you observe, not problems you fear).
 
-# LTX-2 calm/gentle: no "static" -- we want minimal motion, not invented motion.
+# LTX-2 calm/chained frames: no "static" to avoid particle-fill pressure.
+# Kept to 8 focused terms -- quality terms only, no particle enumeration.
 _NEG_LTX_CALM = (
-    "shaky, glitchy, low quality, worst quality, deformed, distorted, "
-    "flickering, flicker, jitter, jittery, temporal artifacts, stutter, "
-    "motion smear, motion artifacts, watermark, text, abrupt transition, jump cut, "
-    "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
-    "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
-    "floating debris, orbs, bokeh balls, lens flare artifacts"
+    "worst quality, low quality, blurry, distorted, jitter, stutter, "
+    "temporal artifacts, watermark, text, abrupt transition, jump cut"
 )
-# LTX-2 dynamic (Dev13B or Distilled in dynamic mode): "static" included per
-# HuggingFace card -- prevents fully frozen non-animating output.
+# LTX-2 dynamic (unconstrained, no chained anchor): "static" included to prevent
+# fully frozen output. Still capped at ~10 terms.
 _NEG_LTX_DYNAMIC = (
-    "shaky, glitchy, low quality, worst quality, deformed, distorted, "
-    "flickering, flicker, jitter, jittery, temporal artifacts, stutter, "
-    "motion smear, motion artifacts, watermark, text, static, abrupt transition, jump cut, "
-    "rain, drizzle, snow, snowflakes, precipitation, falling particles, falling debris, "
-    "blizzard, hail, droplets, splatter, sparks, embers, dust storm, confetti, "
-    "floating debris, orbs, bokeh balls, lens flare artifacts"
+    "worst quality, low quality, blurry, distorted, jitter, stutter, "
+    "temporal artifacts, watermark, text, static, abrupt transition, jump cut"
 )
-# Wan2.1: strong subject anchoring, handles longer neg lists, but still concise.
-# No "static" needed -- Wan doesn't have LTX's empty-region hallucination problem.
+# Wan2.1: keep it minimal, reactive to observed artifacts only.
 _NEG_WAN = (
-    "low quality, blurry, distorted faces, unnatural movement, "
-    "text, watermark, shaky camera, motion smear, temporal artifacts, "
-    "rain, drizzle, snow, precipitation, falling particles, falling debris, droplets, "
-    "sparks, embers, floating debris, lens flare artifacts"
+    "low quality, blurry, distorted, unnatural movement, "
+    "watermark, text, shaky camera, temporal artifacts"
 )
 
 
