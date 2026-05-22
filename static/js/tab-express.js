@@ -298,6 +298,7 @@ export function init(panel) {
   });
 
   async function _pasteImage(e) {
+    if (!panel.offsetParent) return;  // Express tab not visible -- ignore paste
     const active = document.activeElement;
     if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
     const items = Array.from(e.clipboardData?.items || []);
@@ -884,8 +885,16 @@ export function init(panel) {
   const progressFill = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
   progressBar.appendChild(progressFill);
   const progressMsg  = el('div', { style: 'font-size:.8rem; color:var(--text-3); text-align:center;' });
+  const progressCancelBtn = el('button', {
+    style: 'align-self:center; padding:4px 12px; border-radius:var(--r-sm); border:1px solid var(--border-2); background:transparent; color:var(--text-3); cursor:pointer; font-size:11px;',
+    text: 'Cancel',
+  });
+  progressCancelBtn.addEventListener('click', () => {
+    if (_jobId) { stopJob(_jobId); _jobId = null; }
+  });
   progressWrap.appendChild(progressBar);
   progressWrap.appendChild(progressMsg);
+  progressWrap.appendChild(progressCancelBtn);
   root.appendChild(progressWrap);
 
   const resultWrap = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });

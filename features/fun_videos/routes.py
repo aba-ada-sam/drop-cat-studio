@@ -843,8 +843,8 @@ async def make_it(request: Request):
         "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
         "loras":          body.get("loras", []),
         "upscale":        body.get("upscale", True),
-        "upscale_scale":  float(body.get("upscale_scale", 2.0)),
-        "upscale_method": body.get("upscale_method", "ffmpeg"),
+        "upscale_scale":  max(0.5, min(4.0, float(body.get("upscale_scale", 2.0)))),
+        "upscale_method": body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg",
     }
 
     if photo_path:
@@ -976,8 +976,8 @@ async def make_it_multi(request: Request):
         "bpm":                  body.get("bpm"),
         "target_story_length":  target_secs,
         "upscale":              body.get("upscale", True),
-        "upscale_scale":        float(body.get("upscale_scale", 2.0)),
-        "upscale_method":       body.get("upscale_method", "ffmpeg"),
+        "upscale_scale":        max(0.5, min(4.0, float(body.get("upscale_scale", 2.0)))),
+        "upscale_method":       body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg",
         "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
         "motion_style":         requested_motion,
         "start_video_path":          _resolve_path(body.get("start_video_path", "")),
