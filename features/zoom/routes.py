@@ -57,10 +57,20 @@ async def zoom_make(request: Request):
         return JSONResponse({"error": "zoom_direction must be 'in' or 'out'"}, status_code=400)
 
     n_clips = max(2, min(15, int(body.get("n_clips", 5))))
-    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
+    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
+
+    # Zoom uses 832x480 by default for LTX-2 Distilled -- ~33% fewer tokens vs
+    # the model's native 1032x580, directly proportional speedup per clip.
+    # Wan I2V models keep their native resolution (speed is not the bottleneck there).
+    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
+    _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
+    if _is_ltx_distilled and not body.get("zoom_res"):
+        _zoom_res = (832, 480)
+    else:
+        _zoom_res = body.get("zoom_res") or _model_res
 
     # If source is a video, extract the appropriate frame first
     ext = Path(source_path).suffix.lower()
@@ -83,6 +93,7 @@ async def zoom_make(request: Request):
         "n_clips": n_clips,
         "clip_duration": clip_dur,
         "model_name": model_name,
+        "zoom_res": list(_zoom_res),
         "steps": int(body.get("steps", _default_steps)),
         "guidance": float(body.get("guidance", _default_guidance)),
         "idea": body.get("idea", "").strip(),
@@ -90,6 +101,7 @@ async def zoom_make(request: Request):
         "instrumental": bool(body.get("instrumental", False)),
         "music_prompt": body.get("music_prompt", ""),
         "audio_format": body.get("audio_format", "mp3"),
+        "audio_first": bool(body.get("audio_first", False)),
         "upscale": bool(body.get("upscale", False)),
         "upscale_scale": float(body.get("upscale_scale", 2.0)),
     }
@@ -110,6 +122,99 @@ async def zoom_make(request: Request):
 
     job.meta["feature"] = "zoom"
     job.meta["zoom_direction"] = direction
+    return {"job_id": job.id, "label": label}
+
+
+@router.post("/api/zoom/extend")
+async def zoom_extend(request: Request):
+    """Extend an existing zoom video with N more clips in the same direction.
+
+    Body fields:
+      existing_video_path  -- absolute path to the zoom video to extend
+      zoom_direction       -- "in" or "out" (must match original; default "out")
+      n_clips              -- how many new clips to add (default 3)
+      clip_duration        -- seconds per new clip (default 4.0)
+      model_name           -- model to use (default LTX-2 Dev19B Distilled)
+      idea                 -- optional creative direction for the extension
+      music_prompt         -- override music prompt (empty = re-generate)
+      skip_audio           -- if true, no audio on the extended video
+      instrumental         -- bool
+    """
+    from app import get_job_manager
+    from core.job_manager import JOB_FUN_MULTI_VIDEO
+    from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline, extract_frame_from_video
+    import tempfile as _tmp
+
+    job_manager = get_job_manager()
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    existing_path = body.get("existing_video_path", "").strip()
+    if not existing_path or not os.path.isfile(existing_path):
+        return JSONResponse({"error": "existing_video_path is required and must exist"}, status_code=400)
+
+    direction = body.get("zoom_direction", "out")
+    if direction not in ("in", "out"):
+        return JSONResponse({"error": "zoom_direction must be 'in' or 'out'"}, status_code=400)
+
+    # Extract the continuation frame: last frame for zoom-out, first frame for zoom-in
+    frame_pos = "last" if direction == "out" else "first"
+    tmp_dir = _tmp.mkdtemp(prefix="dcs_zoomext_")
+    frame_png = os.path.join(tmp_dir, "extend_frame.png")
+    ok = extract_frame_from_video(existing_path, frame_png, position=frame_pos)
+    if not ok:
+        return JSONResponse({"error": "Could not extract frame from existing video"}, status_code=422)
+
+    n_clips = max(2, min(15, int(body.get("n_clips", 3))))
+    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
+    model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
+    if model_name not in _VG_MODELS:
+        model_name = "LTX-2 Dev19B Distilled"
+
+    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
+    _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
+    _zoom_res = (832, 480) if _is_ltx_distilled else _model_res
+
+    _model_info = _VG_MODELS.get(model_name, {})
+    settings = {
+        "zoom_direction":     direction,
+        "n_clips":            n_clips,
+        "clip_duration":      clip_dur,
+        "model_name":         model_name,
+        "zoom_res":           list(_zoom_res),
+        "steps":              int(body.get("steps", _model_info.get("steps", 8))),
+        "guidance":           float(body.get("guidance", _model_info.get("guidance", 3.0))),
+        "idea":               body.get("idea", "").strip(),
+        "skip_audio":         bool(body.get("skip_audio", False)),
+        "instrumental":       bool(body.get("instrumental", False)),
+        "music_prompt":       body.get("music_prompt", ""),
+        "audio_format":       body.get("audio_format", "mp3"),
+        "audio_first":        bool(body.get("audio_first", False)),
+        "extend_base_path":   existing_path,
+        "upscale":            bool(body.get("upscale", False)),
+        "upscale_scale":      float(body.get("upscale_scale", 2.0)),
+    }
+
+    label = f"Extend zoom {direction}: {Path(existing_path).stem[:20]}"
+    timeout = n_clips * _PER_CLIP_TIMEOUT_S + _AUDIO_BUFFER_S
+
+    try:
+        job = job_manager.submit_with_prep(
+            JOB_FUN_MULTI_VIDEO,
+            run_zoom_prep, run_zoom_pipeline,
+            frame_png, settings,
+            label=label,
+            timeout_seconds=timeout,
+        )
+    except RuntimeError as e:
+        raise __import__("fastapi").HTTPException(429, str(e))
+
+    job.meta["feature"] = "zoom"
+    job.meta["zoom_direction"] = direction
+    log.info("[zoom] Extend job %s: %d clips from %s", job.id, n_clips, Path(existing_path).name)
     return {"job_id": job.id, "label": label}
 
 
@@ -167,17 +272,20 @@ async def zoom_folder_loop_start(request: Request):
         return JSONResponse({"error": "No supported image or video files found in that folder"}, status_code=400)
 
     n_clips  = max(2, min(15, int(body.get("n_clips", 4))))
-    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
+    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
     _model_info = _VG_MODELS.get(model_name, {})
+    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
+    _zoom_res = (832, 480) if _is_ltx_distilled else _model_info.get("res", (1032, 580))
 
     settings = {
         "zoom_direction":  body.get("zoom_direction", "out"),
         "n_clips":         n_clips,
         "clip_duration":   clip_dur,
         "model_name":      model_name,
+        "zoom_res":        list(_zoom_res),
         "steps":           int(body.get("steps", _model_info.get("steps", 25))),
         "guidance":        float(body.get("guidance", _model_info.get("guidance", 3.5))),
         "idea":            body.get("idea", "").strip(),

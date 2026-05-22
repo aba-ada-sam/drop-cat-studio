@@ -191,9 +191,11 @@ def _do_generate(params: dict) -> dict:
     defaults["film_grain_intensity"] = 0    # no film grain
     defaults["prompt_enhancer"]      = ""   # no LLM prompt rewriting inside WanGP
     # TeaCache: skips redundant denoising computations between similar timesteps.
-    # "tea" gives ~25-35% speedup with negligible quality loss at 480p and below.
-    # Pass cache_type="" in params to disable for a specific job if needed.
-    defaults["skip_steps_cache_type"] = params.get("cache_type", "tea")
+    # Enabled for all models that declare tea_cache:true in their defaults JSON.
+    # Multiplier 1.75 = ~40% speedup; pass cache_type="" to disable per-job.
+    defaults["skip_steps_cache_type"]      = params.get("cache_type", "tea")
+    defaults["skip_steps_multiplier"]      = float(params.get("cache_multiplier", 1.75))
+    defaults["skip_steps_start_step_perc"] = 0
     # MMAudio: enable post-processing audio when requested (Wan models only)
     if params.get("mmaudio"):
         defaults["MMAudio_setting"] = 1

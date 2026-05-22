@@ -622,6 +622,111 @@ export function init(panel) {
     outputArea,
   );
 
+  // ── extend/continue ────────────────────────────────────────────────────────
+  let _extendPanel = null;
+
+  function _showExtendPanel(existingVideoPath) {
+    if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
+
+    const panel = el('div', {
+      style: 'background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;',
+    });
+    _extendPanel = panel;
+
+    panel.append(el('div', {
+      style: 'font-size:12px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.08em;',
+      textContent: 'Continue this zoom',
+    }));
+
+    // clips count
+    const clipsRow = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
+    clipsRow.append(el('span', { textContent: 'Additional clips:' }));
+    const clipsInput = el('input', { type: 'number', min: '2', max: '10', value: '3',
+      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
+    clipsRow.append(clipsInput);
+
+    // duration
+    const durRow2 = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
+    durRow2.append(el('span', { textContent: 'Seconds per clip:' }));
+    const durInput = el('input', { type: 'number', min: '3', max: '12', value: '4',
+      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
+    durRow2.append(durInput);
+
+    // idea
+    const ideaInput2 = el('textarea', { rows: '2', placeholder: 'Optional: describe what the zoom continues to reveal...',
+      style: 'width:100%; resize:vertical; font-size:13px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px; padding:6px;' });
+
+    const btnRow = el('div', { style: 'display:flex; gap:8px;' });
+
+    const submitBtn = el('button', { class: 'btn btn-primary', textContent: 'Continue zoom' });
+    const cancelBtn = el('button', { class: 'btn', textContent: 'Cancel',
+      style: 'background:var(--bg-3);' });
+
+    cancelBtn.onclick = () => { panel.remove(); _extendPanel = null; };
+
+    submitBtn.onclick = async () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Queuing...';
+      try {
+        const res = await apiFetch('/api/zoom/extend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            existing_video_path: existingVideoPath,
+            zoom_direction:      _direction,
+            n_clips:             Number(clipsInput.value) || 3,
+            clip_duration:       Number(durInput.value) || 4,
+            model_name:          modelSel.value,
+            idea:                ideaInput2.value.trim(),
+          }),
+        });
+        _incActive();
+        toast('Continue zoom queued -- check Queue tab', 'info');
+        panel.remove(); _extendPanel = null;
+
+        pollJob(res.job_id,
+          () => {},
+          j => {
+            _decActive();
+            const out = Array.isArray(j.output) ? j.output[0] : j.output;
+            if (out) {
+              videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+              outputArea.style.display = 'flex';
+              outputActions.innerHTML = '';
+              outputActions.append(
+                _actionBtn('Open in folder', () =>
+                  apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
+                _actionBtn('Send to Bridges', () => {
+                  document.dispatchEvent(new CustomEvent('dcs:handoff', { detail: { from: 'zoom', to: 'bridges', path: out } }));
+                  toast('Sent to Bridges', 'success');
+                }),
+                _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
+              );
+            }
+            toast('Zoom extended!', 'success');
+            document.dispatchEvent(new CustomEvent('session-updated'));
+          },
+          msg => { _decActive(); toast(`Extend failed: ${msg}`, 'error'); },
+        );
+      } catch (err) {
+        if (err.status === 429 || /queue.*full/i.test(err.message)) {
+          toast('Queue full -- wait for a job to finish first', 'error');
+        } else {
+          toast('Failed: ' + err.message, 'error');
+        }
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Continue zoom';
+      }
+    };
+
+    btnRow.append(submitBtn, cancelBtn);
+    panel.append(clipsRow, durRow2, ideaInput2, btnRow);
+
+    // Insert the panel below outputArea
+    outputArea.after(panel);
+  }
+
   // ── generate ───────────────────────────────────────────────────────────────
   generateBtn.onclick = async () => {
     if (!_sourcePath) return;
@@ -678,6 +783,7 @@ export function init(panel) {
                   { detail: { from: 'zoom', to: 'bridges', path: out } }));
                 toast('Sent to Bridges', 'success');
               }),
+              _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
             );
           }
           toast(`Zoom ${_direction} complete!`, 'success');

@@ -247,6 +247,91 @@ def extract_frame_from_video(video_path: str, out_png: str, position: str = "las
 
 
 # ---------------------------------------------------------------------------
+# Assembly helper: xfade crossfades at clip boundaries
+# ---------------------------------------------------------------------------
+
+_XFADE_SECS = 0.4  # crossfade duration; short enough not to lose content
+
+def _concat_with_xfade(clip_paths: list[str], clip_durations: list[float],
+                       out_path: str, work_dir) -> None:
+    """Concatenate clips with a short crossfade at every boundary.
+
+    Falls back to simple stream-copy concat on any ffmpeg error so the job
+    still completes.  clip_durations must be same length as clip_paths;
+    if shorter it is padded with a safe default.
+    """
+    n = len(clip_paths)
+    # Pad durations list if incomplete
+    while len(clip_durations) < n:
+        clip_durations.append(4.0)
+
+    # Probe actual fps from first clip to calculate offset precisely
+    fps = 25.0
+    try:
+        import json as _json
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_streams", clip_paths[0]],
+            capture_output=True, timeout=10,
+        )
+        if r.returncode == 0:
+            info = _json.loads(r.stdout)
+            for s in info.get("streams", []):
+                if s.get("codec_type") == "video":
+                    fr = s.get("r_frame_rate", "25/1")
+                    num, den = (fr.split("/") + ["1"])[:2]
+                    fps = float(num) / max(float(den), 1)
+                    break
+    except Exception:
+        pass
+
+    xd = min(_XFADE_SECS, 0.25)  # hard cap at 0.25s so short clips don't overlap
+
+    # Build ffmpeg filtergraph: xfade between consecutive clips
+    # Each clip after the first has an offset = sum of previous durations - xd
+    inputs = []
+    for cp in clip_paths:
+        inputs += ["-i", cp]
+
+    filter_parts = []
+    offset = 0.0
+    prev_label = "[0:v]"
+    for i in range(1, n):
+        offset += clip_durations[i - 1] - xd
+        out_label = f"[v{i}]" if i < n - 1 else "[vout]"
+        filter_parts.append(
+            f"{prev_label}[{i}:v]xfade=transition=fade:duration={xd:.3f}:offset={offset:.3f}{out_label}"
+        )
+        prev_label = out_label
+
+    filter_str = ";".join(filter_parts)
+
+    cmd = (["ffmpeg", "-y"]
+           + inputs
+           + ["-filter_complex", filter_str,
+              "-map", "[vout]",
+              "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+              "-pix_fmt", "yuv420p",
+              out_path])
+    r = subprocess.run(cmd, capture_output=True, timeout=300)
+    if r.returncode != 0 or not os.path.isfile(out_path):
+        # Fallback: stream-copy concat (no re-encode, no crossfade)
+        log.warning("[zoom] xfade concat failed, falling back to stream-copy: %s",
+                    r.stderr.decode(errors="replace")[-200:])
+        list_file = str(Path(work_dir) / "concat_list.txt")
+        with open(list_file, "w", encoding="utf-8") as f:
+            for cp in clip_paths:
+                f.write(f"file '{cp}'\n")
+        r2 = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+             "-i", list_file, "-c", "copy", out_path],
+            capture_output=True, timeout=120,
+        )
+        if r2.returncode != 0 or not os.path.isfile(out_path):
+            raise RuntimeError(r2.stderr.decode(errors="replace")[-300:])
+
+
+# ---------------------------------------------------------------------------
 # Prep phase (no GPU lock)
 # ---------------------------------------------------------------------------
 
@@ -316,7 +401,62 @@ def run_zoom_prep(job, source_path: str, settings: dict) -> None:
         except Exception as e:
             log.warning("[zoom] Lyrics prep failed: %s", e)
 
+    # Audio-first: generate ACE-Step audio now (before clips) so each clip can
+    # be conditioned on its matching audio segment for genuine audio-video sync.
+    # Only runs when audio_first=True AND wangp is not already warm (evicting a
+    # warm WanGP worker to run ACE-Step then reloading costs 3-8 min).
+    audio_first = settings.get("audio_first", False)
+    if audio_first and not skip_audio and music_prompt:
+        from core.gpu_orchestrator import gpu as _gp
+        if _gp.current == "wangp":
+            log.info("[zoom] audio_first skipped -- WanGP already warm; using post-clip audio")
+            settings["audio_first"] = False
+        else:
+            try:
+                from features.fun_videos import audio_generator as _ag
+                job.update(progress=9, message="Generating audio for sync...")
+                _gp.acquire("acestep", reason="zoom audio-first before clips")
+                planned_dur = n_clips * clip_dur
+                _ap, _aerr = _ag.generate_audio(
+                    prompt=music_prompt,
+                    duration=min(planned_dur + 2.0, 300.0),
+                    output_dir=os.path.dirname(source_path) or ".",
+                    audio_format=settings.get("audio_format", "mp3"),
+                    steps=int(settings.get("audio_steps", 8)),
+                    guidance=float(settings.get("audio_guidance", 7.0)),
+                    seed=-1,
+                    lyrics=settings.get("_prepped_lyrics", ""),
+                    instrumental=settings.get("instrumental", False),
+                    stop_event=job.stop_event,
+                )
+                if _ap:
+                    settings["_audio_path"] = _ap
+                    log.info("[zoom] Audio-first: %s", _ap)
+                else:
+                    log.warning("[zoom] Audio-first generation failed: %s -- falling back", _aerr)
+                    settings["audio_first"] = False
+            except Exception as _ae:
+                log.warning("[zoom] Audio-first failed: %s -- falling back", _ae)
+                settings["audio_first"] = False
+
     job.update(progress=10, message="Arc ready, waiting for GPU...")
+
+
+# ---------------------------------------------------------------------------
+# Audio slice helper
+# ---------------------------------------------------------------------------
+
+def _slice_audio(audio_path: str, start_sec: float, dur_sec: float, out_path: str) -> bool:
+    """Extract a segment of audio into out_path. Returns True on success."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-ss", str(start_sec), "-t", str(dur_sec),
+             "-i", audio_path, "-c:a", "copy", out_path],
+            capture_output=True, timeout=30,
+        )
+        return r.returncode == 0 and os.path.isfile(out_path)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -337,8 +477,11 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
     model_name = settings.get("model_name", "LTX-2 Dev19B Distilled")
     skip_audio = settings.get("skip_audio", False)
     instrumental = settings.get("instrumental", False)
+    audio_first = settings.get("audio_first", False)
+    extend_base_path: str | None = settings.get("extend_base_path")
     music_prompt = settings.pop("_prepped_music_prompt", settings.get("music_prompt", ""))
     lyrics = settings.pop("_prepped_lyrics", settings.get("lyrics", ""))
+    audio_first_path: str | None = settings.pop("_audio_path", None)
     arc: list[dict] = settings.pop("_zoom_arc", [])
     subject_anchor: str = settings.pop("_zoom_subject_anchor", "")
     focal_target: str = settings.pop("_zoom_focal_target", "")
@@ -396,15 +539,28 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
 
             clip_out = str(job_dir / f"clip_{i:02d}_{ts[-6:]}.mp4")
 
-            # Resize start image to match model resolution
+            # Resize start image to match generation resolution.
+            # zoom_res may be smaller than the model's native res for speed.
             start_img = prev_frame or source_path
             try:
-                model_res = video_generator.MODELS.get(model_name, {}).get("res", (1032, 580))
-                tw, th = model_res
+                _zoom_res = settings.get("zoom_res") or video_generator.MODELS.get(model_name, {}).get("res", (1032, 580))
+                tw, th = int(_zoom_res[0]), int(_zoom_res[1])
                 from features.fun_videos.pipeline import _prep_photo
                 prepped = _prep_photo(start_img, tw, th, job_dir)
             except Exception:
                 prepped = start_img
+
+            # Slice the pre-generated audio for this clip's time window so LTX-2
+            # can condition the video on it (audio_first mode).
+            clip_audio_slice: str | None = None
+            if audio_first and audio_first_path:
+                _audio_start = sum(
+                    float(arc[j].get("duration", clip_dur)) for j in range(i)
+                )
+                _slice_path = str(job_dir / f"audio_slice_{i:02d}.wav")
+                if _slice_audio(audio_first_path, _audio_start, gen_dur, _slice_path):
+                    clip_audio_slice = _slice_path
+                    log.debug("[zoom] Audio slice %d: start=%.1fs dur=%.1fs", i + 1, _audio_start, gen_dur)
 
             ok = False
             for attempt in range(2):
@@ -422,6 +578,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                         seed=-1,
                         negative_prompt=video_generator.negative_prompt_for(model_name, "dynamic"),
                         stop_check=job.stop_event.is_set,
+                        audio_source=clip_audio_slice,
                         progress_fn=lambda cur, tot: job.update(
                             progress=pct + int(pct_per_clip * cur / max(tot, 1)),
                             message=f"Clip {i + 1}/{n_clips} step {cur}/{tot}",
@@ -442,6 +599,21 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                 job.update(status="error", message=f"Clip {i + 1} generation failed")
                 return
 
+            # Strip LTX-2's embedded per-clip audio -- it's generated as part of
+            # the joint diffusion pass and cannot be disabled, but it's thrown away
+            # when ACE-Step generates the final soundtrack. Removing it here keeps
+            # the concat lighter and avoids multiple audio tracks in the output.
+            try:
+                silent_out = clip_out.replace(".mp4", "_s.mp4")
+                r_strip = subprocess.run(
+                    ["ffmpeg", "-y", "-i", clip_out, "-c:v", "copy", "-an", silent_out],
+                    capture_output=True, timeout=30,
+                )
+                if r_strip.returncode == 0 and os.path.isfile(silent_out):
+                    os.replace(silent_out, clip_out)
+            except Exception as _se:
+                log.debug("[zoom] Audio strip failed for clip %d (non-fatal): %s", i + 1, _se)
+
             clip_paths.append(clip_out)
 
             # Extract last frame as next clip's start (lossless chain, no re-anchor)
@@ -458,7 +630,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             job.update(status="error", message="No clips generated")
             return
 
-        # -- Concat clips -------------------------------------------------------
+        # -- Concat clips with xfade crossfades ----------------------------------
         job.update(progress=74, message="Assembling clips...")
         model_tag = model_name.split()[0].lower()
         concat_path = str(job_dir / f"zoom_{direction}_{model_tag}_{ts}.mp4")
@@ -467,21 +639,33 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             shutil.copy2(clip_paths[0], concat_path)
         else:
             try:
-                list_file = str(job_dir / "concat_list.txt")
-                with open(list_file, "w", encoding="utf-8") as f:
-                    for cp in clip_paths:
-                        f.write(f"file '{cp}'\n")
-                r = subprocess.run(
-                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                     "-i", list_file, "-c", "copy", concat_path],
-                    capture_output=True, timeout=120,
-                )
-                if r.returncode != 0 or not os.path.isfile(concat_path):
-                    raise RuntimeError(r.stderr.decode(errors="replace")[-300:])
+                _concat_with_xfade(clip_paths, clip_durations, concat_path, job_dir)
             except Exception as e:
                 _log(f"[error] Concat failed: {e}")
                 job.update(status="error", message=f"Concat failed: {e}")
                 return
+
+        # -- Prepend base video for extend/continue jobs --------------------------
+        if extend_base_path and os.path.isfile(extend_base_path):
+            job.update(progress=76, message="Joining with original...")
+            extended_path = str(job_dir / f"zoom_{direction}_{model_tag}_{ts}_ext.mp4")
+            try:
+                ext_list = str(job_dir / "extend_list.txt")
+                with open(ext_list, "w", encoding="utf-8") as _f:
+                    _f.write(f"file '{extend_base_path}'\n")
+                    _f.write(f"file '{concat_path}'\n")
+                r_ext = subprocess.run(
+                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                     "-i", ext_list, "-c", "copy", extended_path],
+                    capture_output=True, timeout=180,
+                )
+                if r_ext.returncode == 0 and os.path.isfile(extended_path):
+                    concat_path = extended_path
+                    log.info("[zoom] Extended: %s", extended_path)
+                else:
+                    log.warning("[zoom] Extend concat failed -- using new clips only")
+            except Exception as _ee:
+                log.warning("[zoom] Extend concat error: %s -- using new clips only", _ee)
 
         if skip_audio:
             job.output = concat_path
@@ -500,9 +684,26 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                     pass
 
     # -- Audio -----------------------------------------------------------------
-    gpu.acquire("acestep", reason=f"zoom-{direction} music gen")
+    # If audio-first succeeded, the audio is already in audio_first_path and
+    # the clips were conditioned on it -- skip ACE-Step entirely.
+    if audio_first and audio_first_path and os.path.isfile(audio_first_path):
+        log.info("[zoom] Audio-first: reusing pre-generated audio, skipping ACE-Step")
+        audio_path = audio_first_path
+        audio_err = None
+        total_dur = probe_duration(concat_path)
+        # Clean up per-clip audio slices
+        for _si in range(n_clips):
+            _sp = job_dir / f"audio_slice_{_si:02d}.wav"
+            if _sp.exists():
+                try: _sp.unlink()
+                except Exception: pass
+    else:
+        audio_first_path = None  # ensure we fall into the normal ACE-Step path
 
-    if not music_prompt:
+    if not audio_first_path:
+        gpu.acquire("acestep", reason=f"zoom-{direction} music gen")
+
+    if not audio_first_path and not music_prompt:
         job.update(progress=76, message="Getting music direction...")
         try:
             from features.fun_videos import analyzer
@@ -517,46 +718,47 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
         except Exception as e:
             log.warning("[zoom] Post-video music analysis failed: %s", e)
 
-    if not music_prompt:
-        zoom_defaults = {
-            "out": "cinematic orchestral pullback, swelling strings, sense of expanding scale",
-            "in": "intimate piano approach, quiet focus, detail emerging, gentle tension",
-        }
-        music_prompt = zoom_defaults[direction]
+    if not audio_first_path:
+        if not music_prompt:
+            zoom_defaults = {
+                "out": "cinematic orchestral pullback, swelling strings, sense of expanding scale",
+                "in": "intimate piano approach, quiet focus, detail emerging, gentle tension",
+            }
+            music_prompt = zoom_defaults[direction]
 
-    if not instrumental and not lyrics:
-        job.update(progress=79, message="Writing lyrics...")
-        try:
-            from features.fun_videos import analyzer
-            lyrics = analyzer.generate_lyrics(llm_router, [], music_prompt, "")
-        except Exception as e:
-            log.warning("[zoom] Lyrics failed: %s", e)
+        if not instrumental and not lyrics:
+            job.update(progress=79, message="Writing lyrics...")
+            try:
+                from features.fun_videos import analyzer
+                lyrics = analyzer.generate_lyrics(llm_router, [], music_prompt, "")
+            except Exception as e:
+                log.warning("[zoom] Lyrics failed: %s", e)
 
-    total_dur = probe_duration(concat_path)
-    audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else n_clips * clip_dur + 2.0
+        total_dur = probe_duration(concat_path)
+        audio_dur = min(total_dur + 2.0, 300.0) if total_dur > 0 else n_clips * clip_dur + 2.0
 
-    job.update(progress=82, message="Generating audio...")
+        job.update(progress=82, message="Generating audio...")
 
-    def _audio_progress(elapsed_s):
-        job.update(
-            progress=82 + min(8, int(elapsed_s) // 10),
-            message=f"Generating audio... {elapsed_s:.0f}s elapsed",
+        def _audio_progress(elapsed_s):
+            job.update(
+                progress=82 + min(8, int(elapsed_s) // 10),
+                message=f"Generating audio... {elapsed_s:.0f}s elapsed",
+            )
+
+        audio_path, audio_err = audio_generator.generate_audio(
+            prompt=music_prompt,
+            duration=audio_dur,
+            output_dir=str(job_dir),
+            audio_format=settings.get("audio_format", "mp3"),
+            bpm=settings.get("bpm"),
+            steps=int(settings.get("audio_steps", 8)),
+            guidance=float(settings.get("audio_guidance", 7.0)),
+            seed=-1,
+            lyrics=lyrics,
+            instrumental=instrumental,
+            stop_event=job.stop_event,
+            progress_cb=_audio_progress,
         )
-
-    audio_path, audio_err = audio_generator.generate_audio(
-        prompt=music_prompt,
-        duration=audio_dur,
-        output_dir=str(job_dir),
-        audio_format=settings.get("audio_format", "mp3"),
-        bpm=settings.get("bpm"),
-        steps=int(settings.get("audio_steps", 8)),
-        guidance=float(settings.get("audio_guidance", 7.0)),
-        seed=-1,
-        lyrics=lyrics,
-        instrumental=instrumental,
-        stop_event=job.stop_event,
-        progress_cb=_audio_progress,
-    )
 
     if not audio_path:
         _log(f"[warning] Audio failed: {audio_err} -- saving video only")
