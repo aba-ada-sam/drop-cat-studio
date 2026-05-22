@@ -203,15 +203,20 @@ export function init(panel) {
   }});
   const btnSendFun = el('button', { class: 'btn btn-sm', text: '-> Make Videos', onclick() {
     if (!generatedImages[currentIdx]?.path) return;
-    import('./handoff.js').then(h => h.handoff('create-videos', { type: 'image', path: generatedImages[currentIdx].path }));
-    document.querySelector('[data-tab="create-videos"]')?.click();
-    toast('Image sent to Make Videos', 'info');
+    // Set handoff BEFORE clicking tab so consumeHandoff() sees it when the tab initializes.
+    import('./handoff.js').then(h => {
+      h.handoff('create-videos', { type: 'image', path: generatedImages[currentIdx].path });
+      document.querySelector('[data-tab="create-videos"]')?.click();
+      toast('Image sent to Make Videos', 'info');
+    });
   }});
   const btnSendSD = el('button', { class: 'btn btn-sm', text: '-> SD Prompts', onclick() {
     if (!generatedImages[currentIdx]?.path) return;
-    import('./handoff.js').then(h => h.handoff('sd-prompts', { type: 'image', path: generatedImages[currentIdx].path }));
-    document.querySelector('[data-tab="sd-prompts"]')?.click();
-    toast('Image sent to SD Prompts for analysis', 'info');
+    import('./handoff.js').then(h => {
+      h.handoff('sd-prompts', { type: 'image', path: generatedImages[currentIdx].path });
+      document.querySelector('[data-tab="sd-prompts"]')?.click();
+      toast('Image sent to SD Prompts for analysis', 'info');
+    });
   }});
   actionRow.appendChild(btnReuse);
   actionRow.appendChild(btnVariation);

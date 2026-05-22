@@ -362,6 +362,10 @@ def run_zoom_prep(job, source_path: str, settings: dict) -> None:
             except Exception as _ae:
                 log.warning("[zoom] Audio-first failed: %s -- falling back", _ae)
                 settings["audio_first"] = False
+                import shutil as _sh2
+                _audio_out_dir_exc = settings.pop("_audio_out_dir", None)
+                if _audio_out_dir_exc:
+                    _sh2.rmtree(_audio_out_dir_exc, ignore_errors=True)
 
     job.update(progress=10, message="Arc ready, waiting for GPU...")
 
