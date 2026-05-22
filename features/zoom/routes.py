@@ -192,6 +192,9 @@ async def zoom_extend(request: Request):
         "instrumental":       bool(body.get("instrumental", False)),
         "music_prompt":       body.get("music_prompt", ""),
         "audio_format":       body.get("audio_format", "mp3"),
+        "audio_steps":        int(body.get("audio_steps", 8)),
+        "audio_guidance":     float(body.get("audio_guidance", 7.0)),
+        "bpm":                body.get("bpm"),
         "audio_first":        bool(body.get("audio_first", False)),
         "extend_base_path":   existing_path,
         "upscale":            bool(body.get("upscale", False)),
@@ -271,7 +274,7 @@ async def zoom_folder_loop_start(request: Request):
     if not files:
         return JSONResponse({"error": "No supported image or video files found in that folder"}, status_code=400)
 
-    n_clips  = max(2, min(15, int(body.get("n_clips", 4))))
+    n_clips  = max(2, min(15, int(body.get("n_clips", 5))))
     clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
@@ -286,12 +289,17 @@ async def zoom_folder_loop_start(request: Request):
         "clip_duration":   clip_dur,
         "model_name":      model_name,
         "zoom_res":        list(_zoom_res),
-        "steps":           int(body.get("steps", _model_info.get("steps", 25))),
-        "guidance":        float(body.get("guidance", _model_info.get("guidance", 3.5))),
+        "steps":           int(body.get("steps", _model_info.get("steps", 8))),
+        "guidance":        float(body.get("guidance", _model_info.get("guidance", 3.0))),
         "idea":            body.get("idea", "").strip(),
         "skip_audio":      bool(body.get("skip_audio", False)),
         "instrumental":    bool(body.get("instrumental", False)),
         "music_prompt":    body.get("music_prompt", ""),
+        "audio_format":    body.get("audio_format", "mp3"),
+        "audio_steps":     int(body.get("audio_steps", 8)),
+        "audio_guidance":  float(body.get("audio_guidance", 7.0)),
+        "bpm":             body.get("bpm"),
+        "audio_first":     bool(body.get("audio_first", False)),
         "_timeout_seconds": n_clips * _PER_CLIP_TIMEOUT_S + _AUDIO_BUFFER_S,
     }
 

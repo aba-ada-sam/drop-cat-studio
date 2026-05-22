@@ -214,13 +214,13 @@ export function init(panel) {
 
   [3, 4, 5, 6, 8, 10, 12].forEach((n, i) => {
     const b = _chip(n, n, stepsRow, _updateEst);
-    if (i === 1) b.click();
+    if (i === 2) b.click();   // default: 5 clips
     stepsRow.appendChild(b);
   });
 
   [4, 5, 6, 8, 10, 12, 15].forEach((n, i) => {
     const b = _chip(`${n}s`, n, durRow, _updateEst);
-    if (i === 1) b.click();
+    if (i === 0) b.click();   // default: 4s per clip
     durRow.appendChild(b);
   });
 
@@ -268,7 +268,7 @@ export function init(panel) {
   });
 
   const modelGroup = el('div');
-  modelGroup.append(modelLabelRow, modelSel, modelWarn);
+  modelGroup.append(modelLabelRow, modelSel, modelWarn, audioFirstToggle);
 
   apiFetch('/api/fun/models').then(data => {
     _modelData = data.models || {};
@@ -303,6 +303,16 @@ export function init(panel) {
     }
   }
   modelSel.addEventListener('change', _checkModelVram);
+
+  // ── audio-first toggle ─────────────────────────────────────────────────────
+  const audioFirstToggle = el('label', {
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
+  });
+  const audioFirstCheck = el('input', { type: 'checkbox' });
+  audioFirstToggle.append(
+    audioFirstCheck,
+    el('span', { textContent: 'Sync video to music (audio-first -- adds ACE-Step before clips)' }),
+  );
 
   // ── generate button + queue badge ──────────────────────────────────────────
   let _activeCount = 0;
@@ -538,6 +548,7 @@ export function init(panel) {
       idea,
       model_name:     modelSel.value,
       skip_audio:     false,
+      audio_first:    audioFirstCheck.checked,
       repeat:         loopCheck.checked,
     };
 
@@ -577,8 +588,11 @@ export function init(panel) {
               videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
               outputArea.style.display = 'flex';
               outputActions.innerHTML = '';
-              outputActions.append(_actionBtn('Open in folder', () =>
-                apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})));
+              outputActions.append(
+                _actionBtn('Open in folder', () =>
+                  apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
+                _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
+              );
             }
             toast(`Zoom done: ${f.name}`, 'success');
             document.dispatchEvent(new CustomEvent('session-updated'));
@@ -678,6 +692,7 @@ export function init(panel) {
             clip_duration:       Number(durInput.value) || 4,
             model_name:          modelSel.value,
             idea:                ideaInput2.value.trim(),
+            audio_first:         audioFirstCheck.checked,
           }),
         });
         _incActive();
@@ -754,6 +769,7 @@ export function init(panel) {
           idea:           ideaInput.value.trim(),
           model_name:     modelSel.value,
           skip_audio:     false,
+          audio_first:    audioFirstCheck.checked,
         }),
       });
 

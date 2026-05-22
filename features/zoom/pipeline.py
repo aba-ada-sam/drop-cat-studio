@@ -656,7 +656,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                     _f.write(f"file '{concat_path}'\n")
                 r_ext = subprocess.run(
                     ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                     "-i", ext_list, "-c", "copy", extended_path],
+                     "-i", ext_list, "-c:v", "copy", "-an", extended_path],
                     capture_output=True, timeout=180,
                 )
                 if r_ext.returncode == 0 and os.path.isfile(extended_path):
@@ -684,6 +684,12 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
                     pass
 
     # -- Audio -----------------------------------------------------------------
+    # Ensure audio_path / audio_err are always defined (NameError guard for the
+    # case where audio_first=True but prep never wrote _audio_path).
+    audio_path: str | None = None
+    audio_err: str | None = None
+    total_dur: float = 0.0
+
     # If audio-first succeeded, the audio is already in audio_first_path and
     # the clips were conditioned on it -- skip ACE-Step entirely.
     if audio_first and audio_first_path and os.path.isfile(audio_first_path):
