@@ -1113,13 +1113,13 @@ export function init(panel) {
       progressFill.style.width = '0%';
       progressArea.style.display = 'flex';
 
-      pollJob(res.job_id,
+      _activePoller = pollJob(res.job_id,
         j => {
           progressFill.style.width  = `${j.progress || 0}%`;
           progressLabel.textContent = j.message || `${j.progress || 0}%`;
         },
         j => {
-          _jobId = null; _decActive();
+          _activePoller = null; _jobId = null; _decActive();
           progressArea.style.display = 'none';
           if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
           const out = Array.isArray(j.output) ? j.output[0] : j.output;
@@ -1141,7 +1141,7 @@ export function init(panel) {
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
         msg => {
-          _jobId = null; _decActive();
+          _activePoller = null; _jobId = null; _decActive();
           progressArea.style.display = 'none'; progressFill.style.width = '0%';
           toast(`Zoom failed: ${msg}`, 'error');
         },

@@ -33,7 +33,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
-    """Extract the actual last frame of a video as a JPEG.
+    """Extract the actual last frame of a video as a lossless PNG.
 
     Probes the duration first then seeks to 2 frames before the end, so the
     extracted frame is the true final frame rather than an arbitrary point
@@ -45,13 +45,13 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
         seek = max(0.0, dur - 0.08)  # 2 frames before end at 25 fps
         r = subprocess.run(
             ["ffmpeg", "-y", "-ss", f"{seek:.4f}", "-i", video_path,
-             "-frames:v", "1", "-q:v", "2", out_path],
+             "-frames:v", "1", out_path],
             capture_output=True, timeout=30,
         )
     else:
         r = subprocess.run(
             ["ffmpeg", "-y", "-sseof", "-0.1", "-i", video_path,
-             "-frames:v", "1", "-q:v", "2", out_path],
+             "-frames:v", "1", out_path],
             capture_output=True, timeout=30,
         )
     return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
@@ -61,7 +61,7 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
-Each prompt is one 8-20 second clip. Clips are chained -- each starts from the
+Each prompt is one 8-10 second clip. Clips are chained -- each starts from the
 last frame of the previous clip. ALL clips stay in ONE world: same location,
 same subject, camera position and energy level shift with the music.
 
@@ -272,7 +272,7 @@ def run_song_prep(job, photo_path, settings):
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 19.0)
+        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 10.0)
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
 
         clip_durations, beat_positions = fut_beats.result()
