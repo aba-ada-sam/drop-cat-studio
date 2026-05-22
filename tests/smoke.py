@@ -268,6 +268,25 @@ def main() -> int:
             assert r.status_code == 400, f"expected 400, got {r.status_code}"
         _test("POST /api/zoom/extract-frame missing file -> 400", zoom_extract_frame_missing_file)
 
+        def zoom_extend_no_path():
+            r = client.post("/api/zoom/extend", json={})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/extend no path -> 400", zoom_extend_no_path)
+
+        def zoom_extend_bad_direction():
+            r = client.post("/api/zoom/extend",
+                            json={"existing_video_path": "/tmp/fake.mp4",
+                                  "zoom_direction": "diagonal"})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/extend bad direction -> 400", zoom_extend_bad_direction)
+
+        def zoom_extend_missing_file():
+            r = client.post("/api/zoom/extend",
+                            json={"existing_video_path": "/no/such/video.mp4",
+                                  "zoom_direction": "out"})
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+        _test("POST /api/zoom/extend missing file -> 400", zoom_extend_missing_file)
+
         def zoom_upload_image():
             import io
             from PIL import Image
