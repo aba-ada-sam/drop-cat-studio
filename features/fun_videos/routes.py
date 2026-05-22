@@ -576,7 +576,10 @@ def _get_pick_to_model() -> dict:
     """
     from app import _g as _app_g
     gpu_vram = _app_g.get("gpu_vram_gb") or 0
-    action_model = "LTX-2 Dev13B" if (not gpu_vram or gpu_vram >= 20) else "LTX-2 Dev19B Distilled"
+    if not gpu_vram or gpu_vram >= 20:
+        action_model = "LTX-2 Dev13B"         # full res, needs 24GB
+    else:
+        action_model = "LTX-2 Dev13B 480P"    # 480P: real kinetic action, fits 16GB
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
         "action":       (action_model,              "dynamic"),
@@ -818,6 +821,7 @@ async def make_it(request: Request):
     _MODEL_MIN_STEPS_SINGLE = {
         "LTX-2 Dev19B Distilled": 4,
         "LTX-2 Dev13B":            20,
+        "LTX-2 Dev13B 480P":       20,
         "Wan2.1-I2V-14B-480P":     20,
         "Wan2.1-I2V-14B-720P":     20,
         "Wan2.1-T2V-14B":          20,
@@ -958,6 +962,7 @@ async def make_it_multi(request: Request):
     _MODEL_MIN_STEPS = {
         "LTX-2 Dev19B Distilled": 4,
         "LTX-2 Dev13B":            20,
+        "LTX-2 Dev13B 480P":       20,
         "Wan2.1-I2V-14B-480P":     20,
         "Wan2.1-I2V-14B-720P":     20,
         "Wan2.1-T2V-14B":          20,

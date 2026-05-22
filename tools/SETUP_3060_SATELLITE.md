@@ -1,183 +1,196 @@
-# 3060 Satellite Node Setup
+# Task: Configure this machine as a satellite service node
 
-This machine will run three services that offload non-video work from the 5080
-machine: ACE-Step (music generation), Ollama (LLM/vision), and Forge SD (images).
-The 5080 dedicates all 15.9 GB to WanGP video generation with no eviction pauses.
-
-Services stay running permanently. The 5080 connects to them over the LAN.
+You are Claude Code running on the 3060 machine. The 5080 machine runs the main
+Drop Cat Go Studio app and will connect to services on THIS machine over the LAN.
+Your job is to configure three services to accept network connections, then report
+the machine's IP address back to the user.
 
 ---
 
-## 1. Find This Machine's IP Address
+## Step 1 -- Find this machine's local IP
 
-Run in PowerShell:
+Run this and show the user the output:
 
 ```powershell
-(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -eq 'Dhcp' })[0].IPAddress
+Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object IPAddress, InterfaceAlias | Format-Table
 ```
 
-Note that IP. You will enter it in DCS Settings on the 5080 at the end.
-Give this machine a static local IP in your router to prevent it changing.
+The user will need to enter this IP into DCS Settings on the 5080 when you are done.
+Recommend they assign this machine a static IP in their router.
 
 ---
 
-## 2. ACE-Step (music generation -- port 8019)
+## Step 2 -- Open firewall ports
 
-### Install
+Run this in PowerShell as Administrator. If any rule already exists, that is fine.
 
-ACE-Step should already be installed on this machine if it was previously used.
-Check: `Test-Path "C:\DropCatGo-Music\ACE-Step-1.5"` or wherever it lives.
+```powershell
+New-NetFirewallRule -DisplayName "DCS ACE-Step" -Direction Inbound -Protocol TCP -LocalPort 8019 -Action Allow -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "DCS Ollama"   -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "DCS Forge"    -Direction Inbound -Protocol TCP -LocalPort 7861 -Action Allow -ErrorAction SilentlyContinue
+```
 
-If not installed, use Pinokio to install "ACE-Step" -- or clone the repo and
-run `pip install -e .` inside a `.venv`.
+---
 
-### Configure to accept network connections
+## Step 3 -- Configure ACE-Step to accept network connections (port 8019)
 
-ACE-Step must bind to `0.0.0.0` (all interfaces), not `127.0.0.1`.
+First, find the ACE-Step installation:
 
-Create a startup script `C:\DropCatGo-Music\start_acestep_network.bat`:
+```powershell
+$paths = @("C:\DropCatGo-Music\ACE-Step-1.5", "C:\pinokio\api\ace-step.git\app", "C:\ACE-Step")
+$found = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+Write-Host "Found ACE-Step at: $found"
+```
 
-```bat
+If none of those paths exist, search for it:
+
+```powershell
+Get-ChildItem C:\ -Recurse -Depth 4 -Filter "api_server.py" -ErrorAction SilentlyContinue | Select-Object FullName
+```
+
+Once you have the path, create a network startup script. Replace `ACESTEP_ROOT` with
+the actual path you found:
+
+```powershell
+$aceRoot = "ACESTEP_ROOT"   # <-- replace with actual path
+$script = @"
 @echo off
-cd /d "C:\DropCatGo-Music\ACE-Step-1.5"
+cd /d "$aceRoot"
 call .venv\Scripts\activate.bat
 python acestep\api_server.py --host 0.0.0.0 --port 8019
+"@
+$script | Out-File -FilePath "C:\DCS-satellite\start_acestep.bat" -Encoding utf8
 ```
 
-Replace the path if ACE-Step is installed elsewhere. The key flag is `--host 0.0.0.0`.
+Create the folder first:
+```powershell
+New-Item -ItemType Directory -Force -Path "C:\DCS-satellite"
+```
 
-Test it works: run the script, then from the 5080 machine run:
-`curl http://[3060-IP]:8019/health` -- should return `{"status":"ok"}`.
+Verify ACE-Step is running (or start it):
+```powershell
+Start-Process "C:\DCS-satellite\start_acestep.bat" -WindowStyle Minimized
+Start-Sleep 10
+Invoke-WebRequest -Uri "http://localhost:8019/health" -UseBasicParsing | Select-Object StatusCode, Content
+```
+
+Should return `StatusCode: 200`.
 
 ---
 
-## 3. Ollama (LLM + vision -- port 11434)
+## Step 4 -- Configure Ollama to accept network connections (port 11434)
 
-### Install
-
-Download from https://ollama.com and install. Pull the model used on the 5080:
-
+Check if Ollama is installed:
 ```powershell
-ollama pull qwen3-vl:8b
+Get-Command ollama -ErrorAction SilentlyContinue | Select-Object Source
 ```
 
-### Configure to accept network connections
+If not installed, tell the user to download it from https://ollama.com and install it,
+then continue.
 
-Ollama binds to localhost by default. Add a system environment variable:
-
+Set Ollama to listen on all interfaces (persists across reboots):
 ```powershell
 [System.Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "Machine")
 ```
 
-Then restart Ollama (stop the system tray icon and relaunch, or reboot).
+Stop and restart Ollama so the new environment variable takes effect:
+```powershell
+Stop-Process -Name "ollama" -ErrorAction SilentlyContinue
+Start-Sleep 3
+Start-Process "ollama" -ArgumentList "serve" -WindowStyle Hidden
+Start-Sleep 5
+```
 
-Verify: `curl http://[3060-IP]:11434/api/tags` from the 5080 should list models.
+Pull the vision model the 5080 expects (if not already present):
+```powershell
+ollama pull qwen3-vl:8b
+```
+
+Verify Ollama is reachable:
+```powershell
+Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing | Select-Object StatusCode
+```
+
+Should return `StatusCode: 200`.
 
 ---
 
-## 4. Forge SD (Stable Diffusion images -- port 7861)
+## Step 5 -- Configure Forge to accept network connections (port 7861)
 
-### Install
+Find the Forge installation:
+```powershell
+$forgePaths = @("C:\forge", "C:\pinokio\api\forge.git\app", "C:\stable-diffusion-webui-forge")
+$forgeRoot = $forgePaths | Where-Object { Test-Path "$_\webui-user.bat" } | Select-Object -First 1
+Write-Host "Found Forge at: $forgeRoot"
+```
 
-If not installed: clone `https://github.com/lllyasviel/stable-diffusion-webui-forge`
-or use Pinokio to install "Forge".
+If not found, search:
+```powershell
+Get-ChildItem C:\ -Recurse -Depth 4 -Filter "webui-user.bat" -ErrorAction SilentlyContinue | Select-Object FullName
+```
 
-Typical location: `C:\forge` or `C:\pinokio\api\forge.git\app`.
+Read the current webui-user.bat to see what COMMANDLINE_ARGS already says:
+```powershell
+Get-Content "$forgeRoot\webui-user.bat"
+```
 
-### Configure to accept network connections and expose API
+Edit it to add `--listen --api` to the COMMANDLINE_ARGS line. If the line already has
+`--api`, just add `--listen`. If COMMANDLINE_ARGS is blank, set it. Example result:
 
-Edit `webui-user.bat` (in the Forge root) and add `--listen --api` to the
-`COMMANDLINE_ARGS` line:
-
-```bat
+```
 set COMMANDLINE_ARGS=--listen --api --port 7861
 ```
 
-`--listen` makes it bind to `0.0.0.0` so the 5080 can reach it.
-`--api` enables the REST API that DCS uses.
+Make the edit using Read and Edit tools on the file `$forgeRoot\webui-user.bat`.
 
-Verify: `curl http://[3060-IP]:7861/sdapi/v1/sd-models` from the 5080 should
-return a JSON list of models.
+Then launch Forge:
+```powershell
+Start-Process "$forgeRoot\webui-user.bat" -WindowStyle Minimized
+```
+
+Wait up to 3 minutes for it to load, then verify:
+```powershell
+Start-Sleep 60
+Invoke-WebRequest -Uri "http://localhost:7861/sdapi/v1/sd-models" -UseBasicParsing | Select-Object StatusCode
+```
 
 ---
 
-## 5. Windows Firewall -- open inbound ports
-
-Run in PowerShell as Administrator:
+## Step 6 -- Create a single startup script for all three services
 
 ```powershell
-New-NetFirewallRule -DisplayName "DCS ACE-Step" -Direction Inbound -Protocol TCP -LocalPort 8019 -Action Allow
-New-NetFirewallRule -DisplayName "DCS Ollama"   -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow
-New-NetFirewallRule -DisplayName "DCS Forge"    -Direction Inbound -Protocol TCP -LocalPort 7861 -Action Allow
-```
-
----
-
-## 6. Auto-start on login (optional but recommended)
-
-Create `C:\DropCatGo-Music\start_satellite.bat`:
-
-```bat
+$startup = @'
 @echo off
-REM -- ACE-Step (network mode)
-start "ACE-Step" /min cmd /c "C:\DropCatGo-Music\start_acestep_network.bat"
-
-REM -- Forge (already handles its own startup via webui-user.bat)
-start "Forge" /min "C:\forge\webui-user.bat"
-
-REM -- Ollama auto-starts as a system service after setting OLLAMA_HOST above
+echo Starting DCS satellite services...
+start "ACE-Step"  /min "C:\DCS-satellite\start_acestep.bat"
+start "Forge"     /min "FORGE_ROOT\webui-user.bat"
+echo Services started. Ollama runs automatically via system service.
+'@
+$startup | Out-File -FilePath "C:\DCS-satellite\start_all.bat" -Encoding utf8
 ```
 
-Add a shortcut to this batch file in your Startup folder:
-`shell:startup` in Run dialog -> paste shortcut there.
+Replace `FORGE_ROOT` with the actual Forge path you found in Step 5.
+
+Add a shortcut to this script in the Windows Startup folder so it runs on login:
+```powershell
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DCS-satellite.lnk")
+$shortcut.TargetPath = "C:\DCS-satellite\start_all.bat"
+$shortcut.Save()
+```
 
 ---
 
-## 7. Configure DCS on the 5080 machine
+## Step 7 -- Report back to the user
 
-Once all three services are running and reachable, open DCS Settings on the 5080:
+Tell the user:
+1. The IP address of this machine (from Step 1)
+2. Which services are running and on which ports
+3. Any services that could not be found or started, and why
 
-| Setting | Value |
-|---------|-------|
-| ACE-Step Host | `[3060-IP]` (e.g. `192.168.1.50`) |
-| Ollama URL | `http://[3060-IP]:11434` |
-| Forge URL | `http://[3060-IP]:7861` |
-
-Save Settings. DCS will:
-- Stop trying to start ACE-Step/Ollama locally
-- No longer evict WanGP when generating music (they're on separate hardware)
-- WanGP stays warm between all clip jobs -- no 30-60s reload pauses
-
----
-
-## 8. Verify the split is working
-
-On the 5080, open DCS and check the service status pills:
-- WanGP: green (local, owns full 15.9 GB)
-- ACE-Step: green with "(remote)" in the tooltip
-- Ollama: green with "(remote)" in the tooltip
-- Forge: green (remote)
-
-Generate a multi-clip video with music. The log should show:
-```
-[gpu] acquire acestep -- remote, skipping local eviction
-```
-instead of the old eviction sequence that killed and reloaded WanGP.
-
----
-
-## Hardware notes
-
-RTX 3060 (12 GB) service capacity:
-- ACE-Step: ~7 GB loaded -- fits cleanly
-- Ollama qwen3-vl:8b: ~6 GB -- fits, though not simultaneously with ACE-Step
-- Forge SD: ~4-6 GB -- fits
-
-Ollama and ACE-Step won't run simultaneously on 12 GB. That is fine -- DCS
-generates music and LLM prompts at different pipeline phases. If both are
-needed at the same time (rare), Ollama will briefly offload to RAM; this is
-slower but not catastrophic since LLM calls are not on the critical path for
-video generation.
-
-For LTX-2 Dev13B video quality: the 3060 cannot help here (needs 20+ GB).
-That model requires a 3090/4090 when you upgrade.
+Then tell the user to:
+- Open DCS Settings on the 5080 machine
+- Set **ACE-Step Host** to this machine's IP (e.g. `192.168.1.50`)
+- Set **Ollama URL** to `http://[this-IP]:11434`
+- Set **Forge URL** to `http://[this-IP]:7861`
+- Click **Save Settings**
