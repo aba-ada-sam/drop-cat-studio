@@ -268,6 +268,16 @@ export function init(panel) {
     style: 'font-size:11px; color:var(--red); display:none; padding-top:4px;',
   });
 
+  // ── audio-first toggle ─────────────────────────────────────────────────────
+  const audioFirstToggle = el('label', {
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
+  });
+  const audioFirstCheck = el('input', { type: 'checkbox' });
+  audioFirstToggle.append(
+    audioFirstCheck,
+    el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }),
+  );
+
   const modelGroup = el('div');
   modelGroup.append(modelLabelRow, modelSel, modelWarn, audioFirstToggle);
 
@@ -305,16 +315,6 @@ export function init(panel) {
     }
   }
   modelSel.addEventListener('change', _checkModelVram);
-
-  // ── audio-first toggle ─────────────────────────────────────────────────────
-  const audioFirstToggle = el('label', {
-    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
-  });
-  const audioFirstCheck = el('input', { type: 'checkbox' });
-  audioFirstToggle.append(
-    audioFirstCheck,
-    el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }),
-  );
 
   // ── generate button + queue badge ──────────────────────────────────────────
   let _activeCount = 0;
