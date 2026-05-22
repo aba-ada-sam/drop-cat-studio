@@ -284,12 +284,12 @@ export function init(panel) {
       if (!fits) opt.style.color = 'var(--red)';
       modelSel.appendChild(opt);
     }
-    const best = i2v.filter(([, m]) => !_gpuVram || _gpuVram >= (m.vram_min_gb || 0))
-                    .sort(([, a], [, b]) => (b.vram_min_gb || 0) - (a.vram_min_gb || 0))[0];
+    const fits = i2v.filter(([, m]) => !_gpuVram || _gpuVram >= (m.vram_min_gb || 0));
+    const best = fits.find(([name]) => name === 'LTX-2 Dev19B Distilled') || fits[0];
     if (best) modelSel.value = best[0];
     _checkModelVram();
   }).catch(() => {
-    modelSel.appendChild(el('option', { value: 'LTX-2 Dev13B', text: 'LTX-2 Dev13B' }));
+    modelSel.appendChild(el('option', { value: 'LTX-2 Dev19B Distilled', text: 'LTX-2 Dev19B Distilled' }));
   });
 
   function _checkModelVram() {

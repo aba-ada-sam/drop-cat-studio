@@ -58,9 +58,9 @@ async def zoom_make(request: Request):
 
     n_clips = max(2, min(15, int(body.get("n_clips", 5))))
     clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
-    model_name = body.get("model_name", "LTX-2 Dev13B")
+    model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
-        model_name = "LTX-2 Dev13B"
+        model_name = "LTX-2 Dev19B Distilled"
 
     # If source is a video, extract the appropriate frame first
     ext = Path(source_path).suffix.lower()
@@ -168,9 +168,9 @@ async def zoom_folder_loop_start(request: Request):
 
     n_clips  = max(2, min(15, int(body.get("n_clips", 4))))
     clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 5.0))))
-    model_name = body.get("model_name", "LTX-2 Dev13B")
+    model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
-        model_name = "LTX-2 Dev13B"
+        model_name = "LTX-2 Dev19B Distilled"
     _model_info = _VG_MODELS.get(model_name, {})
 
     settings = {

@@ -334,7 +334,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
     direction = settings.get("zoom_direction", "out")
     n_clips = int(settings.get("n_clips", 5))
     clip_dur = float(settings.get("clip_duration", 5.0))
-    model_name = settings.get("model_name", "Wan2.1-I2V-14B-480P")
+    model_name = settings.get("model_name", "LTX-2 Dev19B Distilled")
     skip_audio = settings.get("skip_audio", False)
     instrumental = settings.get("instrumental", False)
     music_prompt = settings.pop("_prepped_music_prompt", settings.get("music_prompt", ""))
