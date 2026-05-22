@@ -37,7 +37,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -723,8 +723,13 @@ async def restore_queue():
 
 
 @app.post("/api/jobs/save-and-restart")
-async def save_and_restart():
-    """Save the current queue then restart app.py via the manager watchdog."""
+async def save_and_restart(background_tasks: BackgroundTasks):
+    """Save the current queue then restart app.py via the manager watchdog.
+
+    BackgroundTasks guarantees the response is fully sent before the task
+    runs -- a bare threading.Thread with a short sleep races with uvicorn's
+    response flush and loses under load, producing 'Failed to fetch'.
+    """
     import asyncio as _asyncio, signal
     if _g["job_manager"] is None:
         return JSONResponse({"error": "Not ready"}, 503)
@@ -732,11 +737,12 @@ async def save_and_restart():
     count = await _asyncio.to_thread(jm.save_queue)
     PLANNED_RESTART_MARKER.write_text("planned")
     log.info("Save-and-restart: saved %d jobs -- triggering watchdog restart", count)
-    def _do_exit():
-        import time
-        time.sleep(0.4)
+
+    async def _scheduled_exit():
+        await _asyncio.sleep(0.3)
         os.kill(os.getpid(), signal.SIGTERM)
-    threading.Thread(target=_do_exit, daemon=True).start()
+
+    background_tasks.add_task(_scheduled_exit)
     return {"ok": True, "saved": count}
 
 
