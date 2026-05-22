@@ -77,14 +77,16 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
-Each prompt is one 8-20 second clip. All clips together tell ONE coherent story.
+Each prompt is one 8-20 second clip. Clips are chained -- each starts from the
+last frame of the previous clip. ALL clips stay in ONE world: same location,
+same subject, camera position and energy level shift with the music.
 
 WORLD RULE: Clip 01 must establish a SPECIFIC, NAMED setting.
 Name the location, the material, the light source, and the subject.
 Good: "A woman in a red coat on a rain-slick Tokyo street under sodium lamps"
 Bad: "a figure in a dramatic landscape bathed in ethereal light"
-Every subsequent clip stays in this world. Same subject, same place, different
-MOMENT or CAMERA POSITION. Never teleport to a new environment between clips.
+Every subsequent clip stays in this world. Same subject, same place -- only
+the CAMERA ANGLE and ENERGY LEVEL change. Never teleport to a new environment.
 
 ANTI-SLOP RULE: Every word must earn its place.
 Banned words and phrases: blazing, sweeping, ethereal, cinematic, dramatic,
@@ -95,27 +97,30 @@ Replace vague adjectives with PHYSICAL SPECIFICS:
   NOT "dramatic shadows" -- WRITE "hard ceiling light casting black bar shadows on concrete"
   NOT "sweeping landscape" -- WRITE "flat wheat field stretching to a grey horizon"
 
-CAMERA MOTION RULE -- every clip must have exactly ONE purposeful camera MOVE:
-  zoom out (pull back to reveal), zoom in (push toward subject), slow pan left/right,
-  dolly forward (glide through environment), tilt up (sweep from ground to sky),
-  orbit/arc (camera circles subject), crane up, drift (slow float).
-The move must be physically motivated by the story moment. Do NOT describe static shots.
+CAMERA MOTION RULE -- camera motion is the PRIMARY energy source in music videos.
+Every clip must have exactly ONE purposeful camera MOVE matched to song energy:
+  LOW energy: slow drift, gentle push-in, subtle pan
+  MED energy: medium dolly forward, slow orbit, steady tilt
+  HIGH energy: faster zoom-in, crisp pan, quick crane up
+Moves: zoom out, zoom in, slow pan, dolly forward, tilt up, orbit, crane up, drift.
 Each move evolves from the previous clip's final frame since clips are chained.
 
-MOTION ARC RULE -- every clip must have ONE clear visual climax -- a single moment of
-maximum action -- not uniform motion throughout:
-  - quiet build -> dolly accelerates -> object ARRIVES or IMPACTS
-  - subject moves through space -> REACHES a defined position
-  - environment is still -> a force (water, fire, wind) SURGES then settles
-A clip that is "fast all the way through" or "slow all the way through" has no peak.
-Build a trajectory the eye can follow toward a single moment of release.
+MOTION ARC RULE -- every clip builds toward ONE physical arrival:
+  - camera starts slow -> accelerates into subject -> reaches a defined point
+  - subject takes ONE step or gesture -> arrives at a position
+  - fabric, leaves, or hair stirs -> settles
+No "maximum action" peaks. No forces surging. Build toward a quiet arrival.
 
-FRAME RULE: No close-up face shots. No direct action on a character's body.
-For close shots use hands, feet, objects, textures, materials.
+PARTICLE BAN -- NEVER describe floating matter. These generate AI artifacts.
+Banned: dust, particles, embers, sparks, snow, ash, mist, fog, debris,
+swirling, drifting atmosphere, steam rising, smoke curling. Describe SOLID
+GROUNDED motion only: footsteps on stone, fabric creasing, light quality shifting.
+
+FRAME RULE: No close-up face shots. For close shots use hands, feet, objects, textures.
 
 Rules:
 - 20-35 words per prompt -- specific noun + verb + environment, no filler adjectives
-- Story progresses: arrival -> challenge -> peak -> resolution
+- Energy follows the song: LOW clips use slow camera + still subject; HIGH clips use faster camera + clear subject motion -- all within the same world
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -434,21 +439,23 @@ def _do_song_gpu_phase(
             prompt_to_use = clip_prompt
         else:
             clip_start_image = _chain_frame
-            # Prefix chain prompts with a scene-lock instruction so the text
-            # reinforces visual continuity alongside the start-image conditioning.
+            # Strong scene-lock prefix: text must reinforce the chained frame, not
+            # override it. Without this the LLM arc's scene variety teleports subjects.
             if clip_start_image:
-                prompt_to_use = "Continue same scene and subject. " + clip_prompt
+                prompt_to_use = "Exact same location and subject as previous frame, continuous scene. " + clip_prompt
             else:
                 prompt_to_use = clip_prompt
-        finalized = _finalize_prompt(prompt_to_use, model_name)
+        # Narrative suffix: "deliberate purposeful motion, physically legible gesture"
+        # avoids the dynamic suffix's "kinetic energy, subjects actively moving" which
+        # makes LTX invent particle motion (snow/dust) on anchored chain frames.
+        finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
-        # Back off guidance for chain clips so the start-image has dominant
-        # weight. At 7.5 the text overrides the start frame and characters
-        # change scene. At 3.5 the start frame anchors visual content while
-        # the text guides camera motion only.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else max(3.5, guidance * 0.7)
+        # Chain clips: fix guidance at 3.5 so the start frame has dominant weight
+        # and the text steers camera only. 7.5 lets text override the frame and
+        # teleport subjects; even 5.25 (0.7x) is too high for chained frames.
+        effective_guidance = guidance if (i == 0 or not clip_start_image) else 3.5
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
@@ -466,7 +473,11 @@ def _do_song_gpu_phase(
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
-                negative_prompt=video_generator.negative_prompt_for(model_name),
+                # Use calm neg prompt (no "static" term) -- "static" in the dynamic neg
+                # pressures LTX to invent particle motion to prove it is not static,
+                # producing snow/dust on chained frames. Calm neg keeps particle bans
+                # without that pressure.
+                negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
