@@ -10,6 +10,7 @@ Run with:  pythonw.exe manager.pyw
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import os
@@ -24,6 +25,77 @@ from pathlib import Path
 # Suppress console windows for all subprocess calls on Windows.
 # Without this every git/pip/netstat/taskkill briefly flashes a terminal.
 _NW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
+# -- Job Object: kill app.py when manager.pyw exits for any reason -------------
+# This is the OS-level guarantee that app.py (and its own GPU children) die
+# whenever manager.pyw exits -- whether via the quit dialog, Task Manager,
+# or a crash.  app.py assigns WanGP/ACE-Step to its own Job Object, so the
+# kill chain is: manager.pyw exits -> OS closes this handle -> app.py dies ->
+# app.py's Job Object closes -> WanGP/ACE-Step die.
+_MGR_JOB: ctypes.c_void_p | None = None
+
+def _init_manager_job() -> None:
+    global _MGR_JOB
+    if sys.platform != "win32" or _MGR_JOB is not None:
+        return
+    try:
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+        JobObjectExtendedLimitInformation   = 9
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit",     ctypes.c_int64),
+                ("LimitFlags",             ctypes.c_uint32),
+                ("MinimumWorkingSetSize",   ctypes.c_size_t),
+                ("MaximumWorkingSetSize",   ctypes.c_size_t),
+                ("ActiveProcessLimit",      ctypes.c_uint32),
+                ("Affinity",               ctypes.c_size_t),
+                ("PriorityClass",           ctypes.c_uint32),
+                ("SchedulingClass",         ctypes.c_uint32),
+            ]
+        class _IO(ctypes.Structure):
+            _fields_ = [(f, ctypes.c_uint64) for f in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount",  "WriteTransferCount",  "OtherTransferCount",
+            )]
+        class _EXT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BASIC),
+                ("IoInfo",                _IO),
+                ("ProcessMemoryLimit",    ctypes.c_size_t),
+                ("JobMemoryLimit",        ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed",     ctypes.c_size_t),
+            ]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                           ctypes.byref(info), ctypes.sizeof(info)):
+            k32.CloseHandle(job)
+            return
+        _MGR_JOB = job
+    except Exception:
+        pass
+
+
+def _assign_app_to_job(proc: subprocess.Popen) -> None:
+    if _MGR_JOB is None or sys.platform != "win32":
+        return
+    try:
+        PROCESS_ALL_ACCESS = 0x1F0FFF
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        h = k32.OpenProcess(PROCESS_ALL_ACCESS, False, proc.pid)
+        if h:
+            k32.AssignProcessToJobObject(_MGR_JOB, h)
+            k32.CloseHandle(h)
+    except Exception:
+        pass
 
 # -- Paths ---------------------------------------------------------------------
 
@@ -355,6 +427,7 @@ class ServerManager:
             log_fh.close()
             return
 
+        _assign_app_to_job(proc)
         with self._lock:
             self._proc = proc
         log.info("Spawned app.py as PID %d", proc.pid)
@@ -796,6 +869,7 @@ def _diag(msg: str) -> None:
 def main() -> None:
     _diag("main() entered")
     log.info("=== manager.pyw starting (PID %d) ===", os.getpid())
+    _init_manager_job()
 
     # Single-instance: Windows named mutex held for the lifetime of the process.
     # _MUTEX_HANDLE is module-level so Python's GC never releases it.
