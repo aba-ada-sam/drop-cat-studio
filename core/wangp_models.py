@@ -84,6 +84,8 @@ SAFE_DEFAULTS: dict = {
     "self_refiner_setting": 0,     # WanGP compares >0; must be int not str
     "spatial_upsampling": "",
     "skip_steps_cache_type": "",
+    "skip_steps_multiplier": 0,       # overridden explicitly in wangp_worker
+    "skip_steps_start_step_perc": 0,
     "speakers_locations": "",
     "frames_positions": "",
     "guidance_phases": 0,

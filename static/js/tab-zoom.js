@@ -592,7 +592,7 @@ export function init(panel) {
               outputActions.append(
                 _actionBtn('Open in folder', () =>
                   apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-                _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
+                _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
               );
             }
             toast(`Zoom done: ${f.name}`, 'success');
@@ -641,7 +641,7 @@ export function init(panel) {
   // ── extend/continue ────────────────────────────────────────────────────────
   let _extendPanel = null;
 
-  function _showExtendPanel(existingVideoPath) {
+  function _showExtendPanel(existingVideoPath, capturedDirection) {
     if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
 
     const panel = el('div', {
@@ -689,7 +689,7 @@ export function init(panel) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             existing_video_path: existingVideoPath,
-            zoom_direction:      _direction,
+            zoom_direction:      capturedDirection,
             n_clips:             Number(clipsInput.value) || 3,
             clip_duration:       Number(durInput.value) || 4,
             model_name:          modelSel.value,
@@ -698,13 +698,21 @@ export function init(panel) {
           }),
         });
         _incActive();
-        toast('Continue zoom queued -- check Queue tab', 'info');
         panel.remove(); _extendPanel = null;
 
+        // Show progress inline for the extend job
+        progressLabel.textContent = 'Extending zoom...';
+        progressFill.style.width = '0%';
+        progressArea.style.display = 'flex';
+
         pollJob(res.job_id,
-          () => {},
+          j => {
+            progressFill.style.width = `${j.progress || 0}%`;
+            progressLabel.textContent = j.message || `${j.progress || 0}%`;
+          },
           j => {
             _decActive();
+            progressArea.style.display = 'none';
             const out = Array.isArray(j.output) ? j.output[0] : j.output;
             if (out) {
               videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
@@ -718,13 +726,18 @@ export function init(panel) {
                   document.dispatchEvent(new CustomEvent('dcs:handoff', { detail: { from: 'zoom', to: 'bridges', path: out } }));
                   toast('Sent to Bridges', 'success');
                 }),
-                _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
+                _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection)),
               );
             }
             toast('Zoom extended!', 'success');
             document.dispatchEvent(new CustomEvent('session-updated'));
           },
-          msg => { _decActive(); toast(`Extend failed: ${msg}`, 'error'); },
+          msg => {
+            _decActive();
+            progressArea.style.display = 'none';
+            progressFill.style.width = '0%';
+            toast(`Extend failed: ${msg}`, 'error');
+          },
         );
       } catch (err) {
         if (err.status === 429 || /queue.*full/i.test(err.message)) {
@@ -732,8 +745,12 @@ export function init(panel) {
         } else {
           toast('Failed: ' + err.message, 'error');
         }
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Continue zoom';
+      } finally {
+        // Re-enable only if panel is still in the DOM (not removed by success path)
+        if (panel.isConnected) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Continue zoom';
+        }
       }
     };
 
@@ -816,7 +833,7 @@ export function init(panel) {
                   { detail: { from: 'zoom', to: 'bridges', path: out } }));
                 toast('Sent to Bridges', 'success');
               }),
-              _actionBtn('Continue zoom...', () => _showExtendPanel(out)),
+              _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
             );
           }
           toast(`Zoom ${_direction} complete!`, 'success');

@@ -329,14 +329,19 @@ def run_zoom_prep(job, source_path: str, settings: dict) -> None:
             settings["audio_first"] = False
         else:
             try:
+                import tempfile as _af_tmp
                 from features.fun_videos import audio_generator as _ag
+                # Use a dedicated temp dir -- NOT os.path.dirname(source_path) which may
+                # be the frame-extraction temp dir that the pipeline will delete early.
+                _audio_out_dir = _af_tmp.mkdtemp(prefix="dcs_zoom_af_")
+                settings["_audio_out_dir"] = _audio_out_dir
                 job.update(progress=9, message="Generating audio for sync...")
                 _gp.acquire("acestep", reason="zoom audio-first before clips")
                 planned_dur = n_clips * clip_dur
                 _ap, _aerr = _ag.generate_audio(
                     prompt=music_prompt,
                     duration=min(planned_dur + 2.0, 300.0),
-                    output_dir=os.path.dirname(source_path) or ".",
+                    output_dir=_audio_out_dir,
                     audio_format=settings.get("audio_format", "mp3"),
                     steps=int(settings.get("audio_steps", 8)),
                     guidance=float(settings.get("audio_guidance", 7.0)),
@@ -351,6 +356,9 @@ def run_zoom_prep(job, source_path: str, settings: dict) -> None:
                 else:
                     log.warning("[zoom] Audio-first generation failed: %s -- falling back", _aerr)
                     settings["audio_first"] = False
+                    import shutil as _sh
+                    _sh.rmtree(_audio_out_dir, ignore_errors=True)
+                    settings.pop("_audio_out_dir", None)
             except Exception as _ae:
                 log.warning("[zoom] Audio-first failed: %s -- falling back", _ae)
                 settings["audio_first"] = False
@@ -370,8 +378,12 @@ def _slice_audio(audio_path: str, start_sec: float, dur_sec: float, out_path: st
              "-i", audio_path, "-c:a", "copy", out_path],
             capture_output=True, timeout=30,
         )
+        if r.returncode != 0:
+            log.debug("[zoom] audio slice failed (start=%.1f dur=%.1f): %s",
+                      start_sec, dur_sec, r.stderr.decode(errors="replace")[-200:])
         return r.returncode == 0 and os.path.isfile(out_path)
-    except Exception:
+    except Exception as _e:
+        log.debug("[zoom] audio slice error: %s", _e)
         return False
 
 
@@ -416,15 +428,13 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
 
     shutil.copy2(source_path, job_dir / f"source{Path(source_path).suffix}")
 
-    # Clean up temp dir from video frame extraction (routes.py creates a mkdtemp
-    # when the source is a video; once we've copied the frame to job_dir it's safe
-    # to delete the temp dir regardless of how the job ends).
+    # Clean up frame-extraction temp dir -- safe once source is copied to job_dir.
     _tmp_dir = settings.pop("_tmp_dir", None)
     if _tmp_dir:
-        try:
-            shutil.rmtree(_tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(_tmp_dir, ignore_errors=True)
+
+    # Pop audio-first output dir -- cleaned up at end of pipeline after merge.
+    _audio_out_dir = settings.pop("_audio_out_dir", None)
 
     # Prepare WanGP request settings
     wangp_steps = int(settings.get("steps", 25))
@@ -770,3 +780,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
         )
     except Exception as e:
         log.warning("[zoom] gallery_push failed: %s", e)
+
+    # Clean up audio-first temp dir -- safe now that audio has been merged.
+    if _audio_out_dir:
+        shutil.rmtree(_audio_out_dir, ignore_errors=True)
