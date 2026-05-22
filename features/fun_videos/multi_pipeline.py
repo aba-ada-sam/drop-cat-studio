@@ -1093,6 +1093,8 @@ def _run_director_pass(
 
     job.update(progress=pct_end - 1, message=f"Director pass {pass_num}: re-assembling...")
     new_assembled = str(job_dir / f"concat_p{pass_num}_{job.id[:6]}.mp4")
+    if new_clip_paths:
+        _normalize_clip_for_concat(new_clip_paths[-1])
     if not _concat_clips(new_clip_paths, new_assembled):
         log.warning("[director] Pass %d re-assemble failed -- keeping previous result", pass_num)
         return clip_paths, clip_durations, story_arc, assembled_path
@@ -1150,7 +1152,7 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     r = subprocess.run(
         ["ffmpeg", "-y", "-i", clip_path,
          "-t", f"{cut_to:.4f}",
-         "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+         "-c:v", "libx264", "-crf", "15", "-preset", "fast",
          "-pix_fmt", "yuv420p", "-an",
          trimmed],
         capture_output=True, timeout=120,
@@ -1184,13 +1186,46 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
 
 # -- ffmpeg clip concatenation -------------------------------------------------
 
-def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
-    """Concatenate clips via ffmpeg concat demuxer, re-encoding to libx264.
+def _normalize_clip_for_concat(clip_path: str) -> bool:
+    """Re-encode a clip to libx264 CRF 15 in-place.
 
-    Re-encoding (rather than -c copy) sidesteps codec/profile mismatches
-    between WanGP's raw output and the trimmed clips that came back through
-    _chain_anchor's libx264 pass. CRF 18 fast preset keeps the quality hit
-    minimal while guaranteeing the concat succeeds.
+    Called on the last clip only, which skips _chain_anchor (no next clip
+    to anchor to). Without this, the last clip stays in WanGP's native
+    format while all other clips are CRF-15 libx264 from _chain_anchor.
+    The mismatch forces _concat_clips to re-encode everything a second time.
+    After normalizing the last clip here, all clips are in the same format
+    and _concat_clips can stream-copy with no quality loss.
+    """
+    tmp = clip_path + ".norm.mp4"
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-i", clip_path,
+         "-c:v", "libx264", "-crf", "15", "-preset", "fast",
+         "-pix_fmt", "yuv420p", "-an", tmp],
+        capture_output=True, timeout=120,
+    )
+    if r.returncode == 0 and Path(tmp).exists():
+        os.replace(tmp, clip_path)
+        return True
+    log.warning("[concat] last-clip normalize failed -- concat will re-encode: %s",
+                r.stderr.decode(errors="replace")[-200:])
+    try:
+        Path(tmp).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return False
+
+
+def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
+    """Concatenate clips via ffmpeg concat demuxer (stream copy).
+
+    All clips must be in the same libx264/yuv420p format before calling
+    this function. _chain_anchor normalizes clips 0..N-2 at CRF 15;
+    callers must normalize clip N-1 via _normalize_clip_for_concat first.
+    Stream copy avoids a second lossy encode of clips that already went
+    through _chain_anchor's CRF-15 pass.
+
+    Falls back to re-encoding at CRF 15 if stream copy fails (e.g. any
+    clip was not normalized -- better one extra encode than a broken output).
     """
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
@@ -1210,16 +1245,37 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
                 "ffmpeg", "-y",
                 "-f", "concat", "-safe", "0",
                 "-i", list_path,
-                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                "-pix_fmt", "yuv420p",
-                "-an",      # drop any audio from raw WanGP clips
+                "-c", "copy",
+                "-an",
                 out_path,
             ],
             capture_output=True, timeout=600,
         )
-        success = r.returncode == 0 and Path(out_path).exists()
+        if r.returncode == 0 and Path(out_path).exists():
+            return True
+        # Stream copy failed -- fall back to re-encode so the job doesn't die
+        log.warning("[multi] stream-copy concat failed, falling back to re-encode: %s",
+                    r.stderr.decode(errors="replace")[-400:])
+        try:
+            Path(out_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        r2 = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", list_path,
+                "-c:v", "libx264", "-crf", "15", "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-an",
+                out_path,
+            ],
+            capture_output=True, timeout=600,
+        )
+        success = r2.returncode == 0 and Path(out_path).exists()
         if not success:
-            log.error("[multi] ffmpeg concat failed:\n%s", r.stderr.decode(errors="replace")[-2000:])
+            log.error("[multi] ffmpeg concat fallback failed:\n%s",
+                      r2.stderr.decode(errors="replace")[-2000:])
         return success
     except Exception as e:
         log.error("[multi] Clip concat exception: %s", e)
@@ -1919,6 +1975,12 @@ def run_multi_pipeline(job, photo_path, settings):
       compile_pct = clips_end_pct + 1
       job.update(progress=compile_pct, message="Compiling clips...")
       concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
+
+      # Last clip skips _chain_anchor (nothing to chain to), so it is still in
+      # WanGP's native format while all other clips are CRF-15 libx264. Normalize
+      # it now so _concat_clips can stream-copy instead of re-encoding everything.
+      if clip_paths:
+          _normalize_clip_for_concat(clip_paths[-1])
 
       if not _concat_clips(clip_paths, concat_path):
           log.warning("[multi] Concat failed -- using first clip only")

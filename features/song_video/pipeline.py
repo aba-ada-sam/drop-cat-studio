@@ -23,7 +23,7 @@ from pathlib import Path
 from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
-from features.fun_videos.multi_pipeline import _concat_clips
+from features.fun_videos.multi_pipeline import _concat_clips, _normalize_clip_for_concat
 from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ def _merge_video_audio_trim(
             "-stream_loop", "-1", "-i", video_path,
             "-i", audio_path,
             "-map", "0:v", "-map", "1:a",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "15",
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{audio_duration:.3f}",
             "-movflags", "+faststart",
@@ -285,7 +285,7 @@ def run_song_prep(job, photo_path, settings):
     # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
     # collapses trailing boundaries to total_dur, producing zero-duration clips.
     # ffmpeg -t 0 then writes an empty file and all subsequent clips fail.
-    clip_durations = [max(8.0, d) for d in clip_durations]
+    clip_durations = [max(8.0, min(10.0, d)) for d in clip_durations]
     settings["_clip_durations"] = clip_durations
     settings["_beat_positions"] = beat_positions
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
@@ -555,7 +555,7 @@ def _do_song_gpu_phase(
         # Extract the in-motion boundary frame (now the last frame of the
         # trimmed clip) and feed it as the start image for the next clip.
         if i < n_clips - 1:
-            frame_path = str(job_dir / f"chain_{i:02d}.jpg")
+            frame_path = str(job_dir / f"chain_{i:02d}.png")
             _chain_frame = _extract_last_frame(clip_path, frame_path)
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
@@ -578,7 +578,11 @@ def _do_song_gpu_phase(
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # -- Phase 2: Concat with crossfade ---------------------------------------
+    # -- Phase 2: Concat (stream copy after normalizing all clips to libx264) --
+    # song_video clips are WanGP native format -- normalize them all to CRF-15
+    # libx264 so _concat_clips can stream-copy (one encode total per clip).
+    for cp in clip_paths:
+        _normalize_clip_for_concat(cp)
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
     if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]

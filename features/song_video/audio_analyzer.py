@@ -91,7 +91,7 @@ def compute_clip_plan(
     audio_path: str,
     n_clips: int,
     min_dur: float = 8.0,
-    max_dur: float = 19.0,
+    max_dur: float = 10.0,
 ) -> tuple[list[float], list[float]]:
     """Beat-aligned clip plan with per-clip peak-beat positions.
 
