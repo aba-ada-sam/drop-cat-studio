@@ -646,7 +646,7 @@ export function init(panel) {
     style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none; margin-top:10px;',
   });
   const audioFirstCheck = el('input', { type: 'checkbox' });
-  audioFirstToggle.append(audioFirstCheck, el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }));
+  audioFirstToggle.append(audioFirstCheck, el('span', { text: 'Sync video to music (generates audio first, takes longer)' }));
 
   const modelGroup = el('div');
   modelGroup.append(modelLabelRow, modelSel, modelWarn, audioFirstToggle);
