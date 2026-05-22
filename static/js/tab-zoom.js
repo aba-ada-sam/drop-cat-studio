@@ -133,6 +133,10 @@ export function init(panel) {
   //   Zoom Out -> last frame of video  (starts from where video ended)
   //   Zoom In  -> first frame of video (zooms into the opening shot)
   // In 'song' mode, source is optional anchor image (videos rejected).
+  const sourceLabelEl = el('div', {
+    style: 'font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-3); margin-bottom:6px;',
+    text: 'Source',
+  });
   const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none' });
   panel.appendChild(fileInput);
 
@@ -231,10 +235,14 @@ export function init(panel) {
   const ABTN = 'flex:1; padding:10px 4px; border-radius:6px; border:2px solid var(--border-2); background:var(--surface); cursor:pointer; font-size:13px; font-weight:600; color:var(--text-2); transition:all .15s; text-align:center;';
   const ABTN_ON = 'flex:1; padding:10px 4px; border-radius:6px; border:2px solid var(--accent-border); background:var(--accent-bg); cursor:pointer; font-size:13px; font-weight:600; color:var(--accent); transition:all .15s; text-align:center;';
 
-  const audioNoneBtn = el('button', { style: ABTN_ON, text: 'No audio' });
-  const audioAiBtn   = el('button', { style: ABTN, text: 'AI music' });
-  const audioSongBtn = el('button', { style: ABTN, text: 'My song' });
+  const audioNoneBtn = el('button', { style: ABTN_ON, text: 'Zoom Only' });
+  const audioAiBtn   = el('button', { style: ABTN, text: 'Zoom + Music' });
+  const audioSongBtn = el('button', { style: ABTN, text: 'Music Video' });
   const audioModeRow = el('div', { style: 'display:flex; gap:8px;' }, [audioNoneBtn, audioAiBtn, audioSongBtn]);
+  const modeDescEl   = el('div', {
+    style: 'font-size:12px; color:var(--text-3); text-align:center; padding-top:4px; min-height:16px;',
+    text: 'Spatial zoom video from a photo or video',
+  });
 
   // Sub-section: AI music
   const audioFirstCheck = el('input', { type: 'checkbox' });
@@ -288,7 +296,7 @@ export function init(panel) {
   audioInput.addEventListener('change', () => { if (audioInput.files[0]) _uploadSong(audioInput.files[0]); audioInput.value = ''; });
   songClearBtn.addEventListener('click', e => { e.stopPropagation(); _clearSong(); });
 
-  const audioSection = _card([LABEL('Audio'), audioModeRow, aiSubSection, songSubSection]);
+  const audioSection = _card([LABEL('Audio'), audioModeRow, modeDescEl, aiSubSection, songSubSection]);
 
   audioNoneBtn.onclick = () => _setAudioMode('none');
   audioAiBtn.onclick   = () => _setAudioMode('ai');
@@ -304,20 +312,31 @@ export function init(panel) {
     audioAiBtn.setAttribute('style',   mode === 'ai'   ? ABTN_ON : ABTN);
     audioSongBtn.setAttribute('style', mode === 'song' ? ABTN_ON : ABTN);
 
-    aiSubSection.style.display  = mode === 'ai'   ? 'flex' : 'none';
+    aiSubSection.style.display   = mode === 'ai'   ? 'flex' : 'none';
     songSubSection.style.display = mode === 'song' ? 'flex' : 'none';
+
+    // Mode description
+    const _MODE_DESCS = {
+      none: 'Spatial zoom video from a photo or video',
+      ai:   'Zoom video with AI-composed soundtrack',
+      song: 'Full music video synced to your song',
+    };
+    modeDescEl.textContent = _MODE_DESCS[mode] || '';
 
     // Source drop zone hint adapts
     if (mode === 'song') {
       dropTextEl.textContent = 'Drop anchor image (optional -- locks visual style)';
       fileInput.accept = 'image/*';
       dropSubEl.style.display = 'none';
+      sourceLabelEl.innerHTML = 'Anchor Image <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-3);">(optional)</span>';
     } else {
       dropTextEl.textContent = 'Drop a photo or video, or click to browse';
       fileInput.accept = 'image/*,video/*';
+      sourceLabelEl.textContent = 'Source';
     }
 
-    // Direction always visible (it controls camera motion even in song mode)
+    // Direction (Zoom Out/In) is only relevant for zoom modes -- song-video pipeline does not use it
+    dirSection.style.display = mode === 'song' ? 'none' : '';
 
     // Zoom controls (clip chips + folder batch) shown in non-song modes
     controlsGrid.style.display = mode === 'song' ? 'none' : 'grid';
@@ -365,10 +384,11 @@ export function init(panel) {
     }
   }
 
-  // -- Analysis card (song mode) ---------------------------------------------
+  // -- Analysis card (song mode) -- lives inside songSubSection, below the player
   const analysisCard = el('div', {
-    style: 'display:none; background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-lg); padding:14px; flex-direction:column; gap:10px;',
+    style: 'display:none; flex-direction:column; gap:10px; padding-top:10px; border-top:1px solid var(--border-2); margin-top:4px;',
   });
+  songSubSection.appendChild(analysisCard);
 
   function _renderAnalysis(a) {
     analysisCard.innerHTML = '';
@@ -416,7 +436,7 @@ export function init(panel) {
 
     if (a.suggested_clip_dur) {
       const maxSec = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 10;
-      _clipDur = Math.min(a.suggested_clip_dur, maxSec);
+      _clipDur = Math.max(8, Math.min(a.suggested_clip_dur, maxSec));
       clipSlider.value = String(_clipDur);
       clipLabel.textContent = `${_clipDur}s`;
     }
@@ -552,9 +572,9 @@ export function init(panel) {
   const dimsLabel = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600;', text: `${_outW} x ${_outH}` });
 
   const _COV_OPTIONS = [
-    { label: '100%', value: 1.0, title: 'Unique content all the way through' },
-    { label: '75%',  value: 0.75, title: 'Loops 1.3x -- 25% faster' },
-    { label: '50%',  value: 0.5,  title: 'Loops 2x -- 50% faster' },
+    { label: 'All unique',      value: 1.0,  title: 'Unique content all the way through' },
+    { label: '75% (1.3x loop)', value: 0.75, title: 'Loops 1.3x -- 25% faster to generate' },
+    { label: '50% (2x loop)',   value: 0.5,  title: 'Loops 2x -- 50% faster to generate' },
   ];
   const coverageRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
   _COV_OPTIONS.forEach((opt, idx) => {
@@ -826,9 +846,8 @@ export function init(panel) {
 
   // -- Assemble layout -------------------------------------------------------
   root.append(
-    _card(dropArea),
+    _card([sourceLabelEl, dropArea]),
     audioSection,
-    analysisCard,
     dirSection,
     controlsGrid,
     clipSummarySection,
