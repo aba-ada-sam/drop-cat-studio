@@ -1,11 +1,19 @@
 /**
- * Infinite Zoom tab -- zoom in or out from a photo or video.
- * Source -> direction -> steps -> Generate
+ * Infinite Zoom / Music Video tab.
+ *
+ * Without a song: spatial zoom in or out from a photo or video (/api/zoom/make).
+ * With a song: AI-driven music video matched to the song's energy (/api/song-video/generate).
+ *
+ * Mode is determined solely by whether a song is loaded -- no explicit toggle needed.
  */
 import { pollJob, stopJob, apiUpload } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 import { handoff } from './handoff.js?v=20260422a';
+
+export function receiveHandoff(data) {
+  // no-op -- zoom/music-video tab doesn't currently receive handoffs
+}
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -14,14 +22,64 @@ export function init(panel) {
   });
   panel.appendChild(root);
 
-  let _sourcePath = null;
-  let _isVideo    = false;
-  let _direction  = 'out';
-  let _jobId      = null;
-  let _modelData  = {};   // cached from /api/fun/models
-  let _gpuVram    = 0;
+  // -- State -----------------------------------------------------------------
+  let _sourcePath   = null;   // uploaded image or video path (zoom anchor / song anchor)
+  let _isVideo      = false;
+  let _songPath     = null;   // null = zoom mode, non-null = music video mode
+  let _songDur      = 0;
+  let _songAnalysis = null;
+  let _lyricsTA     = null;   // ref to lyrics textarea inside analysis card
+  let _direction    = 'out';
+  let _jobId        = null;
+  let _modelData    = {};
+  let _gpuVram      = 0;
+  let _activeCount  = 0;      // zoom-mode concurrent jobs
+  let _clipDur      = 8;      // music video: seconds per clip
+  let _numClips     = 0;      // music video: auto-calculated
+  let _qualityPx    = 360;
+  let _outW         = 640;
+  let _outH         = 352;
+  let _steps        = 4;
+  let _guidance     = 7.5;
+  let _loopMode     = false;
+  let _aiVariety    = true;
+  let _loopCount    = 0;
+  let _stopAfter    = false;
+  let _varietyIdx   = 0;
+  let _analyzeSeq   = 0;
+  let _activePoller = null;
+  let _extendPanel  = null;
 
-  // ── helpers ────────────────────────────────────────────────────────────────
+  const _VARIETY_THEMES = [
+    'Abstract geometric forms and flowing light, motion-blurred energy trails',
+    'Wide flat plains at golden hour, crops bending in wind, long shadows reaching east',
+    'Urban night -- neon-lit rain-slick streets, city pulse and electric glow',
+    'Underwater world -- bioluminescent drift, slow graceful motion, deep blues',
+    'Space journey -- nebula clouds, star fields, vast scale, time-lapse universe',
+    'Fire and molten metal -- ember cascades, plasma arcs, intense heat shimmer',
+    'Dancers and performers -- fabric billowing, choreographic peaks and lulls',
+    'Desert and canyon -- heat shimmer, red rock, ancient silent stone',
+    'Arctic and aurora -- frozen geometry, northern lights, crystalline stillness',
+    'Macro nature -- water droplets, insect wings, pollen in shafts of light',
+    'Surreal dreamscape -- floating objects, impossible architecture, fluid reality',
+    'Storm and lightning -- dark clouds, electric chaos, rain-drenched intensity',
+  ];
+
+  const QUALITIES = [
+    { label: 'Draft 360P', px: 360, maxSec: 19 },
+    { label: '480P',       px: 480, maxSec: 19 },
+    { label: '580P',       px: 580, maxSec: 19 },
+    { label: '720P',       px: 720, maxSec: 14 },
+  ];
+
+  function _computeDims(px) {
+    const h = px, w = Math.round(px * 16 / 9);
+    const r32 = n => Math.max(32, Math.round(n / 32) * 32);
+    return [r32(w), r32(h)];
+  }
+  [_outW, _outH] = _computeDims(_qualityPx);
+
+  // -- Helpers ---------------------------------------------------------------
   const LABEL = s => el('div', {
     style: 'font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-3);',
     text: s,
@@ -65,7 +123,7 @@ export function init(panel) {
     return c;
   }
 
-  // ── source drop zone ───────────────────────────────────────────────────────
+  // -- Source drop zone (zoom: required start frame / song mode: optional anchor image) --
   const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none' });
   panel.appendChild(fileInput);
 
@@ -75,23 +133,23 @@ export function init(panel) {
   const dropHint = el('div', {
     style: 'display:flex; flex-direction:column; align-items:center; gap:8px; padding:20px 0;',
   });
-  const dropIcon = el('div', { style: 'font-size:36px; color:var(--text-3);', text: '+' });
+  const dropIcon   = el('div', { style: 'font-size:36px; color:var(--text-3);', text: '+' });
   const dropTextEl = el('div', {
     style: 'font-size:13px; color:var(--text-2);',
     text: 'Drop a photo or video, or click to browse',
   });
   dropHint.append(dropIcon, dropTextEl);
 
-  const sourceInfo = el('div', {
+  const sourceInfo    = el('div', {
     style: 'display:none; align-items:center; justify-content:space-between; font-size:12px; color:var(--text-2); padding-top:8px;',
   });
-  const sourceNameEl = el('span');
-  const clearBtn = el('button', {
+  const sourceNameEl  = el('span');
+  const clearSourceBtn = el('button', {
     style: 'background:none; border:none; color:var(--red); cursor:pointer; font-size:11px; padding:0;',
     text: 'clear',
   });
-  clearBtn.onclick = e => { e.stopPropagation(); _clearSource(); };
-  sourceInfo.append(sourceNameEl, clearBtn);
+  clearSourceBtn.onclick = e => { e.stopPropagation(); _clearSource(); };
+  sourceInfo.append(sourceNameEl, clearSourceBtn);
 
   const dropArea = el('div', {
     style: [
@@ -114,11 +172,11 @@ export function init(panel) {
     e.preventDefault();
     dropArea.style.borderColor = 'var(--border-2)';
     dropArea.style.background  = 'var(--surface)';
-    if (e.dataTransfer.files[0]) _uploadFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files[0]) _uploadSource(e.dataTransfer.files[0]);
   });
   dropArea.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) _uploadFile(fileInput.files[0]);
+    if (fileInput.files[0]) _uploadSource(fileInput.files[0]);
     fileInput.value = '';
   });
 
@@ -130,7 +188,13 @@ export function init(panel) {
     _updateBtn();
   }
 
-  async function _uploadFile(file) {
+  async function _uploadSource(file) {
+    const songMode = !!_songPath;
+    // In song mode restrict to images only (anchor image, not video start frame)
+    if (songMode && file.type.startsWith('video/')) {
+      toast('Drop an image as the visual anchor -- videos not used in music video mode', 'error');
+      return;
+    }
     const isVid = file.type.startsWith('video/');
     dropTextEl.textContent = 'Uploading...';
     try {
@@ -156,11 +220,201 @@ export function init(panel) {
       _updateBtn();
     } catch (err) {
       toast('Upload failed: ' + err.message, 'error');
-      dropTextEl.textContent = 'Drop a photo or video, or click to browse';
+      dropTextEl.textContent = songMode
+        ? 'Drop an anchor image (optional)'
+        : 'Drop a photo or video, or click to browse';
     }
   }
 
-  // ── direction ──────────────────────────────────────────────────────────────
+  // -- Song drop zone --------------------------------------------------------
+  const audioInput = el('input', {
+    type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mpeg,.mpg',
+    style: 'display:none',
+  });
+  panel.appendChild(audioInput);
+
+  const songHintLabel = el('div', {
+    style: 'font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3);',
+    text: 'Song',
+  });
+  const songHintSub = el('div', {
+    style: 'font-size:12px; color:var(--text-3);',
+    text: 'Drop to make a music video (optional)',
+  });
+  const songHint = el('div', {
+    style: 'display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 0;',
+  });
+  songHint.append(songHintLabel, songHintSub);
+
+  const songPreview  = el('audio', { controls: true, style: 'display:none; width:100%; margin-top:6px;' });
+  const songClearBtn = el('button', {
+    style: 'display:none; align-self:flex-end; background:none; border:none; color:var(--red); cursor:pointer; font-size:11px; padding:0;',
+    text: 'remove song',
+  });
+
+  const songDropArea = el('div', {
+    style: [
+      'border:2px dashed var(--border-2); border-radius:var(--r-lg); cursor:pointer;',
+      'display:flex; flex-direction:column; align-items:center;',
+      'transition:border-color .15s, background .15s; background:var(--surface);',
+    ].join(''),
+  });
+  songDropArea.append(songHint, songPreview, songClearBtn);
+
+  songDropArea.addEventListener('dragover', e => {
+    e.preventDefault();
+    songDropArea.style.borderColor = 'var(--accent)';
+    songDropArea.style.background  = 'var(--accent-bg)';
+  });
+  songDropArea.addEventListener('dragleave', () => {
+    songDropArea.style.borderColor = 'var(--border-2)';
+    songDropArea.style.background  = 'var(--surface)';
+  });
+  songDropArea.addEventListener('drop', e => {
+    e.preventDefault();
+    songDropArea.style.borderColor = 'var(--border-2)';
+    songDropArea.style.background  = 'var(--surface)';
+    const f = Array.from(e.dataTransfer.files).find(f =>
+      f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac|opus|mpeg|mpg)$/i.test(f.name));
+    if (f) _uploadSong(f);
+  });
+  songDropArea.addEventListener('click', e => {
+    if (songPreview.contains(e.target) || e.target === songPreview) return;
+    if (e.target === songClearBtn) return;
+    audioInput.click();
+  });
+  audioInput.addEventListener('change', () => {
+    if (audioInput.files[0]) _uploadSong(audioInput.files[0]);
+    audioInput.value = '';
+  });
+  songClearBtn.addEventListener('click', e => { e.stopPropagation(); _clearSong(); });
+
+  function _clearSong() {
+    _analyzeSeq++;
+    _songPath = null; _songDur = 0; _songAnalysis = null; _lyricsTA = null;
+    songPreview.src = ''; songPreview.style.display = 'none';
+    songHint.style.display = 'flex';
+    songClearBtn.style.display = 'none';
+    songDropArea.style.borderColor = 'var(--border-2)';
+    analysisCard.style.display = 'none';
+    analysisCard.innerHTML = '';
+    _updateMode();
+    _updateBtn();
+  }
+
+  async function _uploadSong(file) {
+    songHintSub.textContent = 'Uploading...';
+    try {
+      const resp = await apiUpload('/api/song-video/upload-audio', [file]);
+      const f = resp?.files?.[0];
+      if (!f?.path) throw new Error('No path returned');
+      songPreview.src = f.url;
+      songPreview.style.display = 'block';
+      songHint.style.display = 'none';
+      songClearBtn.style.display = 'block';
+      _songPath = f.path;
+      _songDur  = f.duration || 0;
+      _updateMode();
+      _updateBtn();
+      _analyzeAudio(f.path);
+    } catch (err) {
+      toast('Song upload failed: ' + err.message, 'error');
+      songHintSub.textContent = 'Drop to make a music video (optional)';
+    }
+  }
+
+  // -- Analysis card (song mode) ---------------------------------------------
+  const analysisCard = el('div', {
+    style: 'display:none; background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-lg); padding:14px; flex-direction:column; gap:10px;',
+  });
+
+  function _renderAnalysis(a) {
+    analysisCard.innerHTML = '';
+    analysisCard.style.display = 'flex';
+
+    const chips = [
+      a.duration_display && { icon: '♪', text: a.duration_display },
+      a.bpm              && { icon: '♩', text: `${a.bpm} BPM` },
+      a.key              && { icon: '#', text: `${a.key} ${a.mode || ''}`.trim() },
+      a.mood             && { icon: '*', text: a.mood.charAt(0).toUpperCase() + a.mood.slice(1) },
+      a.energy           && { icon: '~', text: `${a.energy} energy` },
+    ].filter(Boolean);
+
+    const chipRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+    chips.forEach(c => chipRow.appendChild(el('span', {
+      style: 'display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px; background:var(--surface-2); border:1px solid var(--border-2); font-size:11px; color:var(--text-2);',
+      text: `${c.icon} ${c.text}`,
+    })));
+    analysisCard.appendChild(chipRow);
+
+    // Per-clip energy strip
+    const profile = a.energy_profile || [];
+    const labels  = a.clip_energy_labels || [];
+    if (profile.length > 0) {
+      const LABEL_COLOR = { HIGH: '#e05c5c', MED: '#d4a017', LOW: '#5b9bd4' };
+      const strip = el('div', { style: 'display:flex; gap:2px; align-items:flex-end; height:32px; width:100%;' });
+      profile.forEach((e, i) => {
+        const lbl   = labels[i] || (e > 0.7 ? 'HIGH' : e > 0.35 ? 'MED' : 'LOW');
+        const color = LABEL_COLOR[lbl] || 'var(--accent)';
+        const pct   = Math.max(20, Math.round(e * 100));
+        const bar   = el('div', {
+          title: `Clip ${i + 1}: ${lbl}`,
+          style: `flex:1; min-width:3px; border-radius:2px 2px 0 0; height:${pct}%; background:${color};`,
+        });
+        strip.appendChild(bar);
+      });
+      analysisCard.appendChild(strip);
+    }
+
+    // Lyrics textarea
+    _lyricsTA = el('textarea', {
+      rows: '3',
+      style: [
+        'width:100%; box-sizing:border-box; resize:vertical; font-size:12px; color:var(--text-2);',
+        'font-family:inherit; background:var(--surface-2); border:1px solid var(--border-2);',
+        'border-radius:var(--r-sm); padding:6px 8px;',
+      ].join(''),
+      placeholder: 'Detected lyrics (edit to correct, or leave blank)',
+    });
+    _lyricsTA.value = (a.lyrics_text || '').trim();
+    analysisCard.appendChild(el('div', { style: 'display:flex; flex-direction:column; gap:4px;' }, [
+      el('div', { style: 'font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3);', text: 'Detected lyrics' }),
+      _lyricsTA,
+    ]));
+
+    // Apply suggested clip duration (clamped to quality ceiling)
+    if (a.suggested_clip_dur) {
+      const maxSec = QUALITIES.find(q => q.px === _qualityPx)?.maxSec || 19;
+      _clipDur = Math.min(a.suggested_clip_dur, maxSec);
+      clipSlider.value = String(_clipDur);
+      clipLabel.textContent = `${_clipDur}s`;
+    }
+    _refreshClipCount();
+  }
+
+  async function _analyzeAudio(path) {
+    const seq = ++_analyzeSeq;
+    analysisCard.innerHTML = '';
+    analysisCard.style.display = 'flex';
+    analysisCard.appendChild(el('div', { style: 'font-size:12px; color:var(--text-3); padding:4px;', text: 'Analyzing song...' }));
+    try {
+      const result = await apiFetch('/api/song-video/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ audio_path: path, clip_duration: _clipDur }),
+      });
+      if (seq !== _analyzeSeq) return;
+      _songAnalysis = result;
+      _songDur = result.duration || _songDur;
+      _renderAnalysis(result);
+    } catch (e) {
+      if (seq !== _analyzeSeq) return;
+      analysisCard.innerHTML = '';
+      analysisCard.appendChild(el('div', { style: 'font-size:12px; color:var(--text-3); font-style:italic; padding:4px;', text: `Analysis unavailable: ${e.message}` }));
+      _refreshClipCount();
+    }
+  }
+
+  // -- Direction buttons (zoom only) -----------------------------------------
   const dirRow = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:10px;' });
 
   function _dirBtn(label, sub, value) {
@@ -194,9 +448,11 @@ export function init(panel) {
   btnOut.style.borderColor = 'var(--accent-border)';
   btnOut.style.background  = 'var(--accent-bg)';
 
-  // ── clips + duration ───────────────────────────────────────────────────────
-  // Each "clip" = one WanGP generation. They chain losslessly (last frame ->
-  // next clip's first frame) to produce a continuous zoom movement.
+  const dirSection = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' }, [
+    LABEL('Direction'), dirRow,
+  ]);
+
+  // -- Clips + duration chips (zoom only) ------------------------------------
   const totalEstEl = el('div', {
     style: 'font-size:11px; color:var(--text-3); text-align:right; align-self:flex-end; padding-bottom:2px;',
   });
@@ -208,23 +464,20 @@ export function init(panel) {
     const clips = Number(_activeValue(stepsRow)) || 5;
     const secs  = Number(_activeValue(durRow))   || 4;
     const total = clips * secs;
-    const m = Math.floor(total / 60);
-    const s = total % 60;
+    const m = Math.floor(total / 60), s = total % 60;
     totalEstEl.textContent = `~${m > 0 ? m + 'm ' : ''}${s > 0 ? s + 's' : ''} video`;
   }
 
   [3, 4, 5, 6, 8, 10, 12].forEach((n, i) => {
     const b = _chip(n, n, stepsRow, _updateEst);
-    if (i === 2) b.click();   // default: 5 clips
+    if (i === 2) b.click();
     stepsRow.appendChild(b);
   });
-
   [4, 5, 6, 8, 10, 12, 15].forEach((n, i) => {
     const b = _chip(`${n}s`, n, durRow, _updateEst);
-    if (i === 0) b.click();   // default: 4s per clip
+    if (i === 0) b.click();
     durRow.appendChild(b);
   });
-
   _updateEst();
 
   const controlsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:16px;' });
@@ -232,15 +485,112 @@ export function init(panel) {
   stepsGroup.append(LABEL('Clips in chain'), stepsRow);
   const durGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
   durGroup.append(
-    el('div', { style: 'display:flex; justify-content:space-between; align-items:baseline;' },
-      [LABEL('Seconds per clip'), totalEstEl]),
+    el('div', { style: 'display:flex; justify-content:space-between; align-items:baseline;' }, [
+      LABEL('Seconds per clip'), totalEstEl,
+    ]),
     durRow,
   );
   controlsGrid.append(stepsGroup, durGroup);
 
-  // ── idea ───────────────────────────────────────────────────────────────────
+  // -- Clip count summary + advanced settings (song mode) -------------------
+  const clipSummaryEl = el('div', { style: 'font-size:12px; color:var(--text-3);', text: 'Drop a song above.' });
+  const MAX_CLIPS = 50;
+
+  function _refreshClipCount() {
+    if (!_songDur) { clipSummaryEl.textContent = 'Drop a song above.'; _numClips = 0; _updateBtn(); return; }
+    const rawNeeded = Math.ceil(_songDur / _clipDur);
+    const suggested = _songAnalysis?.suggested_num_clips;
+    _numClips = Math.min(MAX_CLIPS, Math.max(1, suggested || rawNeeded));
+    const m = Math.floor(_songDur / 60), s = Math.round(_songDur % 60);
+    const secsPerClip = _qualityPx <= 360 ? 30 : (_qualityPx <= 480 ? 40 : 55);
+    const estMin = Math.round(_numClips * secsPerClip / 60);
+    clipSummaryEl.textContent = `${_numClips} clips for ${m}:${String(s).padStart(2, '0')} -- est. ~${estMin} min`;
+    _updateBtn();
+  }
+
+  // Quality chips
+  const CHIP_BASE = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
+  const CHIP_ON   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
+
+  const qualChips = {};
+  const qualRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  for (const q of QUALITIES) {
+    const btn = el('button', { style: CHIP_BASE + (q.px === _qualityPx ? CHIP_ON : ''), text: q.label });
+    btn.addEventListener('click', () => {
+      _qualityPx = q.px;
+      [_outW, _outH] = _computeDims(_qualityPx);
+      dimsLabel.textContent = `${_outW} x ${_outH}`;
+      clipSlider.max = String(q.maxSec);
+      if (_clipDur > q.maxSec) {
+        _clipDur = q.maxSec;
+        clipSlider.value = String(_clipDur);
+        clipLabel.textContent = `${_clipDur}s`;
+        _refreshClipCount();
+      }
+      Object.entries(qualChips).forEach(([px, b]) =>
+        b.setAttribute('style', CHIP_BASE + (Number(px) === _qualityPx ? CHIP_ON : '')));
+    });
+    qualChips[q.px] = btn;
+    qualRow.appendChild(btn);
+  }
+
+  const clipSlider = el('input', { type: 'range', min: '8', max: '19', value: '8', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const clipLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '8s' });
+  clipSlider.addEventListener('input', () => {
+    _clipDur = parseInt(clipSlider.value);
+    clipLabel.textContent = `${_clipDur}s`;
+    _refreshClipCount();
+  });
+
+  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '4', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const stepsLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '4' });
+  stepsSlider.addEventListener('input', () => { _steps = parseInt(stepsSlider.value); stepsLabel.textContent = String(_steps); });
+
+  const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: '7.5', step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
+  const guidLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '7.5' });
+  guidSlider.addEventListener('input', () => { _guidance = parseFloat(guidSlider.value); guidLabel.textContent = String(_guidance); });
+
+  const dimsLabel = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600;', text: `${_outW} x ${_outH}` });
+
+  const advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Clip length' }),
+      clipSlider, clipLabel,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Quality' }),
+      qualRow,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Steps' }),
+      stepsSlider, stepsLabel,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
+      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Guidance' }),
+      guidSlider, guidLabel,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:6px;' }, [
+      el('span', { style: 'font-size:11px; color:var(--text-3);', text: 'Output:' }), dimsLabel,
+    ]),
+  ]);
+  const advToggle = el('button', {
+    style: 'background:none; border:none; cursor:pointer; font-size:11px; color:var(--text-3); padding:0; align-self:flex-start; opacity:.7;',
+    text: 'Advanced settings',
+  });
+  advToggle.addEventListener('click', () => {
+    const open = advBody.style.display !== 'none';
+    advBody.style.display = open ? 'none' : 'flex';
+    advToggle.textContent = open ? 'Advanced settings' : 'Hide advanced';
+  });
+
+  const clipSummarySection = el('div', {
+    style: 'display:none; background:var(--surface); border:1px solid var(--border-2); border-radius:var(--r-lg); padding:12px 16px; flex-direction:column; gap:8px;',
+  });
+  clipSummarySection.append(clipSummaryEl, advToggle, advBody);
+
+  // -- Idea textarea (shared) -----------------------------------------------
   const ideaInput = el('textarea', {
-    placeholder: '"reveal a foggy mountain valley"  or  "zoom into the ring on her finger"',
+    placeholder: '"reveal a foggy mountain valley"  or  "a sunset through neon streets"',
     rows: 2,
     style: [
       'width:100%; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--border-2);',
@@ -249,11 +599,9 @@ export function init(panel) {
     ].join(''),
   });
 
-  // ── model ──────────────────────────────────────────────────────────────────
+  // -- Model selection (shared) ---------------------------------------------
   const vramNote = el('span', { style: 'font-size:11px; color:var(--text-3);' });
-  const modelLabelRow = el('div', {
-    style: 'display:flex; align-items:center; justify-content:space-between;',
-  });
+  const modelLabelRow = el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' });
   modelLabelRow.append(LABEL('Model'), vramNote);
 
   const modelSel = el('select', {
@@ -263,20 +611,14 @@ export function init(panel) {
       'cursor:pointer; outline:none; margin-top:6px;',
     ].join(''),
   });
+  const modelWarn = el('div', { style: 'font-size:11px; color:var(--red); display:none; padding-top:4px;' });
 
-  const modelWarn = el('div', {
-    style: 'font-size:11px; color:var(--red); display:none; padding-top:4px;',
-  });
-
-  // ── audio-first toggle ─────────────────────────────────────────────────────
+  // -- Audio-first toggle (zoom only) ----------------------------------------
   const audioFirstToggle = el('label', {
-    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none; margin-top:10px;',
   });
   const audioFirstCheck = el('input', { type: 'checkbox' });
-  audioFirstToggle.append(
-    audioFirstCheck,
-    el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }),
-  );
+  audioFirstToggle.append(audioFirstCheck, el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }));
 
   const modelGroup = el('div');
   modelGroup.append(modelLabelRow, modelSel, modelWarn, audioFirstToggle);
@@ -285,9 +627,7 @@ export function init(panel) {
     _modelData = data.models || {};
     _gpuVram   = data.gpu_vram_gb || 0;
     if (_gpuVram) vramNote.textContent = `${_gpuVram} GB GPU`;
-
-    const i2v = Object.entries(_modelData).filter(([, m]) => m.i2v)
-                       .sort(([a], [b]) => a.localeCompare(b));
+    const i2v = Object.entries(_modelData).filter(([, m]) => m.i2v).sort(([a], [b]) => a.localeCompare(b));
     modelSel.innerHTML = '';
     for (const [name, info] of i2v) {
       const fits = !_gpuVram || _gpuVram >= (info.vram_min_gb || 0);
@@ -316,9 +656,39 @@ export function init(panel) {
   }
   modelSel.addEventListener('change', _checkModelVram);
 
-  // ── generate button + queue badge ──────────────────────────────────────────
-  let _activeCount = 0;
+  // -- Loop / variety toggles (song mode) ------------------------------------
+  const _CHIP_BTN    = 'border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:12px; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s,border-color .15s;';
+  const _CHIP_BTN_ON = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
 
+  const loopBtn    = el('button', { style: _CHIP_BTN, text: 'Loop' });
+  const varietyBtn = el('button', { style: _CHIP_BTN, text: 'AI Variety' });
+  const stopAfterBtn  = el('button', {
+    style: 'display:none; border:1px solid var(--border-2); border-radius:6px; padding:5px 12px; font-size:12px; cursor:pointer; background:transparent; color:var(--text-2);',
+    text: 'Stop after this',
+  });
+  const loopCountEl   = el('span', { style: 'font-size:11px; color:var(--text-3);', text: '' });
+  const loopStatusRow = el('div', { style: 'display:none; align-items:center; gap:10px;' }, [loopCountEl, stopAfterBtn]);
+
+  const loopSection = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
+  loopSection.append(
+    el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' }, [loopBtn, varietyBtn]),
+    loopStatusRow,
+  );
+
+  function _updateLoopUI() {
+    loopBtn.setAttribute('style',    _CHIP_BTN + (_loopMode  ? _CHIP_BTN_ON : ''));
+    varietyBtn.setAttribute('style', _CHIP_BTN + (_aiVariety ? _CHIP_BTN_ON : ''));
+  }
+  loopBtn.addEventListener('click', () => { _loopMode  = !_loopMode;  _updateLoopUI(); });
+  varietyBtn.addEventListener('click', () => { _aiVariety = !_aiVariety; _updateLoopUI(); });
+  _updateLoopUI();
+  stopAfterBtn.addEventListener('click', () => {
+    _stopAfter = true;
+    stopAfterBtn.style.display = 'none';
+    loopCountEl.textContent += ' -- stopping after this...';
+  });
+
+  // -- Generate button + queue badge ----------------------------------------
   const generateBtn = el('button', {
     disabled: true,
     style: [
@@ -328,48 +698,52 @@ export function init(panel) {
     ].join(''),
     text: 'Generate Zoom',
   });
-
-  const queueBadge = el('div', {
-    style: 'display:none; font-size:12px; color:var(--text-2); text-align:center; padding-top:4px;',
-  });
+  const queueBadge = el('div', { style: 'display:none; font-size:12px; color:var(--text-2); text-align:center; padding-top:4px;' });
 
   function _updateBtn() {
-    const ok = !!_sourcePath;
+    const song = !!_songPath;
+    const ok   = song ? (_numClips > 0) : !!_sourcePath;
     generateBtn.disabled = !ok;
     generateBtn.style.opacity = ok ? '1' : '.45';
     generateBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
-    generateBtn.textContent = _activeCount > 0 ? `+ Add to Queue (${_activeCount} running)` : 'Generate Zoom';
+    generateBtn.textContent = song
+      ? 'Generate Music Video'
+      : (_activeCount > 0 ? `+ Add to Queue (${_activeCount} running)` : 'Generate Zoom');
   }
 
-  function _incActive() { _activeCount++; _updateBtn(); queueBadge.style.display = 'block'; queueBadge.textContent = `${_activeCount} zoom job${_activeCount > 1 ? 's' : ''} in queue -- see Queue tab for progress`; }
-  function _decActive() { _activeCount = Math.max(0, _activeCount - 1); _updateBtn(); if (_activeCount === 0) queueBadge.style.display = 'none'; }
+  function _incActive() {
+    _activeCount++;
+    _updateBtn();
+    queueBadge.style.display = 'block';
+    queueBadge.textContent = `${_activeCount} zoom job${_activeCount > 1 ? 's' : ''} in queue -- see Queue tab`;
+  }
+  function _decActive() {
+    _activeCount = Math.max(0, _activeCount - 1);
+    _updateBtn();
+    if (_activeCount === 0) queueBadge.style.display = 'none';
+  }
 
-  // ── progress ───────────────────────────────────────────────────────────────
+  // -- Progress area ---------------------------------------------------------
   const progressLabel = el('div', { style: 'font-size:13px; color:var(--text-2);' });
-  const progressTrack = el('div', {
-    style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;',
-  });
-  const progressFill = el('div', {
-    style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;',
-  });
+  const progressTrack = el('div', { style: 'height:4px; background:var(--border-2); border-radius:2px; overflow:hidden;' });
+  const progressFill  = el('div', { style: 'height:100%; width:0%; background:var(--accent); border-radius:2px; transition:width .4s;' });
   progressTrack.appendChild(progressFill);
 
   const cancelBtn = el('button', {
-    style: [
-      'align-self:flex-start; padding:5px 12px; border-radius:var(--r-sm);',
-      'border:1px solid var(--border-2); background:transparent;',
-      'color:var(--text-3); cursor:pointer; font-size:11px;',
-    ].join(''),
+    style: 'align-self:flex-start; padding:5px 12px; border-radius:var(--r-sm); border:1px solid var(--border-2); background:transparent; color:var(--text-3); cursor:pointer; font-size:11px;',
     text: 'Cancel',
   });
-  cancelBtn.onclick = () => { if (_jobId) stopJob(_jobId); };
+  cancelBtn.onclick = () => {
+    if (_jobId) stopJob(_jobId);
+    if (_activePoller) { _activePoller.stop?.(); _activePoller = null; }
+    _stopAfter = true; _loopMode = false; _updateLoopUI();
+    loopStatusRow.style.display = 'none'; _loopCount = 0;
+  };
 
-  const progressArea = el('div', {
-    style: 'display:none; flex-direction:column; gap:8px;',
-  });
+  const progressArea = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   progressArea.append(progressLabel, progressTrack, cancelBtn);
 
-  // ── output ─────────────────────────────────────────────────────────────────
+  // -- Output area -----------------------------------------------------------
   const videoEl = el('video', {
     controls: true, loop: true, playsInline: true, src: '',
     style: 'width:100%; display:block; border-radius:var(--r-lg); background:#000;',
@@ -378,11 +752,7 @@ export function init(panel) {
 
   function _actionBtn(label, fn) {
     const b = el('button', {
-      style: [
-        'padding:7px 14px; border-radius:var(--r-sm);',
-        'border:1px solid var(--border-2); background:var(--surface);',
-        'color:var(--text-2); cursor:pointer; font-size:12px; transition:background .12s;',
-      ].join(''),
+      style: 'padding:7px 14px; border-radius:var(--r-sm); border:1px solid var(--border-2); background:var(--surface); color:var(--text-2); cursor:pointer; font-size:12px; transition:background .12s;',
       text: label,
     });
     b.onclick = fn;
@@ -392,79 +762,50 @@ export function init(panel) {
   const outputArea = el('div', { style: 'display:none; flex-direction:column; gap:12px;' });
   outputArea.append(videoEl, outputActions);
 
-  // ── folder batch ───────────────────────────────────────────────────────────
-  let _folderFiles  = [];
-  let _folderPath   = '';
-  let _loopActive   = false;
-  let _loopPollTimer = null;
+  // -- Folder batch section (zoom only) -------------------------------------
+  let _folderFiles = [], _folderPath = '', _loopActive = false, _loopPollTimer = null;
 
   const batchDivider = el('div', {
     style: 'display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:11px; padding-top:4px;',
   });
   batchDivider.innerHTML = '<hr style="flex:1;border:none;border-top:1px solid var(--border-2)"> or process a whole folder <hr style="flex:1;border:none;border-top:1px solid var(--border-2)">';
 
-  // folder picker row
   const folderNameEl = el('div', {
     style: 'flex:1; font-size:13px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:9px 0;',
     text: 'No folder selected',
   });
   const browseFolderBtn = el('button', {
     text: 'Choose Folder',
-    style: [
-      'padding:9px 16px; border-radius:var(--r-md); border:1px solid var(--accent-border);',
-      'background:var(--accent-bg); color:var(--accent); cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap;',
-    ].join(''),
+    style: 'padding:9px 16px; border-radius:var(--r-md); border:1px solid var(--accent-border); background:var(--accent-bg); color:var(--accent); cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap;',
   });
-
-  // loop toggle
-  const loopToggle = el('label', {
-    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;',
-  });
-  const loopCheck = el('input', { type: 'checkbox' });
+  const loopToggle = el('label', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;' });
+  const loopCheck  = el('input', { type: 'checkbox' });
   loopCheck.style.accentColor = 'var(--accent)';
   loopToggle.append(loopCheck, 'Loop continuously');
 
-  const folderStatus = el('div', {
-    style: 'font-size:12px; color:var(--text-3); min-height:16px;',
-  });
-
+  const folderStatus = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:16px;' });
   const batchBtn = el('button', {
-    text: 'Queue All',
-    disabled: true,
-    style: [
-      'padding:11px; border-radius:var(--r-lg); border:none; cursor:not-allowed;',
-      'font-size:14px; font-weight:700; background:var(--circus-red); color:var(--text); opacity:.45;',
-    ].join(''),
+    text: 'Queue All', disabled: true,
+    style: 'padding:11px; border-radius:var(--r-lg); border:none; cursor:not-allowed; font-size:14px; font-weight:700; background:var(--circus-red); color:var(--text); opacity:.45;',
   });
 
   function _setBatchReady() {
     const n = _folderFiles.length;
-    if (!n) {
-      batchBtn.disabled = true;
-      batchBtn.style.opacity = '.45';
-      batchBtn.style.cursor = 'not-allowed';
-      batchBtn.textContent = 'Queue All';
-      return;
-    }
-    batchBtn.disabled = false;
-    batchBtn.style.opacity = '1';
-    batchBtn.style.cursor = 'pointer';
-    batchBtn.textContent = loopCheck.checked ? `Start Loop (${n} files)` : `Queue All ${n} Files`;
+    batchBtn.disabled = !n;
+    batchBtn.style.opacity = n ? '1' : '.45';
+    batchBtn.style.cursor  = n ? 'pointer' : 'not-allowed';
+    batchBtn.textContent   = n ? (loopCheck.checked ? `Start Loop (${n} files)` : `Queue All ${n} Files`) : 'Queue All';
   }
-
   loopCheck.addEventListener('change', _setBatchReady);
 
   async function _scanFolder(folder) {
     folderStatus.textContent = 'Scanning...';
-    _folderFiles = [];
-    _setBatchReady();
+    _folderFiles = []; _setBatchReady();
     try {
-      const r = await apiFetch('/api/zoom/scan-folder', {
-        method: 'POST', body: JSON.stringify({ folder }),
-      });
+      const r = await apiFetch('/api/zoom/scan-folder', { method: 'POST', body: JSON.stringify({ folder }) });
       _folderFiles = r.files || [];
-      const imgs   = _folderFiles.filter(f => !f.is_video).length;
-      const vids   = _folderFiles.filter(f =>  f.is_video).length;
+      const imgs = _folderFiles.filter(f => !f.is_video).length;
+      const vids = _folderFiles.filter(f =>  f.is_video).length;
       if (!_folderFiles.length) {
         folderStatus.textContent = 'No supported files found (jpg, png, mp4, mov, ...)';
       } else {
@@ -474,9 +815,7 @@ export function init(panel) {
         folderStatus.textContent = parts.join(', ') + ' found';
       }
       _setBatchReady();
-    } catch (e) {
-      folderStatus.textContent = 'Error: ' + e.message;
-    }
+    } catch (e) { folderStatus.textContent = 'Error: ' + e.message; }
   }
 
   browseFolderBtn.onclick = async () => {
@@ -493,32 +832,23 @@ export function init(panel) {
     } catch {}
   };
 
-  // -- loop poll --
-  function _stopLoopPoll() {
-    if (_loopPollTimer) { clearInterval(_loopPollTimer); _loopPollTimer = null; }
-  }
+  function _stopLoopPoll() { if (_loopPollTimer) { clearInterval(_loopPollTimer); _loopPollTimer = null; } }
 
-  async function _pollLoop() {
+  async function _pollLoopStatus() {
     try {
       const snap = await apiFetch('/api/zoom/folder-loop/status');
       const total = snap.files?.length || _folderFiles.length;
       if (snap.active) {
-        const lap  = snap.lap > 0 ? ` lap ${snap.lap + 1}` : '';
-        batchBtn.textContent = `Stop Loop (${snap.index}/${total}${lap})`;
-        batchBtn.disabled = false;
-        batchBtn.style.opacity = '1';
+        batchBtn.textContent = `Stop Loop (${snap.index}/${total})`;
+        batchBtn.disabled = false; batchBtn.style.opacity = '1';
         folderStatus.textContent = snap.current_file
           ? `Processing: ${snap.current_file} -- ${snap.succeeded} done, ${snap.failed} failed`
-          : `Running...`;
+          : 'Running...';
       } else {
-        // Loop finished
-        _loopActive = false;
-        _stopLoopPoll();
+        _loopActive = false; _stopLoopPoll();
         batchBtn.textContent = `Start Loop (${total} files)`;
         browseFolderBtn.disabled = false;
-        const msg = snap.status === 'done'
-          ? `Loop done -- ${snap.succeeded} succeeded, ${snap.failed} failed`
-          : `Loop stopped -- ${snap.succeeded} done, ${snap.failed} failed`;
+        const msg = `Loop ${snap.status === 'done' ? 'done' : 'stopped'} -- ${snap.succeeded} ok, ${snap.failed} failed`;
         folderStatus.textContent = msg;
         toast(msg, snap.failed ? 'error' : 'success');
       }
@@ -527,27 +857,21 @@ export function init(panel) {
 
   batchBtn.onclick = async () => {
     if (!_folderFiles.length && !_loopActive) return;
-
-    // Stop loop if running
     if (_loopActive) {
       await apiFetch('/api/zoom/folder-loop/stop', { method: 'POST' }).catch(() => {});
-      _loopActive = false;
-      _stopLoopPoll();
+      _loopActive = false; _stopLoopPoll();
       batchBtn.textContent = `Start Loop (${_folderFiles.length} files)`;
-      folderStatus.textContent = 'Loop stopped.';
-      browseFolderBtn.disabled = false;
+      folderStatus.textContent = 'Loop stopped.'; browseFolderBtn.disabled = false;
       return;
     }
-
     const nClips  = Number(_activeValue(stepsRow)) || 4;
     const clipDur = Number(_activeValue(durRow))   || 5;
-    const idea    = ideaInput.value.trim();
     const body    = {
       folder:         _folderPath,
       zoom_direction: _direction,
       n_clips:        nClips,
       clip_duration:  clipDur,
-      idea,
+      idea:           ideaInput.value.trim(),
       model_name:     modelSel.value,
       skip_audio:     false,
       audio_first:    audioFirstCheck.checked,
@@ -555,61 +879,44 @@ export function init(panel) {
     };
 
     if (loopCheck.checked) {
-      // Server-side loop
-      batchBtn.disabled = true;
-      browseFolderBtn.disabled = true;
+      batchBtn.disabled = true; browseFolderBtn.disabled = true;
       try {
         await apiFetch('/api/zoom/folder-loop/start', { method: 'POST', body: JSON.stringify(body) });
-        _loopActive = true;
-        batchBtn.disabled = false;
+        _loopActive = true; batchBtn.disabled = false;
         batchBtn.textContent = `Stop Loop (0/${_folderFiles.length})`;
         folderStatus.textContent = 'Loop started -- processing one file at a time...';
-        _loopPollTimer = setInterval(_pollLoop, 5000);
+        _loopPollTimer = setInterval(_pollLoopStatus, 5000);
       } catch (e) {
-        batchBtn.disabled = false;
-        browseFolderBtn.disabled = false;
-        toast('Failed to start loop: ' + e.message, 'error');
-        _setBatchReady();
+        batchBtn.disabled = false; browseFolderBtn.disabled = false;
+        toast('Failed to start loop: ' + e.message, 'error'); _setBatchReady();
       }
     } else {
-      // Queue all at once
       batchBtn.disabled = true;
       let queued = 0;
       for (const f of _folderFiles) {
         batchBtn.textContent = `Queuing ${queued + 1}/${_folderFiles.length}...`;
         try {
-          const res = await apiFetch('/api/zoom/make', {
-            method: 'POST',
-            body: JSON.stringify({ source_path: f.path, ...body }),
-          });
+          const res = await apiFetch('/api/zoom/make', { method: 'POST', body: JSON.stringify({ source_path: f.path, ...body }) });
           _incActive();
           pollJob(res.job_id, () => {}, j => {
             _decActive();
             const out = Array.isArray(j.output) ? j.output[0] : j.output;
             if (out) {
               videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
-              outputArea.style.display = 'flex';
-              outputActions.innerHTML = '';
-              outputActions.append(
-                _actionBtn('Open in folder', () =>
-                  apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-                _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
-              );
+              outputArea.style.display = 'flex'; outputActions.innerHTML = '';
+              outputActions.append(_actionBtn('Open in folder', () =>
+                apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})));
             }
             toast(`Zoom done: ${f.name}`, 'success');
             document.dispatchEvent(new CustomEvent('session-updated'));
           }, msg => { _decActive(); toast(`Zoom failed (${f.name}): ${msg}`, 'error'); });
           queued++;
         } catch (e) {
-          if (e.status === 429 || /queue.*full/i.test(e.message)) {
-            toast(`Queue full at file ${queued + 1} -- ${_folderFiles.length - queued} files not queued`, 'error');
-            break;
-          }
+          if (e.status === 429 || /queue.*full/i.test(e.message)) { toast(`Queue full at ${queued + 1}/${_folderFiles.length}`, 'error'); break; }
           toast(`Failed to queue ${f.name}: ${e.message}`, 'error');
         }
       }
-      batchBtn.disabled = false;
-      batchBtn.textContent = `Queued ${queued} -- check Queue tab`;
+      batchBtn.disabled = false; batchBtn.textContent = `Queued ${queued} -- check Queue tab`;
       setTimeout(_setBatchReady, 4000);
     }
   };
@@ -618,20 +925,49 @@ export function init(panel) {
   batchSection.append(
     batchDivider,
     el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]),
-    loopToggle,
-    folderStatus,
-    batchBtn,
+    loopToggle, folderStatus, batchBtn,
   );
 
-  // ── assemble ───────────────────────────────────────────────────────────────
+  // -- Mode switch: show/hide sections based on song presence ---------------
+  // Called whenever _songPath changes. Uses explicit display values so grid/flex
+  // layouts survive the toggle (setting display:'' removes inline override and
+  // falls back to browser default, losing 'grid').
+  function _updateMode() {
+    const song = !!_songPath;
+
+    // Source drop zone adapts its hint text
+    dropTextEl.textContent = song
+      ? 'Drop an anchor image (optional -- locks visual style)'
+      : 'Drop a photo or video, or click to browse';
+    fileInput.accept = song ? 'image/*' : 'image/*,video/*';
+
+    // Zoom-only sections
+    dirSection.style.display       = song ? 'none' : 'flex';
+    controlsGrid.style.display     = song ? 'none' : 'grid';
+    audioFirstToggle.style.display = song ? 'none' : 'flex';
+    batchSection.style.display     = song ? 'none' : 'flex';
+
+    // Song-only sections (analysis card manages itself separately)
+    clipSummarySection.style.display = song ? 'flex' : 'none';
+    loopSection.style.display        = song ? 'flex' : 'none';
+
+    // Generate button label
+    _updateBtn();
+  }
+
+  // -- Assemble layout -------------------------------------------------------
   root.append(
     _card(dropArea),
-    el('div', { style: 'display:flex; flex-direction:column; gap:8px;' },
-      [LABEL('Direction'), dirRow]),
+    _card(songDropArea),
+    dirSection,
     controlsGrid,
-    el('div', { style: 'display:flex; flex-direction:column; gap:6px;' },
-      [LABEL('What the zoom reveals (optional)'), ideaInput]),
+    analysisCard,
+    clipSummarySection,
+    el('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
+      LABEL('What to explore (optional)'), ideaInput,
+    ]),
     _card(modelGroup),
+    loopSection,
     generateBtn,
     progressArea,
     queueBadge,
@@ -639,148 +975,125 @@ export function init(panel) {
     outputArea,
   );
 
-  // ── extend/continue ────────────────────────────────────────────────────────
-  let _extendPanel = null;
+  // Initial render: zoom mode (no song)
+  _updateMode();
 
-  function _showExtendPanel(existingVideoPath, capturedDirection) {
-    if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
-
-    const panel = el('div', {
-      style: 'background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;',
-    });
-    _extendPanel = panel;
-
-    panel.append(el('div', {
-      style: 'font-size:12px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.08em;',
-      textContent: 'Continue this zoom',
-    }));
-
-    // clips count
-    const clipsRow = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
-    clipsRow.append(el('span', { textContent: 'Additional clips:' }));
-    const clipsInput = el('input', { type: 'number', min: '2', max: '10', value: '3',
-      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
-    clipsRow.append(clipsInput);
-
-    // duration
-    const durRow2 = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
-    durRow2.append(el('span', { textContent: 'Seconds per clip:' }));
-    const durInput = el('input', { type: 'number', min: '3', max: '12', value: '4',
-      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
-    durRow2.append(durInput);
-
-    // idea
-    const ideaInput2 = el('textarea', { rows: '2', placeholder: 'Optional: describe what the zoom continues to reveal...',
-      style: 'width:100%; resize:vertical; font-size:13px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px; padding:6px;' });
-
-    const btnRow = el('div', { style: 'display:flex; gap:8px;' });
-
-    const submitBtn = el('button', { class: 'btn btn-primary', textContent: 'Continue zoom' });
-    const cancelBtn = el('button', { class: 'btn', textContent: 'Cancel',
-      style: 'background:var(--bg-3);' });
-
-    cancelBtn.onclick = () => { panel.remove(); _extendPanel = null; };
-
-    submitBtn.onclick = async () => {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Queuing...';
-      try {
-        const res = await apiFetch('/api/zoom/extend', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            existing_video_path: existingVideoPath,
-            zoom_direction:      capturedDirection,
-            n_clips:             Number(clipsInput.value) || 3,
-            clip_duration:       Number(durInput.value) || 4,
-            model_name:          modelSel.value,
-            idea:                ideaInput2.value.trim(),
-            audio_first:         audioFirstCheck.checked,
-          }),
-        });
-        _incActive();
-        panel.remove(); _extendPanel = null;
-
-        // Show progress inline for the extend job
-        progressLabel.textContent = 'Extending zoom...';
-        progressFill.style.width = '0%';
-        progressArea.style.display = 'flex';
-
-        pollJob(res.job_id,
-          j => {
-            progressFill.style.width = `${j.progress || 0}%`;
-            progressLabel.textContent = j.message || `${j.progress || 0}%`;
-          },
-          j => {
-            _decActive();
-            progressArea.style.display = 'none';
-            const out = Array.isArray(j.output) ? j.output[0] : j.output;
-            if (out) {
-              videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
-              outputArea.style.display = 'flex';
-              outputActions.innerHTML = '';
-              outputActions.append(
-                _actionBtn('Open in folder', () =>
-                  apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-                _actionBtn('Send to Bridges', () => {
-                  handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
-                  toast('Sent to Bridges', 'success');
-                }),
-                _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection)),
-              );
-            }
-            toast('Zoom extended!', 'success');
-            document.dispatchEvent(new CustomEvent('session-updated'));
-          },
-          msg => {
-            _decActive();
-            progressArea.style.display = 'none';
-            progressFill.style.width = '0%';
-            toast(`Extend failed: ${msg}`, 'error');
-          },
-        );
-      } catch (err) {
-        if (err.status === 429 || /queue.*full/i.test(err.message)) {
-          toast('Queue full -- wait for a job to finish first', 'error');
-        } else {
-          toast('Failed: ' + err.message, 'error');
-        }
-      } finally {
-        // Re-enable only if panel is still in the DOM (not removed by success path)
-        if (panel.isConnected) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Continue zoom';
-        }
-      }
+  // -- Generate: music video mode -------------------------------------------
+  async function _submitMusicVideo() {
+    const varietyTheme = _aiVariety ? _VARIETY_THEMES[(_varietyIdx++) % _VARIETY_THEMES.length] : '';
+    const payload = {
+      audio_path:     _songPath,
+      photo_path:     _sourcePath || '',
+      video_prompt:   ideaInput.value.trim(),
+      variety_theme:  varietyTheme,
+      lyrics_text:    _lyricsTA ? _lyricsTA.value.trim() : '',
+      user_direction: 'music video where visual energy matches song dynamics',
+      audio_analysis: _songAnalysis || undefined,
+      model:          modelSel.value,
+      clip_duration:  _clipDur,
+      num_clips:      _numClips,
+      steps:          _steps,
+      guidance:       _guidance,
+      output_width:   _outW,
+      output_height:  _outH,
     };
 
-    btnRow.append(submitBtn, cancelBtn);
-    panel.append(clipsRow, durRow2, ideaInput2, btnRow);
+    _loopCount++;
+    _stopAfter = false;
+    generateBtn.disabled = true;
 
-    // Insert the panel below outputArea
-    outputArea.after(panel);
+    if (_loopMode) {
+      loopStatusRow.style.display = 'flex';
+      stopAfterBtn.style.display  = '';
+      loopCountEl.textContent     = `Video ${_loopCount} generating...`;
+    }
+
+    try {
+      const resp = await apiFetch('/api/song-video/generate', { method: 'POST', body: JSON.stringify(payload) });
+      _jobId = resp.job_id;
+      document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: _jobId } }));
+      progressFill.style.background = 'var(--accent)';
+      progressLabel.textContent = 'Planning story arc...';
+      progressFill.style.width = '0%';
+      progressArea.style.display = 'flex';
+
+      const maxPolls = resp.timeout_sec > 0
+        ? Math.max(400, Math.ceil((resp.timeout_sec + 300) * 1000 / 1500))
+        : 400;
+
+      const poller = pollJob(_jobId,
+        j => {
+          progressFill.style.width  = `${j.progress || 0}%`;
+          progressLabel.textContent = j.status === 'queued'
+            ? `In queue -- ${j.queue_position === 0 ? 'up next' : `position ${j.queue_position + 1}`}...`
+            : (j.message || `${j.progress || 0}%`);
+        },
+        j => {
+          _activePoller = null; _jobId = null;
+          progressArea.style.display = 'none';
+          const out = Array.isArray(j.output) ? j.output[0] : j.output;
+          if (out) {
+            videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+            outputArea.style.display = 'flex'; outputActions.innerHTML = '';
+            outputActions.append(
+              _actionBtn('Open in folder', () =>
+                apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
+              _actionBtn('Send to Bridges', () => {
+                handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
+                toast('Sent to Bridges', 'success');
+              }),
+            );
+          }
+          if (_loopMode && !_stopAfter) {
+            setTimeout(() => _submitMusicVideo().catch(e => {
+              generateBtn.disabled = false;
+              toast(`Loop stopped: ${e.message}`, 'error');
+            }), 1500);
+          } else {
+            generateBtn.disabled = false;
+            loopStatusRow.style.display = 'none'; _loopCount = 0;
+          }
+          toast('Music video done!', 'success');
+          document.dispatchEvent(new CustomEvent('session-updated'));
+        },
+        msg => {
+          _activePoller = null; _jobId = null;
+          progressFill.style.background = 'var(--red, #c41e3a)';
+          progressLabel.textContent = `Failed: ${msg}`;
+          generateBtn.disabled = false;
+          loopStatusRow.style.display = 'none'; _loopCount = 0;
+          toast(`Music video failed: ${msg}`, 'error');
+        },
+        1500, maxPolls,
+      );
+      _activePoller = poller;
+    } catch (e) {
+      generateBtn.disabled = false;
+      if (e.status === 429 || /queue.*full|full.*queue/i.test(e.message)) {
+        toast('Queue is full -- wait for a job to finish', 'error');
+      } else {
+        toast('Failed: ' + (e.message || e), 'error');
+      }
+    }
   }
 
-  // ── generate ───────────────────────────────────────────────────────────────
+  // -- Generate: zoom mode ---------------------------------------------------
   generateBtn.onclick = async () => {
+    if (!!_songPath) { await _submitMusicVideo(); return; }
+
     if (!_sourcePath) return;
     const nClips  = Number(_activeValue(stepsRow)) || 4;
     const clipDur = Number(_activeValue(durRow))   || 5;
 
     let queueDepth = 0;
-    try {
-      const qs = await apiFetch('/api/jobs');
-      queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0);
-    } catch {}
+    try { const qs = await apiFetch('/api/jobs'); queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0); } catch {}
 
     generateBtn.disabled = true;
     generateBtn.textContent = 'Queuing...';
 
     try {
       const res = await apiFetch('/api/zoom/make', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_path:    _sourcePath,
           zoom_direction: _direction,
@@ -795,40 +1108,28 @@ export function init(panel) {
 
       _jobId = res.job_id;
       _incActive();
-
-      // Show inline progress bar
-      progressLabel.textContent = queueDepth > 0
-        ? `Queued (#${queueDepth + 1}) -- waiting for GPU...`
-        : 'Starting...';
+      progressFill.style.background = 'var(--accent)';
+      progressLabel.textContent = queueDepth > 0 ? `Queued (#${queueDepth + 1}) -- waiting for GPU...` : 'Starting...';
       progressFill.style.width = '0%';
       progressArea.style.display = 'flex';
 
       pollJob(res.job_id,
         j => {
-          // Progress tick
-          const pct = j.progress || 0;
-          progressFill.style.width = `${pct}%`;
-          progressLabel.textContent = j.message || `${pct}%`;
+          progressFill.style.width  = `${j.progress || 0}%`;
+          progressLabel.textContent = j.message || `${j.progress || 0}%`;
         },
         j => {
-          // Done
-          _jobId = null;
-          _decActive();
+          _jobId = null; _decActive();
           progressArea.style.display = 'none';
           if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
           const out = Array.isArray(j.output) ? j.output[0] : j.output;
           if (out) {
-            videoEl.src = pathToUrl(out);
-            videoEl.style.opacity = '1';
-            videoEl.load();
-            outputArea.style.display = 'flex';
-            outputActions.innerHTML = '';
+            videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+            outputArea.style.display = 'flex'; outputActions.innerHTML = '';
             outputActions.append(
               _actionBtn('Open in folder', () =>
-                apiFetch('/api/reveal', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ path: out, action: 'explorer' }),
-                }).catch(() => {})),
+                apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
               _actionBtn('Send to Bridges', () => {
                 handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
                 toast('Sent to Bridges', 'success');
@@ -840,15 +1141,11 @@ export function init(panel) {
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
         msg => {
-          // Error
-          _jobId = null;
-          _decActive();
-          progressArea.style.display = 'none';
-          progressFill.style.width = '0%';
+          _jobId = null; _decActive();
+          progressArea.style.display = 'none'; progressFill.style.width = '0%';
           toast(`Zoom failed: ${msg}`, 'error');
         },
       );
-
     } catch (err) {
       if (err.status === 429 || /queue.*full|full.*queue/i.test(err.message)) {
         toast('Queue is full -- open the Queue tab and wait for a job to finish', 'error');
@@ -859,4 +1156,99 @@ export function init(panel) {
       _updateBtn();
     }
   };
+
+  // -- Extend/continue panel (zoom mode only) --------------------------------
+  function _showExtendPanel(existingVideoPath, capturedDirection) {
+    if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
+
+    const epanel = el('div', {
+      style: 'background:var(--bg-2); border:1px solid var(--border); border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:10px;',
+    });
+    _extendPanel = epanel;
+
+    epanel.append(el('div', {
+      style: 'font-size:12px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.08em;',
+      textContent: 'Continue this zoom',
+    }));
+
+    const clipsRow = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
+    clipsRow.append(el('span', { textContent: 'Additional clips:' }));
+    const clipsInput = el('input', { type: 'number', min: '2', max: '10', value: '3',
+      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
+    clipsRow.append(clipsInput);
+
+    const durRow2 = el('div', { style: 'display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2);' });
+    durRow2.append(el('span', { textContent: 'Seconds per clip:' }));
+    const durInput = el('input', { type: 'number', min: '3', max: '12', value: '4',
+      style: 'width:56px; padding:4px 6px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px;' });
+    durRow2.append(durInput);
+
+    const ideaInput2 = el('textarea', { rows: '2',
+      placeholder: 'Optional: describe what the zoom continues to reveal...',
+      style: 'width:100%; resize:vertical; font-size:13px; background:var(--bg-1); color:var(--text-1); border:1px solid var(--border); border-radius:4px; padding:6px;' });
+
+    const btnRow    = el('div', { style: 'display:flex; gap:8px;' });
+    const submitBtn = el('button', { class: 'btn btn-primary', textContent: 'Continue zoom' });
+    const cancelBtn2 = el('button', { class: 'btn', textContent: 'Cancel', style: 'background:var(--bg-3);' });
+    cancelBtn2.onclick = () => { epanel.remove(); _extendPanel = null; };
+
+    submitBtn.onclick = async () => {
+      submitBtn.disabled = true; submitBtn.textContent = 'Queuing...';
+      try {
+        const res = await apiFetch('/api/zoom/extend', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            existing_video_path: existingVideoPath,
+            zoom_direction:      capturedDirection,
+            n_clips:             Number(clipsInput.value) || 3,
+            clip_duration:       Number(durInput.value) || 4,
+            model_name:          modelSel.value,
+            idea:                ideaInput2.value.trim(),
+            audio_first:         audioFirstCheck.checked,
+          }),
+        });
+        _incActive(); epanel.remove(); _extendPanel = null;
+
+        progressFill.style.background = 'var(--accent)';
+        progressLabel.textContent = 'Extending zoom...';
+        progressFill.style.width = '0%'; progressArea.style.display = 'flex';
+
+        pollJob(res.job_id,
+          j => { progressFill.style.width = `${j.progress || 0}%`; progressLabel.textContent = j.message || `${j.progress || 0}%`; },
+          j => {
+            _decActive(); progressArea.style.display = 'none';
+            const out = Array.isArray(j.output) ? j.output[0] : j.output;
+            if (out) {
+              videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load();
+              outputArea.style.display = 'flex'; outputActions.innerHTML = '';
+              outputActions.append(
+                _actionBtn('Open in folder', () =>
+                  apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
+                _actionBtn('Send to Bridges', () => {
+                  handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) });
+                  toast('Sent to Bridges', 'success');
+                }),
+                _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection)),
+              );
+            }
+            toast('Zoom extended!', 'success');
+            document.dispatchEvent(new CustomEvent('session-updated'));
+          },
+          msg => { _decActive(); progressArea.style.display = 'none'; progressFill.style.width = '0%'; toast(`Extend failed: ${msg}`, 'error'); },
+        );
+      } catch (err) {
+        if (err.status === 429 || /queue.*full/i.test(err.message)) {
+          toast('Queue full -- wait for a job to finish first', 'error');
+        } else {
+          toast('Failed: ' + err.message, 'error');
+        }
+        if (epanel.isConnected) { submitBtn.disabled = false; submitBtn.textContent = 'Continue zoom'; }
+      }
+    };
+
+    btnRow.append(submitBtn, cancelBtn2);
+    epanel.append(clipsRow, durRow2, ideaInput2, btnRow);
+    outputArea.after(epanel);
+  }
 }

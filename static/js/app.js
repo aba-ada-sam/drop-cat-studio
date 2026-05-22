@@ -8,8 +8,7 @@
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260521a';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260521b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260520a';
-import { init as initSongVideo, receiveHandoff as songVideoHandoff } from './tab-song-video.js?v=20260521a';
-import { init as initZoom } from './tab-zoom.js?v=20260521k';
+import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260522a';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260521a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
@@ -28,7 +27,6 @@ const TAB_INIT = {
   'express':           initExpress,
   'pipeline':          initPipeline,
   'create-videos':     initFunVideos,
-  'song-video':        initSongVideo,
   'zoom':              initZoom,
   'bridges':           initBridges,
   'sd-prompts':        initSdPrompts,
@@ -40,7 +38,7 @@ const TAB_INIT = {
 const TAB_HANDOFF = {
   'express':           expressHandoff,
   'create-videos':     funHandoff,
-  'song-video':        songVideoHandoff,
+  'zoom':              zoomHandoff,
   'bridges':           bridgesHandoff,
   'sd-prompts':        sdPromptsHandoff,
   'video-tools':       null,
@@ -334,7 +332,7 @@ function switchTab(tabId) {
   if (tabId === 'queue') resumeQueue(); else pauseQueue();
 
   // Video pill: let the incoming tab announce its model; clear override for non-video tabs
-  const VIDEO_TABS = new Set(['express', 'create-videos', 'song-video']);
+  const VIDEO_TABS = new Set(['express', 'create-videos', 'zoom']);
   if (!VIDEO_TABS.has(tabId)) {
     _tabVideoModel = null;
     _applyVideoPillState(_configVideoModel);
