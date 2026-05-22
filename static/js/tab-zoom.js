@@ -36,6 +36,7 @@ export function init(panel) {
   let _activeCount  = 0;      // zoom-mode concurrent jobs
   let _clipDur      = 8;      // music video: seconds per clip
   let _numClips     = 0;      // music video: auto-calculated
+  let _coverage     = 1.0;    // fraction of song to fill with unique clips (rest loops)
   let _qualityPx    = 360;
   let _outW         = 640;
   let _outH         = 352;
@@ -498,13 +499,14 @@ export function init(panel) {
 
   function _refreshClipCount() {
     if (!_songDur) { clipSummaryEl.textContent = 'Drop a song above.'; _numClips = 0; _updateBtn(); return; }
-    const rawNeeded = Math.ceil(_songDur / _clipDur);
-    const suggested = _songAnalysis?.suggested_num_clips;
-    _numClips = Math.min(MAX_CLIPS, Math.max(1, suggested || rawNeeded));
+    const coveredDur = _songDur * _coverage;
+    const rawNeeded  = Math.ceil(coveredDur / _clipDur);
+    _numClips = Math.min(MAX_CLIPS, Math.max(1, rawNeeded));
     const m = Math.floor(_songDur / 60), s = Math.round(_songDur % 60);
     const secsPerClip = _qualityPx <= 360 ? 30 : (_qualityPx <= 480 ? 40 : 55);
     const estMin = Math.round(_numClips * secsPerClip / 60);
-    clipSummaryEl.textContent = `${_numClips} clips for ${m}:${String(s).padStart(2, '0')} -- est. ~${estMin} min`;
+    const loopNote = _coverage < 1.0 ? ` (loops ${(1 / _coverage).toFixed(1)}x)` : '';
+    clipSummaryEl.textContent = `${_numClips} clips${loopNote} -- est. ~${estMin} min for ${m}:${String(s).padStart(2, '0')} song`;
     _updateBtn();
   }
 
@@ -552,6 +554,28 @@ export function init(panel) {
 
   const dimsLabel = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600;', text: `${_outW} x ${_outH}` });
 
+  // Coverage chips: fraction of song to fill with unique clips; rest loops.
+  // 100% = no loops (default). 65% = 35% fewer clips, video loops 1.5x.
+  const _COV_OPTIONS = [
+    { label: '100%', value: 1.0, title: 'Unique content all the way through' },
+    { label: '75%',  value: 0.75, title: 'Loops 1.3x -- 25% faster' },
+    { label: '50%',  value: 0.5,  title: 'Loops 2x -- 50% faster' },
+  ];
+  const coverageRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
+  _COV_OPTIONS.forEach((opt, idx) => {
+    const btn = el('button', {
+      style: CHIP_BASE + (idx === 0 ? CHIP_ON : ''),
+      text: opt.label, title: opt.title,
+    });
+    btn.addEventListener('click', () => {
+      _coverage = opt.value;
+      coverageRow.querySelectorAll('button').forEach((b, i) =>
+        b.setAttribute('style', CHIP_BASE + (i === idx ? CHIP_ON : '')));
+      _refreshClipCount();
+    });
+    coverageRow.appendChild(btn);
+  });
+
   const advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Clip length' }),
@@ -560,6 +584,10 @@ export function init(panel) {
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Quality' }),
       qualRow,
+    ]),
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
+      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Coverage' }),
+      coverageRow,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Steps' }),
@@ -992,6 +1020,7 @@ export function init(panel) {
       model:          modelSel.value,
       clip_duration:  _clipDur,
       num_clips:      _numClips,
+      coverage_ratio: _coverage,
       steps:          _steps,
       guidance:       _guidance,
       output_width:   _outW,

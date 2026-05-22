@@ -176,7 +176,7 @@ def align_clip_to_beat(
     target_time: float,
     clip_duration: float,
     out_path: str,
-    min_confidence: float = 1.3,
+    min_confidence: float = 1.5,
 ) -> tuple[bool, dict]:
     """High-level wrapper: find the natural motion peak, ramp it onto the beat.
 
@@ -184,7 +184,7 @@ def align_clip_to_beat(
     pipeline can surface in its progress messages and logs:
         natural_time   -- detected peak time in seconds (may be None)
         target_time    -- caller-supplied beat time
-        confidence     -- peak/mean motion ratio (>1.3 is a clean peak)
+        confidence     -- peak/mean motion ratio (>1.5 is a clean peak)
         applied        -- True if speed ramp was actually written
         reason         -- human-readable explanation when applied=False
 

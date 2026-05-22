@@ -163,8 +163,13 @@ async def generate(request: Request):
     if audio_dur <= 0:
         raise HTTPException(400, "Could not determine audio duration")
 
-    n_clips = int(body.get("num_clips") or analysis.get("suggested_num_clips") or
-                  max(1, math.ceil(audio_dur / clip_dur)))
+    # coverage_ratio: fraction of the song to fill with unique clips (rest loops).
+    # 1.0 = full coverage, 0.65 = 35% fewer clips (video loops 1.5x). Clamped 0.4-1.0.
+    coverage_ratio = max(0.4, min(1.0, float(body.get("coverage_ratio", 1.0))))
+    covered_dur = audio_dur * coverage_ratio
+
+    n_clips = int(body.get("num_clips") or
+                  max(1, math.ceil(covered_dur / clip_dur)))
     n_clips = max(1, min(50, n_clips))  # hard cap at 50 clips
 
     # Per-job timeout: 5 min per clip + 15 min buffer, min 30 min

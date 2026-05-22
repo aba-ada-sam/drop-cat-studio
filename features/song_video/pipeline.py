@@ -21,9 +21,9 @@ import time
 from pathlib import Path
 
 from core.ffmpeg_utils import probe_duration
-from core.llm_client import TIER_BALANCED, encode_image_b64, parse_json_response
+from core.llm_client import TIER_BALANCED, TIER_FAST, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
-from features.fun_videos.multi_pipeline import _concat_clips, _normalize_clip_for_concat
+from features.fun_videos.multi_pipeline import _concat_clips
 from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
@@ -57,54 +57,73 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     return out_path if (r.returncode == 0 and Path(out_path).exists()) else None
 
 
+# -- Subject anchor extraction -------------------------------------------------
+
+def _extract_subject_anchor(photo_path: str, llm_router) -> str:
+    """Vision call to get a 12-15 word subject description prepended to every prompt.
+
+    Runs concurrently with beat analysis in run_song_prep so it adds ~0 wall time.
+    Same pattern as multi_pipeline._generate_subject_anchor.
+    """
+    if not photo_path or not os.path.isfile(photo_path):
+        return ""
+    try:
+        b64 = encode_image_b64(photo_path)
+        if not b64:
+            return ""
+        raw = llm_router.route_vision(
+            "Describe the main subject in 12-15 words. "
+            "Exact visual details only: hair color, clothing color and type, "
+            "skin tone, species, material, expression. No interpretation. "
+            "Example: 'Red-haired woman in blue denim jacket, pale skin, hazel eyes.'",
+            [b64], tier=TIER_FAST, max_tokens=60,
+        )
+        anchor = raw.strip().strip('"').strip("'")
+        if anchor and not anchor.endswith("."):
+            anchor += "."
+        return anchor
+    except Exception as e:
+        log.warning("[song-video] Subject anchor extraction failed (non-fatal): %s", e)
+        return ""
+
+
 # -- Story arc generation ------------------------------------------------------
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
-Each prompt is one 8-10 second clip. Clips are chained -- each starts from the
-last frame of the previous clip. ALL clips stay in ONE world: same location,
-same subject, camera position and energy level shift with the music.
+Each prompt is one 8-10 second clip. Clips chain from each other's last frame.
+ALL clips stay in ONE world: same location, same subject. Only camera angle
+and energy change with the music.
 
-WORLD RULE: Clip 01 must establish a SPECIFIC, NAMED setting.
-Name the location, the material, the light source, and the subject.
-Good: "A woman in a red coat on a rain-slick Tokyo street under sodium lamps"
-Bad: "a figure in a dramatic landscape bathed in ethereal light"
-Every subsequent clip stays in this world. Same subject, same place -- only
-the CAMERA ANGLE and ENERGY LEVEL change. Never teleport to a new environment.
+WORLD RULE: Clip 01 names the SPECIFIC setting -- location, material, light, subject.
+Good: "Woman in red coat on rain-slick Tokyo street under sodium lamps"
+Bad: "figure in dramatic landscape bathed in ethereal light"
+Every clip after stays in this world. Never change location between clips.
 
 ANTI-SLOP RULE: Every word must earn its place.
-Banned words and phrases: blazing, sweeping, ethereal, cinematic, dramatic,
-luminous, breathtaking, majestic, haunting, mesmerizing, pulsing with energy,
-bathed in light, awash in color, transcendent, otherworldly.
-Replace vague adjectives with PHYSICAL SPECIFICS:
-  NOT "blazing fire" -- WRITE "orange flames eating a wooden chair leg"
-  NOT "dramatic shadows" -- WRITE "hard ceiling light casting black bar shadows on concrete"
-  NOT "sweeping landscape" -- WRITE "flat wheat field stretching to a grey horizon"
+Banned vague words: blazing, sweeping, ethereal, cinematic, dramatic, luminous,
+breathtaking, majestic, haunting, mesmerizing, transcendent, otherworldly,
+pulsing, shimmering, glowing, twinkling, flickering, alive with energy.
+Use PHYSICAL SPECIFICS: not "dramatic shadows" but "hard light casting black bars on concrete".
 
-CAMERA MOTION RULE -- camera motion is the PRIMARY energy source in music videos.
-Every clip must have exactly ONE purposeful camera MOVE matched to song energy:
-  LOW energy: slow drift, gentle push-in, subtle pan
-  MED energy: medium dolly forward, slow orbit, steady tilt
-  HIGH energy: faster zoom-in, crisp pan, quick crane up
-Moves: zoom out, zoom in, slow pan, dolly forward, tilt up, orbit, crane up, drift.
-Each move evolves from the previous clip's final frame since clips are chained.
+CAMERA-FIRST RULE -- the camera move IS the energy. Subject stays nearly still.
+Every clip has ONE camera move. Subject makes at most ONE micro-gesture.
+  LOW: slow drift or push-in. Subject completely still.
+  MED: steady pan or dolly. Subject: one head turn or weight shift.
+  HIGH: crisper zoom-in or pan. Subject: one step or arm raise only.
+A still subject with a moving camera renders FASTER and CLEANER than complex action.
+Never describe: running, jumping, spinning, dancing, or multi-step movement.
 
-MOTION ARC RULE -- every clip builds toward ONE physical arrival:
-  - camera starts slow -> accelerates into subject -> reaches a defined point
-  - subject takes ONE step or gesture -> arrives at a position
-  - fabric, leaves, or hair stirs -> settles
-No "maximum action" peaks. No forces surging. Build toward a quiet arrival.
+PARTICLE BAN -- these always produce AI artifacts. Never write:
+dust, particles, embers, sparks, snow, ash, mist, fog, debris, steam, smoke,
+swirling, drifting, bokeh swirls, floating anything, confetti, rain, drizzle.
+Describe SOLID, GROUNDED elements only -- stone, fabric, wood, metal, skin.
 
-PARTICLE BAN -- NEVER describe floating matter. These generate AI artifacts.
-Banned: dust, particles, embers, sparks, snow, ash, mist, fog, debris,
-swirling, drifting atmosphere, steam rising, smoke curling. Describe SOLID
-GROUNDED motion only: footsteps on stone, fabric creasing, light quality shifting.
-
-FRAME RULE: No close-up face shots. For close shots use hands, feet, objects, textures.
+FRAME RULE: No close-up face shots. Use hands, feet, objects for close shots.
 
 Rules:
-- 20-35 words per prompt -- specific noun + verb + environment, no filler adjectives
-- Energy follows the song: LOW clips use slow camera + still subject; HIGH clips use faster camera + clear subject motion -- all within the same world
+- 15-25 words per prompt -- one camera move + one grounded element. Nothing more.
+- Energy label (LOW/MED/HIGH) drives only camera speed and ONE subject micro-gesture.
 - Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
 """
 
@@ -271,10 +290,12 @@ def run_song_prep(job, photo_path, settings):
     job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         # max_dur must be >= min_dur (clip_dur); cap at 10s for quality but never below clip_dur
         fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0))
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
+        # Subject anchor runs concurrently -- vision LLM call, adds ~0 wall time.
+        fut_anchor = pool.submit(_extract_subject_anchor, photo_path, llm_router) if photo_path else None
 
         clip_durations, beat_positions = fut_beats.result()
         if fut_lyrics is not None:
@@ -282,6 +303,9 @@ def run_song_prep(job, photo_path, settings):
             if detected:
                 lyrics_text = detected
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
+        subject_anchor = fut_anchor.result() if fut_anchor else ""
+        if subject_anchor:
+            log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
 
     # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
     # collapses trailing boundaries to total_dur, producing zero-duration clips.
@@ -291,6 +315,8 @@ def run_song_prep(job, photo_path, settings):
     settings["_beat_positions"] = beat_positions
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
+
+    settings["_subject_anchor"] = subject_anchor
 
     job.meta["stage"] = "planning"
     job.update(progress=4, message="Planning music video story arc...")
@@ -326,7 +352,8 @@ def run_song_pipeline(job, photo_path, settings):
     seed          = int(settings.get("video_seed", -1))
     audio_path    = settings.get("audio_path", "")   # user's uploaded song
     audio_dur     = float(settings.get("audio_duration", 0.0))
-    story_arc     = settings.pop("_story_arc", [])
+    story_arc      = settings.pop("_story_arc", [])
+    subject_anchor = settings.pop("_subject_anchor", "")
 
     if not story_arc:
         story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
@@ -423,6 +450,10 @@ def _do_song_gpu_phase(
                 prompt_to_use = "Exact same location and subject as previous frame, continuous scene. " + clip_prompt
             else:
                 prompt_to_use = clip_prompt
+        # Prepend subject anchor so every clip is grounded to the actual photo content.
+        # Guards against LLM drift where later prompts describe a different-looking subject.
+        if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
+            prompt_to_use = subject_anchor + " " + prompt_to_use
         # Narrative suffix: "deliberate purposeful motion, physically legible gesture"
         # avoids the dynamic suffix's "kinetic energy, subjects actively moving" which
         # makes LTX invent particle motion (snow/dust) on anchored chain frames.
@@ -499,11 +530,16 @@ def _do_song_gpu_phase(
         beat_pos      = beat_positions[i] if i < len(beat_positions) else 0.5
         target_time   = beat_pos * post_trim_dur
         ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
+        # Skip beat-sync for clips whose target is at the edge (beat_pos ~0) or
+        # center (beat_pos ~0.5) -- the edge guard and "peak already on beat" checks
+        # inside align_clip_to_beat would skip them anyway after an expensive cv2
+        # frame scan. Skipping here saves ~2-4s per clip for 60-70% of clips.
+        _beat_sync_useful = beat_pos > 0.05 and abs(beat_pos - 0.5) > 0.12
         job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} -- syncing peak to beat...")
         try:
             applied, info = align_clip_to_beat(
                 clip_path, target_time, post_trim_dur, ramped_out,
-            )
+            ) if _beat_sync_useful else (False, {"reason": "beat_pos near 0 or 0.5 -- skipped"})
             if applied and Path(ramped_out).exists():
                 # Replace the original with the ramped version. The chain
                 # frame we extract below now comes from the ramped clip,
@@ -579,11 +615,11 @@ def _do_song_gpu_phase(
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # -- Phase 2: Concat (stream copy after normalizing all clips to libx264) --
-    # song_video clips are WanGP native format -- normalize them all to CRF-15
-    # libx264 so _concat_clips can stream-copy (one encode total per clip).
-    for cp in clip_paths:
-        _normalize_clip_for_concat(cp)
+    # -- Phase 2: Concat
+    # song_video clips are all WanGP native format (no _chain_anchor involved).
+    # _concat_clips will fail stream-copy (mixed codec params) and fall back to
+    # a single CRF-15 re-encode of all clips in one ffmpeg pass -- faster than
+    # N separate normalize calls followed by a stream copy.
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
     if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]
