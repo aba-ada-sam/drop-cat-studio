@@ -24,6 +24,7 @@ DEFAULTS: dict = {
     "wan_model": "LTX-2 Dev19B Distilled",
     "resolution": "480p",
     "acestep_root": "",
+    "acestep_host": "localhost",    # set to remote IP to use ACE-Step on another machine
 
     # -- LLM Provider -----------------------------------------------------
     "llm_provider": "anthropic",      # anthropic | openai | ollama | auto

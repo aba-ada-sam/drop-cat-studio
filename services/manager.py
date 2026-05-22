@@ -217,21 +217,46 @@ def http_get(url: str, timeout: int = 5) -> dict | None:
 
 # -- ACE-Step -----------------------------------------------------------------
 
-ACESTEP_HOST = "127.0.0.1"
 ACESTEP_PORT = 8019
 
 
+def _acestep_host() -> str:
+    """Return the configured ACE-Step host (local or remote IP)."""
+    try:
+        return (cfg.get("acestep_host") or "localhost").strip()
+    except Exception:
+        return "localhost"
+
+
+def _is_remote_host(host_or_url: str) -> bool:
+    h = host_or_url.lower().replace("http://", "").replace("https://", "").split(":")[0].split("/")[0]
+    return bool(h) and h not in ("localhost", "127.0.0.1")
+
+
 def acestep_alive() -> bool:
-    return http_get(f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health", timeout=3) is not None
+    return http_get(f"http://{_acestep_host()}:{ACESTEP_PORT}/health", timeout=3) is not None
 
 
 def start_acestep() -> tuple[bool, str | None]:
     """Start ACE-Step API server headlessly if not already running.
 
+    When acestep_host points to a remote machine, skips local subprocess
+    launch and just checks the remote endpoint is reachable.
     Supports both venv-based (.venv/Scripts/python.exe) and uv-based installs.
     """
     import shutil
     global _acestep_proc
+
+    host = _acestep_host()
+
+    if _is_remote_host(host):
+        if acestep_alive():
+            _set_status("acestep", state="running",
+                        message=f"ACE-Step (remote) running at {host}:{ACESTEP_PORT}", port=ACESTEP_PORT)
+            return True, None
+        msg = f"ACE-Step not reachable at {host}:{ACESTEP_PORT} -- is it running on the remote machine?"
+        _set_status("acestep", state="not_running", message=msg)
+        return False, msg
 
     with _acestep_start_lock:
         if acestep_alive():
@@ -257,10 +282,10 @@ def start_acestep() -> tuple[bool, str | None]:
         uv_exe = shutil.which("uv")
 
         if python.exists():
-            cmd = [str(python), str(api_script), "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+            cmd = [str(python), str(api_script), "--host", host, "--port", str(ACESTEP_PORT)]
         elif uv_exe:
             cmd = [uv_exe, "run", "--no-sync", "acestep-api",
-                   "--host", ACESTEP_HOST, "--port", str(ACESTEP_PORT)]
+                   "--host", host, "--port", str(ACESTEP_PORT)]
         else:
             msg = "Cannot start ACE-Step: no .venv Python and 'uv' not found in PATH"
             _set_status("acestep", state="error", message=msg)
@@ -612,6 +637,18 @@ def startup_all():
             _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
 
     def _ensure_ollama():
+        ollama_url = cfg.get("ollama_host") or "http://localhost:11434"
+        if _is_remote_host(ollama_url.replace("http://", "").split(":")[0]):
+            # Remote Ollama -- just verify it's reachable
+            import urllib.request
+            try:
+                urllib.request.urlopen(ollama_url.rstrip("/") + "/api/tags", timeout=3)
+                _set_status("ollama", state="running",
+                            message=f"Ollama (remote) running at {ollama_url}", port=11434)
+            except Exception:
+                _set_status("ollama", state="not_running",
+                            message=f"Ollama not reachable at {ollama_url}")
+            return
         ok, err = start_ollama()
         if ok:
             _set_status("ollama", state="running",
@@ -625,7 +662,14 @@ def startup_all():
 
     # ACE-Step: deferred -- only started when music generation is needed.
     # Keeps VRAM free for Ollama vision models during prompt generation.
-    if acestep_alive():
+    if _is_remote_host(_acestep_host()):
+        if acestep_alive():
+            _set_status("acestep", state="running",
+                        message=f"ACE-Step (remote) running at {_acestep_host()}:{ACESTEP_PORT}", port=ACESTEP_PORT)
+        else:
+            _set_status("acestep", state="not_running",
+                        message=f"ACE-Step not reachable at {_acestep_host()}:{ACESTEP_PORT}")
+    elif acestep_alive():
         _set_status("acestep", state="running",
                     message="ACE-Step already running", port=ACESTEP_PORT)
     else:

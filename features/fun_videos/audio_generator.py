@@ -16,9 +16,17 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-ACESTEP_HOST = "127.0.0.1"
 ACESTEP_PORT = 8019
-API_BASE = f"http://{ACESTEP_HOST}:{ACESTEP_PORT}"
+_ACESTEP_DEFAULT = f"http://127.0.0.1:{ACESTEP_PORT}"
+
+def _api_base() -> str:
+    """Return the ACE-Step base URL, reading host from config so remote mode works."""
+    try:
+        from core import config as _cfg
+        host = (_cfg.get("acestep_host") or "localhost").strip()
+        return f"http://{host}:{ACESTEP_PORT}"
+    except Exception:
+        return _ACESTEP_DEFAULT
 
 MAX_DURATION = 120
 GENERATION_TIMEOUT = 300  # 5 min
@@ -27,7 +35,7 @@ POLL_INTERVAL = 3
 
 def _acestep_alive() -> bool:
     try:
-        with urllib.request.urlopen(f"{API_BASE}/health", timeout=3):
+        with urllib.request.urlopen(f"{_api_base()}/health", timeout=3):
             return True
     except Exception:
         return False
@@ -120,7 +128,7 @@ def _poll(task_id: str, stop_event: threading.Event | None = None, progress_fn=N
     while time.time() < deadline:
         if stop_event and stop_event.is_set():
             return {"status": -1}
-        resp = _post(f"{API_BASE}/query_result",
+        resp = _post(f"{_api_base()}/query_result",
                      {"task_id_list": json.dumps([task_id])}, timeout=15)
         if resp is not None:
             data = resp.get("data", [])
@@ -232,7 +240,7 @@ def generate_audio(
         except (TypeError, ValueError):
             pass
 
-    resp = _post(f"{API_BASE}/release_task", payload, timeout=30)
+    resp = _post(f"{_api_base()}/release_task", payload, timeout=30)
     if resp is None:
         return None, "Failed to submit task to ACE-Step"
 
@@ -262,7 +270,7 @@ def generate_audio(
     dest = out_dir / f"audio_{ts}.{audio_format}"
 
     if audio_ref.startswith(("/", "http")):
-        url = f"{API_BASE}{audio_ref}" if audio_ref.startswith("/") else audio_ref
+        url = f"{_api_base()}{audio_ref}" if audio_ref.startswith("/") else audio_ref
         try:
             with urllib.request.urlopen(url, timeout=90) as r:
                 dest.write_bytes(r.read())

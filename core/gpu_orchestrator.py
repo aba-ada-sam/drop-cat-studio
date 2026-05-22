@@ -36,6 +36,27 @@ ServiceName = Literal["wangp", "acestep", "forge", "ollama"]
 _ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge", "ollama")
 
 
+def _is_remote(service: ServiceName) -> bool:
+    """Return True if this service is configured to run on another machine.
+
+    Remote services manage their own GPU -- no local eviction needed.
+    """
+    try:
+        from core import config as _cfg
+        if service == "acestep":
+            h = (_cfg.get("acestep_host") or "localhost").strip().lower()
+            return h not in ("localhost", "127.0.0.1", "")
+        if service == "ollama":
+            u = (_cfg.get("ollama_host") or "").lower()
+            return "localhost" not in u and "127.0.0.1" not in u and u != ""
+        if service == "forge":
+            u = (_cfg.get("forge_url") or "").lower()
+            return "localhost" not in u and "127.0.0.1" not in u and u != ""
+    except Exception:
+        pass
+    return False
+
+
 _IDLE_EVICT_SECS = 1800  # 30 min -- release GPU services when nothing has run for this long
 
 
@@ -106,9 +127,14 @@ class GPUOrchestrator:
 
         Idempotent when `service` already holds. If the holder process died
         out-of-band (crash, OOM kill), this transparently restarts it.
+
+        Remote services (another machine) manage their own GPU -- no eviction.
         """
+        self._last_acquire = time.time()
+        if _is_remote(service):
+            log.debug("[gpu] acquire %s -- remote, skipping local eviction", service)
+            return
         with self._lock:
-            self._last_acquire = time.time()
             if self._current == service:
                 if not self._is_alive(service):
                     log.info("[gpu] holder %s is dead -- restarting", service)
@@ -234,7 +260,12 @@ class GPUOrchestrator:
     def _ollama_unload(self) -> None:
         """Force Ollama to drop loaded models by issuing keep_alive=0 pings."""
         try:
-            with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=2) as r:
+            from core import config as _cfg
+            base = (_cfg.get("ollama_host") or "http://localhost:11434").rstrip("/")
+        except Exception:
+            base = "http://localhost:11434"
+        try:
+            with urllib.request.urlopen(f"{base}/api/ps", timeout=2) as r:
                 running = json.loads(r.read()).get("models", [])
         except Exception as e:
             log.debug("[gpu] ollama /api/ps failed: %s", e)
@@ -246,7 +277,7 @@ class GPUOrchestrator:
             try:
                 body = json.dumps({"model": name, "keep_alive": 0}).encode()
                 req = urllib.request.Request(
-                    "http://localhost:11434/api/generate",
+                    f"{base}/api/generate",
                     data=body, headers={"Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=3).read()
                 log.info("[gpu] ollama unload: %s", name)

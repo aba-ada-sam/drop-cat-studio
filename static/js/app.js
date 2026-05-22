@@ -601,7 +601,7 @@ function _applyLLMState(llm) {
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
+    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
