@@ -453,6 +453,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             ts=ts, job_dir=job_dir, llm_router=llm_router,
             video_generator=video_generator, audio_generator=audio_generator,
             copy_to_inbox=copy_to_inbox, gallery_push=gallery_push,
+            stopped_fn=_stopped,
         )
     finally:
         if _audio_out_dir:
@@ -465,9 +466,13 @@ def _run_zoom_body(
     audio_first_path, extend_base_path, arc, subject_anchor, focal_target,
     music_prompt, lyrics, ts, job_dir, llm_router,
     video_generator, audio_generator, copy_to_inbox, gallery_push,
+    stopped_fn,
 ):
     """All zoom pipeline work after setup — extracted so try/finally in
     run_zoom_pipeline guarantees _audio_out_dir cleanup at every exit."""
+    def _stopped() -> bool:
+        return stopped_fn()
+
     # Prepare WanGP request settings
     wangp_steps = int(settings.get("steps", 25))
     wangp_guidance = float(settings.get("guidance", 5.0))

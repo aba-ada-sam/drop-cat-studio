@@ -3,6 +3,7 @@
 Ken Burns slideshow generator. Upload images, configure motion/duration,
 generate combined or separate videos.
 """
+import asyncio
 import logging
 import os
 import time
@@ -78,7 +79,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
             continue
         dest = UPLOADS_DIR / f"{uuid.uuid4()}{ext}"
         data = await f.read()
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         saved.append(_image_payload(dest, name=f.filename, size=len(data)))
     return {"images": saved}
 

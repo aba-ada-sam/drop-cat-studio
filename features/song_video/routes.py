@@ -38,7 +38,7 @@ async def upload_audio(files: list[UploadFile] = File(...)):
             raise HTTPException(413, f"Audio file exceeds {MAX_AUDIO_MB}MB limit")
         UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         # Basic duration probe (fast, no librosa)
         from core.ffmpeg_utils import probe_duration
         dur = probe_duration(str(dest))
@@ -74,7 +74,7 @@ async def upload_image(files: list[UploadFile] = File(...)):
             raise HTTPException(422, f"File '{f.filename}' is not a valid image")
         UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         saved.append({
             "path":   str(dest),
             "url":    f"/uploads/{dest.name}",

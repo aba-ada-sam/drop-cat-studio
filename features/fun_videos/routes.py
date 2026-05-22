@@ -168,7 +168,7 @@ async def upload_photo(files: list[UploadFile] = File(...)):
         data = await f.read()
         img = _validate_image(data, f.filename or "unknown")
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         saved.append({
             "path": str(dest),
             "name": f.filename,
@@ -334,7 +334,7 @@ async def upload_video(files: list[UploadFile] = File(...)):
             continue
         data = await f.read()
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         saved.append({
             "path": str(dest),
             "name": f.filename,
