@@ -272,7 +272,8 @@ def run_song_prep(job, photo_path, settings):
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, 10.0)
+        # max_dur must be >= min_dur (clip_dur); cap at 10s for quality but never below clip_dur
+        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0))
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
 
         clip_durations, beat_positions = fut_beats.result()

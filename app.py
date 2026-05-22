@@ -653,8 +653,18 @@ async def save_queue():
     import asyncio as _asyncio
     if _g["job_manager"] is None:
         return JSONResponse({"error": "Not ready"}, 503)
-    count = await _asyncio.to_thread(_g["job_manager"].save_queue)
-    return {"ok": True, "saved": count}
+    try:
+        count = await _asyncio.wait_for(
+            _asyncio.to_thread(_g["job_manager"].save_queue),
+            timeout=10.0,
+        )
+        return {"ok": True, "saved": count}
+    except _asyncio.TimeoutError:
+        log.error("[save-queue] Timed out waiting for job_manager lock")
+        return JSONResponse({"error": "Save timed out -- a GPU job may be holding the queue lock"}, 503)
+    except Exception as e:
+        log.exception("[save-queue] Save failed: %s", e)
+        return JSONResponse({"error": str(e)}, 500)
 
 
 def _build_restore_registry(jm):
@@ -734,7 +744,14 @@ async def save_and_restart(background_tasks: BackgroundTasks):
     if _g["job_manager"] is None:
         return JSONResponse({"error": "Not ready"}, 503)
     jm = _g["job_manager"]
-    count = await _asyncio.to_thread(jm.save_queue)
+    try:
+        count = await _asyncio.wait_for(
+            _asyncio.to_thread(jm.save_queue),
+            timeout=10.0,
+        )
+    except _asyncio.TimeoutError:
+        log.error("[save-restart] save_queue timed out -- restarting anyway without save")
+        count = 0
     PLANNED_RESTART_MARKER.write_text("planned")
     log.info("Save-and-restart: saved %d jobs -- triggering watchdog restart", count)
 

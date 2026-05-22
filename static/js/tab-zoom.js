@@ -66,10 +66,10 @@ export function init(panel) {
   ];
 
   const QUALITIES = [
-    { label: 'Draft 360P', px: 360, maxSec: 19 },
-    { label: '480P',       px: 480, maxSec: 19 },
-    { label: '580P',       px: 580, maxSec: 19 },
-    { label: '720P',       px: 720, maxSec: 14 },
+    { label: 'Draft 360P', px: 360, maxSec: 10 },
+    { label: '480P',       px: 480, maxSec: 10 },
+    { label: '580P',       px: 580, maxSec: 10 },
+    { label: '720P',       px: 720, maxSec: 10 },
   ];
 
   function _computeDims(px) {

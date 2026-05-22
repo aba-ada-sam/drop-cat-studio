@@ -8,7 +8,7 @@
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260521a';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260521b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260520a';
-import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260522b';
+import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260522c';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260521a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
@@ -43,6 +43,7 @@ const TAB_HANDOFF = {
   'sd-prompts':        sdPromptsHandoff,
   'video-tools':       null,
   'video-tools-batch': null,
+  'adobe':             null,
 };
 const _tabInitialized = new Set();
 

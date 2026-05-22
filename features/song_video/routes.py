@@ -141,7 +141,7 @@ async def generate(request: Request):
         raise HTTPException(400, f"Image not found: {photo_path}")
 
     config    = cfg.load()
-    clip_dur  = max(8, min(20, int(body.get("clip_duration", 8))))
+    clip_dur  = max(8, min(10, int(body.get("clip_duration", 8))))
     analysis  = body.get("audio_analysis") or {}
 
     # If analysis not provided, run a fast probe for duration
