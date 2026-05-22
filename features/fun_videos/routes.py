@@ -23,6 +23,15 @@ from features.fun_videos.video_generator import MODELS
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+
+def _safe_float(val, default: float) -> float:
+    """Convert val to float, returning default on any parse error."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 VIDEO_EXTS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
@@ -843,7 +852,7 @@ async def make_it(request: Request):
         "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
         "loras":          body.get("loras", []),
         "upscale":        body.get("upscale", True),
-        "upscale_scale":  max(0.5, min(4.0, float(body.get("upscale_scale", 2.0)))),
+        "upscale_scale":  max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 2.0))),
         "upscale_method": body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg",
     }
 

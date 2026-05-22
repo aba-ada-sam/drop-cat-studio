@@ -106,24 +106,27 @@ export function init(panel) {
     analyzeBtn.disabled = true;
     const origText = analyzeBtn.textContent;
     let done = 0, failed = 0;
-    for (let i = 0; i < _items.length; i++) {
-      if (_items[i].analysis || _items[i].kind === 'text') continue;
-      analyzeBtn.textContent = `Analyzing ${done + failed + 1}/${toAnalyze.length}...`;
-      try {
-        _items[i].analysis = await api('/api/bridges/analyze', {
-          method: 'POST', body: JSON.stringify({ path: _items[i].path }),
-        });
-        _renderItems();
-        done++;
-      } catch (e) {
-        failed++;
-        toast(`"${_items[i].name}" analysis failed: ${e.message}`, 'error');
+    try {
+      for (let i = 0; i < _items.length; i++) {
+        if (_items[i].analysis || _items[i].kind === 'text') continue;
+        analyzeBtn.textContent = `Analyzing ${done + failed + 1}/${toAnalyze.length}...`;
+        try {
+          _items[i].analysis = await api('/api/bridges/analyze', {
+            method: 'POST', body: JSON.stringify({ path: _items[i].path }),
+          });
+          _renderItems();
+          done++;
+        } catch (e) {
+          failed++;
+          toast(`"${_items[i].name}" analysis failed: ${e.message}`, 'error');
+        }
       }
+      if (failed === 0) toast('Analysis done', 'success');
+      else if (done > 0) toast(`Analysis done -- ${failed} clip${failed > 1 ? 's' : ''} failed`, 'info');
+    } finally {
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = origText;
     }
-    analyzeBtn.disabled = false;
-    analyzeBtn.textContent = origText;
-    if (failed === 0) toast('Analysis done', 'success');
-    else if (done > 0) toast(`Analysis done -- ${failed} clip${failed > 1 ? 's' : ''} failed`, 'info');
   });
 
   const itemList = el('div', { style: 'display:flex; flex-direction:column; gap:0;' });

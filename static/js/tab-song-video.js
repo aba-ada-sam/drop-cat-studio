@@ -600,6 +600,7 @@ export function init(panel) {
     _updateLoopUI();
     loopStatusRow.style.display = 'none';
     _loopCount = 0;
+    if (_activePoller) { _activePoller.stop(); _activePoller = null; }
     if (_jobId) {
       stopJob(_jobId).catch(() => {});
       toast('Stopping -- current clip will finish then generation halts', 'info');

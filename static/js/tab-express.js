@@ -890,7 +890,9 @@ export function init(panel) {
     text: 'Cancel',
   });
   progressCancelBtn.addEventListener('click', () => {
+    if (_activePoller) { _activePoller.stop(); _activePoller = null; }
     if (_jobId) { stopJob(_jobId); _jobId = null; }
+    progressWrap.style.display = 'none';
   });
   progressWrap.appendChild(progressBar);
   progressWrap.appendChild(progressMsg);
