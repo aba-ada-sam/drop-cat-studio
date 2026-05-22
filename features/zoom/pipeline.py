@@ -437,9 +437,37 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
     if _tmp_dir:
         shutil.rmtree(_tmp_dir, ignore_errors=True)
 
-    # Pop audio-first output dir -- cleaned up at end of pipeline after merge.
+    # Pop audio-first output dir -- always cleaned up via try/finally below.
     _audio_out_dir = settings.pop("_audio_out_dir", None)
 
+    try:
+        _run_zoom_body(
+            job=job, source_path=source_path, settings=settings,
+            direction=direction, n_clips=n_clips, clip_dur=clip_dur,
+            model_name=model_name, skip_audio=skip_audio,
+            instrumental=instrumental, audio_first=audio_first,
+            audio_first_path=audio_first_path,
+            extend_base_path=extend_base_path,
+            arc=arc, subject_anchor=subject_anchor, focal_target=focal_target,
+            music_prompt=music_prompt, lyrics=lyrics,
+            ts=ts, job_dir=job_dir, llm_router=llm_router,
+            video_generator=video_generator, audio_generator=audio_generator,
+            copy_to_inbox=copy_to_inbox, gallery_push=gallery_push,
+        )
+    finally:
+        if _audio_out_dir:
+            shutil.rmtree(_audio_out_dir, ignore_errors=True)
+
+
+def _run_zoom_body(
+    *, job, source_path, settings, direction, n_clips, clip_dur,
+    model_name, skip_audio, instrumental, audio_first,
+    audio_first_path, extend_base_path, arc, subject_anchor, focal_target,
+    music_prompt, lyrics, ts, job_dir, llm_router,
+    video_generator, audio_generator, copy_to_inbox, gallery_push,
+):
+    """All zoom pipeline work after setup — extracted so try/finally in
+    run_zoom_pipeline guarantees _audio_out_dir cleanup at every exit."""
     # Prepare WanGP request settings
     wangp_steps = int(settings.get("steps", 25))
     wangp_guidance = float(settings.get("guidance", 5.0))
@@ -784,7 +812,3 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
         )
     except Exception as e:
         log.warning("[zoom] gallery_push failed: %s", e)
-
-    # Clean up audio-first temp dir -- safe now that audio has been merged.
-    if _audio_out_dir:
-        shutil.rmtree(_audio_out_dir, ignore_errors=True)

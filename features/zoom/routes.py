@@ -367,5 +367,6 @@ async def zoom_extract_frame(request: Request):
     dest = uploads_dir / f"zoomframe_{Path(tmp_dir).name}.png"
     import shutil
     shutil.copy2(frame_png, dest)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return {"frame_path": str(dest), "frame_url": f"/uploads/{dest.name}"}
