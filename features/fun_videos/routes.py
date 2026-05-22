@@ -560,20 +560,28 @@ async def refine_prompt(request: Request):
 # calm / long_story -> LTX-2 Distilled + "calm": scene-hold extension produces
 #   atmospheric breathing-photograph. Fast (~30s/clip), visually stable.
 #
-# action / action_hd / story_action -> LTX-2 Dev13B + "dynamic": 40 steps,
-#   designed for deliberate physical motion (strides, gestures, turns). Dev13B
-#   bypasses the scene-hold extension (scene-hold only fires for calm/gentle).
-#   The LLM writes a real kinetic story arc. ~3-4 min/clip vs ~30s for Distilled
-#   but produces actual visible motion. vram_min_gb=10, fits on RTX 5080 (15.9GB).
-#   Wan I2V is NOT used -- deadlocks on RTX 5080 (15.87GB > 80% VRAM budget).
+# action / action_hd / story_action -> LTX-2 Dev13B if VRAM >= 20 GB, else
+#   LTX-2 Distilled. Dev13B deadlocks at step 0 on 16 GB cards (WanGP 80% cap
+#   = 13 GB, Dev13B first-step VRAM exceeds that). LTX-2 Distilled is the safe
+#   fallback -- kinetic action is weaker but the job completes. On >=20 GB cards
+#   Dev13B runs cleanly with real kinetic motion at ~3-4 min/clip.
+#   Wan I2V is NOT in auto-pick -- also deadlocks on RTX 5080 (15.87 GB > budget).
 
 def _get_pick_to_model() -> dict:
-    """Return auto-pick bucket -> (model, motion) map."""
+    """Return auto-pick bucket -> (model, motion) map.
+
+    LTX-2 Dev13B requires >16 GB VRAM (WanGP 80% budget = 13 GB is not enough --
+    step 0 deadlocks on RTX 5080 15.9 GB). Fall back to LTX-2 Distilled on
+    cards below 20 GB; it won't do strong kinetic action but it won't deadlock.
+    """
+    from app import _g as _app_g
+    gpu_vram = _app_g.get("gpu_vram_gb") or 0
+    action_model = "LTX-2 Dev13B" if (not gpu_vram or gpu_vram >= 20) else "LTX-2 Dev19B Distilled"
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-        "action":       ("LTX-2 Dev13B",           "dynamic"),
-        "action_hd":    ("LTX-2 Dev13B",           "dynamic"),
-        "story_action": ("LTX-2 Dev13B",           "dynamic"),
+        "action":       (action_model,              "dynamic"),
+        "action_hd":    (action_model,              "dynamic"),
+        "story_action": (action_model,              "dynamic"),
         "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
     }
 # Hardware reality on 16GB VRAM cards (RTX 5080):

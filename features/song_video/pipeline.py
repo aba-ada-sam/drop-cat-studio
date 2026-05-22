@@ -382,7 +382,7 @@ def run_song_pipeline(job, photo_path, settings):
         job, photo_path, settings, job_dir,
         n_clips, clip_durations, beat_positions, model_name,
         resolution, ow, oh, tw, th, steps, guidance, seed,
-        audio_path, audio_dur, story_arc, clip_dur,
+        audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
     )
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
@@ -391,7 +391,7 @@ def _do_song_gpu_phase(
     job, photo_path, settings, job_dir,
     n_clips, clip_durations, beat_positions, model_name,
     resolution, ow, oh, tw, th, steps, guidance, seed,
-    audio_path, audio_dur, story_arc, clip_dur,
+    audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator

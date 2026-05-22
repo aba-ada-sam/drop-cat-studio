@@ -549,7 +549,7 @@ def _run_zoom_body(
                         guidance=wangp_guidance,
                         duration=gen_dur,
                         seed=-1,
-                        negative_prompt=video_generator.negative_prompt_for(model_name, "dynamic"),
+                        negative_prompt=video_generator.negative_prompt_for(model_name, "calm"),
                         stop_check=job.stop_event.is_set,
                         audio_source=clip_audio_slice,
                         progress_fn=lambda cur, tot: job.update(
