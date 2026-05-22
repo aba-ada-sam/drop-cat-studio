@@ -189,11 +189,16 @@ class GPUOrchestrator:
                     start_acestep()
                 return
             if service == "forge":
-                # Forge is external (separate launch). If it's down we cannot
-                # auto-start; just attempt a checkpoint reload so the next call
-                # works.
                 from services.forge_client import forge_alive, reload_checkpoint
-                if forge_alive():
+                if not forge_alive():
+                    # Auto-start Forge -- same deferred pattern as ACE-Step.
+                    # start_forge() blocks until the API is ready (up to 5 min).
+                    # Called from a thread via asyncio.to_thread in the route
+                    # handler so it doesn't stall the event loop.
+                    from services.manager import start_forge
+                    log.info("[gpu] Forge not running -- auto-starting...")
+                    start_forge()
+                else:
                     try:
                         reload_checkpoint()
                     except Exception as e:

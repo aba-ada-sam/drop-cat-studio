@@ -584,12 +584,15 @@ async def forge_txt2img(request: Request):
     For Forge Couple (regional prompting), pass use_forge_couple=true and
     the backend will join the SD prompt columns with '\\n' instead of BREAK.
     """
+    import asyncio as _asyncio
     from services.forge_client import (
         txt2img, build_adetailer_args, build_forge_couple_args,
     )
-    # Orchestrator: acquire Forge (evicts WanGP/ACE-Step/Ollama if loaded).
+    # Orchestrator: acquire Forge, evicting WanGP/ACE-Step if needed.
+    # gpu.acquire() may block up to 5 min if Forge isn't running yet
+    # (auto-start path). Run in a thread so the event loop stays alive.
     from core.gpu_orchestrator import gpu
-    gpu.acquire("forge", reason="txt2img")
+    await _asyncio.to_thread(gpu.acquire, "forge", "txt2img")
 
     body = await request.json()
 
