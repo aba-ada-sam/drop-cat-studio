@@ -246,90 +246,6 @@ def extract_frame_from_video(video_path: str, out_png: str, position: str = "las
         return False
 
 
-# ---------------------------------------------------------------------------
-# Assembly helper: xfade crossfades at clip boundaries
-# ---------------------------------------------------------------------------
-
-_XFADE_SECS = 0.4  # crossfade duration; short enough not to lose content
-
-def _concat_with_xfade(clip_paths: list[str], clip_durations: list[float],
-                       out_path: str, work_dir) -> None:
-    """Concatenate clips with a short crossfade at every boundary.
-
-    Falls back to simple stream-copy concat on any ffmpeg error so the job
-    still completes.  clip_durations must be same length as clip_paths;
-    if shorter it is padded with a safe default.
-    """
-    n = len(clip_paths)
-    # Pad durations list if incomplete
-    while len(clip_durations) < n:
-        clip_durations.append(4.0)
-
-    # Probe actual fps from first clip to calculate offset precisely
-    fps = 25.0
-    try:
-        import json as _json
-        r = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_streams", clip_paths[0]],
-            capture_output=True, timeout=10,
-        )
-        if r.returncode == 0:
-            info = _json.loads(r.stdout)
-            for s in info.get("streams", []):
-                if s.get("codec_type") == "video":
-                    fr = s.get("r_frame_rate", "25/1")
-                    num, den = (fr.split("/") + ["1"])[:2]
-                    fps = float(num) / max(float(den), 1)
-                    break
-    except Exception:
-        pass
-
-    xd = min(_XFADE_SECS, 0.25)  # hard cap at 0.25s so short clips don't overlap
-
-    # Build ffmpeg filtergraph: xfade between consecutive clips
-    # Each clip after the first has an offset = sum of previous durations - xd
-    inputs = []
-    for cp in clip_paths:
-        inputs += ["-i", cp]
-
-    filter_parts = []
-    offset = 0.0
-    prev_label = "[0:v]"
-    for i in range(1, n):
-        offset += clip_durations[i - 1] - xd
-        out_label = f"[v{i}]" if i < n - 1 else "[vout]"
-        filter_parts.append(
-            f"{prev_label}[{i}:v]xfade=transition=fade:duration={xd:.3f}:offset={offset:.3f}{out_label}"
-        )
-        prev_label = out_label
-
-    filter_str = ";".join(filter_parts)
-
-    cmd = (["ffmpeg", "-y"]
-           + inputs
-           + ["-filter_complex", filter_str,
-              "-map", "[vout]",
-              "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-              "-pix_fmt", "yuv420p",
-              out_path])
-    r = subprocess.run(cmd, capture_output=True, timeout=300)
-    if r.returncode != 0 or not os.path.isfile(out_path):
-        # Fallback: stream-copy concat (no re-encode, no crossfade)
-        log.warning("[zoom] xfade concat failed, falling back to stream-copy: %s",
-                    r.stderr.decode(errors="replace")[-200:])
-        list_file = str(Path(work_dir) / "concat_list.txt")
-        with open(list_file, "w", encoding="utf-8") as f:
-            for cp in clip_paths:
-                f.write(f"file '{cp}'\n")
-        r2 = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-             "-i", list_file, "-c", "copy", out_path],
-            capture_output=True, timeout=120,
-        )
-        if r2.returncode != 0 or not os.path.isfile(out_path):
-            raise RuntimeError(r2.stderr.decode(errors="replace")[-300:])
-
 
 # ---------------------------------------------------------------------------
 # Prep phase (no GPU lock)
@@ -630,7 +546,7 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             job.update(status="error", message="No clips generated")
             return
 
-        # -- Concat clips with xfade crossfades ----------------------------------
+        # -- Concat clips (stream copy) -----------------------------------------
         job.update(progress=74, message="Assembling clips...")
         model_tag = model_name.split()[0].lower()
         concat_path = str(job_dir / f"zoom_{direction}_{model_tag}_{ts}.mp4")
@@ -639,7 +555,21 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
             shutil.copy2(clip_paths[0], concat_path)
         else:
             try:
-                _concat_with_xfade(clip_paths, clip_durations, concat_path, job_dir)
+                # Stream-copy concat: _chain_anchor has already trimmed every
+                # clip and extracted its last frame as the next clip's start,
+                # so the junction is frame-exact. Re-encoding (xfade etc.)
+                # would introduce artifacts that compound through the chain.
+                list_file = str(job_dir / "concat_list.txt")
+                with open(list_file, "w", encoding="utf-8") as _f:
+                    for cp in clip_paths:
+                        _f.write(f"file '{cp}'\n")
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                     "-i", list_file, "-c", "copy", concat_path],
+                    capture_output=True, timeout=120,
+                )
+                if r.returncode != 0 or not os.path.isfile(concat_path):
+                    raise RuntimeError(r.stderr.decode(errors="replace")[-300:])
             except Exception as e:
                 _log(f"[error] Concat failed: {e}")
                 job.update(status="error", message=f"Concat failed: {e}")

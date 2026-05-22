@@ -62,15 +62,12 @@ async def zoom_make(request: Request):
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
 
-    # Zoom uses 832x480 by default for LTX-2 Distilled -- ~33% fewer tokens vs
-    # the model's native 1032x580, directly proportional speedup per clip.
-    # Wan I2V models keep their native resolution (speed is not the bottleneck there).
-    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
+    # Use the model's native resolution. The 832x480 shortcut was removed --
+    # lower resolution compounds artifacts through the chain anchor and produces
+    # visibly degraded output by clip 3-4. TeaCache + shorter clip duration
+    # already provide the speed improvement without this quality tradeoff.
     _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
-    if _is_ltx_distilled and not body.get("zoom_res"):
-        _zoom_res = (832, 480)
-    else:
-        _zoom_res = body.get("zoom_res") or _model_res
+    _zoom_res = body.get("zoom_res") or _model_res
 
     # If source is a video, extract the appropriate frame first
     ext = Path(source_path).suffix.lower()
@@ -174,9 +171,8 @@ async def zoom_extend(request: Request):
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
 
-    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
     _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
-    _zoom_res = (832, 480) if _is_ltx_distilled else _model_res
+    _zoom_res = body.get("zoom_res") or _model_res
 
     _model_info = _VG_MODELS.get(model_name, {})
     settings = {
@@ -280,8 +276,7 @@ async def zoom_folder_loop_start(request: Request):
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
     _model_info = _VG_MODELS.get(model_name, {})
-    _is_ltx_distilled = "Distilled" in model_name and "LTX" in model_name
-    _zoom_res = (832, 480) if _is_ltx_distilled else _model_info.get("res", (1032, 580))
+    _zoom_res = _model_info.get("res", (1032, 580))
 
     settings = {
         "zoom_direction":  body.get("zoom_direction", "out"),
