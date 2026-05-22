@@ -150,7 +150,7 @@ export function init(panel) {
       }
 
       dropHint.style.display = 'none';
-      sourceNameEl.textContent = file.name;
+      sourceNameEl.textContent = isVid ? `${file.name} (video)` : file.name;
       sourceInfo.style.display = 'flex';
       _updateBtn();
     } catch (err) {
@@ -204,8 +204,8 @@ export function init(panel) {
   const durRow   = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
 
   function _updateEst() {
-    const clips = Number(_activeValue(stepsRow)) || 4;
-    const secs  = Number(_activeValue(durRow))   || 5;
+    const clips = Number(_activeValue(stepsRow)) || 5;
+    const secs  = Number(_activeValue(durRow))   || 4;
     const total = clips * secs;
     const m = Math.floor(total / 60);
     const s = total % 60;
@@ -275,7 +275,8 @@ export function init(panel) {
     _gpuVram   = data.gpu_vram_gb || 0;
     if (_gpuVram) vramNote.textContent = `${_gpuVram} GB GPU`;
 
-    const i2v = Object.entries(_modelData).filter(([, m]) => m.i2v);
+    const i2v = Object.entries(_modelData).filter(([, m]) => m.i2v)
+                       .sort(([a], [b]) => a.localeCompare(b));
     modelSel.innerHTML = '';
     for (const [name, info] of i2v) {
       const fits = !_gpuVram || _gpuVram >= (info.vram_min_gb || 0);
@@ -311,7 +312,7 @@ export function init(panel) {
   const audioFirstCheck = el('input', { type: 'checkbox' });
   audioFirstToggle.append(
     audioFirstCheck,
-    el('span', { textContent: 'Sync video to music (audio-first -- adds ACE-Step before clips)' }),
+    el('span', { textContent: 'Sync video to music (generates audio first, takes longer)' }),
   );
 
   // ── generate button + queue badge ──────────────────────────────────────────
@@ -631,6 +632,7 @@ export function init(panel) {
       [LABEL('What the zoom reveals (optional)'), ideaInput]),
     _card(modelGroup),
     generateBtn,
+    progressArea,
     queueBadge,
     batchSection,
     outputArea,
@@ -773,14 +775,29 @@ export function init(panel) {
         }),
       });
 
+      _jobId = res.job_id;
       _incActive();
-      toast(`Zoom ${_direction} queued (#${queueDepth + 1}) -- check Queue tab for progress`, 'info');
 
-      // Watch in background -- form stays active for more submissions
+      // Show inline progress bar
+      progressLabel.textContent = queueDepth > 0
+        ? `Queued (#${queueDepth + 1}) -- waiting for GPU...`
+        : 'Starting...';
+      progressFill.style.width = '0%';
+      progressArea.style.display = 'flex';
+
       pollJob(res.job_id,
-        () => {},
         j => {
+          // Progress tick
+          const pct = j.progress || 0;
+          progressFill.style.width = `${pct}%`;
+          progressLabel.textContent = j.message || `${pct}%`;
+        },
+        j => {
+          // Done
+          _jobId = null;
           _decActive();
+          progressArea.style.display = 'none';
+          if (_extendPanel) { _extendPanel.remove(); _extendPanel = null; }
           const out = Array.isArray(j.output) ? j.output[0] : j.output;
           if (out) {
             videoEl.src = pathToUrl(out);
@@ -806,7 +823,11 @@ export function init(panel) {
           document.dispatchEvent(new CustomEvent('session-updated'));
         },
         msg => {
+          // Error
+          _jobId = null;
           _decActive();
+          progressArea.style.display = 'none';
+          progressFill.style.width = '0%';
           toast(`Zoom failed: ${msg}`, 'error');
         },
       );

@@ -416,6 +416,16 @@ def run_zoom_pipeline(job, source_path: str, settings: dict) -> None:
 
     shutil.copy2(source_path, job_dir / f"source{Path(source_path).suffix}")
 
+    # Clean up temp dir from video frame extraction (routes.py creates a mkdtemp
+    # when the source is a video; once we've copied the frame to job_dir it's safe
+    # to delete the temp dir regardless of how the job ends).
+    _tmp_dir = settings.pop("_tmp_dir", None)
+    if _tmp_dir:
+        try:
+            shutil.rmtree(_tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
     # Prepare WanGP request settings
     wangp_steps = int(settings.get("steps", 25))
     wangp_guidance = float(settings.get("guidance", 5.0))

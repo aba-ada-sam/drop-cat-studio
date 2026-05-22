@@ -25,16 +25,17 @@ async def zoom_make(request: Request):
     """Submit a zoom-in or zoom-out generation job.
 
     Body fields:
-      source_path  -- absolute path to photo OR video file
+      source_path    -- absolute path to photo OR video file
       zoom_direction -- "in" or "out" (default "out")
-      n_clips      -- 3-8 (default 5)
-      clip_duration -- seconds per clip before trim (default 5.0)
-      model_name   -- WanGP model (default Wan2.1-I2V-14B-480P)
-      steps        -- denoising steps (default 25)
-      idea         -- optional user description of the zoom content
-      skip_audio   -- bool (default false)
-      instrumental -- bool (default false)
-      music_prompt -- override music prompt
+      n_clips        -- number of chained clips (default 5)
+      clip_duration  -- seconds per clip before trim (default 4.0)
+      model_name     -- WanGP model (default LTX-2 Dev19B Distilled)
+      steps          -- denoising steps (default from model)
+      idea           -- optional description of what the zoom reveals
+      skip_audio     -- bool (default false)
+      instrumental   -- bool (default false)
+      audio_first    -- bool: generate music before clips for sync (default false)
+      music_prompt   -- override music prompt
     """
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
@@ -70,11 +71,12 @@ async def zoom_make(request: Request):
     _zoom_res = body.get("zoom_res") or _model_res
 
     # If source is a video, extract the appropriate frame first
+    _tmp_dir_to_clean: str | None = None
     ext = Path(source_path).suffix.lower()
     if ext in (".mp4", ".mov", ".avi", ".webm", ".mkv"):
         frame_pos = "last" if direction == "out" else "first"
-        tmp_dir = tempfile.mkdtemp(prefix="dcs_zoom_")
-        frame_png = os.path.join(tmp_dir, "start_frame.png")
+        _tmp_dir_to_clean = tempfile.mkdtemp(prefix="dcs_zoom_")
+        frame_png = os.path.join(_tmp_dir_to_clean, "start_frame.png")
         ok = extract_frame_from_video(source_path, frame_png, position=frame_pos)
         if not ok:
             return JSONResponse({"error": "Could not extract frame from video"}, status_code=422)
@@ -101,6 +103,7 @@ async def zoom_make(request: Request):
         "audio_first": bool(body.get("audio_first", False)),
         "upscale": bool(body.get("upscale", False)),
         "upscale_scale": float(body.get("upscale_scale", 2.0)),
+        "_tmp_dir": _tmp_dir_to_clean,
     }
 
     label = f"Zoom {direction}: {Path(source_path).stem[:20]}"
@@ -159,8 +162,8 @@ async def zoom_extend(request: Request):
 
     # Extract the continuation frame: last frame for zoom-out, first frame for zoom-in
     frame_pos = "last" if direction == "out" else "first"
-    tmp_dir = _tmp.mkdtemp(prefix="dcs_zoomext_")
-    frame_png = os.path.join(tmp_dir, "extend_frame.png")
+    _ext_tmp_dir = _tmp.mkdtemp(prefix="dcs_zoomext_")
+    frame_png = os.path.join(_ext_tmp_dir, "extend_frame.png")
     ok = extract_frame_from_video(existing_path, frame_png, position=frame_pos)
     if not ok:
         return JSONResponse({"error": "Could not extract frame from existing video"}, status_code=422)
@@ -195,6 +198,7 @@ async def zoom_extend(request: Request):
         "extend_base_path":   existing_path,
         "upscale":            bool(body.get("upscale", False)),
         "upscale_scale":      float(body.get("upscale_scale", 2.0)),
+        "_tmp_dir":           _ext_tmp_dir,
     }
 
     label = f"Extend zoom {direction}: {Path(existing_path).stem[:20]}"
