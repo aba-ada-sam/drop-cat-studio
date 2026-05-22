@@ -4,9 +4,9 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260507a';
-import { toast, apiFetch } from './shell/toast.js?v=20260503a';
+import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260509a';
 
 // Concurrency limiter for thumbnail extraction -- caps parallel <video> preloads.
 const _thumbQueue = { running: 0, max: 4, pending: [] };

@@ -4,7 +4,7 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { el, pathToUrl } from './components.js?v=20260507a';
-import { toast, apiFetch } from './shell/toast.js?v=20260503a';
+import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 import { handoff } from './handoff.js?v=20260422a';
 
 // Module-level so receiveHandoff can call _applyImageFn even after init

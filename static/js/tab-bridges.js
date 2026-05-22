@@ -4,9 +4,9 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260507a';
-import { toast } from './shell/toast.js?v=20260503a';
+import { toast } from './shell/toast.js?v=20260518a';
 import { handoff } from './handoff.js?v=20260422a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260503g';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260509a';
 
 let _items      = [];   // { path, name, kind, duration, analysis, prompt }
 let _activeMode = 'cinematic';

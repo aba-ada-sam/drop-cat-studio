@@ -9,7 +9,7 @@
  *  5. Results summary at the bottom
  */
 
-import { apiFetch, toast }          from './shell/toast.js?v=20260503a';
+import { apiFetch, toast }          from './shell/toast.js?v=20260518a';
 import { el }                       from './components.js?v=20260507a';
 import { pollJob }                  from './api.js?v=20260505e';
 

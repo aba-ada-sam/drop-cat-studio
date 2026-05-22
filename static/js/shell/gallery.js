@@ -3,7 +3,7 @@
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
 
-import { apiFetch, toast } from './toast.js?v=20260503a';
+import { apiFetch, toast } from './toast.js?v=20260518a';
 import { applySettingsToTab } from './ai-intent.js?v=20260503h';
 import { handoff } from '../handoff.js?v=20260422a';
 import { pathToUrl } from '../components.js?v=20260507a';

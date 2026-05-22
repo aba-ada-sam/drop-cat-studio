@@ -4,7 +4,7 @@
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
 import { createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js?v=20260507a';
-import { toast } from './shell/toast.js?v=20260503a';
+import { toast } from './shell/toast.js?v=20260518a';
 import { handoff } from './handoff.js?v=20260422a';
 
 let images = [];

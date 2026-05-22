@@ -216,10 +216,13 @@ async def lifespan(app: FastAPI):
     # Detect GPU VRAM via nvidia-smi (no torch import needed in main process)
     try:
         import subprocess as _sp2
-        _r = _sp2.run(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
-        )
+        def _detect_vram():
+            r = _sp2.run(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r
+        _r = await _asyncio.to_thread(_detect_vram)
         if _r.returncode == 0:
             _mb = int(_r.stdout.strip().splitlines()[0].strip())
             _g["gpu_vram_gb"] = round(_mb / 1024, 1)
