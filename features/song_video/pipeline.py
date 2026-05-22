@@ -31,22 +31,6 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-def _extract_audio_segment(audio_path: str, start_time: float, duration: float, out_path: str) -> str | None:
-    """Cut [start_time, start_time+duration] from audio as a stereo 44100 Hz WAV.
-
-    Transcoding to WAV avoids MP3 frame-boundary issues when seeking, and gives
-    LTX-2 a format it can reliably decode with torchaudio.
-    """
-    r = subprocess.run(
-        ["ffmpeg", "-y",
-         "-ss", f"{start_time:.4f}", "-t", f"{duration:.4f}",
-         "-i", audio_path,
-         "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
-         out_path],
-        capture_output=True, timeout=30,
-    )
-    return out_path if r.returncode == 0 and Path(out_path).exists() else None
-
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     """Extract the actual last frame of a video as a JPEG.
@@ -403,13 +387,6 @@ def _do_song_gpu_phase(
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
-    # Cumulative start times so each clip gets its corresponding audio segment
-    _clip_start_times: list[float] = []
-    _t = 0.0
-    for _d in clip_durations:
-        _clip_start_times.append(_t)
-        _t += _d
-
     for i, clip_prompt in enumerate(story_arc):
         if _stopped():
             break
@@ -658,12 +635,6 @@ def _do_song_gpu_phase(
         if concat_path not in (merged, *clip_paths):
             try:
                 os.remove(concat_path)
-            except Exception:
-                pass
-        # Remove per-clip audio segment WAVs (conditioning inputs, not output audio)
-        for seg in job_dir.glob("audio_seg_*.wav"):
-            try:
-                seg.unlink()
             except Exception:
                 pass
     else:
