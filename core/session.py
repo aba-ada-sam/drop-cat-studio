@@ -6,6 +6,8 @@ Sessions persist to projects/{session_id}/session.json.
 """
 import json
 import logging
+import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -46,8 +48,7 @@ class Session:
         self.created_at = time.time()
         self.files: dict[str, FileEntry] = {}
         self._dir = PROJECTS_DIR / self.id
-        # BUG-10: create the directory eagerly in __init__, not lazily on every
-        # .dir access. The property is now a cheap read-only accessor.
+        self._lock = threading.Lock()
         self._dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -57,15 +58,17 @@ class Session:
 
     def add_file(self, filename: str, kind: str, source: str, **meta):
         """Register a file (upload or output). Evicts oldest entries if at capacity."""
-        if len(self.files) >= MAX_SESSION_FILES and filename not in self.files:
-            oldest_key = min(self.files, key=lambda k: self.files[k].added_at)
-            del self.files[oldest_key]
-        self.files[filename] = FileEntry(filename, kind, source, **meta)
-        self._save()
+        with self._lock:
+            if len(self.files) >= MAX_SESSION_FILES and filename not in self.files:
+                oldest_key = min(self.files, key=lambda k: self.files[k].added_at)
+                del self.files[oldest_key]
+            self.files[filename] = FileEntry(filename, kind, source, **meta)
+            self._save()
 
     def remove_file(self, filename: str):
-        self.files.pop(filename, None)
-        self._save()
+        with self._lock:
+            self.files.pop(filename, None)
+            self._save()
 
     def get_videos(self) -> list[dict]:
         """Get all video files (for Bridges input picker)."""
@@ -103,7 +106,9 @@ class Session:
             "files": {k: v.to_dict() for k, v in self.files.items()},
         }
         path = self.dir / "session.json"
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(path))
 
     @classmethod
     def load(cls, session_id: str) -> "Session | None":

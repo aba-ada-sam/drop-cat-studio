@@ -26,7 +26,16 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+OUTPUT_DIR  = Path(__file__).resolve().parent.parent.parent / "output"
+
+
+def _is_within(child: Path, parent: Path) -> bool:
+    """Return True if child is inside parent (after resolving symlinks)."""
+    try:
+        child.relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def _image_payload(path: Path, name: str | None = None, size: int | None = None) -> dict:
@@ -92,8 +101,14 @@ async def scan_folder(request: Request):
 @router.get("/image")
 async def serve_image(path: str = Query(...)):
     from fastapi.responses import FileResponse
-    p = Path(path)
-    if not p.exists() or not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+    p = Path(path).resolve()
+    # Containment check: only serve files inside known safe directories.
+    # Prevents path traversal (e.g. "../../etc/passwd" with an .jpg extension).
+    _safe = (
+        _is_within(p, UPLOADS_DIR) or
+        _is_within(p, OUTPUT_DIR)
+    )
+    if not _safe or not p.exists() or not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
         raise HTTPException(404, "Image not found")
     return FileResponse(str(p))
 

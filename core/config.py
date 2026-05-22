@@ -8,6 +8,7 @@ bridge_, sd_, tools_).
 """
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -186,12 +187,16 @@ def load() -> dict:
 
 
 def save(data: dict):
-    """Merge data into existing config and write to disk."""
+    """Merge data into existing config and write atomically to disk."""
     with _lock:
         current = load()
         current.update(data)
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        # Atomic write: write to a sibling temp file then rename so a crash
+        # mid-write never leaves a partial config.json on disk.
+        tmp = CONFIG_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        os.replace(str(tmp), str(CONFIG_FILE))
         _invalidate()
 
 
