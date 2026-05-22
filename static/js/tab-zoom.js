@@ -40,12 +40,11 @@ export function init(panel) {
   let _activeCount  = 0;
   let _clipDur      = 8;
   let _numClips     = 0;
-  let _coverage     = 1.0;
-  let _qualityPx    = 360;
+  let _qualityPx    = 480;
   let _outW         = 640;
   let _outH         = 352;
-  let _steps        = 4;
-  let _guidance     = 7.5;
+  let _steps        = 8;
+  let _guidance     = 3.5;
   let _loopMode     = false;
   let _aiVariety    = true;
   let _loopCount    = 0;
@@ -530,14 +529,12 @@ export function init(panel) {
 
   function _refreshClipCount() {
     if (!_songDur) { clipSummaryEl.textContent = 'Drop a song in the Audio section above.'; _numClips = 0; _updateBtn(); return; }
-    const coveredDur = _songDur * _coverage;
-    const rawNeeded  = Math.ceil(coveredDur / _clipDur);
+    const rawNeeded = Math.ceil(_songDur / _clipDur);
     _numClips = Math.min(MAX_CLIPS, Math.max(1, rawNeeded));
     const m = Math.floor(_songDur / 60), s = Math.round(_songDur % 60);
     const secsPerClip = _qualityPx <= 360 ? 30 : (_qualityPx <= 480 ? 40 : 55);
     const estMin = Math.round(_numClips * secsPerClip / 60);
-    const loopNote = _coverage < 1.0 ? ` (loops ${(1 / _coverage).toFixed(1)}x)` : '';
-    clipSummaryEl.textContent = `${_numClips} clips${loopNote} -- est. ~${estMin} min for ${m}:${String(s).padStart(2, '0')} song`;
+    clipSummaryEl.textContent = `${_numClips} clips -- est. ~${estMin} min for ${m}:${String(s).padStart(2, '0')} song`;
     _updateBtn();
   }
 
@@ -561,31 +558,15 @@ export function init(panel) {
   const clipLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '8s' });
   clipSlider.addEventListener('input', () => { _clipDur = parseInt(clipSlider.value); clipLabel.textContent = `${_clipDur}s`; _refreshClipCount(); });
 
-  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '4', step: '1', style: 'flex:1; accent-color:var(--accent);' });
-  const stepsLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '4' });
+  const stepsSlider = el('input', { type: 'range', min: '4', max: '50', value: '8', step: '1', style: 'flex:1; accent-color:var(--accent);' });
+  const stepsLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '8' });
   stepsSlider.addEventListener('input', () => { _steps = parseInt(stepsSlider.value); stepsLabel.textContent = String(_steps); });
 
-  const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: '7.5', step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
-  const guidLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '7.5' });
+  const guidSlider = el('input', { type: 'range', min: '1', max: '20', value: '3.5', step: '0.5', style: 'flex:1; accent-color:var(--accent);' });
+  const guidLabel  = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600; min-width:26px; text-align:right;', text: '3.5' });
   guidSlider.addEventListener('input', () => { _guidance = parseFloat(guidSlider.value); guidLabel.textContent = String(_guidance); });
 
   const dimsLabel = el('span', { style: 'font-size:12px; color:var(--accent); font-weight:600;', text: `${_outW} x ${_outH}` });
-
-  const _COV_OPTIONS = [
-    { label: 'All unique',      value: 1.0,  title: 'Unique content all the way through' },
-    { label: '75% (1.3x loop)', value: 0.75, title: 'Loops 1.3x -- 25% faster to generate' },
-    { label: '50% (2x loop)',   value: 0.5,  title: 'Loops 2x -- 50% faster to generate' },
-  ];
-  const coverageRow = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
-  _COV_OPTIONS.forEach((opt, idx) => {
-    const btn = el('button', { style: CHIP_BASE + (idx === 0 ? CHIP_ON : ''), text: opt.label, title: opt.title });
-    btn.addEventListener('click', () => {
-      _coverage = opt.value;
-      coverageRow.querySelectorAll('button').forEach((b, i) => b.setAttribute('style', CHIP_BASE + (i === idx ? CHIP_ON : '')));
-      _refreshClipCount();
-    });
-    coverageRow.appendChild(btn);
-  });
 
   const advBody = el('div', { style: 'display:none; flex-direction:column; gap:10px; margin-top:4px;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
@@ -593,9 +574,6 @@ export function init(panel) {
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
       el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Quality' }), qualRow,
-    ]),
-    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap;' }, [
-      el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Coverage' }), coverageRow,
     ]),
     el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
       el('div', { style: 'font-size:11px; color:var(--text-3); width:76px; flex-shrink:0;', text: 'Steps' }), stepsSlider, stepsLabel,
@@ -878,7 +856,6 @@ export function init(panel) {
       model:          modelSel.value,
       clip_duration:  _clipDur,
       num_clips:      _numClips,
-      coverage_ratio: _coverage,
       steps:          _steps,
       guidance:       _guidance,
       output_width:   _outW,
