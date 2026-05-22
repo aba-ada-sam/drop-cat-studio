@@ -63,7 +63,7 @@ async def upload_videos(files: list[UploadFile] = File(...)):
             continue
         dest = UPLOADS_DIR / f"{uuid.uuid4().hex[:8]}_{f.filename}"
         data = await f.read()
-        dest.write_bytes(data)
+        await asyncio.to_thread(dest.write_bytes, data)
         from core.ffmpeg_utils import probe_file
         info = await asyncio.to_thread(probe_file, str(dest))
         saved.append({
