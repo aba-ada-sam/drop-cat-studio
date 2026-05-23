@@ -188,7 +188,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.path.startswith("/start/"):
                 name = self.path.rsplit("/", 1)[-1]
                 _start_service(name)
-                self._send_ui(output=f"Starting {name}...")
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             elif self.path == "/run":
                 cmd = params.get("cmd", "").strip()
                 res = _run_ps(cmd) if cmd else {}
