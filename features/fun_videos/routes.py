@@ -582,9 +582,9 @@ def _get_pick_to_model() -> dict:
     from app import _g as _app_g
     gpu_vram = _app_g.get("gpu_vram_gb") or 0
     if not gpu_vram or gpu_vram >= 20:
-        action_model = "LTX-2 Dev13B"         # full res, needs 24GB
+        action_model = "LTX-2 Dev13B"             # needs 24GB+
     else:
-        action_model = "LTX-2 Dev13B 360P"    # 480P: real kinetic action, fits 16GB
+        action_model = "LTX-2 Dev19B Distilled"   # only model confirmed working on 16GB
     return {
         "calm":         ("LTX-2 Dev19B Distilled", "calm"),
         "action":       (action_model,              "dynamic"),
@@ -874,7 +874,7 @@ async def make_it(request: Request):
     }
 
     if photo_path:
-        label = f"Fun Video: {Path(photo_path).stem[:20]}"
+        label = f"Create Video: {Path(photo_path).stem[:20]}"
     else:
         label = f"T2V: {settings.get('video_prompt', '')[:24]}"
     try:
