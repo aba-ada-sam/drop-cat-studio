@@ -1869,12 +1869,20 @@ def run_multi_pipeline(job, photo_path, settings):
           # different-looking subject than the source photo.
           if subject_anchor and not clip_prompt.lower().startswith(subject_anchor[:20].lower()):
               clip_prompt = subject_anchor + " " + clip_prompt
-          finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
           clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
+          # For chained clips, lock the scene so the model continues from the
+          # anchor frame rather than drifting to a new composition. Same pattern
+          # as song_video pipeline which has consistent clip continuity.
+          if i > 0 and clip_start_image and clip_start_image != prepped_photo:
+              clip_prompt = "Exact same location and subject as previous frame, continuous scene. " + clip_prompt
+          finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
           clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-          effective_guidance = guidance
+          # Chained clips: lower guidance so start frame dominates over text.
+          # 7.5 lets text override the anchor frame and teleport subjects.
+          # 3.5 keeps camera steering from text while locking scene identity.
+          effective_guidance = guidance if (i == 0 or not clip_start_image or clip_start_image == prepped_photo) else min(guidance, 3.5)
 
           clip_path = None
           for _attempt in range(2):

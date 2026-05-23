@@ -504,6 +504,9 @@ def _run_zoom_body(
             dur = float(clip_spec.get("duration", clip_dur))
             # Add trim compensation so the trimmed clip is the right length
             gen_dur = dur / _CHAIN_TRIM_RATIO
+            # Lock scene for chained clips so model continues from anchor frame
+            if i > 0 and prev_frame and prev_frame != source_path:
+                prompt = "Exact same location, continuous scene, " + prompt
 
             pct = int(pct_start + i * pct_per_clip)
             job.update(progress=pct,
@@ -540,13 +543,15 @@ def _run_zoom_body(
                 if _stopped():
                     return
                 try:
+                    # Chained clips: cap guidance so start frame dominates
+                    _eff_guidance = wangp_guidance if (i == 0 or prev_frame == source_path) else min(wangp_guidance, 3.5)
                     result = video_generator.generate_video(
                         image_path=prepped,
                         out_path=clip_out,
                         prompt=prompt,
                         model_name=model_name,
                         steps=wangp_steps,
-                        guidance=wangp_guidance,
+                        guidance=_eff_guidance,
                         duration=gen_dur,
                         seed=-1,
                         negative_prompt=video_generator.negative_prompt_for(model_name, "calm"),
