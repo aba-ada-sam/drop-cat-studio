@@ -1665,8 +1665,8 @@ async def enhance_prompt(request: Request):
 
     def _call():
         return llm.route(
+            [{"role": "user", "content": raw}],
             system=system,
-            user=raw,
             tier=TIER_FAST,
             max_tokens=200,
         )
