@@ -465,28 +465,29 @@ async def services_status():
 @app.get("/api/satellite/status")
 async def satellite_status():
     """Ping the 3060 relay and return its service status."""
-    import urllib.request as _ur
-    import time as _time
     host = cfg.get("satellite_host", "").strip()
     if not host:
         return JSONResponse({"connected": False, "host": "", "services": {}})
-    base = f"http://{host}:9999"
-    try:
-        t0 = _time.time()
+
+    def _check():
+        import urllib.request as _ur
+        import time as _t
+        base = f"http://{host}:9999"
+        t0 = _t.time()
         with _ur.urlopen(f"{base}/ping", timeout=3) as r:
-            ping = json.loads(r.read())
-        latency = int((_time.time() - t0) * 1000)
+            ping = _json_std.loads(r.read())
         if not ping.get("ok"):
             raise ValueError("bad ping")
+        latency = int((_t.time() - t0) * 1000)
         with _ur.urlopen(f"{base}/services", timeout=5) as r:
-            services = json.loads(r.read())
-        return JSONResponse({
-            "connected": True, "host": host,
-            "latency_ms": latency, "services": services,
-        })
+            services = _json_std.loads(r.read())
+        return {"connected": True, "host": host, "latency_ms": latency, "services": services}
+
+    try:
+        result = await asyncio.to_thread(_check)
+        return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"connected": False, "host": host,
-                             "error": str(e), "services": {}})
+        return JSONResponse({"connected": False, "host": host, "error": str(e), "services": {}})
 
 
 @app.get("/api/gpu/status")
