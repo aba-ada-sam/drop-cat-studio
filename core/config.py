@@ -24,8 +24,14 @@ DEFAULTS: dict = {
     "wan_model": "LTX-2 Dev19B Distilled",
     "resolution": "480p",
     "acestep_root": "",
-    "acestep_host": "localhost",    # set to remote IP to use ACE-Step on another machine
+    "acestep_host": "localhost",    # set to remote IP/hostname to use ACE-Step on another machine
     "satellite_host": "",           # IP of the 3060 relay (port 9999); blank = no satellite
+    # Auto-discovery for satellite-hosted services (ACE-Step, Ollama, Forge):
+    # when the configured host is remote (not localhost) and unreachable, try
+    # these hostnames via the OS resolver, then sweep the local /24 subnet.
+    # Successful discovery is written back to the host config key.
+    "auto_discover_satellite": True,
+    "satellite_hostnames": ["study", "study.local", "dcs-satellite", "dcs-satellite.local"],
 
     # -- LLM Provider -----------------------------------------------------
     "llm_provider": "anthropic",      # anthropic | openai | ollama | auto

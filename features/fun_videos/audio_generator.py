@@ -20,10 +20,36 @@ ACESTEP_PORT = 8020
 _ACESTEP_DEFAULT = f"http://127.0.0.1:{ACESTEP_PORT}"
 
 def _api_base() -> str:
-    """Return the ACE-Step base URL, reading host from config so remote mode works."""
+    """Return the ACE-Step base URL, reading host from config so remote mode works.
+
+    When the configured host is remote and auto-discovery is enabled, falls back
+    to LAN discovery (hostname hints + subnet sweep) so the satellite's DHCP IP
+    can change without breaking the link.
+    """
     try:
         from core import config as _cfg
         host = (_cfg.get("acestep_host") or "localhost").strip()
+        if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
+            return f"http://{host}:{ACESTEP_PORT}"
+
+        if not _cfg.get("auto_discover_satellite"):
+            return f"http://{host}:{ACESTEP_PORT}"
+
+        from core import satellite_discovery as _disc
+        found = _disc.discover(
+            port=ACESTEP_PORT,
+            health_path="/health",
+            cached_host=host,
+            hostname_hints=_cfg.get("satellite_hostnames"),
+            log_label="acestep",
+        )
+        if found:
+            if found != host:
+                try:
+                    _cfg.set_val("acestep_host", found)
+                except Exception:
+                    pass
+            return f"http://{found}:{ACESTEP_PORT}"
         return f"http://{host}:{ACESTEP_PORT}"
     except Exception:
         return _ACESTEP_DEFAULT

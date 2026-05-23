@@ -21,10 +21,39 @@ _FORGE_DEFAULT = f"http://127.0.0.1:{FORGE_PORT}"
 
 
 def _forge_url() -> str:
-    """Return the current Forge base URL from config (hot-reloads on Settings change)."""
+    """Return the current Forge base URL from config (hot-reloads on Settings change).
+
+    Auto-discovers on LAN when the configured host is remote and unreachable
+    (only when auto_discover_satellite is True).
+    """
     try:
         from core import config as _cfg
-        return (_cfg.get("forge_url") or _FORGE_DEFAULT).rstrip("/")
+        raw = (_cfg.get("forge_url") or _FORGE_DEFAULT).rstrip("/")
+        from urllib.parse import urlparse
+        p = urlparse(raw)
+        host = (p.hostname or "127.0.0.1")
+        port = p.port or FORGE_PORT
+        if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
+            return raw
+        if not _cfg.get("auto_discover_satellite"):
+            return raw
+        from core import satellite_discovery as _disc
+        found = _disc.discover(
+            port=port,
+            # Forge has no /health; use /sdapi/v1/options which is cheap and always 200 when alive.
+            health_path="/sdapi/v1/options",
+            cached_host=host,
+            hostname_hints=_cfg.get("satellite_hostnames"),
+            log_label="forge",
+        )
+        if found and found != host:
+            new_url = f"{p.scheme or 'http'}://{found}:{port}"
+            try:
+                _cfg.set_val("forge_url", new_url)
+            except Exception:
+                pass
+            return new_url
+        return raw
     except Exception:
         return _FORGE_DEFAULT
 

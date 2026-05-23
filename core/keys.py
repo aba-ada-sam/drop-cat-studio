@@ -51,10 +51,49 @@ def save_keys(**kwargs):
         cfg.save(updates)
 
 
-# -- Ollama helpers (unchanged) ------------------------------------------------
+# -- Ollama helpers ------------------------------------------------
+
+def _split_url(url: str) -> tuple[str, str, int, str]:
+    """Crude URL splitter: returns (scheme, host, port, path)."""
+    from urllib.parse import urlparse
+    p = urlparse(url)
+    scheme = p.scheme or "http"
+    host = p.hostname or "localhost"
+    port = p.port or (443 if scheme == "https" else 80)
+    return scheme, host, port, (p.path or "")
+
 
 def get_ollama_host() -> str:
-    return cfg.get("ollama_host") or "http://localhost:11434"
+    """Return the Ollama base URL. Auto-discovers on LAN when the configured
+    host is remote and unreachable (only when auto_discover_satellite is True)."""
+    raw = cfg.get("ollama_host") or "http://localhost:11434"
+    try:
+        scheme, host, port, _ = _split_url(raw)
+    except Exception:
+        return raw
+    if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
+        return raw
+    if not cfg.get("auto_discover_satellite"):
+        return raw
+    try:
+        from core import satellite_discovery as _disc
+        found = _disc.discover(
+            port=port,
+            health_path="/api/tags",
+            cached_host=host,
+            hostname_hints=cfg.get("satellite_hostnames"),
+            log_label="ollama",
+        )
+    except Exception:
+        return raw
+    if not found or found == host:
+        return raw
+    new_url = f"{scheme}://{found}:{port}"
+    try:
+        cfg.set_val("ollama_host", new_url)
+    except Exception:
+        pass
+    return new_url
 
 
 def get_ollama_models() -> list[str]:
