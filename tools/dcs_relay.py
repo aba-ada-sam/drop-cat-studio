@@ -50,7 +50,7 @@ def _check_service(url: str) -> tuple[bool, int]:
     import time
     t0 = time.time()
     try:
-        urllib.request.urlopen(url, timeout=3)
+        urllib.request.urlopen(url, timeout=1)
         return True, int((time.time() - t0) * 1000)
     except Exception:
         return False, 0
@@ -66,6 +66,22 @@ def _service_status() -> dict:
             "latency_ms": ms,
         }
     return result
+
+
+def _start_service(name):
+    py = _run_ps("(Get-Command python -ErrorAction SilentlyContinue).Source").get("out", "").strip()
+    if not py:
+        py = "Z:/Python310/python.exe"
+    cmds = {
+        "relay":   [py, r"C:\DCS-satellite\dcs_relay.py"],
+        "acestep": ["cmd", "/c", r"C:\DCS-satellite\start_acestep.bat"],
+        "ollama":  ["ollama", "serve"],
+        "forge":   ["cmd", "/c", r"C:\pinokio\api\forge.pinokio\app\webui-user.bat"],
+    }
+    c = cmds.get(name)
+    if c:
+        subprocess.Popen(c, creationflags=0x08000000)
+        _log(f"Started {name}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -85,7 +101,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/ping":
+        if self.path in ("/", "/ui"):
+            self._send_ui()
+        elif self.path == "/ping":
             self._respond({"ok": True, "machine": "3060"})
         elif self.path == "/services":
             self._respond(_service_status())
@@ -95,8 +113,93 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._respond({"error": "not found"}, 404)
 
+    def _send_ui(self, output="", cmd=""):
+        svcs = _service_status()
+        rows = ""
+        for name, info in svcs.items():
+            alive = info["state"] == "running"
+            dot = "on" if alive else "off"
+            lat = (str(info["latency_ms"]) + "ms") if alive else "--"
+            action = "Restart" if alive else "Start"
+            rows += (
+                '<div class="s">'
+                '<div class="d ' + dot + '"></div>'
+                '<div class="n">' + name + '</div>'
+                '<div class="l">' + lat + '</div>'
+                '<form method="POST" action="/start/' + name + '">'
+                '<button>' + action + '</button></form></div>'
+            )
+        out_html = "<pre>" + output + "</pre>" if output else ""
+        ts = datetime.now().strftime("%H:%M:%S")
+        css = (
+            "body{font-family:monospace;background:#0d0606;color:#f0e6d0;padding:20px;max-width:580px;margin:0 auto}"
+            "h2{color:#d4a017;margin:0 0 4px}"
+            "p.sub{color:#666;font-size:11px;margin:0 0 12px}"
+            ".s{display:flex;align-items:center;gap:10px;padding:8px 12px;margin:5px 0;"
+            "background:#1a0f0f;border:1px solid #3a2020;border-radius:6px}"
+            ".d{width:9px;height:9px;border-radius:50%;flex-shrink:0}"
+            ".on{background:#4caf50;box-shadow:0 0 5px #4caf50}.off{background:#c41e3a}"
+            ".n{flex:1}.l{font-size:11px;color:#555;min-width:44px;text-align:right}"
+            "form{display:inline}"
+            "button{padding:3px 10px;border:1px solid #d4a017;border-radius:3px;"
+            "background:transparent;color:#d4a017;cursor:pointer;font-family:monospace;font-size:11px}"
+            "button:hover{background:#d4a017;color:#000}"
+            ".box{background:#1a0f0f;border:1px solid #3a2020;border-radius:5px;padding:10px;margin-top:14px}"
+            "textarea{width:100%;box-sizing:border-box;background:#0d0606;border:1px solid #3a2020;"
+            "color:#f0e6d0;padding:6px;font-family:monospace;font-size:11px;border-radius:3px}"
+            "pre{background:#0d0606;border:1px solid #222;padding:7px;border-radius:3px;"
+            "white-space:pre-wrap;word-break:break-all;font-size:10px;color:#aaa;"
+            "max-height:200px;overflow-y:auto;margin:6px 0 0}"
+        )
+        page = (
+            "<!DOCTYPE html><html><head><title>DCS 3060</title>"
+            "<meta http-equiv='refresh' content='15'>"
+            "<style>" + css + "</style></head><body>"
+            "<h2>DCS 3060 Control Panel</h2>"
+            "<p class='sub'>Auto-refreshes 15s &bull; " + ts + "</p>"
+            + rows +
+            "<div class='box'><b style='color:#d4a017'>PowerShell:</b><br><br>"
+            "<form method='POST' action='/run'>"
+            "<textarea name='cmd' rows='3'>" + cmd + "</textarea><br>"
+            "<button type='submit' style='margin-top:5px'>Run</button>"
+            "</form>" + out_html + "</div>"
+            "</body></html>"
+        )
+        body = page.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
-        body = self._read_body()
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+
+        # UI form posts (Content-Type: application/x-www-form-urlencoded)
+        ct = self.headers.get("Content-Type", "")
+        if "urlencoded" in ct:
+            import urllib.parse
+            params = dict(urllib.parse.parse_qsl(raw.decode()))
+
+            if self.path.startswith("/start/"):
+                name = self.path.rsplit("/", 1)[-1]
+                _start_service(name)
+                self._send_ui(output=f"Starting {name}...")
+            elif self.path == "/run":
+                cmd = params.get("cmd", "").strip()
+                res = _run_ps(cmd) if cmd else {}
+                out = (res.get("out") or "") + (res.get("err") or "")
+                self._send_ui(output=out, cmd=cmd)
+            else:
+                self._send_ui()
+            return
+
+        # JSON API (original relay protocol)
+        try:
+            body = json.loads(raw)
+        except Exception:
+            body = {}
         if self.path == "/run":
             cmd = body.get("cmd", "")
             _log(f"RUN: {cmd[:120]}")
