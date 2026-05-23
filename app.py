@@ -465,7 +465,7 @@ async def services_status():
 @app.get("/api/satellite/status")
 async def satellite_status():
     """Ping the 3060 relay and return its service status."""
-    host = cfg.get("satellite_host", "").strip()
+    host = (cfg.get("satellite_host") or "").strip()
     if not host:
         return JSONResponse({"connected": False, "host": "", "services": {}})
 
