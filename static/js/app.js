@@ -601,7 +601,7 @@ function _applyLLMState(llm) {
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
+    const fields = ['wan2gp_root','acestep_root','acestep_host','satellite_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
@@ -1195,6 +1195,42 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   pollGpuIndicator();
   setInterval(pollGpuIndicator, 3000);
+
+  // -- Satellite node status pill --------------------------------------------
+  const _satPill  = document.getElementById('satellite-pill');
+  const _satDot   = document.getElementById('satellite-dot');
+  const _satLabel = document.getElementById('satellite-label');
+
+  async function pollSatellite() {
+    try {
+      const r = await fetch('/api/satellite/status', { cache: 'no-store' });
+      const d = await r.json();
+
+      if (!d.host) { _satPill.style.display = 'none'; return; }
+
+      _satPill.style.display = 'inline-flex';
+
+      if (d.connected) {
+        const svcs    = d.services || {};
+        const running = Object.values(svcs).filter(s => s.state === 'running').length;
+        const total   = Object.keys(svcs).length;
+        _satDot.style.background    = '#4caf50';
+        _satDot.style.boxShadow     = '0 0 5px #4caf50';
+        _satLabel.textContent       = `Node  ${running}/${total}`;
+        _satPill.title              = [
+          `Satellite node: ${d.host}  (${d.latency_ms}ms)`,
+          ...Object.entries(svcs).map(([n, s]) => `  ${n}: ${s.state}`),
+        ].join('\n');
+      } else {
+        _satDot.style.background    = '#c41e3a';
+        _satDot.style.boxShadow     = '';
+        _satLabel.textContent       = 'Node offline';
+        _satPill.title              = `Satellite ${d.host} not reachable`;
+      }
+    } catch (_) { /* silent */ }
+  }
+  pollSatellite();
+  setInterval(pollSatellite, 8000);
 
   // -- Sidebar job feed ------------------------------------------------------
   const _feedEl = document.getElementById('job-feed');

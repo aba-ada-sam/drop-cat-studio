@@ -97,6 +97,14 @@
         </div>
 
         <div class="header-right">
+          <button id="satellite-pill" title="3060 satellite node -- click for details"
+            style="display:none;align-items:center;gap:5px;padding:3px 9px;
+                   background:var(--surface-2);border:1px solid var(--border-1);
+                   border-radius:14px;font-size:.72rem;color:var(--text-muted);
+                   margin-right:8px;cursor:pointer;user-select:none;">
+            <span id="satellite-dot" style="width:6px;height:6px;border-radius:50%;background:#555;"></span>
+            <span id="satellite-label">Node</span>
+          </button>
           <div id="gpu-indicator" title="Which service currently holds the GPU"
                style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:var(--surface-2);
                       border:1px solid var(--border-1);border-radius:14px;font-size:.72rem;
@@ -298,6 +306,13 @@
           <div class="form-group">
             <label for="cfg-acestep_host">ACE-Step Host <span class="hint-text">-- localhost, or remote IP (e.g. 192.168.1.50) to use another machine</span></label>
             <input type="text" id="cfg-acestep_host" placeholder="localhost" autocomplete="off">
+          </div>
+        </div>
+        <div class="settings-section">
+          <h4 class="settings-section-label">Satellite Node (3060)</h4>
+          <div class="form-group">
+            <label for="cfg-satellite_host">Node IP <span class="hint-text">-- IP of the 3060 machine running dcs_relay.py (port 9999). Blank = no satellite.</span></label>
+            <input type="text" id="cfg-satellite_host" placeholder="e.g. 192.168.1.50" autocomplete="off">
           </div>
         </div>
         <div class="settings-section">

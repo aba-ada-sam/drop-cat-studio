@@ -462,6 +462,33 @@ async def services_status():
     return JSONResponse(content=svc.get_status(), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/satellite/status")
+async def satellite_status():
+    """Ping the 3060 relay and return its service status."""
+    import urllib.request as _ur
+    import time as _time
+    host = cfg.get("satellite_host", "").strip()
+    if not host:
+        return JSONResponse({"connected": False, "host": "", "services": {}})
+    base = f"http://{host}:9999"
+    try:
+        t0 = _time.time()
+        with _ur.urlopen(f"{base}/ping", timeout=3) as r:
+            ping = json.loads(r.read())
+        latency = int((_time.time() - t0) * 1000)
+        if not ping.get("ok"):
+            raise ValueError("bad ping")
+        with _ur.urlopen(f"{base}/services", timeout=5) as r:
+            services = json.loads(r.read())
+        return JSONResponse({
+            "connected": True, "host": host,
+            "latency_ms": latency, "services": services,
+        })
+    except Exception as e:
+        return JSONResponse({"connected": False, "host": host,
+                             "error": str(e), "services": {}})
+
+
 @app.get("/api/gpu/status")
 async def gpu_status():
     """Which service currently owns the GPU + recent eviction history."""

@@ -25,6 +25,7 @@ DEFAULTS: dict = {
     "resolution": "480p",
     "acestep_root": "",
     "acestep_host": "localhost",    # set to remote IP to use ACE-Step on another machine
+    "satellite_host": "",           # IP of the 3060 relay (port 9999); blank = no satellite
 
     # -- LLM Provider -----------------------------------------------------
     "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
