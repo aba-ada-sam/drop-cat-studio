@@ -33,7 +33,7 @@ Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\DCS-satell
 
 ```powershell
 # ACE-Step
-try { (Invoke-WebRequest -Uri "http://localhost:8019/health" -UseBasicParsing -TimeoutSec 5).StatusCode } catch { "NOT RESPONDING" }
+try { (Invoke-WebRequest -Uri "http://localhost:8020/health" -UseBasicParsing -TimeoutSec 5).StatusCode } catch { "NOT RESPONDING" }
 
 # Ollama
 try { (Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -UseBasicParsing -TimeoutSec 5).StatusCode } catch { "NOT RESPONDING" }
@@ -63,7 +63,7 @@ If the path is wrong, update the startup script:
 ```powershell
 $aceRoot = "ACTUAL_PATH_HERE"  # replace with path containing acestep\api_server.py
 $python = (Get-ChildItem $aceRoot -Recurse -Depth 3 -Filter "python.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-"@echo off`r`ncd /d `"$aceRoot`"`r`n`"$python`" acestep\api_server.py --host 0.0.0.0 --port 8019" | Out-File "C:\DCS-satellite\start_acestep.bat" -Encoding utf8
+"@echo off`r`ncd /d `"$aceRoot`"`r`n`"$python`" acestep\api_server.py --host 0.0.0.0 --port 8020" | Out-File "C:\DCS-satellite\start_acestep.bat" -Encoding utf8
 Start-Process "C:\DCS-satellite\start_acestep.bat" -WindowStyle Minimized
 ```
 

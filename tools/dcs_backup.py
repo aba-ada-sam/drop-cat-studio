@@ -17,7 +17,7 @@ PORT = 9998
 
 SERVICES = {
     "relay":   "http://localhost:9999/ping",
-    "acestep": "http://localhost:8019/health",
+    "acestep": "http://localhost:8020/health",
     "ollama":  "http://localhost:11434/api/tags",
     "forge":   "http://localhost:7861/sdapi/v1/sd-models",
 }
@@ -159,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif name == "acestep":
                     subprocess.Popen(["cmd", "/c", r"C:\DCS-satellite\start_acestep.bat"],
                                      creationflags=0x08000000)
-                    out = "ACE-Step starting on port 8019..."
+                    out = "ACE-Step starting on port 8020..."
                 elif name == "forge":
                     subprocess.Popen(["cmd", "/c",
                                       r"C:\pinokio\api\forge.pinokio\app\webui-user.bat"],

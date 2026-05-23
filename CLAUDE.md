@@ -211,7 +211,7 @@ Beat-sync pipeline used by Phase 0. Key functions:
 | Service | Port | Purpose | Startup |
 |---------|------|---------|---------|
 | WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
-| ACE-Step | 8019 | Music generation | Deferred — only starts when music is needed (keeps VRAM free for Ollama) |
+| ACE-Step | 8020 | Music generation | Deferred — only starts when music is needed (keeps VRAM free for Ollama) |
 | Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
 | Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
 

@@ -57,7 +57,7 @@ This machine has a full AI video + image production stack already running. That 
 ## AI Music Generation — ACE-Step
 
 - **Location**: `C:\DropCatGo-Music\ACE-Step-1.5`
-- **Port**: 8019
+- **Port**: 8020
 - **What it does**: Generates music from text prompts. Outputs MP3 or WAV.
 - **Configurable**: Steps, guidance scale, instrumental vs. vocal, output format
 - **GPU**: Local, no per-generation cost
@@ -139,7 +139,7 @@ These are all in `C:\Users\andre\Desktop\AI Editors\DropCat-Studio\`.
 | 7860 | Drop Cat Go Studio (FastAPI) | Runs when launched via `launch.bat` |
 | 7861 | Forge Stable Diffusion | Runs when Andrew starts Forge manually |
 | 7899 | WanGP video worker | Starts automatically when DropCat launches |
-| 8019 | ACE-Step music worker | Starts automatically when DropCat launches |
+| 8020 | ACE-Step music worker | Starts automatically when DropCat launches |
 | 11434 | Ollama | Always running (system service) |
 
 **Open Claw should avoid port 7860** and pick something else (e.g., 7870, 8080, 8888).

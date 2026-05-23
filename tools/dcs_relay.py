@@ -22,7 +22,7 @@ PORT = 9999
 LOG  = Path("C:/DCS-satellite/relay_log.txt")
 
 SERVICES = {
-    "acestep": {"url": "http://localhost:8019/health",           "port": 8019},
+    "acestep": {"url": "http://localhost:8020/health",           "port": 8020},
     "forge":   {"url": "http://localhost:7861/sdapi/v1/sd-models","port": 7861},
 }
 

@@ -1,6 +1,6 @@
 """ACE-Step audio generation client for Create Videos.
 
-Calls the ACE-Step REST API on port 8019 to generate music/audio.
+Calls the ACE-Step REST API on port 8020 to generate music/audio.
 Based on the battle-tested DropCatGo-Fun-Videos_w_Audio/audio_generator.py.
 """
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-ACESTEP_PORT = 8019
+ACESTEP_PORT = 8020
 _ACESTEP_DEFAULT = f"http://127.0.0.1:{ACESTEP_PORT}"
 
 def _api_base() -> str:

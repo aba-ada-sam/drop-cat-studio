@@ -36,12 +36,12 @@ get results back without any user involvement.
 ## Then do the full satellite setup without asking anything
 
 1. Find what is installed in C:\pinokio\api\
-2. Get ACE-Step running on 0.0.0.0:8019
+2. Get ACE-Step running on 0.0.0.0:8020
 3. Get Ollama running on 0.0.0.0:11434 (set OLLAMA_HOST env var)
 4. Get Forge running on 0.0.0.0:7861 with --listen --api
 5. Create C:\DCS-satellite\start_all.bat
 6. Add to Windows startup
-7. Open firewall ports 8019, 11434, 7861
+7. Open firewall ports 8020, 11434, 7861
 8. Write this machine IP + service status to Z:\My Drive\DCS-Relay\chat.txt
 
 ## What this machine is for

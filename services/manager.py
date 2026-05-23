@@ -217,7 +217,7 @@ def http_get(url: str, timeout: int = 5) -> dict | None:
 
 # -- ACE-Step -----------------------------------------------------------------
 
-ACESTEP_PORT = 8019
+ACESTEP_PORT = 8020
 
 
 def _acestep_host() -> str:
@@ -758,7 +758,7 @@ def kill_orphans_at_startup() -> None:
     GPU subprocesses (which the OS has not yet finished tearing down) can't
     keep VRAM hostage and force the user to wait for the old job to complete.
 
-    Fast path: netstat + taskkill /F /T on ports 7899 and 8019 (~1s).
+    Fast path: netstat + taskkill /F /T on ports 7899 and 8020 (~1s).
     Backstop: WMIC command-line scan for orphans on different ports (~10s).
     """
     log.info("Evicting any orphan GPU workers from prior session...")

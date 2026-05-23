@@ -25,7 +25,7 @@ echo.
 
 REM -- Step 1: Firewall rules (instant) --
 echo [1/7] Opening firewall ports...
-netsh advfirewall firewall add rule name="DCS ACE-Step" dir=in action=allow protocol=TCP localport=8019 >nul 2>&1
+netsh advfirewall firewall add rule name="DCS ACE-Step" dir=in action=allow protocol=TCP localport=8020 >nul 2>&1
 netsh advfirewall firewall add rule name="DCS Ollama"   dir=in action=allow protocol=TCP localport=11434 >nul 2>&1
 netsh advfirewall firewall add rule name="DCS Forge"    dir=in action=allow protocol=TCP localport=7861 >nul 2>&1
 echo     Done.
@@ -121,21 +121,21 @@ IF "!PYTHON!"=="" (
         (
             echo @echo off
             echo cd /d "!ACE_ROOT!"
-            echo uv run --no-sync python acestep\api_server.py --host 0.0.0.0 --port 8019
+            echo uv run --no-sync python acestep\api_server.py --host 0.0.0.0 --port 8020
         ) > "C:\DCS-satellite\start_acestep.bat"
     ) ELSE (
         echo     WARNING: No Python found for ACE-Step. Startup script may need manual fixing.
         (
             echo @echo off
             echo cd /d "!ACE_ROOT!"
-            echo python acestep\api_server.py --host 0.0.0.0 --port 8019
+            echo python acestep\api_server.py --host 0.0.0.0 --port 8020
         ) > "C:\DCS-satellite\start_acestep.bat"
     )
 ) ELSE (
     (
         echo @echo off
         echo cd /d "!ACE_ROOT!"
-        echo "!PYTHON!" acestep\api_server.py --host 0.0.0.0 --port 8019
+        echo "!PYTHON!" acestep\api_server.py --host 0.0.0.0 --port 8020
     ) > "C:\DCS-satellite\start_acestep.bat"
 )
 echo     Created C:\DCS-satellite\start_acestep.bat

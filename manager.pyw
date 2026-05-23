@@ -824,7 +824,7 @@ def _shutdown(srv: "ServerManager") -> None:
 
     # 1. Kill GPU workers + Forge by port (fast -- catches LISTENING processes)
     _kill_procs_on_port(7899, "WanGP")
-    _kill_procs_on_port(8019, "ACE-Step")
+    _kill_procs_on_port(8020, "ACE-Step")
     _kill_procs_on_port(7861, "Forge")
 
     # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
