@@ -23,7 +23,6 @@ LOG  = Path("C:/DCS-satellite/relay_log.txt")
 
 SERVICES = {
     "acestep": {"url": "http://localhost:8019/health",           "port": 8019},
-    "ollama":  {"url": "http://localhost:11434/api/tags",        "port": 11434},
     "forge":   {"url": "http://localhost:7861/sdapi/v1/sd-models","port": 7861},
 }
 
@@ -80,7 +79,6 @@ def _start_service(name):
     cmds = {
         "relay":   [py, r"C:\DCS-satellite\dcs_relay.py"],
         "acestep": ["cmd", "/c", r"C:\DCS-satellite\start_acestep.bat"],
-        "ollama":  ["ollama", "serve"],
         "forge":   ["cmd", "/c", r"C:\pinokio\api\forge.pinokio\app\webui-user.bat"],
     }
     c = cmds.get(name)
