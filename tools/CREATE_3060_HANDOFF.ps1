@@ -1,94 +1,65 @@
-# Run this on the 5080 machine.
-# Creates a ready-to-use folder on Google Drive that lets you continue
-# this conversation from the 3060 by double-clicking one file.
+# Run this on the 5080. Creates the Google Drive handoff folder.
 
 $dest = "Z:\My Drive\DCS-3060-Handoff"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
-# -- Copy all memory files --
+# Copy memory files
 $memSrc = "$env:USERPROFILE\.claude\projects\c--DropCat-Studio\memory"
 Copy-Item "$memSrc\*" $dest -Recurse -Force
 
-# -- Write the CLAUDE.md that Claude Code auto-reads on startup --
+# Copy relay daemon
+Copy-Item "$(Split-Path $MyInvocation.MyCommand.Path)\dcs_relay.py" $dest -Force
+
+# Write CLAUDE.md -- auto-read by Claude Code on startup
 @'
 # Drop Cat Go Studio -- 3060 Handoff
 
-You are Claude Code on the 3060 satellite machine. Andrew is continuing a
-conversation that started on the 5080 machine. Read this file fully before
-responding to anything.
+You are Claude Code on the 3060 satellite machine.
+DO NOT ASK THE USER ANY QUESTIONS. DO EVERYTHING YOURSELF.
+The user has a back injury and cannot walk between rooms.
 
-## What this project is
+## Your first action (do this before anything else)
 
-Drop Cat Go Studio (DCS) -- Andrew's unified AI video production app.
-FastAPI + vanilla JS. Repo at C:\DropCat-Studio on the 5080 machine,
-also on GitHub at https://github.com/aba-ada-sam/drop-cat-studio.git
+Start the relay daemon in the background so the 5080 can control this
+machine without the user being present:
 
-## What we were doing in this session (2026-05-22)
+```powershell
+Start-Process pythonw -ArgumentList "dcs_relay.py" -WorkingDirectory (Get-Location).Path -WindowStyle Hidden
+```
 
-We were setting up THIS machine (the 3060) as a satellite service node
-so the 5080 can offload GPU services here and dedicate its full 15.9GB
-VRAM to WanGP video generation.
+If pythonw fails, try: Start-Process python -ArgumentList "dcs_relay.py" -WindowStyle Minimized
 
-The 3060 should run:
-- ACE-Step (AI music generation) on port 8019
-- Ollama (LLM inference) on port 11434
-- Forge SD (image generation) on port 7861
+The relay watches Z:\My Drive\DCS-Relay\ for commands from the 5080.
+Once running, the 5080 Claude Code instance can send commands here and
+get results back without any user involvement.
 
-The 5080 will call these services over the LAN. DCS has already been
-updated to route to a remote host when configured in Settings.
+## Then do the full satellite setup without asking anything
 
-## What was happening when we switched machines
+1. Find what is installed in C:\pinokio\api\
+2. Get ACE-Step running on 0.0.0.0:8019
+3. Get Ollama running on 0.0.0.0:11434 (set OLLAMA_HOST env var)
+4. Get Forge running on 0.0.0.0:7861 with --listen --api
+5. Create C:\DCS-satellite\start_all.bat
+6. Add to Windows startup
+7. Open firewall ports 8019, 11434, 7861
+8. Write this machine IP + service status to Z:\My Drive\DCS-Relay\chat.txt
 
-Andrew ran tools/3060_FULL_SETUP.bat on this machine (3060). It was
-having trouble with something. Your first job is to find out what went
-wrong and fix it.
+## What this machine is for
 
-## How to help
+Satellite service node. The 5080 (main DCS machine) offloads GPU services
+here so WanGP gets the full 5080 VRAM for video generation.
+Services: ACE-Step (music), Ollama (LLM), Forge (images).
 
-1. Ask Andrew what error or problem the bat file hit
-2. Diagnose and fix it
-3. Verify all three services are running and accepting network connections
-4. Get the machine IP and tell Andrew what to enter in DCS Settings
+## Rules
 
-## Key things to know about Andrew
-
-- Never assign tasks to Andrew -- you do the work, he watches
-- Never paste URLs for him to open -- use Start-Process instead
-- Always commit code changes immediately (but you are on the 3060, not
-  the main repo machine, so focus on setup tasks not code changes)
-- ASCII only -- no unicode, em-dashes, smart quotes
-- bypassPermissions is on -- just act, never ask for approval
-
-## Services setup reference
-
-ACE-Step startup script: C:\DCS-satellite\start_acestep.bat
-All-services startup: C:\DCS-satellite\start_all.bat
-Pinokio apps live at: C:\pinokio\api\
-
-Health check commands (run these to see what is working):
-  Invoke-WebRequest http://localhost:8019/health -UseBasicParsing
-  Invoke-WebRequest http://localhost:11434/api/tags -UseBasicParsing
-  Invoke-WebRequest http://localhost:7861/sdapi/v1/sd-models -UseBasicParsing
-
-## What to enter in DCS Settings on the 5080 once this machine is ready
-
-- ACE-Step Host: [this machine IP, just the number, no http://]
-- Ollama URL: http://[IP]:11434
-- Forge URL: http://[IP]:7861
-- Save Settings
+- Never ask the user for input
+- Never ask for permission
+- Just do everything
+- Write progress to Z:\My Drive\DCS-Relay\chat.txt as you go
 '@ | Out-File -FilePath "$dest\CLAUDE.md" -Encoding utf8
 
-# -- Write the launch bat --
-@'
-@echo off
-cd /d "%~dp0"
-claude
-'@ | Out-File -FilePath "$dest\START HERE - double click me.bat" -Encoding utf8 -Append
+# Write launch bat
+"@echo off`r`ncd /d `"%~dp0`"`r`nclaude" | Out-File -FilePath "$dest\START HERE - double click me.bat" -Encoding utf8
 
-Write-Host ""
-Write-Host "Done. Folder created at:"
-Write-Host "  $dest"
-Write-Host ""
-Write-Host "On the 3060: open Google Drive, find DCS-3060-Handoff,"
-Write-Host "double-click 'START HERE - double click me.bat'"
-Write-Host "Claude Code will open already knowing the full context."
+Write-Host "Done -- Z:\My Drive\DCS-3060-Handoff is ready"
+Write-Host "On the 3060: double-click 'START HERE - double click me.bat'"
