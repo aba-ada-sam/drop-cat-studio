@@ -11,6 +11,11 @@ import subprocess
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 from pathlib import Path
 
 PORT = 9999
@@ -221,7 +226,7 @@ def main():
          "protocol=TCP", f"localport={PORT}"],
         capture_output=True,
     )
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    server = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
     server.serve_forever()
 
 
