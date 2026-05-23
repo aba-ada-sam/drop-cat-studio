@@ -344,6 +344,7 @@ export function init(panel) {
     // Song-only sections
     clipSummarySection.style.display = mode === 'song' ? 'flex' : 'none';
     loopSection.style.display        = mode === 'song' ? 'flex' : 'none';
+    songBatchSection.style.display   = mode === 'song' ? 'flex' : 'none';
 
     _updateBtn();
   }
@@ -440,6 +441,7 @@ export function init(panel) {
       clipLabel.textContent = `${_clipDur}s`;
     }
     _refreshClipCount();
+    _setSongBatchReady();
   }
 
   async function _analyzeAudio(path) {
@@ -822,6 +824,119 @@ export function init(panel) {
   const batchSection = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
   batchSection.append(batchDivider, el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]), loopToggle, folderStatus, batchBtn);
 
+  // -- Song batch: one music video per image in a folder ---------------------
+  let _songFolderFiles = [], _songFolderPath = '', _songBatchLooping = false;
+
+  const songBatchDivider = el('div', { style: 'display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:11px; padding-top:4px;' });
+  songBatchDivider.innerHTML = '<hr style="flex:1;border:none;border-top:1px solid var(--border-2)"> or make one video per image in a folder <hr style="flex:1;border:none;border-top:1px solid var(--border-2)">';
+
+  const songFolderNameEl    = el('div', { style: 'flex:1; font-size:13px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:9px 0;', text: 'No folder selected' });
+  const songBrowseBtn       = el('button', { text: 'Choose Folder', style: 'padding:9px 16px; border-radius:var(--r-md); border:1px solid var(--accent-border); background:var(--accent-bg); color:var(--accent); cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap;' });
+  const songBatchLoopToggle = el('label', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;' });
+  const songBatchLoopCheck  = el('input', { type: 'checkbox' });
+  songBatchLoopCheck.style.accentColor = 'var(--accent)';
+  songBatchLoopToggle.append(songBatchLoopCheck, 'Loop overnight (repeat folder continuously)');
+  const songFolderStatus = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:16px;' });
+  const songBatchBtn     = el('button', { text: 'Queue All', disabled: true, style: 'padding:11px; border-radius:var(--r-lg); border:none; cursor:not-allowed; font-size:14px; font-weight:700; background:var(--circus-red); color:var(--text); opacity:.45;' });
+
+  function _setSongBatchReady() {
+    const n = _songFolderFiles.length;
+    const ready = n > 0 && _numClips > 0;
+    songBatchBtn.disabled = !ready;
+    songBatchBtn.style.opacity = ready ? '1' : '.45';
+    songBatchBtn.style.cursor  = ready ? 'pointer' : 'not-allowed';
+    songBatchBtn.textContent = !_songPath ? 'Upload a song first' :
+      n ? (songBatchLoopCheck.checked ? `Start Loop (${n} images)` : `Queue All ${n} Images`) : 'Queue All';
+  }
+  songBatchLoopCheck.addEventListener('change', _setSongBatchReady);
+
+  async function _scanSongFolder(folder) {
+    songFolderStatus.textContent = 'Scanning...'; _songFolderFiles = []; _setSongBatchReady();
+    try {
+      const r = await apiFetch('/api/zoom/scan-folder', { method: 'POST', body: JSON.stringify({ folder }) });
+      const imgs = (r.files || []).filter(f => !f.is_video);
+      _songFolderFiles = imgs;
+      songFolderStatus.textContent = !imgs.length ? 'No images found (jpg, png, webp...)' : `${imgs.length} image${imgs.length !== 1 ? 's' : ''} found`;
+      _setSongBatchReady();
+    } catch (e) { songFolderStatus.textContent = 'Error: ' + e.message; }
+  }
+
+  songBrowseBtn.onclick = async () => {
+    try {
+      const r = await apiFetch('/api/browse-folder', { method: 'POST' });
+      const picked = r.folder || r.path;
+      if (picked) { _songFolderPath = picked; songFolderNameEl.textContent = picked.split(/[\\/]/).pop() || picked; songFolderNameEl.title = picked; await _scanSongFolder(picked); }
+    } catch {}
+  };
+
+  let _songBatchIdx = 0;
+  async function _runSongBatch() {
+    if (!_songFolderFiles.length || !_numClips) return;
+    _songBatchLooping = true;
+    songBatchBtn.textContent = `Running... (0/${_songFolderFiles.length})`;
+    songBatchBtn.disabled = false; songBatchBtn.style.opacity = '1';
+
+    const runOnce = async () => {
+      for (let idx = 0; idx < _songFolderFiles.length; idx++) {
+        if (!_songBatchLooping) break;
+        const f = _songFolderFiles[idx];
+        songFolderStatus.textContent = `Processing ${idx + 1}/${_songFolderFiles.length}: ${f.name}`;
+        songBatchBtn.textContent = `Running ${idx + 1}/${_songFolderFiles.length}`;
+        // Upload image as anchor and generate
+        try {
+          const resp = await apiFetch('/api/song-video/upload-image', {
+            method: 'POST',
+            headers: {},
+            body: (() => { const fd = new FormData(); /* fallback: pass path directly */ return JSON.stringify({ path: f.path }); })(),
+          }).catch(() => null);
+          // Use path directly -- server already has the file
+          const savedSourcePath = _sourcePath;
+          _sourcePath = f.path;
+          await _submitMusicVideo();
+          // Wait for the job to clear before starting the next
+          await new Promise(resolve => {
+            const check = setInterval(() => { if (!_jobId) { clearInterval(check); resolve(); } }, 2000);
+          });
+          _sourcePath = savedSourcePath;
+        } catch (e) {
+          songFolderStatus.textContent = `Error on ${f.name}: ${e.message}`;
+        }
+      }
+    };
+
+    await runOnce();
+    while (_songBatchLooping && songBatchLoopCheck.checked) {
+      songFolderStatus.textContent = 'Loop complete -- starting again...';
+      await runOnce();
+    }
+    _songBatchLooping = false;
+    _setSongBatchReady();
+    songFolderStatus.textContent = `Done -- ${_songFolderFiles.length} videos generated`;
+  }
+
+  songBatchBtn.onclick = async () => {
+    if (_songBatchLooping) {
+      _songBatchLooping = false;
+      songFolderStatus.textContent = 'Stopping after current video...';
+      _setSongBatchReady();
+      return;
+    }
+    if (!_songPath) { toast('Upload a song first', 'error'); return; }
+    if (!_songFolderFiles.length) { toast('Choose a folder of images first', 'error'); return; }
+    songBatchBtn.textContent = 'Stop';
+    songBatchBtn.style.background = 'var(--red)';
+    _runSongBatch().then(() => { songBatchBtn.style.background = 'var(--circus-red)'; });
+  };
+
+  const songBatchSection = el('div', { style: 'display:none; flex-direction:column; gap:10px;' });
+  songBatchSection.append(
+    songBatchDivider,
+    el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [songFolderNameEl, songBrowseBtn]),
+    songBatchLoopToggle,
+    songFolderStatus,
+    songBatchBtn,
+  );
+
   // -- Assemble layout -------------------------------------------------------
   root.append(
     _card([sourceLabelEl, dropArea]),
@@ -835,6 +950,7 @@ export function init(panel) {
     generateBtn,
     progressArea,
     queueBadge,
+    songBatchSection,
     batchSection,
     outputArea,
   );
