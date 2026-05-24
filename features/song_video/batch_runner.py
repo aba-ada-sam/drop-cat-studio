@@ -374,9 +374,9 @@ def _runner() -> None:
 
                 img          = _state["images"][idx]
                 settings     = dict(_state["settings"])
-                # Alternate local/satellite: even index -> local 5080, odd -> 3060 satellite.
-                # Satellite check is cheap (just a health ping) and cached for 30s.
-                use_sat      = (idx % 2 == 1) and _satellite_available()
+                # Satellite routing disabled by default -- use local 5080 only.
+                # Enable via settings["use_satellite"] = True once 3060 is confirmed stable.
+                use_sat      = bool(settings.get("use_satellite")) and _satellite_available()
 
             try:
                 job    = _submit_one(img["path"], img["name"], settings, use_satellite=use_sat)
