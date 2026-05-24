@@ -235,12 +235,20 @@ def _merge_video_audio_trim(
     out_path: str,
     audio_duration: float,
 ) -> str | None:
-    """Merge video + audio, looping the video if needed to fill the full song duration."""
+    """Merge video + audio, looping the video if needed to fill the full song duration.
+
+    Always probes the audio file directly with ffprobe to get the true duration.
+    The stored audio_duration from settings comes from librosa which can report
+    2-5 seconds less than the actual file (signal frames vs container metadata).
+    """
     video_dur = probe_duration(video_path) or 0.0
-    need_loop = video_dur > 0 and video_dur < audio_duration * 0.98
+    # Use ffprobe duration as ground truth -- librosa can undercount by a few seconds
+    true_audio_dur = probe_duration(audio_path) or audio_duration
+    target_dur = max(true_audio_dur, audio_duration)  # take the longer of the two
+
+    need_loop = video_dur > 0 and video_dur < target_dur * 0.98
 
     if need_loop:
-        # Loop the video to fill the song. Re-encode to keep timestamps clean.
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", video_path,
@@ -248,7 +256,7 @@ def _merge_video_audio_trim(
             "-map", "0:v", "-map", "1:a",
             "-c:v", "libx264", "-preset", "fast", "-crf", "15",
             "-c:a", "aac", "-b:a", "192k",
-            "-t", f"{audio_duration:.3f}",
+            "-t", f"{target_dur:.3f}",
             "-movflags", "+faststart",
             out_path,
         ]
@@ -260,7 +268,7 @@ def _merge_video_audio_trim(
             "-map", "0:v", "-map", "1:a",
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
-            "-t", f"{audio_duration:.3f}",
+            "-t", f"{target_dur:.3f}",
             "-movflags", "+faststart",
             out_path,
         ]
