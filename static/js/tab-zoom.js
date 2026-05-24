@@ -895,7 +895,9 @@ export function init(panel) {
     if (_songBatchPollTimer) return;
     _songBatchPollTimer = setInterval(async () => {
       try {
-        const s = await apiFetch('/api/song-video/batch/status');
+        const r = await fetch('/api/song-video/batch/status');
+        if (!r.ok) return;
+        const s = await r.json();
         _applyBatchSnapshot(s);
         if (!s.active && s.status !== 'running') {
           clearInterval(_songBatchPollTimer);
@@ -925,9 +927,13 @@ export function init(panel) {
   }
 
   // On page load, check if a batch is already running (e.g. after refresh).
+  // Use plain fetch (not apiFetch) so a 404 or network error is silent --
+  // the endpoint may not exist yet if the server hasn't restarted.
   (async () => {
     try {
-      const s = await apiFetch('/api/song-video/batch/status');
+      const r = await fetch('/api/song-video/batch/status');
+      if (!r.ok) return;
+      const s = await r.json();
       if (s.active || s.status === 'running') {
         _applyBatchSnapshot(s);
         _startSongBatchPoll();
