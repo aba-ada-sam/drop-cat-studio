@@ -342,7 +342,17 @@ def _do_generate(params: dict) -> dict:
     best = exact[0] if exact else max(deduped, key=lambda p: os.path.getmtime(p))
 
     if os.path.abspath(best) != os.path.abspath(output_path):
-        shutil.copy2(best, output_path)
+        # Retry copy -- on Windows, WanGP may still have the file open briefly
+        # after generation completes, causing "file in use" errors on first attempt.
+        import time as _time
+        for _copy_attempt in range(6):
+            try:
+                shutil.copy2(best, output_path)
+                break
+            except OSError as _ce:
+                if _copy_attempt == 5:
+                    return {"ok": False, "output": None, "error": f"Copy failed after retries: {_ce}"}
+                _time.sleep(0.5)
 
     return {"ok": True, "output": output_path, "error": None}
 

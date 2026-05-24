@@ -502,8 +502,68 @@ def _do_song_gpu_phase(
             break
 
         if not clip_path:
-            _log(f"[error] Clip {clip_num} produced no output -- stopping early")
+            # Timeout or copy failure -- restart WanGP to clear degraded state
+            # and retry once. After ~20 clips WanGP can hang at Step 0 due to
+            # VRAM fragmentation; a restart clears it in ~35 seconds.
+            _log(f"[warning] Clip {clip_num} failed -- restarting WanGP and retrying once...")
+            import threading as _th
+            from services import manager as _svc
+            _svc.restart_service("wangp")
+            # Wait for worker to come back (up to 90s)
+            for _ in range(45):
+                if _stopped():
+                    break
+                time.sleep(2)
+                try:
+                    import urllib.request as _ur
+                    with _ur.urlopen(f"http://127.0.0.1:7899/health", timeout=3) as _r:
+                        if __import__("json").loads(_r.read()).get("ok"):
+                            break
+                except Exception:
+                    pass
+            if not _stopped():
+                try:
+                    clip_path = video_generator.generate_video(
+                        image_path=clip_start_image,
+                        prompt=finalized,
+                        out_path=clip_out,
+                        duration=this_dur,
+                        model_name=model_name,
+                        resolution=resolution,
+                        override_width=int(ow) if ow else None,
+                        override_height=int(oh) if oh else None,
+                        steps=steps,
+                        guidance=effective_guidance,
+                        seed=seed,
+                        negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
+                        stop_check=_stopped,
+                        log_fn=_log,
+                        progress_fn=_video_progress,
+                    )
+                except Exception as _re:
+                    clip_path = None
+                    _log(f"[error] Clip {clip_num} retry also failed: {_re}")
+            if not clip_path:
+                _log(f"[error] Clip {clip_num} produced no output -- stopping early")
             break
+
+        # Extract clean chain frame NOW from the original WanGP output BEFORE any
+        # re-encoding. Beat-sync (CRF-18) and tail-trim happen below; if we wait
+        # until after those, the "lossless PNG" carries H.264 block artifacts baked
+        # into skin pixels which LTX-2 reinforces each clip, producing the
+        # pox/pustule accumulation by clip 5-10.
+        _clean_chain_frame: str | None = None
+        if i < n_clips - 1:
+            _raw_dur = probe_duration(clip_path) or this_dur
+            _seek_t  = _raw_dur * 0.85
+            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
+            _cfr = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{_seek_t:.4f}", "-i", clip_path,
+                 "-frames:v", "1", _cframe_path],
+                capture_output=True, timeout=30,
+            )
+            if _cfr.returncode == 0 and Path(_cframe_path).exists():
+                _clean_chain_frame = _cframe_path
 
         # Trim clip to exact beat-aligned duration so timing errors don't
         # accumulate across clips. WanGP may over/undershoot by up to ~0.5s.
@@ -589,11 +649,14 @@ def _do_song_gpu_phase(
             "stage":       "generating",
         })
 
-        # Extract the in-motion boundary frame (now the last frame of the
-        # trimmed clip) and feed it as the start image for the next clip.
+        # Use the clean pre-encode chain frame (extracted before beat-sync).
+        # Falls back to extracting from the final clip if early extraction failed.
         if i < n_clips - 1:
-            frame_path = str(job_dir / f"chain_{i:02d}.png")
-            _chain_frame = _extract_last_frame(clip_path, frame_path)
+            if _clean_chain_frame:
+                _chain_frame = _clean_chain_frame
+            else:
+                fallback = str(job_dir / f"chain_{i:02d}.png")
+                _chain_frame = _extract_last_frame(clip_path, fallback)
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
 

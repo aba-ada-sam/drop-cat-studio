@@ -305,8 +305,10 @@ def _generate_via_worker(
             ) as r:
                 status = json.loads(r.read())
 
-            # Reject this status if the worker has moved on to a newer job
-            if my_token is not None and status.get("token") != my_token:
+            # Reject this status if the worker is busy with a DIFFERENT job.
+            # Only check token while busy -- when the worker finishes it resets
+            # token to 0, which would falsely look like a mismatch otherwise.
+            if my_token is not None and status.get("busy") and status.get("token") != my_token:
                 if log_fn:
                     log_fn("[error] Worker token mismatch -- our job was superseded")
                 return None
@@ -319,10 +321,24 @@ def _generate_via_worker(
                 result_path = status.get("result")
                 if result_path and os.path.isfile(result_path):
                     return result_path
+                # Fallback 1: result_path exists but file missing -- check _tmp variant
+                if result_path:
+                    tmp_variant = result_path.replace(".mp4", "_tmp.mp4")
+                    if os.path.isfile(tmp_variant):
+                        return tmp_variant
+                # Fallback 2: result_path is None (copy failed in worker) -- check
+                # if the _tmp variant of the *requested* output_path still exists.
+                tmp_of_requested = output_path.replace(".mp4", "_tmp.mp4")
+                if os.path.isfile(tmp_of_requested):
+                    if log_fn:
+                        log_fn(f"[info] Using _tmp fallback for {os.path.basename(output_path)}")
+                    return tmp_of_requested
                 # Guard: if we've polled for < 6s, worker may not have started yet
                 if time.time() - _poll_start < 6:
                     time.sleep(2)
                     continue
+                if log_fn:
+                    log_fn(f"[error] generate_video returning None: result={result_path} error={status.get('error')}")
                 return None
             if log_fn and status.get("progress"):
                 log_fn(f"[info] {status['progress']}")
