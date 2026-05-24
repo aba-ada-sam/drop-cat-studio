@@ -11,6 +11,7 @@ import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-v
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260524h';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524g';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260521a';
+import { init as initBeatSync, receiveHandoff as beatSyncHandoff } from './tab-beat-sync.js?v=20260524a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
@@ -31,6 +32,7 @@ const TAB_INIT = {
   'music-video':       initMusicVideo,
   'zoom':              initZoom,
   'bridges':           initBridges,
+  'beat-sync':         initBeatSync,
   'sd-prompts':        initSdPrompts,
   'video-tools':       initVideoTools,
   'video-tools-batch': initVideoToolsBatch,
@@ -43,6 +45,7 @@ const TAB_HANDOFF = {
   'music-video':       musicVideoHandoff,
   'zoom':              zoomHandoff,
   'bridges':           bridgesHandoff,
+  'beat-sync':         beatSyncHandoff,
   'sd-prompts':        sdPromptsHandoff,
   'video-tools':       null,
   'video-tools-batch': null,

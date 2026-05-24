@@ -4,7 +4,8 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from core.job_manager import JOB_VIDEO_TOOL
 from core import session as _session
@@ -13,6 +14,24 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+_SERVE_ROOTS = None
+
+def _allowed_path(p: str) -> bool:
+    """Only serve files under output/ or uploads/ to prevent path traversal."""
+    global _SERVE_ROOTS
+    if _SERVE_ROOTS is None:
+        base = Path(__file__).resolve().parent.parent.parent
+        _SERVE_ROOTS = [base / "output", base / "uploads"]
+    resolved = Path(p).resolve()
+    return any(resolved.is_relative_to(r) for r in _SERVE_ROOTS)
+
+
+@router.get("/serve")
+async def serve_file(path: str):
+    """Serve an output/upload file to the browser (for Web Audio API decoding)."""
+    if not path or not os.path.isfile(path) or not _allowed_path(path):
+        raise HTTPException(404, "File not found")
+    return FileResponse(path, media_type="application/octet-stream")
 
 
 @router.post("/analyze")
