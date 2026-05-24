@@ -463,25 +463,18 @@ export function init(panel) {
     } catch {}
   }
 
-  // ── On tab open: check for running/saved batch ─────────────────────────────
+  // ── On tab open: check for already-running batch (do NOT auto-start) ─────────
+  // Only connect the poll to a batch that is ALREADY actively running on the
+  // server. Never silently start or resume a saved batch without user input.
 
   (async () => {
     try {
-      // Try to resume any batch that was running when DCS restarted
-      const r = await fetch('/api/song-video/batch/resume', { method: 'POST' });
-      if (!r.ok) {
-        // Fall back to status check
-        const r2 = await fetch('/api/song-video/batch/status');
-        if (!r2.ok) return;
-        const s = await r2.json();
-        if (s.active || s.status === 'running') { _applySnapshot(s); _startPoll(); }
-        return;
-      }
+      const r = await fetch('/api/song-video/batch/status');
+      if (!r.ok) return;
       const s = await r.json();
-      if (s.active || s.status === 'running') {
+      if (s.active && s.status === 'running') {
         _applySnapshot(s);
         _startPoll();
-        if (s.total > 0) batchStatus.textContent = `Resumed: ${s.index}/${s.total} — ${s.succeeded} done`;
       }
     } catch {}
   })();
