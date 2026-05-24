@@ -1,0 +1,62 @@
+"""Beat-sync API routes: analyze audio/video peaks, retime video to audio."""
+import logging
+import os
+import time
+from pathlib import Path
+
+from fastapi import APIRouter
+
+from core.job_manager import submit_job, JOB_VIDEO_TOOL
+from core.session import get_session
+
+router = APIRouter()
+log = logging.getLogger(__name__)
+
+OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+
+
+@router.post("/analyze")
+async def analyze_sync(body: dict):
+    """Analyze audio beats and video motion peaks for alignment UI."""
+    import asyncio
+    from features.beat_sync.analyzer import analyze_audio_beats, analyze_video_motion
+    audio_path = body.get("audio_path", "")
+    video_path = body.get("video_path", "")
+    result = {}
+    if audio_path and os.path.isfile(audio_path):
+        result["audio"] = await asyncio.to_thread(analyze_audio_beats, audio_path)
+    if video_path and os.path.isfile(video_path):
+        result["video"] = await asyncio.to_thread(analyze_video_motion, video_path)
+    return result
+
+
+@router.post("/retime")
+async def retime_video(body: dict):
+    """Submit a beat-sync retime job. Returns {job_id}."""
+    video_path   = body.get("video_path", "")
+    audio_path   = body.get("audio_path", "")
+    remap_points = body.get("remap_points")   # None = auto-align
+
+    if not video_path or not os.path.isfile(video_path):
+        return {"error": "video_path not found"}
+    if not audio_path or not os.path.isfile(audio_path):
+        return {"error": "audio_path not found"}
+
+    ts = time.strftime("%Y-%m-%d")
+    out_dir = OUTPUT_DIR / ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(video_path).stem[:20]
+    out_path = str(out_dir / f"{stem}_synced_{int(time.time())}.mp4")
+
+    def _work(job, vp=video_path, ap=audio_path, op=out_path, rp=remap_points):
+        job.update(progress=5, message="Analyzing audio and video peaks...")
+        from features.beat_sync.retimer import retime_video as _retime
+        ok, err = _retime(vp, ap, op, remap_points=rp, auto_align=(rp is None))
+        if ok:
+            job.update(status="done", progress=100, output=op)
+            get_session().add_file(op, "video", "beat_sync", path=op)
+        else:
+            raise RuntimeError(err or "Retime failed")
+
+    job_id = submit_job(JOB_VIDEO_TOOL, _work)
+    return {"job_id": job_id}

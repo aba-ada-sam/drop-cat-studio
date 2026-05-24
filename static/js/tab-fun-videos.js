@@ -1547,6 +1547,40 @@ export function init(panel) {
               document.querySelector('.rail-tab[data-tab="bridges"]')?.click();
               toast('Clip sent to Add Transitions tab', 'success');
             };
+
+            // If job metadata carries a separate audio path, offer beat-sync retime
+            const outAudioPath = j.meta && j.meta.audio_path;
+            if (outAudioPath && outputs[0]) {
+              const existingSync = vidWrap.querySelector('.beat-sync-btn');
+              if (!existingSync) {
+                const syncBtn = el('button', {
+                  class: 'btn btn-sm beat-sync-btn',
+                  style: 'margin-top:8px;',
+                  text: 'Sync Video to Beat',
+                });
+                syncBtn.addEventListener('click', async () => {
+                  syncBtn.disabled = true;
+                  syncBtn.textContent = 'Syncing...';
+                  try {
+                    const r = await apiFetch('/api/sync/retime', {
+                      method: 'POST',
+                      body: JSON.stringify({ video_path: outputs[0], audio_path: outAudioPath }),
+                    });
+                    if (r.job_id) {
+                      toast('Beat sync job started -- check Queue tab', 'info');
+                    } else if (r.error) {
+                      toast('Sync error: ' + r.error, 'error');
+                    }
+                  } catch (e) {
+                    toast('Sync failed: ' + e.message, 'error');
+                  } finally {
+                    syncBtn.disabled = false;
+                    syncBtn.textContent = 'Sync Video to Beat';
+                  }
+                });
+                vidWrap.appendChild(syncBtn);
+              }
+            }
           } else {
             toast('Generation finished but no output file found -- check server logs', 'error');
           }

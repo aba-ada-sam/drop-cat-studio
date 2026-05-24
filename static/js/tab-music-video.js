@@ -145,6 +145,13 @@ export function init(panel) {
       });
       analysisCard.appendChild(row);
     }
+    if (a.sections && a.sections.length) {
+      const sectInfo = el('div', {
+        style: 'font-size:11px; color:var(--text-3); margin-top:4px;',
+        text: a.sections.length + ' sections detected -- clip boundaries will snap to section changes',
+      });
+      analysisCard.appendChild(sectInfo);
+    }
   }
 
   // ── Model selector ─────────────────────────────────────────────────────────
@@ -216,7 +223,16 @@ export function init(panel) {
   }
 
   const { wrap: loopWrap, input: loopCheck }   = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: fastWrap, input: fastCheck }   = _toggle('Fast mode  (360P · 8 steps · 50% coverage · ~4x faster, upscaled after)', true);
+  const { wrap: fastWrap, input: fastCheck }   = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', true);
+
+  // Coverage ratio: how much of the song gets video clips (rest uses still frames)
+  const coverageLabel  = el('div', { style: 'font-size:12px; color:var(--text-3); margin-bottom:4px;', text: 'Song coverage' });
+  const coverageSlider = el('input', { type: 'range', min: '20', max: '100', step: '10', value: '100' });
+  coverageSlider.style.cssText = 'width:100%; accent-color:var(--accent);';
+  const coverageVal    = el('span', { style: 'font-size:11px; color:var(--text-2);', text: '100%' });
+  coverageSlider.addEventListener('input', () => { coverageVal.textContent = coverageSlider.value + '%'; });
+  const coverageRow    = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [coverageSlider, coverageVal]);
+  const coverageWrap   = el('div', { style: 'display:flex; flex-direction:column; gap:2px; padding:6px 0;' }, [coverageLabel, coverageRow]);
   // Satellite disabled -- unstable, kept for future use
   const satCheck = { checked: false };
   const satWrap  = null;
@@ -330,7 +346,7 @@ export function init(panel) {
         num_clips:       fast ? null : undefined,
         steps:           fast ? 8    : 20,
         guidance:        fast ? 2.5  : 3.5,
-        coverage_ratio:  fast ? 0.5  : 1.0,
+        coverage_ratio:  parseFloat(coverageSlider.value) / 100,
         output_width:    fast ? 640  : undefined,
         output_height:   fast ? 360  : undefined,
       };
@@ -424,7 +440,7 @@ export function init(panel) {
         clip_duration:  fast ? 5    : 8,
         steps:          fast ? 8    : 20,
         guidance:       fast ? 2.5  : 3.5,
-        coverage_ratio: fast ? 0.5  : 1.0,
+        coverage_ratio: parseFloat(coverageSlider.value) / 100,
         output_width:   fast ? 640  : undefined,
         output_height:  fast ? 360  : undefined,
       };
@@ -505,6 +521,7 @@ export function init(panel) {
       folderStatus,
       loopWrap,
       fastWrap,
+      coverageWrap,
       batchStatus,
       batchBtn,
     ]),

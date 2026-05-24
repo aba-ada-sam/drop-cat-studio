@@ -1542,6 +1542,16 @@ def run_multi_prep(job, photo_path, settings):
     model_name       = settings.get("model_name", "")
     motion_style     = settings.get("motion_style") or None  # None -> auto-resolve per model
 
+    # Run audio event detection if audio_path is set (from audio-first or future beat sync).
+    _raw_audio = settings.get("audio_path", "") or settings.get("_audio_path", "")
+    if _raw_audio and os.path.isfile(_raw_audio) and "_audio_events" not in settings:
+        try:
+            from features.fun_videos.audio_analyzer import detect_audio_events
+            settings["_audio_events"] = detect_audio_events(_raw_audio)
+            log.info("[multi] Audio events detected for beat-snap")
+        except Exception as _ae:
+            log.warning("[multi] Audio event detection failed: %s", _ae)
+
     # -- Video continuation mode -------------------------------------------
     # If a start_video_path is provided and video_mode == 'continuation',
     # extract the last frame to use as the LLM vision anchor AND as the
@@ -1635,6 +1645,22 @@ def run_multi_prep(job, photo_path, settings):
         continuation_mode=is_continuation,
     )
     settings["_story_arc"] = arc
+
+    # Snap clip boundaries to strong beats if audio analysis is available.
+    _a_events = settings.get("_audio_events", {})
+    if _a_events and settings.get("_story_arc"):
+        try:
+            from features.fun_videos.audio_analyzer import snap_durations_to_beats
+            from core.ffmpeg_utils import probe_duration as _pd
+            _a_path = settings.get("audio_path", "")
+            _a_dur = float(_a_events.get("duration") or (_pd(_a_path) if _a_path else 0) or 0)
+            if _a_dur > 0:
+                settings["_story_arc"] = snap_durations_to_beats(
+                    settings["_story_arc"], _a_events, _a_dur, snap_window=2.0
+                )
+                log.info("[multi] Story arc durations snapped to beats")
+        except Exception as _e:
+            log.warning("[multi] Beat-snap failed (non-fatal): %s", _e)
 
     # Extract a concrete subject description from the source image so every
     # clip prompt is anchored to the actual visual content, not the LLM's
@@ -1804,7 +1830,21 @@ def run_multi_pipeline(job, photo_path, settings):
     if _user_reanchor is not None:
         reanchor_every = int(_user_reanchor)
     else:
-        reanchor_every = 0  # pure chain -- never reset to source photo
+        # Compute from audio section boundaries if available, else default to 3.
+        # Section boundaries are natural reset points -- the visual cut back to
+        # source coincides with a musical section change so it feels intentional.
+        _audio_events = settings.get("_audio_events", {})
+        _sections = _audio_events.get("sections", []) if _audio_events else []
+        if _sections and n_clips >= 2:
+            _total_dur = sum(
+                float(c.get("duration", 5)) if isinstance(c, dict) else 5
+                for c in story_arc
+            ) if story_arc else n_clips * 6.0
+            _n_in_video = max(1, sum(1 for s in _sections if s.get("start", 0) < _total_dur))
+            reanchor_every = max(2, min(5, round(n_clips / max(1, _n_in_video))))
+            log.info("[multi] reanchor_every=%d (from %d audio sections)", reanchor_every, len(_sections))
+        else:
+            reanchor_every = 3
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
