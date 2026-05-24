@@ -572,11 +572,11 @@ class App(tk.Tk):
 
     def _check_deps(self):
         missing = []
-        for pkg, imp in [("librosa", "librosa"), ("scipy", "scipy"), ("cv2", "opencv-python")]:
+        for pkg, imp in [("librosa", "librosa"), ("scipy", "scipy"), ("opencv-python", "cv2")]:
             try:
                 __import__(imp)
             except ImportError:
-                missing.append(pkg if pkg != "cv2" else "opencv-python")
+                missing.append(pkg)
         if missing:
             raise RuntimeError(
                 f"Missing Python packages: {', '.join(missing)}\n\n"
