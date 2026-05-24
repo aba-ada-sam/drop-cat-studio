@@ -217,15 +217,9 @@ export function init(panel) {
 
   const { wrap: loopWrap, input: loopCheck }   = _toggle('Loop continuously (repeat folder)', false);
   const { wrap: fastWrap, input: fastCheck }   = _toggle('Fast mode  (360P · 8 steps · 50% coverage · ~4x faster, upscaled after)', true);
-  const { wrap: satWrap,  input: satCheck }    = _toggle('Use 3060 satellite  (both GPUs generate simultaneously)', false);
-  // Check if satellite is reachable and auto-enable the toggle
-  fetch('/api/song-video/batch/status').then(() =>
-    fetch('/api/satellite/status').then(r => r.json()).then(s => {
-      if (s && s.connected && s.services && s.services.wangp && s.services.wangp.state === 'running') {
-        satCheck.checked = true;
-      }
-    }).catch(() => {})
-  ).catch(() => {});
+  // Satellite disabled -- unstable, kept for future use
+  const satCheck = { checked: false };
+  const satWrap  = null;
 
   // ── Batch controls ─────────────────────────────────────────────────────────
 
@@ -253,7 +247,6 @@ export function init(panel) {
 
   loopCheck.addEventListener('change', _updateButtons);
   fastCheck.addEventListener('change', _updateButtons);
-  satCheck.addEventListener('change', _updateButtons);
 
   let _pollActive = false;
 
@@ -512,7 +505,6 @@ export function init(panel) {
       folderStatus,
       loopWrap,
       fastWrap,
-      satWrap,
       batchStatus,
       batchBtn,
     ]),
