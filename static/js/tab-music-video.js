@@ -8,8 +8,9 @@
  */
 
 import { el }                    from './components.js?v=20260508a';
-import { apiFetch, apiUpload }   from './shell/toast.js?v=20260518a';
+import { apiFetch }              from './shell/toast.js?v=20260518a';
 import { toast }                 from './shell/toast.js?v=20260518a';
+import { apiUpload }             from './api.js?v=20260505e';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
