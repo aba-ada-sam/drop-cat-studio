@@ -464,10 +464,10 @@ def _do_song_gpu_phase(
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
-        # Source-photo conditioning: moderate guidance so text steers camera/energy
-        # without fighting the image anchor. Lower than default 7.5 (which would let
-        # text override the photo appearance), higher than chain-frame 1.5.
-        effective_guidance = min(guidance, 2.5)
+        # 3.5 guidance: high enough for the text prompt to drive real scene motion
+        # and variety (avoids Ken Burns drift), low enough not to fully override
+        # the source photo's character/appearance.
+        effective_guidance = min(guidance, 3.5)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
