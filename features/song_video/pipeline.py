@@ -686,26 +686,12 @@ def _do_song_gpu_phase(
     if effective_dur <= 0:
         raise RuntimeError("Cannot determine audio duration -- file may be missing or corrupt")
 
-    # -- Phase 3: Beat-sync the raw concat BEFORE looping ---------------------
-    # Running beat-sync on the already-looped video was wrong: the looped video
-    # has the same motion pattern repeating, the DTW alignment is meaningless,
-    # and -shortest was clipping the output short of the full song duration.
-    # Correct order: sync the unique clip content first, then loop the synced
-    # content to fill the song. This also makes semantic sense -- we align the
-    # 14 unique shots once, then the loop repeats those synced shots.
-    job.update(progress=84, message="Beat-syncing clips to song...")
-    from features.song_video.beat_sync import apply_beat_sync
-    synced_concat = apply_beat_sync(
-        merged_path = concat_path,
-        audio_path  = audio_path,
-        job_dir     = job_dir,
-        job_id      = job.id,
-        log_fn      = _log,
-    )
-    # apply_beat_sync always returns a valid path (original on failure)
-    video_to_loop = synced_concat
+    # Beat-sync DTW pass removed: clips are already beat-aligned by the pipeline
+    # (clip durations snap to beat boundaries during analysis). Running DTW again
+    # adds 2-3 min of pure overhead per video with no quality benefit.
+    video_to_loop = concat_path
 
-    # -- Phase 4: Loop to fill song + merge audio -----------------------------
+    # -- Phase 3: Loop to fill song + merge audio -----------------------------
     job.meta["stage"] = "merging"
     job.update(progress=92, message="Looping clips to fill song duration...")
 
