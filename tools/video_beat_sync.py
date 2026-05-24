@@ -2,14 +2,15 @@
 """
 video_beat_sync.py -- Squeeze and stretch video to match visual changes with audio peaks.
 
-Audio stays untouched.  Only the video timeline is warped via ffmpeg setpts.
+Audio stays untouched. Only the video timeline is warped via ffmpeg setpts.
+
+Uses DTW (Dynamic Time Warping) to align the continuous video-motion energy
+profile against the audio onset+energy profile, so scene changes land on beats
+and loud moments match high-motion moments.
 
 Dependencies:
     pip install librosa scipy opencv-python
     ffmpeg must be on PATH
-
-Usage:
-    python tools/video_beat_sync.py
 """
 
 import os
@@ -27,157 +28,149 @@ import numpy as np
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Audio analysis
+# DTW-based warp computation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def analyze_audio(audio_path, n_events, sensitivity, log):
-    import librosa
-    from scipy.signal import find_peaks
+def compute_dtw_warp(video_path, audio_path, n_ctrl, log):
+    """
+    Compute a piecewise-linear time warp that maps video time to output time
+    by aligning video motion energy with audio onset/beat energy via DTW.
 
+    Returns (v_ctrl, a_ctrl, vid_dur, aud_dur):
+      v_ctrl[i] seconds in the video should appear at a_ctrl[i] seconds in output.
+    """
+    import librosa
+    import cv2
+    from scipy.ndimage import gaussian_filter1d
+
+    ANALYSIS_FPS = 8.0   # feature frames per second; higher = more detail, slower DTW
+
+    # ── Audio feature ─────────────────────────────────────────────────────────
     log("Loading audio ...")
     y, sr = librosa.load(audio_path, sr=None, mono=True)
-    duration = float(len(y)) / sr
-    log(f"  {duration:.2f}s  @ {sr} Hz")
+    aud_dur = float(len(y)) / sr
 
-    hop = 512
+    hop = max(1, int(sr / ANALYSIS_FPS))
+    real_audio_fps = sr / hop
 
-    # Beat tracking
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-    beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-    log(f"  Beats: {len(beat_times)} @ {float(tempo):.1f} BPM")
-
-    # Onset strength + detection
+    # Onset strength: captures beats, transients, note attacks
     onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
-    onset_frames = librosa.onset.onset_detect(
-        onset_envelope=onset_env, sr=sr, hop_length=hop)
-    onset_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop).tolist()
+    # RMS: captures sustained loudness
+    rms_env = librosa.feature.rms(y=y, hop_length=hop)[0]
 
-    # RMS energy peaks
-    rms = librosa.feature.rms(y=y, hop_length=hop)[0]
-    rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=hop)
-    rms_thresh = float(np.percentile(rms, 40 + sensitivity * 45))
-    min_dist_rms = max(1, int(sr * 0.3 / hop))
-    rms_peaks, _ = find_peaks(rms, height=rms_thresh, distance=min_dist_rms)
-    rms_peak_times = rms_times[rms_peaks].tolist()
+    n_audio = min(len(onset_env), len(rms_env))
+    onset_env = onset_env[:n_audio]
+    rms_env   = rms_env[:n_audio]
 
-    # Spectral novelty (half-wave rectified flux)
-    spec_flux = np.maximum(np.diff(onset_env, prepend=onset_env[0]), 0)
-    sf_thresh = float(np.percentile(spec_flux, 55 + sensitivity * 35))
-    sf_peaks, _ = find_peaks(spec_flux, height=sf_thresh, distance=min_dist_rms)
-    sf_times = librosa.frames_to_time(sf_peaks, sr=sr, hop_length=hop).tolist()
+    audio_feat = (
+        0.65 * onset_env / (onset_env.max() + 1e-8) +
+        0.35 * rms_env   / (rms_env.max()   + 1e-8)
+    )
+    audio_times = np.arange(n_audio) * hop / sr
+    log(f"  Audio: {aud_dur:.2f}s  ({n_audio} frames @ {real_audio_fps:.1f}fps)")
 
-    all_t = np.sort(np.unique(np.array(
-        beat_times + onset_times + rms_peak_times + sf_times, dtype=float
-    )))
-    # Keep away from edges
-    all_t = all_t[(all_t > 0.15) & (all_t < duration - 0.15)]
-
-    # Score each candidate by local RMS energy so we can pick the best ones
-    clustered = _cluster(all_t, gap=0.25)
-
-    def rms_at(t):
-        idx = int(np.searchsorted(rms_times, t))
-        idx = min(idx, len(rms) - 1)
-        return float(rms[idx])
-
-    if len(clustered) <= n_events:
-        selected = clustered
-    else:
-        scores = np.array([rms_at(t) for t in clustered])
-        top_idx = np.sort(np.argsort(scores)[-n_events:])
-        selected = [clustered[i] for i in top_idx]
-
-    log(f"  Audio events selected: {len(selected)}")
-    return selected, duration
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Video analysis
-# ─────────────────────────────────────────────────────────────────────────────
-
-def analyze_video(video_path, n_events, sensitivity, log):
-    import cv2
-    from scipy.signal import find_peaks
-
-    log("Scanning video frames ...")
+    # ── Video motion feature ──────────────────────────────────────────────────
+    log("Computing video motion profile ...")
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = float(total) / fps
-    log(f"  {duration:.2f}s  @ {fps:.2f} fps  ({total} frames)")
+    vid_fps   = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    n_frames  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    vid_dur   = float(n_frames) / vid_fps
 
-    # Sample at most ~12 fps for speed; every skip-th frame
-    skip = max(1, int(round(fps / 12)))
+    skip = max(1, int(round(vid_fps / ANALYSIS_FPS)))
+    real_video_fps = vid_fps / skip
+
     diffs = []
-    times = []
-    prev = None
-    idx = 0
+    prev  = None
+    idx   = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         if idx % skip == 0:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.resize(gray, (160, 90))
+            gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (160, 90))
             if prev is not None:
                 d = float(np.mean(np.abs(
-                    gray.astype(np.float32) - prev.astype(np.float32)
+                    small.astype(np.float32) - prev.astype(np.float32)
                 )))
                 diffs.append(d)
-                times.append(float(idx) / fps)
-            prev = gray
+            prev = small
         idx += 1
-
     cap.release()
 
     if not diffs:
-        log("  No frames read from video.")
-        return [], duration
+        raise RuntimeError("No video frames could be read.")
 
-    diffs = np.array(diffs)
-    times = np.array(times)
+    video_feat  = np.array(diffs, dtype=np.float32)
+    video_feat /= (video_feat.max() + 1e-8)
+    video_times = np.arange(len(video_feat)) * skip / vid_fps
+    log(f"  Video: {vid_dur:.2f}s  ({len(video_feat)} frames @ {real_video_fps:.1f}fps)")
 
-    sample_fps = fps / skip
-    thresh = float(np.percentile(diffs, 40 + sensitivity * 45))
-    min_dist = max(1, int(sample_fps * 0.35))
-    peaks, _ = find_peaks(diffs, height=thresh, distance=min_dist)
+    # ── Smooth so DTW focuses on large-scale structure, not noise ─────────────
+    # sigma = ~0.6 second window
+    audio_smooth = gaussian_filter1d(audio_feat, sigma=max(1.0, real_audio_fps * 0.6))
+    video_smooth = gaussian_filter1d(video_feat, sigma=max(1.0, real_video_fps * 0.6))
 
-    ev_times = times[peaks]
-    ev_scores = diffs[peaks]
+    # ── DTW ──────────────────────────────────────────────────────────────────
+    log(f"Running DTW on ({len(video_smooth)} x {len(audio_smooth)}) feature matrix ...")
+    D, wp = librosa.sequence.dtw(
+        X=video_smooth.reshape(1, -1),
+        Y=audio_smooth.reshape(1, -1),
+        subseq=False,
+        backtrack=True,
+        global_constraints=False,   # no Sakoe-Chiba band -- allow full flexibility
+    )
+    wp = wp[::-1]   # DTW returns end→start; flip to start→end
+    log(f"  Path length: {len(wp)} steps")
 
-    # Strip edges
-    mask = (ev_times > 0.15) & (ev_times < duration - 0.15)
-    ev_times = ev_times[mask]
-    ev_scores = ev_scores[mask]
+    # ── Build control points from DTW path ────────────────────────────────────
+    v_path = video_times[np.minimum(wp[:, 0], len(video_times) - 1)]
+    a_path = audio_times[np.minimum(wp[:, 1], len(audio_times) - 1)]
 
-    if len(ev_times) > n_events:
-        top_idx = np.sort(np.argsort(ev_scores)[-n_events:])
-        ev_times = ev_times[top_idx]
+    # Sample n_ctrl evenly-spaced points along the DTW path
+    idx_samples = np.linspace(0, len(v_path) - 1, n_ctrl, dtype=int)
+    v_ctrl = list(v_path[idx_samples])
+    a_ctrl = list(a_path[idx_samples])
 
-    log(f"  Video events selected: {len(ev_times)}")
-    return list(ev_times), duration
+    # Force bookends
+    v_ctrl = [0.0] + v_ctrl + [vid_dur]
+    a_ctrl = [0.0] + a_ctrl + [aud_dur]
+
+    # Remove any non-strictly-monotone points (DTW can repeat indices)
+    v_out, a_out = [v_ctrl[0]], [a_ctrl[0]]
+    for i in range(1, len(v_ctrl)):
+        if v_ctrl[i] > v_out[-1] + 0.02 and a_ctrl[i] > a_out[-1] + 0.02:
+            v_out.append(v_ctrl[i])
+            a_out.append(a_ctrl[i])
+
+    if v_out[-1] < vid_dur - 0.05:
+        v_out.append(vid_dur)
+        a_out.append(aud_dur)
+
+    log(f"  {len(v_out)} control points after cleanup")
+    return v_out, a_out, vid_dur, aud_dur
+
+
+def warp_summary(v_ctrl, a_ctrl):
+    """Return a human-readable list of speed factors per segment."""
+    lines = []
+    for i in range(len(v_ctrl) - 1):
+        vo = v_ctrl[i+1] - v_ctrl[i]
+        ao = a_ctrl[i+1] - a_ctrl[i]
+        if vo < 0.02 or ao < 0.02:
+            continue
+        factor = vo / ao   # >1 = video is stretched (plays slower), <1 = compressed (faster)
+        direction = "slower" if factor > 1.05 else ("faster" if factor < 0.95 else "same")
+        lines.append(
+            f"  {a_ctrl[i]:.1f}s-{a_ctrl[i+1]:.1f}s  {factor:.2f}x ({direction})"
+        )
+    return lines
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# FFmpeg helpers
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _cluster(times, gap=0.25):
-    """Merge timestamps within `gap` seconds of each other."""
-    if len(times) == 0:
-        return []
-    result = []
-    group = [float(times[0])]
-    for t in times[1:]:
-        if float(t) - group[-1] < gap:
-            group.append(float(t))
-        else:
-            result.append(float(np.mean(group)))
-            group = [float(t)]
-    result.append(float(np.mean(group)))
-    return result
-
 
 def ffprobe_duration(path):
     r = subprocess.run(
@@ -190,116 +183,91 @@ def ffprobe_duration(path):
 
 
 def extract_audio_wav(video_path, out_wav, log):
-    log("Extracting audio to WAV ...")
-    cmd = ["ffmpeg", "-y", "-i", video_path, "-vn",
-           "-ar", "44100", "-ac", "2", out_wav]
+    log("Extracting audio to WAV for analysis ...")
+    cmd = ["ffmpeg", "-y", "-i", video_path, "-vn", "-ar", "44100", "-ac", "2", out_wav]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"Audio extraction failed:\n{r.stderr[-1200:]}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Core warp engine
-# ─────────────────────────────────────────────────────────────────────────────
-
 def build_warped_video(
-    input_video, v_events, a_events,
-    audio_src,          # path to audio that goes in the output
+    input_video,
+    v_ctrl, a_ctrl,      # already include 0 and end bookends
+    audio_src,
     output_path,
     max_speed,
     log, progress_cb
 ):
     """
-    Warp the video track so each v_events[i] timestamp lands at a_events[i].
-    Audio from audio_src is muxed in unchanged.
+    Apply piecewise-linear time warp to the video track.
+    v_ctrl[i] in the video maps to a_ctrl[i] in output time.
+    Audio from audio_src is muxed unchanged.
     """
-    vid_dur = ffprobe_duration(input_video)
-    aud_dur = ffprobe_duration(audio_src)
-    log(f"Video duration: {vid_dur:.3f}s   Audio duration: {aud_dur:.3f}s")
-
-    # Build aligned control-point lists with 0 and end bookends
-    v_pts = [0.0] + sorted(float(t) for t in v_events) + [vid_dur]
-    a_pts = [0.0] + sorted(float(t) for t in a_events) + [aud_dur]
-
-    # Must be same length -- trim to shorter
-    n = min(len(v_pts), len(a_pts))
-    v_pts = v_pts[:n]
-    a_pts = a_pts[:n]
-
-    n_segs = n - 1
+    n_segs = len(v_ctrl) - 1
     log(f"Building {n_segs} time-warped segments ...")
 
     filter_parts = []
-    seg_labels = []
-    speed_report = []
+    seg_labels   = []
+    speed_clamps = 0
 
     for i in range(n_segs):
-        vs = v_pts[i]
-        ve = v_pts[i + 1]
-        at = a_pts[i]
-        ae = a_pts[i + 1]
+        vs      = v_ctrl[i]
+        ve      = v_ctrl[i + 1]
+        orig    = ve - vs
 
-        orig_dur = ve - vs
-        tgt_dur = ae - at
+        ao      = a_ctrl[i]
+        ae      = a_ctrl[i + 1]
+        target  = ae - ao
 
-        if orig_dur < 0.02 or tgt_dur < 0.02:
+        if orig < 0.015 or target < 0.015:
             continue
 
-        # Clamp extreme speed changes to max_speed factor
-        speed = orig_dur / tgt_dur          # >1 = fast-forward, <1 = slow-mo
+        speed   = orig / target     # >1 = fast-forward, <1 = slow-mo
         clamped = max(1.0 / max_speed, min(max_speed, speed))
-        if abs(clamped - speed) > 0.01:
-            # Adjust ve so the segment ends at the clamped rate
-            tgt_dur = orig_dur / clamped
-            ae = at + tgt_dur
-            speed_report.append(
-                f"  seg {i}: {speed:.2f}x -> clamped to {clamped:.2f}x"
-            )
+        if abs(clamped - speed) > 0.02:
+            speed_clamps += 1
+            target = orig / clamped
 
-        pts_mult = tgt_dur / orig_dur       # PTS multiplier for setpts
+        pts_mult = target / orig    # PTS multiplier: <1 = speed up, >1 = slow down
 
         label = f"s{i}"
         filter_parts.append(
             f"[0:v]trim=start={vs:.6f}:end={ve:.6f},"
-            f"setpts={pts_mult:.8f}*(PTS-STARTPTS)[{label}]"
+            f"setpts={pts_mult:.9f}*(PTS-STARTPTS)[{label}]"
         )
         seg_labels.append(f"[{label}]")
 
     if not seg_labels:
-        raise RuntimeError("No valid segments produced -- check event detection.")
+        raise RuntimeError("No valid segments produced.  Check that input has video frames.")
 
-    if speed_report:
-        log("Speed clamping applied:")
-        for line in speed_report:
-            log(line)
+    if speed_clamps:
+        log(f"  Note: {speed_clamps} segments clamped to max {max_speed:.1f}x speed factor.")
 
-    n_valid = len(seg_labels)
     filter_parts.append(
-        f"{''.join(seg_labels)}concat=n={n_valid}:v=1:a=0[outv]"
+        f"{''.join(seg_labels)}concat=n={len(seg_labels)}:v=1:a=0[outv]"
     )
     filter_complex = ";".join(filter_parts)
 
-    tmp_dir = tempfile.mkdtemp(prefix="bsync_mux_")
+    tmp_dir   = tempfile.mkdtemp(prefix="bsync_")
     tmp_video = os.path.join(tmp_dir, "warped_noaudio.mp4")
 
     try:
-        # Step 1: Encode warped video (no audio)
-        log("Encoding warped video ...")
+        # Step 1 -- encode warped video (no audio)
+        log("Encoding warped video track ...")
         progress_cb(10)
         cmd1 = [
             "ffmpeg", "-y", "-i", input_video,
             "-filter_complex", filter_complex,
             "-map", "[outv]",
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-an",
-            tmp_video
+            "-an", tmp_video
         ]
         r1 = subprocess.run(cmd1, capture_output=True, text=True)
         if r1.returncode != 0:
-            raise RuntimeError(f"ffmpeg encode failed:\n{r1.stderr[-2000:]}")
+            raise RuntimeError(f"ffmpeg encode failed:\n{r1.stderr[-2500:]}")
         progress_cb(75)
 
-        # Step 2: Mux warped video + original audio
+        # Step 2 -- mux warped video + original audio
         log("Muxing with original audio ...")
         cmd2 = [
             "ffmpeg", "-y",
@@ -312,165 +280,137 @@ def build_warped_video(
         ]
         r2 = subprocess.run(cmd2, capture_output=True, text=True)
         if r2.returncode != 0:
-            raise RuntimeError(f"ffmpeg mux failed:\n{r2.stderr[-2000:]}")
+            raise RuntimeError(f"ffmpeg mux failed:\n{r2.stderr[-2500:]}")
         progress_cb(100)
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    log(f"Done. Output: {output_path}")
+    log(f"Done.  Output: {output_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GUI
 # ─────────────────────────────────────────────────────────────────────────────
 
-BG     = "#1a1a2e"
-BG2    = "#0d0d1a"
-FG     = "#e0e0e0"
-GOLD   = "#d4a017"
-BLUE   = "#4fc3f7"
-RED    = "#c41e3a"
-MUTED  = "#888888"
+BG    = "#1a1a2e"
+BG2   = "#0d0d1a"
+FG    = "#e0e0e0"
+GOLD  = "#d4a017"
+BLUE  = "#4fc3f7"
+RED   = "#c41e3a"
+MUTED = "#888888"
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Video-Audio Beat Sync")
-        self.geometry("700x760")
+        self.geometry("720x780")
         self.configure(bg=BG)
         self.resizable(True, True)
 
-        self._audio_events  = []
-        self._video_events  = []
-        self._audio_wav     = None   # path to extracted WAV (for analysis)
-        self._audio_for_out = None   # path to audio to mux into output
-        self._tmp_dir       = None
+        self._v_ctrl       = []
+        self._a_ctrl       = []
+        self._audio_wav    = None   # for analysis (librosa needs WAV)
+        self._audio_out    = None   # for final mux
+        self._tmp_dir      = None
 
         self._setup_style()
         self._build_ui()
 
-    # ── Style ─────────────────────────────────────────────────────────────
+    # ── Styling ───────────────────────────────────────────────────────────────
 
     def _setup_style(self):
         s = ttk.Style(self)
         s.theme_use("clam")
-        s.configure(".",           background=BG,  foreground=FG,   font=("Segoe UI", 10))
-        s.configure("TFrame",      background=BG)
-        s.configure("TLabel",      background=BG,  foreground=FG)
-        s.configure("TLabelframe", background=BG,  foreground=MUTED)
+        s.configure(".",               background=BG,  foreground=FG,  font=("Segoe UI", 10))
+        s.configure("TFrame",          background=BG)
+        s.configure("TLabel",          background=BG,  foreground=FG)
+        s.configure("TLabelframe",     background=BG,  foreground=MUTED)
         s.configure("TLabelframe.Label", background=BG, foreground=MUTED, font=("Segoe UI", 9))
-        s.configure("TEntry",      fieldbackground=BG2, foreground=FG,  insertcolor=FG)
-        s.configure("TButton",     background="#2d2d4e", foreground=FG, borderwidth=0, padding=4)
-        s.map("TButton",           background=[("active", "#3d3d5e")])
-        s.configure("Run.TButton", background=RED,  foreground="white",
+        s.configure("TEntry",          fieldbackground=BG2, foreground=FG, insertcolor=FG)
+        s.configure("TButton",         background="#2d2d4e", foreground=FG, borderwidth=0, padding=4)
+        s.map("TButton",               background=[("active", "#3d3d5e")])
+        s.configure("Run.TButton",     background=RED, foreground="white",
                     font=("Segoe UI", 11, "bold"), padding=6)
-        s.map("Run.TButton",       background=[("active", "#a01528"), ("disabled", "#555")])
-        s.configure("TScale",      background=BG, troughcolor=BG2, sliderlength=16)
-        s.configure("TProgressbar", troughcolor=BG2, background=GOLD)
+        s.map("Run.TButton",           background=[("active", "#a01528"), ("disabled", "#555")])
+        s.configure("TScale",          background=BG, troughcolor=BG2, sliderlength=16)
+        s.configure("TProgressbar",    troughcolor=BG2, background=GOLD)
 
-    # ── Layout ─────────────────────────────────────────────────────────────
+    # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         P = dict(padx=14, pady=5)
 
-        # Title
+        # Header
         hdr = ttk.Frame(self)
         hdr.pack(fill="x", padx=14, pady=(14, 2))
         tk.Label(hdr, text="Video-Audio Beat Sync",
                  bg=BG, fg=GOLD, font=("Segoe UI", 17, "bold")).pack(side="left")
-        tk.Label(hdr, text="  squeeze & stretch video to match audio peaks",
+        tk.Label(hdr, text="  align visual changes to audio beats via DTW",
                  bg=BG, fg=MUTED, font=("Segoe UI", 10)).pack(side="left", pady=(4, 0))
 
-        # ── Input ──
+        # Input
         fin = ttk.LabelFrame(self, text="  Input", padding=8)
         fin.pack(fill="x", **P)
-
         self._var_video = tk.StringVar()
-        self._row(fin, "Video file:", self._var_video, 52, self._pick_video)
-
+        self._file_row(fin, "Video file:", self._var_video, 52, self._pick_video)
         self._var_alt_audio = tk.StringVar()
-        self._row(fin, "Alt audio (optional):", self._var_alt_audio, 44, self._pick_audio,
-                  note="leave blank to use audio embedded in the video")
+        self._file_row(fin, "Alt audio (optional):", self._var_alt_audio, 44, self._pick_audio,
+                       note="leave blank to use the audio already in the video")
 
-        # ── Output ──
+        # Output
         fout = ttk.LabelFrame(self, text="  Output", padding=8)
         fout.pack(fill="x", **P)
-
         self._var_output = tk.StringVar()
-        self._row(fout, "Save as:", self._var_output, 52, self._pick_output)
+        self._file_row(fout, "Save as:", self._var_output, 52, self._pick_output)
 
-        # ── Settings ──
+        # Settings
         fset = ttk.LabelFrame(self, text="  Settings", padding=10)
         fset.pack(fill="x", **P)
 
-        self._var_n = tk.IntVar(value=10)
-        self._slider_row(fset, "Sync points:", self._var_n, 3, 30,
-                         lambda v: f"{int(float(v))}", int)
-
-        self._var_sens = tk.DoubleVar(value=0.55)
-        self._slider_row(fset, "Sensitivity:", self._var_sens, 0.0, 1.0,
-                         lambda v: f"{float(v):.2f}")
+        self._var_n = tk.IntVar(value=20)
+        self._slider_row(fset, "DTW control points:", self._var_n, 8, 60,
+                         lambda v: str(int(float(v))), int)
 
         self._var_max_speed = tk.DoubleVar(value=4.0)
         self._slider_row(fset, "Max speed factor:", self._var_max_speed, 1.2, 10.0,
                          lambda v: f"{float(v):.1f}x")
 
-        note = tk.Label(fset,
-            text="Higher sync points = tighter alignment  |  "
-                 "Max speed factor clamps extreme stretches  |  "
-                 "Sensitivity controls event detection threshold",
-            bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=620, justify="left")
-        note.pack(anchor="w", pady=(4, 0))
+        tk.Label(fset,
+            text="Control points: more = tighter sync but allows more aggressive warping.  "
+                 "Max speed factor: clamps extreme segment stretches.",
+            bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=640, justify="left"
+        ).pack(anchor="w", pady=(4, 0))
 
-        # ── Action buttons ──
+        # Buttons
         btn_row = ttk.Frame(self)
         btn_row.pack(pady=8)
-
-        ttk.Button(btn_row, text="1.  Analyze",
+        ttk.Button(btn_row, text="1.  Analyze + Compute Warp",
                    command=self._analyze).pack(side="left", padx=6)
-
-        self._btn_run = ttk.Button(btn_row, text="2.  Sync Video",
+        self._btn_run = ttk.Button(btn_row, text="2.  Encode Synced Video",
                                    command=self._run, style="Run.TButton")
         self._btn_run.pack(side="left", padx=6)
         self._btn_run.state(["disabled"])
-
         ttk.Button(btn_row, text="Open output folder",
-                   command=self._open_output_folder).pack(side="left", padx=6)
+                   command=self._open_folder).pack(side="left", padx=6)
 
-        # ── Detected events ──
-        fev = ttk.LabelFrame(self, text="  Detected sync points", padding=8)
-        fev.pack(fill="x", **P)
+        # Warp summary
+        fwarp = ttk.LabelFrame(self, text="  Warp preview (video-time -> output-time, speed factor)", padding=8)
+        fwarp.pack(fill="x", **P)
+        self._lbl_warp = tk.Label(fwarp,
+            text="-- run Analyze first --",
+            bg=BG, fg=MUTED, font=("Courier", 9), justify="left", wraplength=660)
+        self._lbl_warp.pack(anchor="w")
 
-        ev_cols = ttk.Frame(fev)
-        ev_cols.pack(fill="x")
-
-        ca = ttk.Frame(ev_cols)
-        ca.pack(side="left", fill="both", expand=True)
-        tk.Label(ca, text="Audio moments", bg=BG, fg=GOLD,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self._lbl_a = tk.Label(ca, text="-- run Analyze first --",
-                               bg=BG, fg=MUTED, font=("Courier", 9),
-                               justify="left", wraplength=300)
-        self._lbl_a.pack(anchor="w")
-
-        cv = ttk.Frame(ev_cols)
-        cv.pack(side="left", fill="both", expand=True)
-        tk.Label(cv, text="Video moments", bg=BG, fg=BLUE,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self._lbl_v = tk.Label(cv, text="-- run Analyze first --",
-                               bg=BG, fg=MUTED, font=("Courier", 9),
-                               justify="left", wraplength=300)
-        self._lbl_v.pack(anchor="w")
-
-        # ── Progress ──
-        self._progress = ttk.Progressbar(self, mode="determinate", length=480)
+        # Progress
+        self._progress = ttk.Progressbar(self, mode="determinate", length=500)
         self._progress.pack(pady=(8, 2))
         self._lbl_status = tk.Label(self, text="", bg=BG, fg=MUTED, font=("Segoe UI", 9))
         self._lbl_status.pack()
 
-        # ── Log ──
+        # Log
         log_frame = ttk.Frame(self, padding=(14, 0, 14, 12))
         log_frame.pack(fill="both", expand=True)
         self._log_box = tk.Text(log_frame, height=9, bg=BG2, fg="#cccccc",
@@ -481,10 +421,10 @@ class App(tk.Tk):
         sb.pack(side="right", fill="y")
         self._log_box.pack(fill="both", expand=True)
 
-    def _row(self, parent, label, var, width, cmd, note=None):
+    def _file_row(self, parent, label, var, width, cmd, note=None):
         r = ttk.Frame(parent)
         r.pack(fill="x", pady=2)
-        ttk.Label(r, text=label, width=20, anchor="e").pack(side="left")
+        ttk.Label(r, text=label, width=22, anchor="e").pack(side="left")
         ttk.Entry(r, textvariable=var, width=width).pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(r, text="Browse", command=cmd).pack(side="left")
         if note:
@@ -494,23 +434,26 @@ class App(tk.Tk):
     def _slider_row(self, parent, label, var, lo, hi, fmt, cast=float):
         r = ttk.Frame(parent)
         r.pack(fill="x", pady=3)
-        ttk.Label(r, text=label, width=20, anchor="e").pack(side="left")
+        ttk.Label(r, text=label, width=22, anchor="e").pack(side="left")
         lbl_val = tk.Label(r, text=fmt(var.get()), bg=BG, fg=GOLD,
                            font=("Segoe UI", 10), width=6)
-        def on_change(*_):
-            lbl_val.config(text=fmt(var.get()))
-            var.set(cast(var.get()))
-        var.trace_add("write", on_change)
+        def _on_change(*_):
+            try:
+                lbl_val.config(text=fmt(var.get()))
+                var.set(cast(var.get()))
+            except Exception:
+                pass
+        var.trace_add("write", _on_change)
         ttk.Scale(r, variable=var, from_=lo, to=hi, orient="horizontal",
-                  length=240, command=lambda v: on_change()).pack(side="left", padx=8)
+                  length=260).pack(side="left", padx=8)
         lbl_val.pack(side="left")
 
-    # ── File pickers ──────────────────────────────────────────────────────
+    # ── File pickers ──────────────────────────────────────────────────────────
 
     def _pick_video(self):
         p = filedialog.askopenfilename(
-            title="Select video file",
-            filetypes=[("Video files", "*.mp4 *.mov *.avi *.mkv *.webm"), ("All files", "*.*")]
+            title="Select video",
+            filetypes=[("Video files", "*.mp4 *.mov *.avi *.mkv *.webm"), ("All", "*.*")]
         )
         if p:
             self._var_video.set(p)
@@ -521,8 +464,7 @@ class App(tk.Tk):
     def _pick_audio(self):
         p = filedialog.askopenfilename(
             title="Select audio file (optional)",
-            filetypes=[("Audio files", "*.mp3 *.wav *.aac *.m4a *.flac *.ogg"),
-                       ("All files", "*.*")]
+            filetypes=[("Audio files", "*.mp3 *.wav *.aac *.m4a *.flac *.ogg"), ("All", "*.*")]
         )
         if p:
             self._var_alt_audio.set(p)
@@ -536,14 +478,14 @@ class App(tk.Tk):
         if p:
             self._var_output.set(p)
 
-    def _open_output_folder(self):
+    def _open_folder(self):
         out = self._var_output.get()
         if out:
             folder = os.path.dirname(os.path.abspath(out))
             if os.path.isdir(folder):
                 subprocess.Popen(["explorer", folder])
 
-    # ── Logging / progress ────────────────────────────────────────────────
+    # ── Logging / progress ────────────────────────────────────────────────────
 
     def log(self, msg):
         def _do():
@@ -559,7 +501,7 @@ class App(tk.Tk):
     def _set_progress(self, pct):
         self.after(0, lambda: self._progress.configure(value=pct))
 
-    # ── Validation ────────────────────────────────────────────────────────
+    # ── Validation / dep check ────────────────────────────────────────────────
 
     def _validate(self):
         if not self._var_video.get() or not os.path.isfile(self._var_video.get()):
@@ -572,7 +514,7 @@ class App(tk.Tk):
 
     def _check_deps(self):
         missing = []
-        for pkg, imp in [("librosa", "librosa"), ("scipy", "scipy"), ("opencv-python", "cv2")]:
+        for imp, pkg in [("librosa", "librosa"), ("scipy", "scipy"), ("cv2", "opencv-python")]:
             try:
                 __import__(imp)
             except ImportError:
@@ -580,15 +522,15 @@ class App(tk.Tk):
         if missing:
             raise RuntimeError(
                 f"Missing Python packages: {', '.join(missing)}\n\n"
-                f"Install with:\n  pip install {' '.join(missing)}"
+                f"Install with:  pip install {' '.join(missing)}"
             )
         if not shutil.which("ffmpeg"):
             raise RuntimeError(
                 "ffmpeg not found on PATH.\n"
-                "Download from https://ffmpeg.org/download.html and add to PATH."
+                "Download ffmpeg and add it to your system PATH."
             )
 
-    # ── Analyze ───────────────────────────────────────────────────────────
+    # ── Analyze ───────────────────────────────────────────────────────────────
 
     def _analyze(self):
         if not self._validate():
@@ -602,68 +544,74 @@ class App(tk.Tk):
             self._check_deps()
 
             video_path = self._var_video.get()
-            n = int(self._var_n.get())
-            sens = float(self._var_sens.get())
+            n_ctrl     = int(self._var_n.get())
 
-            # Clean up previous tmp dir
+            # Clean up any previous temp dir
             if self._tmp_dir:
                 shutil.rmtree(self._tmp_dir, ignore_errors=True)
             self._tmp_dir = tempfile.mkdtemp(prefix="beatsync_")
 
             alt = self._var_alt_audio.get().strip()
             if alt and os.path.isfile(alt):
-                # Use alt audio as-is for output; convert to WAV for analysis
-                self._audio_for_out = alt
+                self.log(f"Using alt audio: {os.path.basename(alt)}")
+                self._audio_out = alt
+                # Convert to WAV for librosa analysis
                 self._audio_wav = os.path.join(self._tmp_dir, "analysis.wav")
-                self.log(f"Alt audio: {os.path.basename(alt)}")
                 self._status("Converting alt audio to WAV ...")
                 extract_audio_wav(alt, self._audio_wav, self.log)
             else:
-                # Extract from video for both analysis and output
-                self._audio_wav     = os.path.join(self._tmp_dir, "analysis.wav")
-                self._audio_for_out = os.path.join(self._tmp_dir, "audio_out.aac")
+                self._audio_wav = os.path.join(self._tmp_dir, "analysis.wav")
+                self._audio_out = os.path.join(self._tmp_dir, "audio_out.aac")
                 self._status("Extracting audio from video ...")
                 extract_audio_wav(video_path, self._audio_wav, self.log)
-                # Also extract native audio stream for lossless mux
-                self.log("Extracting audio stream for output ...")
+                # Also extract native stream for lossless mux
+                self.log("Preserving audio stream for output ...")
                 r = subprocess.run(
                     ["ffmpeg", "-y", "-i", video_path, "-vn",
-                     "-acodec", "aac", "-b:a", "192k", self._audio_for_out],
+                     "-acodec", "aac", "-b:a", "192k", self._audio_out],
                     capture_output=True, text=True
                 )
                 if r.returncode != 0:
-                    # Fallback: use the WAV
-                    self._audio_for_out = self._audio_wav
+                    self._audio_out = self._audio_wav  # fallback
 
-            self._set_progress(20)
-            self._status("Analyzing audio ...")
+            self._set_progress(15)
+            self._status("Computing DTW warp ...")
             self.log("")
-            self.log("=== Audio Analysis ===")
-            self._audio_events, _ = analyze_audio(self._audio_wav, n, sens, self.log)
+            self.log("=== DTW Warp Analysis ===")
 
-            self._set_progress(50)
-            self._status("Analyzing video ...")
+            v_ctrl, a_ctrl, vid_dur, aud_dur = compute_dtw_warp(
+                video_path, self._audio_wav, n_ctrl, self.log
+            )
+            self._v_ctrl = v_ctrl
+            self._a_ctrl = a_ctrl
+
+            # Build warp summary text
+            summary_lines = warp_summary(v_ctrl, a_ctrl)
             self.log("")
-            self.log("=== Video Analysis ===")
-            self._video_events, _ = analyze_video(video_path, n, sens, self.log)
+            self.log("Warp segments (output-time  speed):")
+            for line in summary_lines[:20]:
+                self.log(line)
+            if len(summary_lines) > 20:
+                self.log(f"  ... ({len(summary_lines) - 20} more segments)")
 
-            self._set_progress(80)
+            # Show a compact version in the UI label
+            compact = "  |  ".join(
+                f"{a_ctrl[i]:.1f}s: {((v_ctrl[i+1]-v_ctrl[i])/(a_ctrl[i+1]-a_ctrl[i])):.2f}x"
+                for i in range(min(len(v_ctrl)-1, 12))
+                if (v_ctrl[i+1]-v_ctrl[i]) > 0.02 and (a_ctrl[i+1]-a_ctrl[i]) > 0.02
+            )
 
-            def _update_ui():
-                a_str = "  ".join(f"{t:.2f}s" for t in self._audio_events) or "none found"
-                v_str = "  ".join(f"{t:.2f}s" for t in self._video_events) or "none found"
-                self._lbl_a.configure(text=a_str)
-                self._lbl_v.configure(text=v_str)
+            def _upd():
+                self._lbl_warp.configure(text=compact or "computed")
                 self._btn_run.state(["!disabled"])
                 self._set_progress(100)
                 self._status(
-                    f"Ready: {len(self._audio_events)} audio + "
-                    f"{len(self._video_events)} video events found"
+                    f"Ready to encode.  "
+                    f"Video {vid_dur:.1f}s -> warped to match {aud_dur:.1f}s audio."
                 )
-
-            self.after(0, _update_ui)
+            self.after(0, _upd)
             self.log("")
-            self.log(f"Analysis complete. Press 'Sync Video' to encode.")
+            self.log("Analysis done.  Press 'Encode Synced Video' to render.")
 
         except Exception as e:
             self.log(f"\nERROR: {e}")
@@ -673,13 +621,13 @@ class App(tk.Tk):
                 "Analysis Error", f"Analysis failed:\n\n{e}"
             ))
 
-    # ── Run ───────────────────────────────────────────────────────────────
+    # ── Encode ────────────────────────────────────────────────────────────────
 
     def _run(self):
         if not self._validate():
             return
-        if not self._audio_for_out:
-            messagebox.showerror("Not analyzed", "Run Analysis first (step 1).")
+        if not self._audio_out:
+            messagebox.showerror("Not ready", "Run Analyze first (step 1).")
             return
         self._btn_run.state(["disabled"])
         self._set_progress(0)
@@ -687,19 +635,19 @@ class App(tk.Tk):
 
     def _run_thread(self):
         try:
-            self._status("Encoding warped video ...")
+            self._status("Encoding ...")
             self.log("")
             self.log("=== Encoding ===")
 
             build_warped_video(
-                input_video    = self._var_video.get(),
-                v_events       = self._video_events,
-                a_events       = self._audio_events,
-                audio_src      = self._audio_for_out,
-                output_path    = self._var_output.get(),
-                max_speed      = float(self._var_max_speed.get()),
-                log            = self.log,
-                progress_cb    = self._set_progress,
+                input_video = self._var_video.get(),
+                v_ctrl      = self._v_ctrl,
+                a_ctrl      = self._a_ctrl,
+                audio_src   = self._audio_out,
+                output_path = self._var_output.get(),
+                max_speed   = float(self._var_max_speed.get()),
+                log         = self.log,
+                progress_cb = self._set_progress,
             )
 
             self.after(0, lambda: self._status(
@@ -707,7 +655,7 @@ class App(tk.Tk):
             ))
             self.after(0, lambda: messagebox.showinfo(
                 "Sync Complete",
-                f"Saved to:\n{self._var_output.get()}"
+                f"Saved:\n{self._var_output.get()}"
             ))
 
         except Exception as e:
@@ -722,34 +670,11 @@ class App(tk.Tk):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _check_basic_deps():
-    """Give a friendly error before the GUI even starts."""
-    missing = []
-    for imp, pkg in [("numpy", "numpy"), ("librosa", "librosa"),
-                     ("scipy", "scipy")]:
-        try:
-            __import__(imp)
-        except ImportError:
-            missing.append(pkg)
-    if missing:
-        print(f"Missing packages: {', '.join(missing)}")
-        print(f"Install with:  pip install {' '.join(missing)}")
-        sys.exit(1)
-    if not shutil.which("ffmpeg"):
-        print("ffmpeg not found on PATH. Please install ffmpeg.")
-        sys.exit(1)
-
 
 if __name__ == "__main__":
-    # Light dep check -- heavy imports happen inside threads
     try:
         import numpy
     except ImportError:
         print("numpy is required.  pip install numpy")
         sys.exit(1)
-
-    app = App()
-    app.mainloop()
+    App().mainloop()
