@@ -309,6 +309,8 @@ class JobManager:
                 # where satellite and local jobs competed for the same queue slot.
                 log.info("Job %s (%s) prep done, running directly (non-GPU type)",
                          job.id, job_type)
+                job.status     = "running"
+                job.started_at = time.time()
                 self._run_job(job)
 
         t = threading.Thread(target=_run_prep, daemon=True)
