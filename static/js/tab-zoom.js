@@ -840,6 +840,12 @@ export function init(panel) {
   const songBatchLoopCheck  = el('input', { type: 'checkbox' });
   songBatchLoopCheck.style.accentColor = 'var(--accent)';
   songBatchLoopToggle.append(songBatchLoopCheck, 'Loop overnight (repeat folder continuously)');
+
+  // Fast mode: 360P, 4 steps, 50% coverage -- ~6x faster, Real-ESRGAN upscales back to HD
+  const songBatchFastToggle = el('label', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;' });
+  const songBatchFastCheck  = el('input', { type: 'checkbox', checked: true });
+  songBatchFastCheck.style.accentColor = 'var(--accent)';
+  songBatchFastToggle.append(songBatchFastCheck, 'Fast mode (360P + 4 steps + 50% clip coverage -- ~6x faster, upscaled after)');
   const songFolderStatus = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:16px;' });
   const songBatchBtn     = el('button', { text: 'Queue All', disabled: true, style: 'padding:11px; border-radius:var(--r-lg); border:none; cursor:not-allowed; font-size:14px; font-weight:700; background:var(--circus-red); color:var(--text); opacity:.45;' });
 
@@ -959,17 +965,20 @@ export function init(panel) {
     songBatchBtn.disabled = true;
     songFolderStatus.textContent = 'Analyzing song and queuing batch...';
     try {
+      const fast = songBatchFastCheck.checked;
       const body = {
-        audio_path:    _songPath,
-        folder:        _songFolderPath,
-        images:        _songFolderFiles.map(f => ({ path: f.path, name: f.name })),
-        repeat:        songBatchLoopCheck.checked,
-        video_prompt:  '',
-        model:         modelSel.value,
-        clip_duration: _clipDur,
-        num_clips:     _numClips,
-        steps:         _steps,
-        guidance:      _guidance,
+        audio_path:      _songPath,
+        folder:          _songFolderPath,
+        images:          _songFolderFiles.map(f => ({ path: f.path, name: f.name })),
+        repeat:          songBatchLoopCheck.checked,
+        video_prompt:    '',
+        model:           modelSel.value,
+        clip_duration:   fast ? 4  : _clipDur,
+        steps:           fast ? 4  : _steps,
+        guidance:        fast ? 1.5 : _guidance,
+        coverage_ratio:  fast ? 0.5 : 1.0,
+        output_width:    fast ? 640  : undefined,
+        output_height:   fast ? 360  : undefined,
       };
       const s = await apiFetch('/api/song-video/batch/start', {
         method: 'POST',
@@ -990,6 +999,7 @@ export function init(panel) {
     songBatchDivider,
     el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [songFolderNameEl, songBrowseBtn]),
     songBatchLoopToggle,
+    songBatchFastToggle,
     songFolderStatus,
     songBatchBtn,
   );
