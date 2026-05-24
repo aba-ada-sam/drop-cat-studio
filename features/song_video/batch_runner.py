@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 log = logging.getLogger("song_batch")
 
-HEARTBEAT_TIMEOUT_SEC = 120
+HEARTBEAT_TIMEOUT_SEC = 3600  # 1 hour -- survives overnight with backgrounded/closed tab
 _JOB_POLL_INTERVAL_SEC = 2.0
 
 # Persist state here so a DCS restart can auto-resume an in-progress batch.

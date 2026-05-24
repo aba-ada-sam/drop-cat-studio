@@ -80,7 +80,13 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
             "white t-shirt, pale freckled skin, hazel eyes, small silver earrings.'",
             [b64], tier=TIER_FAST, max_tokens=90,
         )
-        anchor = raw.strip().strip('"').strip("'")
+        # Strip any markdown the LLM adds (headers, bullets, bold, etc.)
+        import re as _re
+        anchor = raw.strip()
+        anchor = _re.sub(r'^#+\s*[^\n]*\n+', '', anchor)   # strip # headings
+        anchor = _re.sub(r'\*\*([^*]+)\*\*', r'\1', anchor) # **bold**
+        anchor = _re.sub(r'\*([^*]+)\*', r'\1', anchor)     # *italic*
+        anchor = anchor.strip().strip('"').strip("'").split('\n')[0].strip()
         if anchor and not anchor.endswith("."):
             anchor += "."
         return anchor
@@ -716,7 +722,7 @@ def _do_song_gpu_phase(
             idx  = norm.lower().find("/output/")
             url  = norm[idx:] if idx != -1 else f"/output/{Path(merged).name}"
             gallery_push(
-                url, tab="song-video",
+                url, tab="music-video",
                 prompt=(story_arc[0].get("prompt", "") if isinstance(story_arc[0], dict) else str(story_arc[0]))[:120] if story_arc else "",
                 model=model_name,
                 metadata={
@@ -734,18 +740,17 @@ def _do_song_gpu_phase(
         except Exception as e:
             log.warning("session.add_file failed: %s", e)
 
-        # Clean up intermediates (clips, concat, synced_concat if separate)
+        # Clean up intermediate clip files and concat
         for cp in clip_paths:
             try:
                 os.remove(cp)
             except Exception:
                 pass
-        for p in (concat_path, synced_concat):
-            if p and p != merged:
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
+        if concat_path and concat_path != merged:
+            try:
+                os.remove(concat_path)
+            except Exception:
+                pass
     else:
         # Merge failed -- log it but do NOT inbox a soundless video.
         # The clip files remain in job_dir for manual recovery if needed.
