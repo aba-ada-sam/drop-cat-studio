@@ -135,7 +135,7 @@ def _refine_arc_with_audio(
                     orig.get("prompt", "") if isinstance(orig, dict) else str(orig)
                 ):
                     entry = dict(orig) if isinstance(orig, dict) else {"prompt": str(orig), "duration": 5.0}
-                    entry["prompt"] = new_prompt
+                    entry["prompt"] = _strip_camera_moves(new_prompt)
                     refined.append(entry)
                     continue
             refined.append(orig)
@@ -258,7 +258,11 @@ progressively replaces the original scene with motion-themed hallucinations.
 Common rules:
 - Describe only what is PHYSICALLY VISIBLE: bodies, surfaces, weather, objects in motion
 - Every action must be a real physical thing a camera could capture -- no abstract concepts
-- NO camera moves as the primary event (camera reacts, never leads)
+- NO camera moves of any kind -- no zoom, no pan, no push, no pull, no dolly, no tilt
+- BANNED camera words (never use these): "zoom in", "zoom out", "zooms in", "zooms out",
+  "pull back", "push in", "pan left", "pan right", "dolly", "tilt up", "tilt down",
+  "camera moves", "camera pushes", "camera pulls", "camera zooms", "camera pans",
+  "slow zoom", "gentle zoom", "subtle zoom", "zoom reveals", "zoom into"
 - BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera",
   "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
 - BANNED: inventing subjects not in the photo (no new animals, people, or objects)
@@ -1100,6 +1104,39 @@ def _run_director_pass(
         return clip_paths, clip_durations, story_arc, assembled_path
 
     return new_clip_paths, new_clip_durs, new_arc, new_assembled
+
+
+import re as _re_cam
+
+_CAMERA_MOVE_RE = _re_cam.compile(
+    r'\b(?:'
+    r'zoom(?:s|ing|ed)?\s+(?:in|out|into|back)'
+    r'|(?:slow|gentle|subtle|gradual|slight)\s+zoom'
+    r'|zoom\s+(?:reveals?|shows?|uncovers?)'
+    r'|pull(?:s|ing|ed)?\s+(?:back|out|away)'
+    r'|push(?:es|ing|ed)?\s+in'
+    r'|pan(?:s|ning|ned)?\s+(?:left|right|across|up|down|over)'
+    r'|dolly(?:ing|ies|ied)?\s+(?:in|out|back)'
+    r'|tilt(?:s|ing|ed)?\s+(?:up|down)'
+    r'|track(?:s|ing|ed)?\s+(?:left|right|in|out|back)'
+    r'|camera\s+(?:zooms?|pans?|pushes?|pulls?|moves?|drifts?|sweeps?|tracks?|dollies?|tilts?)'
+    r')',
+    _re_cam.IGNORECASE,
+)
+
+
+def _strip_camera_moves(prompt: str) -> str:
+    """Remove zoom/pan/dolly/tilt camera instructions from a clip prompt.
+
+    Applied to every LLM-generated clip prompt before it reaches WanGP.
+    WanGP and LTX interpret camera words literally and apply the motion,
+    producing inconsistent clip-to-clip camera work.
+    """
+    cleaned = _CAMERA_MOVE_RE.sub('', prompt)
+    cleaned = _re_cam.sub(r'[ ,;]+', ' ', cleaned).strip().strip(',').strip(';').strip()
+    if cleaned != prompt:
+        log.info("[prompt] stripped camera moves: %r -> %r", prompt[:60], cleaned[:60])
+    return cleaned
 
 
 _CHAIN_TRIM_RATIO = 0.88
@@ -1968,6 +2005,7 @@ def run_multi_pipeline(job, photo_path, settings):
           # Prepend subject anchor if the prompt doesn't already open with it.
           # This guards against LLM drift where later clip prompts describe a
           # different-looking subject than the source photo.
+          clip_prompt = _strip_camera_moves(clip_prompt)
           if subject_anchor and not clip_prompt.lower().startswith(subject_anchor[:20].lower()):
               clip_prompt = subject_anchor + " " + clip_prompt
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
