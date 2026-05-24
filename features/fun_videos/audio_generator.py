@@ -268,7 +268,23 @@ def generate_audio(
 
     resp = _post(f"{_api_base()}/release_task", payload, timeout=30)
     if resp is None:
-        return None, "Failed to submit task to ACE-Step"
+        # release_task timed out despite health check passing -- classic zombie:
+        # a crashed ACE-Step process left a ghost on port 8020 that answers /health
+        # but cannot process tasks. Force-kill and restart, then retry once.
+        log.warning("[audio] release_task timed out -- zombie ACE-Step suspected, force-restarting...")
+        try:
+            from services.manager import stop_service, start_acestep as _start
+            stop_service("acestep")
+            ok, _err = _start()
+            if ok:
+                log.info("[audio] ACE-Step restarted -- retrying release_task")
+                resp = _post(f"{_api_base()}/release_task", payload, timeout=30)
+            else:
+                log.warning("[audio] ACE-Step restart failed: %s", _err)
+        except Exception as _exc:
+            log.warning("[audio] ACE-Step restart attempt failed: %s", _exc)
+        if resp is None:
+            return None, "Failed to submit task to ACE-Step"
 
     # Handle both wrapped {"data": {"task_id": ...}} and flat {"task_id": ...} responses
     resp_data = resp.get("data") or resp
