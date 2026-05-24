@@ -1095,7 +1095,7 @@ def _run_director_pass(
     new_assembled = str(job_dir / f"concat_p{pass_num}_{job.id[:6]}.mp4")
     if new_clip_paths:
         _normalize_clip_for_concat(new_clip_paths[-1])
-    if not _concat_clips(new_clip_paths, new_assembled):
+    if not _concat_with_xfade(new_clip_paths, new_clip_durs, new_assembled):
         log.warning("[director] Pass %d re-assemble failed -- keeping previous result", pass_num)
         return clip_paths, clip_durations, story_arc, assembled_path
 
@@ -1133,10 +1133,12 @@ def _find_anchor(job_dir: Path, i: int, current_pass: int) -> str | None:
 def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RATIO) -> tuple[bool, float]:
     """Trim clip to ratio*duration via re-encode and write last frame as PNG.
 
-    The trim and the anchor frame share the same timestamp, so concatenating
-    clips via hard cut produces a frame-exact junction (clip i ends on the
-    same frame clip i+1 starts from). ratio=0.88 stays clear of LTX-2's
-    final fade-out blur while keeping most of each clip.
+    CRITICAL ORDER: extract PNG from the ORIGINAL WanGP output FIRST, then
+    re-encode. CRF-15 H.264 introduces macroblock artifacts; if the PNG is
+    extracted after re-encoding those artifacts become the conditioning frame
+    for the next clip, and the model reinforces them on every subsequent clip
+    -- cumulative skin "pox" marks and texture degradation. The clean diffusion
+    output must be the source for the anchor frame.
 
     Returns (ok, new_duration). On failure, leaves clip_path untouched and
     returns (False, original_duration).
@@ -1145,9 +1147,26 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     if dur <= 1.0:
         return False, dur
     cut_to = dur * ratio
+    seek_t = max(0.0, cut_to - 0.05)
 
-    # Re-encode trim so the new EOF lands exactly at cut_to (concat -c copy
-    # would snap to the nearest keyframe, leaving the chain misaligned).
+    # Step 1: Extract anchor PNG from ORIGINAL output BEFORE any re-encode.
+    anchor_ok = False
+    for _cmd in [
+        ["ffmpeg", "-y", "-ss", f"{seek_t:.4f}", "-i", clip_path,
+         "-frames:v", "1", anchor_png],
+        ["ffmpeg", "-y", "-i", clip_path,
+         "-ss", f"{seek_t:.4f}", "-frames:v", "1", anchor_png],
+    ]:
+        fr = subprocess.run(_cmd, capture_output=True, timeout=30)
+        if fr.returncode == 0 and Path(anchor_png).exists():
+            anchor_ok = True
+            break
+    if not anchor_ok:
+        log.warning("[chain] anchor extract failed for %s", clip_path)
+
+    # Step 2: Re-encode-trim for concat AFTER the PNG is safely extracted.
+    # concat -c copy would snap to the nearest keyframe, leaving the chain
+    # misaligned; re-encode lands the EOF exactly at cut_to.
     trimmed = clip_path + ".trim.mp4"
     r = subprocess.run(
         ["ffmpeg", "-y", "-i", clip_path,
@@ -1158,30 +1177,39 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
         capture_output=True, timeout=120,
     )
     if r.returncode != 0 or not Path(trimmed).exists():
-        log.warning("[chain] trim failed for %s: %s", clip_path, r.stderr.decode(errors='replace')[-400:])
-        return False, dur
+        log.warning("[chain] trim failed for %s: %s", clip_path, r.stderr.decode(errors="replace")[-400:])
+        return anchor_ok, dur
     os.replace(trimmed, clip_path)
 
     new_dur = probe_duration(clip_path) or cut_to
+    return anchor_ok, new_dur
 
-    # Extract the last frame of the trimmed clip.
-    # sseof -0.1 is tried first: seeks from end of file, decodes only the
-    # last 0.1s -- almost instant regardless of clip length. The 2-3 frame
-    # inaccuracy is invisible. Output seek (decodes full clip) is the fallback
-    # only if sseof fails for any reason.
-    _anchor_cmds = [
-        ["ffmpeg", "-y", "-sseof", "-0.1", "-i", clip_path,
-         "-frames:v", "1", anchor_png],
-        ["ffmpeg", "-y", "-i", clip_path,
-         "-ss", f"{max(0.0, new_dur - 0.1):.4f}", "-frames:v", "1", anchor_png],
-    ]
-    for _cmd in _anchor_cmds:
-        fr = subprocess.run(_cmd, capture_output=True, timeout=30)
-        if fr.returncode == 0 and Path(anchor_png).exists():
-            return True, new_dur
 
-    log.warning("[chain] anchor extract failed for %s", clip_path)
-    return False, new_dur
+_ANCHOR_BLEND_ALPHA = 0.82  # 82% last frame (motion continuity) + 18% source (identity)
+
+
+def _blend_anchor_with_source(anchor_png: str, source_photo: str,
+                               alpha: float = _ANCHOR_BLEND_ALPHA) -> None:
+    """Blend chain anchor frame with original source photo to prevent character drift.
+
+    Without blending, small appearance errors compound across clips: the model
+    slightly changes hair color or skin tone in clip 2, that becomes the anchor
+    for clip 3 which drifts further, and by clip 6 the character looks like a
+    different person. Injecting 18% of the original source on every anchor acts
+    as a gravity well that pulls appearance back toward the source on each transition
+    without snapping visually or breaking motion continuity.
+
+    alpha=0.82 is empirically safe: enough last-frame dominance to carry motion
+    and environment state; enough source-photo injection to kill drift within 3-4
+    clips even on LTX-2 with active scene prompts.
+    """
+    try:
+        from PIL import Image
+        anc = Image.open(anchor_png).convert("RGB")
+        src = Image.open(source_photo).convert("RGB").resize(anc.size, Image.LANCZOS)
+        Image.blend(src, anc, alpha=alpha).save(anchor_png)
+    except Exception as exc:
+        log.warning("[chain] anchor blend with source failed (using raw anchor): %s", exc)
 
 
 # -- ffmpeg clip concatenation -------------------------------------------------
@@ -1285,6 +1313,77 @@ def _concat_clips(clip_paths: list[str], out_path: str) -> bool:
             os.remove(list_path)
         except Exception:
             pass
+
+
+_XFADE_DUR = 0.25  # seconds -- 6 frames @25fps, 4 frames @16fps; invisible as a wipe but smooths seams
+
+
+def _concat_with_xfade(clip_paths: list[str], clip_durs: list[float], out_path: str,
+                        fade_dur: float = _XFADE_DUR) -> bool:
+    """Concatenate clips with a short alpha-blend crossfade at each junction.
+
+    Hard-cut concat produces a visible seam even with frame-exact chaining.
+    Diffusion models do not generate a first frame pixel-identical to their
+    conditioning image -- there is always a slight luminance shift or color-cast
+    at the start of each clip. A 0.25s crossfade makes every transition invisible
+    without the dreaded "cross-dissolve sludge" of long fades.
+
+    Uses ffmpeg xfade filter with transition=fade. Falls back to _concat_clips
+    (hard cut) if xfade encode fails or if only 1 clip.
+    """
+    n = len(clip_paths)
+    if n <= 1:
+        return _concat_clips(clip_paths, out_path)
+
+    # Cap fade_dur to at most 20% of the shortest clip to avoid xfade consuming tiny clips
+    min_dur = min(clip_durs[:n]) if clip_durs else 3.0
+    fade = min(fade_dur, min_dur * 0.20)
+    if fade < 0.04:
+        return _concat_clips(clip_paths, out_path)
+
+    # Build ffmpeg inputs
+    inputs = []
+    for p in clip_paths:
+        inputs += ["-i", p]
+
+    # Build chained xfade filter_complex.
+    # Offset for xfade i is measured in the OUTPUT timeline from t=0.
+    # O_0 = d[0] - fade
+    # O_i = O_{i-1} + d[i] - fade  (each xfade shortens the output by fade)
+    filter_parts = []
+    cumulative_offset = 0.0
+    prev_label = "[0:v]"
+
+    for i in range(1, n):
+        offset = max(0.01, cumulative_offset + clip_durs[i - 1] - fade)
+        out_label = "[outv]" if i == n - 1 else f"[xf{i}]"
+        filter_parts.append(
+            f"{prev_label}[{i}:v]xfade=transition=fade"
+            f":duration={fade:.4f}:offset={offset:.4f}{out_label}"
+        )
+        prev_label = out_label
+        cumulative_offset = offset
+
+    filter_complex = ";".join(filter_parts)
+
+    cmd = ["ffmpeg", "-y"] + inputs + [
+        "-filter_complex", filter_complex,
+        "-map", "[outv]",
+        "-c:v", "libx264", "-crf", "15", "-preset", "fast",
+        "-pix_fmt", "yuv420p", "-an",
+        out_path,
+    ]
+    r = subprocess.run(cmd, capture_output=True, timeout=600)
+    if r.returncode == 0 and Path(out_path).exists():
+        return True
+
+    log.warning("[multi] xfade concat failed -- falling back to hard cut: %s",
+                r.stderr.decode(errors="replace")[-400:])
+    try:
+        Path(out_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return _concat_clips(clip_paths, out_path)
 
 
 def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps: int = 25, trim_to: float | None = None) -> bool:
@@ -1498,13 +1597,15 @@ def run_multi_prep(job, photo_path, settings):
             b64 = encode_image_b64(arc_photo)
             if b64:
                 anchor_raw = llm_router.route_vision(
-                    "Describe the main subject in this image in 12-15 words. "
-                    "Use exact visual details only: hair color, clothing color and type, "
-                    "skin tone, species, material, expression. No interpretation. "
-                    "Example: 'Red-haired woman in blue denim jacket, pale skin, hazel eyes.'",
+                    "Describe the main subject in this image in 20-25 words. "
+                    "Include: exact hair color and style, clothing color and type, "
+                    "skin tone, eye color, distinguishing features, species if not human, "
+                    "any accessories. Be specific and visual only -- no emotions or context. "
+                    "Example: 'Red-haired woman, loose shoulder curls, blue denim jacket, "
+                    "white t-shirt, pale freckled skin, hazel eyes, small silver earrings.'",
                     [b64],
                     tier=TIER_FAST,
-                    max_tokens=60,
+                    max_tokens=90,
                 )
                 subject_anchor = anchor_raw.strip().strip('"').strip("'")
                 if subject_anchor and not subject_anchor.endswith("."):
@@ -1879,10 +1980,23 @@ def run_multi_pipeline(job, photo_path, settings):
           finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
           clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
 
-          # Chained clips: lower guidance so start frame dominates over text.
-          # 7.5 lets text override the anchor frame and teleport subjects.
-          # 3.5 keeps camera steering from text while locking scene identity.
-          effective_guidance = guidance if (i == 0 or not clip_start_image or clip_start_image == prepped_photo) else min(guidance, 3.5)
+          # Chained clips: drop guidance hard so the anchor image dominates.
+          # At 3.5 the text prompt can still override the conditioning frame's
+          # appearance and "teleport" the character. Empirically:
+          #   LTX Distilled (compressed 8-step schedule): 1.5 max -- the
+          #     compressed denoising schedule amplifies guidance drift badly.
+          #   LTX Dev (40-step schedule): 2.0 max.
+          #   Wan I2V: 2.5 max -- less sensitive per step.
+          # Clip 1 keeps full guidance because it starts from the source photo
+          # (identity is ground truth); clips 2+ use the accumulated chain anchor.
+          if i == 0 or not clip_start_image or clip_start_image == prepped_photo:
+              effective_guidance = guidance
+          elif "distilled" in model_name.lower():
+              effective_guidance = min(guidance, 1.5)
+          elif "ltx" in model_name.lower():
+              effective_guidance = min(guidance, 2.0)
+          else:
+              effective_guidance = min(guidance, 2.5)
 
           clip_path = None
           for _attempt in range(2):
@@ -1937,9 +2051,7 @@ def run_multi_pipeline(job, photo_path, settings):
           if len(clip_paths) == 1:
               job.meta["first_clip"] = clip_path
 
-          # Trim each clip and extract the chain anchor at the SAME timestamp
-          # so the next clip starts exactly where this one ends -- frame-exact
-          # hard-cut concat with no visible jump.
+          # Trim clip and extract chain anchor for the next clip.
           if i < len(story_arc) - 1:
               frame_out = str(job_dir / f"frame_{i:02d}.png")
               ok, new_dur = _chain_anchor(clip_path, frame_out)
@@ -1948,16 +2060,19 @@ def run_multi_pipeline(job, photo_path, settings):
                   log.warning("[multi] Chain anchor failed for clip %d -- next clip resets to source", i + 1)
                   prev_frame_path = None
               elif reanchor_every > 0 and (i + 1) % reanchor_every == 0:
-                  # Periodic re-anchor: clip (i+2) restarts from the source photo
-                  # to break the compounding quality drift on long stories.
-                  # Requires n_clips > reanchor_every to be worth doing.
+                  # Periodic re-anchor: clip (i+2) restarts from the source photo.
                   if n_clips > reanchor_every:
                       log.info("[multi] Re-anchoring clip %d back to source photo (every %d)",
                                i + 2, reanchor_every)
                       prev_frame_path = None
                   else:
+                      # Blend even when not re-anchoring to kill drift
+                      _blend_anchor_with_source(frame_out, prepped_photo)
                       prev_frame_path = frame_out
               else:
+                  # Blend anchor with source photo on EVERY transition to prevent
+                  # cumulative character appearance drift across clips.
+                  _blend_anchor_with_source(frame_out, prepped_photo)
                   prev_frame_path = frame_out
           else:
               clip_durations.append(probe_duration(clip_path) or this_clip_dur)
@@ -1974,23 +2089,22 @@ def run_multi_pipeline(job, photo_path, settings):
       job.meta["clips_generated"] = len(clip_paths)
       job.meta["clip_paths"] = clip_paths
 
-      # -- Phase 2: Compile clips into one video ------------------------------
-      # Clips are chained (each starts from the previous clip's last frame),
-      # so adjacent boundaries share the same frame. _chain_anchor aligned
-      # each clip's end with the next clip's start image, so a hard-cut concat
-      # is frame-exact -- crossfade or AI bridges would only add cross-dissolve
-      # sludge over already-seamless joins.
+      # -- Phase 2: Compile clips with xfade transitions ----------------------
+      # A 0.25s crossfade blend at each junction hides the slight luminance/color
+      # startup artifact that diffusion models produce on the first frame of each
+      # clip regardless of conditioning. Hard cuts make this obvious; the xfade
+      # makes it invisible. _concat_with_xfade falls back to hard cut if ffmpeg
+      # xfade fails for any reason.
       compile_pct = clips_end_pct + 1
       job.update(progress=compile_pct, message="Compiling clips...")
       concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
 
-      # Last clip skips _chain_anchor (nothing to chain to), so it is still in
-      # WanGP's native format while all other clips are CRF-15 libx264. Normalize
-      # it now so _concat_clips can stream-copy instead of re-encoding everything.
+      # Last clip skips _chain_anchor so it is still in WanGP's native format.
+      # Normalize it to CRF-15 libx264 first so xfade sees uniform input format.
       if clip_paths:
           _normalize_clip_for_concat(clip_paths[-1])
 
-      if not _concat_clips(clip_paths, concat_path):
+      if not _concat_with_xfade(clip_paths, clip_durations, concat_path):
           log.warning("[multi] Concat failed -- using first clip only")
           concat_path = clip_paths[0]
 
