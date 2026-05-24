@@ -222,17 +222,30 @@ export function init(panel) {
     return { wrap, input };
   }
 
-  const { wrap: loopWrap, input: loopCheck }   = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: fastWrap, input: fastCheck }   = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', true);
+  const { wrap: loopWrap, input: loopCheck } = _toggle('Loop continuously (repeat folder)', false);
+  const { wrap: fastWrap, input: fastCheck } = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', true);
 
-  // Coverage ratio: how much of the song gets video clips (rest uses still frames)
-  const coverageLabel  = el('div', { style: 'font-size:12px; color:var(--text-3); margin-bottom:4px;', text: 'Song coverage' });
-  const coverageSlider = el('input', { type: 'range', min: '20', max: '100', step: '10', value: '100' });
-  coverageSlider.style.cssText = 'width:100%; accent-color:var(--accent);';
-  const coverageVal    = el('span', { style: 'font-size:11px; color:var(--text-2);', text: '100%' });
-  coverageSlider.addEventListener('input', () => { coverageVal.textContent = coverageSlider.value + '%'; });
-  const coverageRow    = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [coverageSlider, coverageVal]);
-  const coverageWrap   = el('div', { style: 'display:flex; flex-direction:column; gap:2px; padding:6px 0;' }, [coverageLabel, coverageRow]);
+  // Clip duration slider
+  function _numRow(labelText, min, max, step, def, unit) {
+    const lbl   = el('div', { style: 'font-size:12px; color:var(--text-3);', text: labelText });
+    const input = el('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(def) });
+    input.style.cssText = 'flex:1; accent-color:var(--accent);';
+    const val   = el('span', { style: 'font-size:11px; color:var(--text-2); min-width:32px; text-align:right;', text: def + unit });
+    input.addEventListener('input', () => { val.textContent = input.value + unit; });
+    const row   = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [input, val]);
+    const wrap  = el('div', { style: 'display:flex; flex-direction:column; gap:3px; padding:4px 0;' }, [lbl, row]);
+    return { wrap, input, val };
+  }
+
+  const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 12, 1, 8, 's');
+  fastCheck.addEventListener('change', () => {
+    if (fastCheck.checked) { clipDurSlider.value = '5'; clipDurSlider.dispatchEvent(new Event('input')); }
+    else                   { clipDurSlider.value = '8'; clipDurSlider.dispatchEvent(new Event('input')); }
+  });
+
+  // Padding: seconds of silent video before song starts / after song ends
+  const { wrap: padBeforeWrap, input: padBeforeSlider } = _numRow('Video before song starts', 0, 10, 1, 0, 's');
+  const { wrap: padAfterWrap,  input: padAfterSlider  } = _numRow('Video after song ends',    0, 10, 1, 0, 's');
   // Satellite disabled -- unstable, kept for future use
   const satCheck = { checked: false };
   const satWrap  = null;
@@ -336,19 +349,19 @@ export function init(panel) {
     try {
       const fast = fastCheck.checked;
       const body = {
-        audio_path:      _songPath,
-        folder:          _folderPath,
-        images:          _folderFiles.map(f => ({ path: f.path, name: f.name })),
-        repeat:          loopCheck.checked,
-        use_satellite:   satCheck.checked,
-        model:           modelSel.value,
-        clip_duration:   fast ? 5    : 8,
-        num_clips:       fast ? null : undefined,
-        steps:           fast ? 8    : 20,
-        guidance:        fast ? 2.5  : 3.5,
-        coverage_ratio:  parseFloat(coverageSlider.value) / 100,
-        output_width:    fast ? 640  : undefined,
-        output_height:   fast ? 360  : undefined,
+        audio_path:    _songPath,
+        folder:        _folderPath,
+        images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
+        repeat:        loopCheck.checked,
+        use_satellite: satCheck.checked,
+        model:         modelSel.value,
+        clip_duration: parseInt(clipDurSlider.value),
+        steps:         fast ? 8    : 20,
+        guidance:      fast ? 2.5  : 3.5,
+        pad_before:    parseInt(padBeforeSlider.value),
+        pad_after:     parseInt(padAfterSlider.value),
+        output_width:  fast ? 640  : undefined,
+        output_height: fast ? 360  : undefined,
       };
       const s = await apiFetch('/api/song-video/batch/start', { method: 'POST', body: JSON.stringify(body) });
       _applySnapshot(s);
@@ -432,15 +445,16 @@ export function init(panel) {
     try {
       const fast = fastCheck.checked;
       const body = {
-        audio_path:    _songPath,
-        photo_path:    singleImagePath.value || '',
-        video_prompt:  ideaInput.value.trim(),
+        audio_path:     _songPath,
+        photo_path:     singleImagePath.value || '',
+        video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
         model:          modelSel.value,
-        clip_duration:  fast ? 5    : 8,
+        clip_duration:  parseInt(clipDurSlider.value),
         steps:          fast ? 8    : 20,
         guidance:       fast ? 2.5  : 3.5,
-        coverage_ratio: parseFloat(coverageSlider.value) / 100,
+        pad_before:     parseInt(padBeforeSlider.value),
+        pad_after:      parseInt(padAfterSlider.value),
         output_width:   fast ? 640  : undefined,
         output_height:  fast ? 360  : undefined,
       };
@@ -521,7 +535,9 @@ export function init(panel) {
       folderStatus,
       loopWrap,
       fastWrap,
-      coverageWrap,
+      clipDurWrap,
+      padBeforeWrap,
+      padAfterWrap,
       batchStatus,
       batchBtn,
     ]),

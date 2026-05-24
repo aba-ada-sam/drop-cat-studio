@@ -163,13 +163,15 @@ async def generate(request: Request):
     if audio_dur <= 0:
         raise HTTPException(400, "Could not determine audio duration")
 
-    # coverage_ratio: fraction of the song to fill with unique clips (rest loops).
-    # 1.0 = full coverage, 0.65 = 35% fewer clips (video loops 1.5x). Clamped 0.4-1.0.
-    coverage_ratio = max(0.4, min(1.0, float(body.get("coverage_ratio", 1.0))))
-    covered_dur = audio_dur * coverage_ratio
+    # pad_before / pad_after: seconds of video before song starts / after song ends.
+    # Video length = audio_dur + pad_before + pad_after.
+    # Audio is delayed pad_before seconds into the final output.
+    pad_before = max(0.0, min(10.0, float(body.get("pad_before", 0))))
+    pad_after  = max(0.0, min(10.0, float(body.get("pad_after",  0))))
+    total_video_dur = audio_dur + pad_before + pad_after
 
     n_clips = int(body.get("num_clips") or
-                  max(1, math.ceil(covered_dur / clip_dur)))
+                  max(1, math.ceil(total_video_dur / clip_dur)))
     n_clips = max(1, min(50, n_clips))  # hard cap at 50 clips
 
     # Per-job timeout: 5 min per clip + 15 min buffer, min 30 min
@@ -181,10 +183,12 @@ async def generate(request: Request):
         "lyrics_text":     body.get("lyrics_text", ""),
         "user_direction":  body.get("user_direction", "music video, energetic, bold"),
         "audio_path":      audio_path,
-        "audio_duration":  audio_dur,
+        "audio_duration":  total_video_dur,
         "audio_analysis":  analysis,
         "num_clips":       n_clips,
         "clip_duration":   clip_dur,
+        "pad_before":      pad_before,
+        "pad_after":       pad_after,
         "model_name":      body.get("model", config.get("wan_model", "LTX-2 Dev19B Distilled")),
         "resolution":      body.get("resolution", config.get("resolution", "580p")),
         "override_width":  body.get("output_width"),
@@ -291,9 +295,11 @@ async def batch_start(request: Request):
     if audio_dur <= 0:
         raise HTTPException(400, "Could not determine audio duration")
 
-    coverage_ratio = max(0.4, min(1.0, float(body.get("coverage_ratio", 1.0))))
+    pad_before = max(0.0, min(10.0, float(body.get("pad_before", 0))))
+    pad_after  = max(0.0, min(10.0, float(body.get("pad_after",  0))))
+    total_video_dur = audio_dur + pad_before + pad_after
     n_clips = int(body.get("num_clips") or
-                  max(1, math.ceil(audio_dur * coverage_ratio / clip_dur)))
+                  max(1, math.ceil(total_video_dur / clip_dur)))
     n_clips = max(1, min(50, n_clips))
 
     settings = {
@@ -303,10 +309,12 @@ async def batch_start(request: Request):
         "user_direction": body.get("user_direction", "music video, energetic, bold"),
         "audio_path":     audio_path,
         "audio_name":     Path(audio_path).stem[:30],
-        "audio_duration": audio_dur,
+        "audio_duration": total_video_dur,
         "audio_analysis": analysis,
         "num_clips":      n_clips,
         "clip_duration":  clip_dur,
+        "pad_before":     pad_before,
+        "pad_after":      pad_after,
         "model_name":     body.get("model", config.get("wan_model", "LTX-2 Dev19B Distilled")),
         "resolution":     body.get("resolution", config.get("resolution", "580p")),
         "override_width": body.get("output_width"),

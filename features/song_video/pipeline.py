@@ -234,26 +234,26 @@ def _merge_video_audio_trim(
     audio_path: str,
     out_path: str,
     audio_duration: float,
+    pad_before: float = 0.0,
 ) -> str | None:
-    """Merge video + audio, looping the video if needed to fill the full song duration.
-
-    Always probes the audio file directly with ffprobe to get the true duration.
-    The stored audio_duration from settings comes from librosa which can report
-    2-5 seconds less than the actual file (signal frames vs container metadata).
-    """
+    """Merge video + audio, looping video if needed. pad_before delays audio onset."""
     video_dur = probe_duration(video_path) or 0.0
-    # Use ffprobe duration as ground truth -- librosa can undercount by a few seconds
     true_audio_dur = probe_duration(audio_path) or audio_duration
-    target_dur = max(true_audio_dur, audio_duration)  # take the longer of the two
+    target_dur = max(true_audio_dur + pad_before, audio_duration)
 
     need_loop = video_dur > 0 and video_dur < target_dur * 0.98
+
+    # Build audio filter: delay by pad_before ms if requested
+    audio_filter = f"adelay={int(pad_before * 1000)}|{int(pad_before * 1000)},apad" if pad_before > 0 else "apad"
 
     if need_loop:
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", video_path,
             "-i", audio_path,
-            "-map", "0:v", "-map", "1:a",
+            "-map", "0:v",
+            "-filter_complex", f"[1:a]{audio_filter}[a]",
+            "-map", "[a]",
             "-c:v", "libx264", "-preset", "fast", "-crf", "15",
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{target_dur:.3f}",
@@ -265,7 +265,9 @@ def _merge_video_audio_trim(
             "ffmpeg", "-y",
             "-i", video_path,
             "-i", audio_path,
-            "-map", "0:v", "-map", "1:a",
+            "-map", "0:v",
+            "-filter_complex", f"[1:a]{audio_filter}[a]",
+            "-map", "[a]",
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{target_dur:.3f}",
@@ -399,6 +401,7 @@ def run_song_pipeline(job, photo_path, settings):
     seed          = int(settings.get("video_seed", -1))
     audio_path    = settings.get("audio_path", "")   # user's uploaded song
     audio_dur     = float(settings.get("audio_duration", 0.0))
+    pad_before    = float(settings.get("pad_before", 0.0))
     story_arc      = settings.pop("_story_arc", [])
     subject_anchor = settings.pop("_subject_anchor", "")
     reanchor_every = int(settings.pop("_reanchor_every", 3))
@@ -762,7 +765,7 @@ def _do_song_gpu_phase(
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
-    merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur)
+    merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before)
 
     if merged:
         job.output = merged
