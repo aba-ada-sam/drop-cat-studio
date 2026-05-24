@@ -438,6 +438,9 @@ def _do_song_gpu_phase(
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}{_et}")
 
+        # Worker URL: local by default, satellite if batch runner requested it.
+        _worker_url = settings.get("wangp_worker_url") or None
+
         # Every clip starts from the original source photo -- never chain frames.
         # Chaining causes the subject to drift clip-by-clip as each generation
         # compounds any appearance deviation from the previous frame. For music
@@ -476,14 +479,11 @@ def _do_song_gpu_phase(
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
-                # Use calm neg prompt (no "static" term) -- "static" in the dynamic neg
-                # pressures LTX to invent particle motion to prove it is not static,
-                # producing snow/dust on chained frames. Calm neg keeps particle bans
-                # without that pressure.
                 negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
+                worker_url=_worker_url or None,
             )
         except Exception as e:
             err = str(e)
@@ -532,6 +532,7 @@ def _do_song_gpu_phase(
                         negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
                         stop_check=_stopped,
                         log_fn=_log,
+                        worker_url=_worker_url or None,
                         progress_fn=_video_progress,
                     )
                 except Exception as _re:

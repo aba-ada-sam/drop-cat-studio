@@ -485,6 +485,7 @@ def main():
     parser = argparse.ArgumentParser(description="Persistent WanGP worker")
     parser.add_argument("--wangp-app", required=True, help="WanGP root directory")
     parser.add_argument("--port", type=int, default=7899, help="Worker HTTP port")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (use 0.0.0.0 for LAN access)")
     parser.add_argument("--model", default="i2v", help="Initial model type to load")
     args = parser.parse_args()
 
@@ -597,8 +598,8 @@ def main():
         print(f"[worker] Warning: could not pre-load model settings: {e}", flush=True)
 
     # BUG-03: ThreadingHTTPServer lets /status polls and /generate run concurrently
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkerHandler)
-    print(f"[worker] Ready -- listening on port {args.port}", flush=True)
+    server = http.server.ThreadingHTTPServer((args.host, args.port), WorkerHandler)
+    print(f"[worker] Ready -- listening on {args.host}:{args.port}", flush=True)
 
     try:
         server.serve_forever()

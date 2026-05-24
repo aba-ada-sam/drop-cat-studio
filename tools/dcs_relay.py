@@ -1,6 +1,9 @@
 """
 DCS Relay -- runs on the 3060.
 HTTP server on port 9999. The 5080 sends commands and checks service status.
+Also proxies WanGP video generation: GET/POST /wangp/* forwards to the local
+WanGP worker at 127.0.0.1:7899, so the 5080 can use the 3060 GPU without
+needing a separate firewall hole for port 7899.
 Zero dependencies beyond Python stdlib.
 
 Start: python dcs_relay.py
@@ -8,6 +11,7 @@ Start: python dcs_relay.py
 import json
 import socket
 import subprocess
+import threading
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -22,9 +26,17 @@ PORT = 9999
 LOG  = Path("C:/DCS-satellite/relay_log.txt")
 
 SERVICES = {
-    "acestep": {"url": "http://localhost:8020/health",           "port": 8020},
-    "forge":   {"url": "http://localhost:7861/sdapi/v1/sd-models","port": 7861},
+    "acestep": {"url": "http://localhost:8020/health",            "port": 8020},
+    "forge":   {"url": "http://localhost:7861/sdapi/v1/sd-models", "port": 7861},
+    "wangp":   {"url": "http://localhost:7899/health",             "port": 7899},
 }
+
+WANGP_WORKER_URL = "http://127.0.0.1:7899"
+WANGP_PYTHON     = r"C:\pinokio\api\wan.git\app\env\Scripts\python.exe"
+WANGP_WORKER_PY  = r"C:\DCS-satellite\wangp_worker.py"
+WANGP_APP_DIR    = r"C:\pinokio\api\wan.git\app"
+_wangp_proc      = None
+_wangp_lock      = threading.Lock()
 
 
 def _log(msg: str) -> None:
@@ -80,11 +92,53 @@ def _start_service(name):
         "relay":   [py, r"C:\DCS-satellite\dcs_relay.py"],
         "acestep": ["cmd", "/c", r"C:\DCS-satellite\start_acestep.bat"],
         "forge":   ["cmd", "/c", r"C:\pinokio\api\forge.pinokio\app\webui-user.bat"],
+        "wangp":   [WANGP_PYTHON, WANGP_WORKER_PY,
+                    "--wangp-app", WANGP_APP_DIR, "--port", "7899", "--host", "127.0.0.1"],
     }
     c = cmds.get(name)
     if c:
-        subprocess.Popen(c, creationflags=0x08000000)
+        subprocess.Popen(c, cwd=WANGP_APP_DIR, creationflags=0x08000000)
         _log(f"Started {name}")
+
+
+def _ensure_wangp():
+    """Start WanGP worker if not already running. Called on relay startup."""
+    global _wangp_proc
+    with _wangp_lock:
+        alive, _ = _check_service(f"{WANGP_WORKER_URL}/health")
+        if alive:
+            _log("WanGP worker already running")
+            return
+        _log("Starting WanGP worker...")
+        try:
+            _wangp_proc = subprocess.Popen(
+                [WANGP_PYTHON, WANGP_WORKER_PY,
+                 "--wangp-app", WANGP_APP_DIR,
+                 "--port", "7899", "--host", "127.0.0.1"],
+                cwd=WANGP_APP_DIR,
+                stdout=open(r"C:\DCS-satellite\worker_out.log", "w"),
+                stderr=open(r"C:\DCS-satellite\worker_err.log", "w"),
+                creationflags=0x08000000,
+            )
+            _log(f"WanGP worker started (pid {_wangp_proc.pid})")
+        except Exception as e:
+            _log(f"Failed to start WanGP worker: {e}")
+
+
+def _proxy_wangp(path: str, method: str, body: bytes, content_type: str):
+    """Forward a request to the local WanGP worker and return (status, body_bytes)."""
+    url = WANGP_WORKER_URL + path
+    try:
+        req = urllib.request.Request(url, data=body if body else None, method=method)
+        if content_type:
+            req.add_header("Content-Type", content_type)
+        with urllib.request.urlopen(req, timeout=1200) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as exc:
+        err = json.dumps({"error": str(exc)}).encode()
+        return 503, err
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -104,7 +158,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path in ("/", "/ui"):
+        if self.path.startswith("/wangp/"):
+            status, data = _proxy_wangp(self.path[6:], "GET", None, "")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path in ("/", "/ui"):
             self._send_ui()
         elif self.path == "/ping":
             self._respond({"ok": True, "machine": "3060"})
@@ -202,6 +263,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_ui()
             return
 
+        # WanGP proxy
+        if self.path.startswith("/wangp/"):
+            ct = self.headers.get("Content-Type", "application/json")
+            status, data = _proxy_wangp(self.path[6:], "POST", raw, ct)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         # JSON API (original relay protocol)
         try:
             body = json.loads(raw)
@@ -213,6 +285,10 @@ class Handler(BaseHTTPRequestHandler):
             res = _run_ps(cmd)
             _log(f"rc={res['rc']}  {res['out'][:120]}")
             self._respond(res)
+        elif self.path.startswith("/start/"):
+            name = self.path.rsplit("/", 1)[-1]
+            _start_service(name)
+            self._respond({"ok": True, "started": name})
         else:
             self._respond({"error": "not found"}, 404)
 
@@ -228,6 +304,8 @@ def main():
          "protocol=TCP", f"localport={PORT}"],
         capture_output=True,
     )
+    # Start WanGP worker in background (binds localhost only; proxied through relay)
+    threading.Thread(target=_ensure_wangp, daemon=True).start()
     server = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
     server.serve_forever()
 

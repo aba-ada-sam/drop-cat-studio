@@ -16,7 +16,12 @@ from core.ffmpeg_utils import parse_resolution
 
 log = logging.getLogger(__name__)
 
-WANGP_WORKER_PORT = 7899
+WANGP_WORKER_PORT     = 7899
+WANGP_LOCAL_URL       = f"http://127.0.0.1:{WANGP_WORKER_PORT}"
+# Satellite WanGP is proxied through the relay on the 3060.
+# /wangp/* on the relay forwards to the local worker at 127.0.0.1:7899 there.
+WANGP_SATELLITE_RELAY = "http://192.168.86.49:9999"
+WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
 
 # Negative prompts tuned per model family and motion style.
 #
@@ -85,12 +90,17 @@ MODELS = {
 }
 
 
-def _worker_alive() -> bool:
+def _worker_alive(base_url: str = WANGP_LOCAL_URL) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{WANGP_WORKER_PORT}/health", timeout=3) as r:
+        with urllib.request.urlopen(f"{base_url}/health", timeout=3) as r:
             return json.loads(r.read()).get("ok", False)
     except Exception:
         return False
+
+
+def satellite_alive() -> bool:
+    """Return True if the 3060 satellite WanGP proxy is reachable and healthy."""
+    return _worker_alive(WANGP_SATELLITE_URL)
 
 
 def _resolve_res(model_name: str, resolution: str) -> tuple[int, int]:
@@ -121,13 +131,13 @@ def generate_video(
     stop_check=None,
     log_fn=None,
     progress_fn=None,
+    worker_url: str | None = None,
 ) -> str | None:
     """Generate a video via WanGP. Returns output path or None.
 
-    progress_fn(step: int, total_steps: int) is called each time the worker
-    reports a new inference step, allowing callers to update a progress bar.
-    override_width / override_height bypass the model's native resolution so
-    custom aspect ratios work regardless of which model is loaded.
+    worker_url: routes to that WanGP HTTP endpoint instead of the local worker.
+    progress_fn(step, total_steps) is called on each inference step.
+    override_width/height bypass the model's native resolution.
     """
     model_info = MODELS.get(model_name, MODELS["LTX-2 Dev19B Distilled"])
     fps = model_info.get("fps", 16)
@@ -166,6 +176,18 @@ def generate_video(
             log_fn("[info] Waiting for WanGP worker to load...")
         time.sleep(2)
 
+    # Satellite shortcut: if caller supplied a worker_url, skip local worker
+    # entirely and route directly to that endpoint.
+    if worker_url and worker_url != WANGP_LOCAL_URL:
+        return _generate_via_worker(
+            image_path, prompt, out_path, num_frames, res_w, res_h,
+            steps, guidance, seed, model_name, end_image_path,
+            start_video_path, loras or [], stop_check, log_fn, progress_fn,
+            mmaudio=mmaudio, audio_source=audio_source,
+            negative_prompt=negative_prompt,
+            worker_url=worker_url,
+        )
+
     if _worker_alive():
         return _generate_via_worker(
             image_path, prompt, out_path, num_frames, res_w, res_h,
@@ -173,6 +195,7 @@ def generate_video(
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
             mmaudio=mmaudio, audio_source=audio_source,
             negative_prompt=negative_prompt,
+            worker_url=WANGP_LOCAL_URL,
         )
 
     # Only fall back to subprocess if the worker process is not running at all
@@ -188,6 +211,61 @@ def generate_video(
     )
 
 
+def generate_video_satellite(
+    image_path, prompt, out_path, **kwargs
+) -> str | None:
+    """Like generate_video() but routes to the 3060 satellite worker via relay proxy.
+
+    Falls back to the local worker if the satellite is not reachable.
+    The output file is written locally (out_path on this machine); the satellite
+    generates it and streams the result back via the status/output_path mechanism.
+    """
+    if not satellite_alive():
+        log.warning("[satellite] not reachable -- falling back to local worker")
+        return generate_video(image_path, prompt, out_path, **kwargs)
+
+    model_name  = kwargs.get("model_name", "LTX-2 Dev19B Distilled")
+    model_info  = MODELS.get(model_name, MODELS["LTX-2 Dev19B Distilled"])
+    fps         = model_info.get("fps", 25)
+    duration    = kwargs.get("duration", 14.0)
+    override_w  = kwargs.get("override_width")
+    override_h  = kwargs.get("override_height")
+    resolution  = kwargs.get("resolution", "580p")
+
+    if override_w and override_h:
+        res_w, res_h = int(override_w), int(override_h)
+    else:
+        res_w, res_h = _resolve_res(model_name, resolution)
+
+    num_frames = max(17, int(duration * fps))
+    if num_frames % 2 == 0:
+        num_frames += 1
+    max_sec   = model_info.get("max_sec", 19)
+    frame_cap = int(max_sec * fps)
+    if frame_cap % 2 == 0:
+        frame_cap -= 1
+    num_frames = min(num_frames, frame_cap)
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    return _generate_via_worker(
+        image_path, prompt, out_path, num_frames, res_w, res_h,
+        kwargs.get("steps", 8),
+        kwargs.get("guidance", 2.5),
+        kwargs.get("seed", -1),
+        model_name,
+        kwargs.get("end_image_path"),
+        kwargs.get("start_video_path"),
+        kwargs.get("loras") or [],
+        kwargs.get("stop_check"),
+        kwargs.get("log_fn"),
+        kwargs.get("progress_fn"),
+        mmaudio=kwargs.get("mmaudio", False),
+        audio_source=kwargs.get("audio_source"),
+        negative_prompt=kwargs.get("negative_prompt", ""),
+        worker_url=WANGP_SATELLITE_URL,
+    )
+
+
 def _generate_via_worker(
     image_path, prompt, out_path, num_frames, width, height,
     steps, guidance, seed, model_name, end_image_path,
@@ -195,8 +273,9 @@ def _generate_via_worker(
     mmaudio: bool = False,
     audio_source: str | None = None,
     negative_prompt: str = "",
+    worker_url: str = WANGP_LOCAL_URL,
 ) -> str | None:
-    """Generate via persistent worker on port 7899."""
+    """Generate via a WanGP worker HTTP endpoint. worker_url selects local or satellite."""
     payload = {
         "prompt": prompt,
         "negative_prompt": negative_prompt,
@@ -223,7 +302,8 @@ def _generate_via_worker(
         payload["loras_multipliers"] = " ".join(str(l.get("multiplier", 1.0)) for l in loras)
 
     if log_fn:
-        log_fn(f"[info] Sending to WanGP worker (port {WANGP_WORKER_PORT})...")
+        label = "satellite" if "192.168" in worker_url else f"port {WANGP_WORKER_PORT}"
+        log_fn(f"[info] Sending to WanGP worker ({label})...")
 
     # Submit with 409-retry: if worker is busy, wait until it's free then retry.
     # On success, capture the generation token so we can reject stale results if
@@ -241,7 +321,7 @@ def _generate_via_worker(
         try:
             data = json.dumps(payload).encode()
             req = urllib.request.Request(
-                f"http://127.0.0.1:{WANGP_WORKER_PORT}/generate",
+                f"{worker_url}/generate",
                 data=data,
                 headers={"Content-Type": "application/json"},
             )
@@ -264,7 +344,7 @@ def _generate_via_worker(
                     time.sleep(2)
                     try:
                         with urllib.request.urlopen(
-                            f"http://127.0.0.1:{WANGP_WORKER_PORT}/health", timeout=5
+                            f"{worker_url}/health", timeout=5
                         ) as r:
                             health = json.loads(r.read())
                         if not health.get("busy", True):
@@ -290,7 +370,7 @@ def _generate_via_worker(
             # keep consuming GPU for a job we no longer care about.
             try:
                 abort_req = urllib.request.Request(
-                    f"http://127.0.0.1:{WANGP_WORKER_PORT}/abort",
+                    f"{worker_url}/abort",
                     data=b"{}",
                     headers={"Content-Type": "application/json"},
                     method="POST",
@@ -301,7 +381,7 @@ def _generate_via_worker(
             return None
         try:
             with urllib.request.urlopen(
-                f"http://127.0.0.1:{WANGP_WORKER_PORT}/status", timeout=5
+                f"{worker_url}/status", timeout=5
             ) as r:
                 status = json.loads(r.read())
 

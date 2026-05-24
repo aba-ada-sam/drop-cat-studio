@@ -164,24 +164,40 @@ def status() -> dict:
 
 # -- Runner --------------------------------------------------------------------
 
-def _submit_one(img_path: str | None, img_name: str, settings: dict):
+def _satellite_available() -> bool:
+    try:
+        from features.fun_videos.video_generator import satellite_alive
+        return satellite_alive()
+    except Exception:
+        return False
+
+
+def _submit_one(img_path: str | None, img_name: str, settings: dict, use_satellite: bool = False):
     from app import get_job_manager
-    from core.job_manager import JOB_FUN_MULTI_VIDEO
+    from core.job_manager import JOB_FUN_MULTI_VIDEO, JOB_FUN_MULTI_VIDEO_SAT
     from features.song_video.pipeline import run_song_prep, run_song_pipeline
+    from features.fun_videos.video_generator import WANGP_SATELLITE_URL
 
     job_manager = get_job_manager()
     audio_name  = settings.get("audio_name", "song")
     n_clips     = settings.get("num_clips", 4)
-    clip_dur    = settings.get("clip_duration", 8)
     timeout_sec = max(1800, n_clips * 300 + 900)
-    label       = f"Music video: {audio_name} / {img_name[:30]}"
+
+    job_settings = dict(settings)
+    if use_satellite:
+        job_settings["wangp_worker_url"] = WANGP_SATELLITE_URL
+        label    = f"[3060] Music video: {audio_name} / {img_name[:25]}"
+        job_type = JOB_FUN_MULTI_VIDEO_SAT   # not GPU-queued; runs in its own thread
+    else:
+        label    = f"Music video: {audio_name} / {img_name[:30]}"
+        job_type = JOB_FUN_MULTI_VIDEO
 
     return job_manager.submit_with_prep(
-        JOB_FUN_MULTI_VIDEO,
+        job_type,
         run_song_prep,
         run_song_pipeline,
         img_path or None,
-        settings,
+        job_settings,
         label=label,
         timeout_seconds=timeout_sec,
     )
@@ -255,11 +271,14 @@ def _runner() -> None:
                                  _state.get("succeeded", 0), total, _state.get("failed", 0))
                         break
 
-                img      = _state["images"][idx]
-                settings = dict(_state["settings"])
+                img          = _state["images"][idx]
+                settings     = dict(_state["settings"])
+                # Alternate local/satellite: even index -> local 5080, odd -> 3060 satellite.
+                # Satellite check is cheap (just a health ping) and cached for 30s.
+                use_sat      = (idx % 2 == 1) and _satellite_available()
 
             try:
-                job    = _submit_one(img["path"], img["name"], settings)
+                job    = _submit_one(img["path"], img["name"], settings, use_satellite=use_sat)
                 job_id = job.id
             except Exception as e:
                 log.warning("[song-batch] submit failed for %s: %s", img.get("path"), e)

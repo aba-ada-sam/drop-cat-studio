@@ -23,11 +23,14 @@ QUEUE_SAVE_FILE = Path(__file__).resolve().parent.parent / "queue_save.json"
 JOB_I2V = "i2v"
 JOB_FUN_VIDEO = "fun_video"
 JOB_FUN_MULTI_VIDEO = "fun_multi_video"
+JOB_FUN_MULTI_VIDEO_SAT = "fun_multi_video_sat"  # satellite variant -- not GPU-queued
 JOB_BRIDGE = "bridge"
 JOB_VIDEO_TOOL = "video_tool"
 JOB_SD_PROMPT = "sd_prompt"
 
-# Types that require exclusive GPU access
+# Types that require exclusive LOCAL GPU access
+# Satellite jobs (JOB_FUN_MULTI_VIDEO_SAT) use the 3060 remote GPU so they
+# run immediately without queuing alongside local GPU jobs.
 GPU_JOB_TYPES = {JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE}
 
 
