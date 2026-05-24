@@ -524,13 +524,15 @@ def _do_song_gpu_phase(
             # and retry once. After ~20 clips WanGP can hang at Step 0 due to
             # VRAM fragmentation; a restart clears it in ~35 seconds.
             _log(f"[warning] Clip {clip_num} failed -- restarting WanGP and retrying once...")
+            job.update(progress=pct_start, message=f"Clip {clip_num}/{n_clips} -- restarting WanGP, retrying...")
             import threading as _th
             from services import manager as _svc
             _svc.restart_service("wangp")
             # Wait for worker to come back (up to 90s)
-            for _ in range(45):
+            for _w in range(45):
                 if _stopped():
                     break
+                job.update(progress=pct_start, message=f"Clip {clip_num}/{n_clips} -- waiting for WanGP restart ({_w*2}s)...")
                 time.sleep(2)
                 try:
                     import urllib.request as _ur
