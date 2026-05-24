@@ -197,6 +197,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+        elif self.path.startswith("/download?"):
+            # Serve a local file back to the main machine.
+            # Used after satellite generation: main machine downloads the clip
+            # that WanGP wrote to the 3060's local filesystem.
+            import urllib.parse, os as _os
+            params = dict(urllib.parse.parse_qsl(self.path[10:]))
+            fpath  = params.get("path", "")
+            if not fpath or not _os.path.isfile(fpath):
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            data = open(fpath, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif self.path in ("/", "/ui"):
             self._send_ui()
         elif self.path == "/ping":

@@ -8,6 +8,7 @@ import logging
 import os
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -266,6 +267,39 @@ def generate_video_satellite(
     )
 
 
+def _download_satellite_file(remote_path: str, local_dest: str,
+                              worker_url: str, log_fn=None) -> str | None:
+    """Download a file from the satellite machine via the relay /download endpoint.
+
+    When the 3060 generates a clip, it saves to its own local filesystem.
+    The relay at port 9999 exposes GET /download?path=... to serve any local file.
+    We download it and write it to local_dest on the main machine.
+
+    Returns local_dest on success, None on failure.
+    """
+    try:
+        # Derive relay base URL from worker_url (strip /wangp suffix)
+        relay_base = worker_url.replace("/wangp", "").rstrip("/")
+        url = f"{relay_base}/download?path={urllib.parse.quote(remote_path)}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = r.read()
+        if not data:
+            if log_fn:
+                log_fn(f"[warn] Satellite download returned empty file: {remote_path}")
+            return None
+        os.makedirs(os.path.dirname(local_dest) or ".", exist_ok=True)
+        with open(local_dest, "wb") as f:
+            f.write(data)
+        if log_fn:
+            log_fn(f"[info] Downloaded satellite clip ({len(data)//1024}KB) -> {os.path.basename(local_dest)}")
+        return local_dest
+    except Exception as exc:
+        if log_fn:
+            log_fn(f"[warn] Satellite file download failed: {exc}")
+        return None
+
+
 def _generate_via_worker(
     image_path, prompt, out_path, num_frames, width, height,
     steps, guidance, seed, model_name, end_image_path,
@@ -404,13 +438,19 @@ def _generate_via_worker(
                 result_path = status.get("result")
                 if result_path and os.path.isfile(result_path):
                     return result_path
+                # Satellite: result file lives on the 3060, not locally.
+                # Download it via the relay's /download endpoint and save
+                # to the locally-requested output_path.
+                if result_path and worker_url != WANGP_LOCAL_URL:
+                    local_path = _download_satellite_file(
+                        result_path, output_path, worker_url, log_fn
+                    )
+                    if local_path:
+                        return local_path
                 # Fallback 1: result_path exists but file missing -- check _tmp variant
-                if result_path:
-                    tmp_variant = result_path.replace(".mp4", "_tmp.mp4")
-                    if os.path.isfile(tmp_variant):
-                        return tmp_variant
-                # Fallback 2: result_path is None (copy failed in worker) -- check
-                # if the _tmp variant of the *requested* output_path still exists.
+                if result_path and os.path.isfile(result_path.replace(".mp4", "_tmp.mp4")):
+                    return result_path.replace(".mp4", "_tmp.mp4")
+                # Fallback 2: result_path is None -- check _tmp of requested path
                 tmp_of_requested = output_path.replace(".mp4", "_tmp.mp4")
                 if os.path.isfile(tmp_of_requested):
                     if log_fn:
