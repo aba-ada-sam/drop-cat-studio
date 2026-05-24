@@ -310,11 +310,24 @@ def _generate_via_worker(
     worker_url: str = WANGP_LOCAL_URL,
 ) -> str | None:
     """Generate via a WanGP worker HTTP endpoint. worker_url selects local or satellite."""
+    # Satellite: use a temp path that EXISTS on the 3060's filesystem.
+    # C:\DropCat-Studio\output\... doesn't exist on the 3060, so WanGP would
+    # generate but silently fail to save.  C:\DCS-satellite\tmp\ is guaranteed
+    # to exist there (created during satellite setup).
+    _is_satellite = worker_url and worker_url != WANGP_LOCAL_URL
+    _local_out    = os.path.abspath(out_path)
+    if _is_satellite:
+        import uuid as _uuid
+        _sat_tmp_path = r"C:\DCS-satellite\tmp\\" + _uuid.uuid4().hex[:12] + ".mp4"
+        _effective_out = _sat_tmp_path
+    else:
+        _effective_out = _local_out
+
     payload = {
         "prompt": prompt,
         "negative_prompt": negative_prompt,
         "model_name": model_name,
-        "output_path": os.path.abspath(out_path),
+        "output_path": _effective_out,
         "num_frames": num_frames,
         "width": width,
         "height": height,
@@ -441,9 +454,9 @@ def _generate_via_worker(
                 # Satellite: result file lives on the 3060, not locally.
                 # Download it via the relay's /download endpoint and save
                 # to the locally-requested output_path.
-                if result_path and worker_url != WANGP_LOCAL_URL:
+                if result_path and _is_satellite:
                     local_path = _download_satellite_file(
-                        result_path, output_path, worker_url, log_fn
+                        result_path, _local_out, worker_url, log_fn
                     )
                     if local_path:
                         return local_path
@@ -451,10 +464,10 @@ def _generate_via_worker(
                 if result_path and os.path.isfile(result_path.replace(".mp4", "_tmp.mp4")):
                     return result_path.replace(".mp4", "_tmp.mp4")
                 # Fallback 2: result_path is None -- check _tmp of requested path
-                tmp_of_requested = output_path.replace(".mp4", "_tmp.mp4")
+                tmp_of_requested = _local_out.replace(".mp4", "_tmp.mp4")
                 if os.path.isfile(tmp_of_requested):
                     if log_fn:
-                        log_fn(f"[info] Using _tmp fallback for {os.path.basename(output_path)}")
+                        log_fn(f"[info] Using _tmp fallback for {os.path.basename(_local_out)}")
                     return tmp_of_requested
                 # Guard: if we've polled for < 6s, worker may not have started yet
                 if time.time() - _poll_start < 6:
