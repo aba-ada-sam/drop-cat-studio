@@ -72,11 +72,13 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
         if not b64:
             return ""
         raw = llm_router.route_vision(
-            "Describe the main subject in 12-15 words. "
-            "Exact visual details only: hair color, clothing color and type, "
-            "skin tone, species, material, expression. No interpretation. "
-            "Example: 'Red-haired woman in blue denim jacket, pale skin, hazel eyes.'",
-            [b64], tier=TIER_FAST, max_tokens=60,
+            "Describe the main subject in 20-25 words. "
+            "Include: exact hair color and style, clothing color and type, "
+            "skin tone, eye color, distinguishing features, species if not human, "
+            "any accessories. Visual details only, no emotions or context. "
+            "Example: 'Red-haired woman, loose shoulder curls, blue denim jacket, "
+            "white t-shirt, pale freckled skin, hazel eyes, small silver earrings.'",
+            [b64], tier=TIER_FAST, max_tokens=90,
         )
         anchor = raw.strip().strip('"').strip("'")
         if anchor and not anchor.endswith("."):
@@ -436,35 +438,27 @@ def _do_song_gpu_phase(
             pct = _s + int(step / total * (_e - _s)) if total > 0 else _s
             job.update(progress=pct, message=f"Clip {_cn}/{n_clips} -- step {step}/{total}{_et}")
 
-        # Clip 0: use the user's uploaded photo as visual anchor.
-        # Clips 1+: use the in-motion boundary frame extracted from the trimmed
-        # end of the previous clip. Falls back to T2V if extraction failed.
-        if i == 0:
-            clip_start_image = prepped_photo
-            prompt_to_use = clip_prompt
-        else:
-            clip_start_image = _chain_frame
-            # Strong scene-lock prefix: text must reinforce the chained frame, not
-            # override it. Without this the LLM arc's scene variety teleports subjects.
-            if clip_start_image:
-                prompt_to_use = "Exact same location and subject as previous frame, continuous scene. " + clip_prompt
-            else:
-                prompt_to_use = clip_prompt
-        # Prepend subject anchor so every clip is grounded to the actual photo content.
-        # Guards against LLM drift where later prompts describe a different-looking subject.
+        # Every clip starts from the original source photo -- never chain frames.
+        # Chaining causes the subject to drift clip-by-clip as each generation
+        # compounds any appearance deviation from the previous frame. For music
+        # videos (independent shots) this is wrong: use the source photo every
+        # time to guarantee the subject looks the same in every clip. The xfade
+        # crossfade at each junction hides the "restart" visually.
+        clip_start_image = prepped_photo
+        prompt_to_use    = clip_prompt
+
+        # Prepend subject anchor so every clip is grounded to the actual photo.
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
             prompt_to_use = subject_anchor + " " + prompt_to_use
-        # Narrative suffix: "deliberate purposeful motion, physically legible gesture"
-        # avoids the dynamic suffix's "kinetic energy, subjects actively moving" which
-        # makes LTX invent particle motion (snow/dust) on anchored chain frames.
+
         finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
-        # Chain clips: fix guidance at 3.5 so the start frame has dominant weight
-        # and the text steers camera only. 7.5 lets text override the frame and
-        # teleport subjects; even 5.25 (0.7x) is too high for chained frames.
-        effective_guidance = guidance if (i == 0 or not clip_start_image) else 3.5
+        # Source-photo conditioning: moderate guidance so text steers camera/energy
+        # without fighting the image anchor. Lower than default 7.5 (which would let
+        # text override the photo appearance), higher than chain-frame 1.5.
+        effective_guidance = min(guidance, 2.5)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
