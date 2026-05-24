@@ -37,25 +37,16 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 # Quality suffixes appended to every video prompt before sending to WanGP.
 # These are model-family specific tags the models were trained on.
 _PROMPT_SUFFIXES = {
-    # LTX-2 image conditioning is very strong and produces near-static output without
-    # explicit motion language. Force movement with every prompt.
-    "ltx":           "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
-    # Calm mode: environment-only motion. Subject-motion keywords directly contradict
-    # the calm system prompt and cause LTX to animate the subject, triggering ghosting.
+    # static shot, fixed camera on every variant -- the model uses camera motion
+    # (zoom, pan, dolly) as a fallback when subject motion is hard to generate.
+    # Stating the constraint in the suffix overrides that fallback at every clip.
+    "ltx":           "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, static shot, fixed camera, high quality",
     "ltx_calm":      "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
-    # Gentle mode: subtle subject motion (breath, head turn, gesture) + environment animates.
-    # Do NOT use the "ltx" dynamic suffix here -- "kinetic energy, subjects actively moving,
-    # motion blur" fights the gentle motion_clause and causes spastic micro-jitter artifacts.
-    "ltx_gentle":    "subtle natural movement, slight gesture, soft atmospheric motion, fixed camera, photorealistic, high quality",
-    # Narrative mode: purposeful story-driven action, no kinetic extremes.
-    "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, photorealistic, high quality",
-    "wan":           "smooth animation, photorealistic, high quality, detailed",
-    # Wan + calm: Wan I2V can be run in calm mode for breathing-photograph stories.
-    # Without a matching suffix the per-clip prompt picked up "smooth animation" --
-    # a kinetic hint that fights the CALM story-arc system prompt. Mirror the LTX
-    # calm suffix so subject-still and static-camera are restated every clip.
+    "ltx_gentle":    "subtle natural movement, slight gesture, soft atmospheric motion, static shot, fixed camera, photorealistic, high quality",
+    "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, static shot, fixed camera, photorealistic, high quality",
+    "wan":           "smooth animation, static shot, fixed camera, photorealistic, high quality, detailed",
     "wan_calm":      "subject completely still, environment in gentle motion, static shot, fixed camera, photorealistic, high quality",
-    "wan_narrative": "deliberate purposeful motion, meaningful story action, physically legible gesture, photorealistic, high quality",
+    "wan_narrative": "deliberate purposeful motion, meaningful story action, physically legible gesture, static shot, fixed camera, photorealistic, high quality",
 }
 
 
