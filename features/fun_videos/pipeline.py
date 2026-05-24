@@ -37,16 +37,13 @@ def _sample_music_frames(video_path: str, llm_router) -> list:
 # Quality suffixes appended to every video prompt before sending to WanGP.
 # These are model-family specific tags the models were trained on.
 _PROMPT_SUFFIXES = {
-    # static shot, fixed camera on every variant -- the model uses camera motion
-    # (zoom, pan, dolly) as a fallback when subject motion is hard to generate.
-    # Stating the constraint in the suffix overrides that fallback at every clip.
-    "ltx":           "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, static shot, fixed camera, high quality",
+    "ltx":           "dynamic physical motion, kinetic energy, subjects actively moving, motion blur on fast elements, high quality",
     "ltx_calm":      "gentle atmospheric motion, environment in motion, subject completely still, static shot, fixed camera, photorealistic, high quality",
-    "ltx_gentle":    "subtle natural movement, slight gesture, soft atmospheric motion, static shot, fixed camera, photorealistic, high quality",
-    "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, static shot, fixed camera, photorealistic, high quality",
-    "wan":           "smooth animation, static shot, fixed camera, photorealistic, high quality, detailed",
+    "ltx_gentle":    "subtle natural movement, slight gesture, soft atmospheric motion, photorealistic, high quality",
+    "ltx_narrative": "single purposeful action, narrative motion, story-driven gesture, physically legible, photorealistic, high quality",
+    "wan":           "smooth animation, photorealistic, high quality, detailed",
     "wan_calm":      "subject completely still, environment in gentle motion, static shot, fixed camera, photorealistic, high quality",
-    "wan_narrative": "deliberate purposeful motion, meaningful story action, physically legible gesture, static shot, fixed camera, photorealistic, high quality",
+    "wan_narrative": "deliberate purposeful motion, meaningful story action, physically legible gesture, photorealistic, high quality",
 }
 
 

@@ -135,7 +135,7 @@ def _refine_arc_with_audio(
                     orig.get("prompt", "") if isinstance(orig, dict) else str(orig)
                 ):
                     entry = dict(orig) if isinstance(orig, dict) else {"prompt": str(orig), "duration": 5.0}
-                    entry["prompt"] = _enforce_static_camera(new_prompt)
+                    entry["prompt"] = _strip_camera_moves(new_prompt)
                     refined.append(entry)
                     continue
             refined.append(orig)
@@ -2056,7 +2056,7 @@ def run_multi_pipeline(job, photo_path, settings):
           # Prepend subject anchor if the prompt doesn't already open with it.
           # This guards against LLM drift where later clip prompts describe a
           # different-looking subject than the source photo.
-          clip_prompt = _enforce_static_camera(clip_prompt)
+          clip_prompt = _strip_camera_moves(clip_prompt)
           if subject_anchor and not clip_prompt.lower().startswith(subject_anchor[:20].lower()):
               clip_prompt = subject_anchor + " " + clip_prompt
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
