@@ -964,11 +964,12 @@ export function init(panel) {
         folder:        _songFolderPath,
         images:        _songFolderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        songBatchLoopCheck.checked,
-        video_prompt:  '', // user can add a prompt field later
-        model:         _modelSel ? _modelSel.value : undefined,
-        clip_duration: _clipDurSel ? parseInt(_clipDurSel.value) : 8,
-        steps:         _stepsSel ? parseInt(_stepsSel.value) : undefined,
-        guidance:      _guidanceSel ? parseFloat(_guidanceSel.value) : undefined,
+        video_prompt:  '',
+        model:         modelSel.value,
+        clip_duration: _clipDur,
+        num_clips:     _numClips,
+        steps:         _steps,
+        guidance:      _guidance,
       };
       const s = await apiFetch('/api/song-video/batch/start', {
         method: 'POST',
