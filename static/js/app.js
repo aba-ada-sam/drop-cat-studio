@@ -1355,12 +1355,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  let _feedFirstPoll = true;
+
   async function _pollFeed() {
     if (!_feedEl) return;
     try {
       const data = await fetch('/api/queue').then(r => r.json());
       const active = [...(data.running || []), ...(data.queued || [])];
       const done   = (data.completed || []).slice(0, 5);
+
+      // On first poll after page load, mark all existing completed jobs as
+      // already-seen so they never appear in the sidebar. Only completions
+      // that happen AFTER the page loaded should show up.
+      if (_feedFirstPoll) {
+        _feedFirstPoll = false;
+        for (const job of done) _feedDone.push(job.id);
+      }
 
       // Update/create active cards (running first, then queued)
       const seen = new Set();
