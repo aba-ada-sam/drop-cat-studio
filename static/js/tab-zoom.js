@@ -440,7 +440,7 @@ export function init(panel) {
       clipLabel.textContent = `${_clipDur}s`;
     }
     _refreshClipCount();
-    _setSongBatchReady();
+    _updateBtn();
   }
 
   async function _analyzeAudio(path) {

@@ -220,137 +220,85 @@ def _pick_cloud_provider(llm_router) -> str | None:
 #   KINETIC -- aggressive action verbs, Wan I2V only (25 steps handles it).
 
 _STORY_ARC_BASE = """\
-You are planning a multi-clip short film from a still photograph.
-Each clip starts from the last frame of the previous, so prompts must chain visually.
+You are writing motion prompts for an image-to-video AI model.
+Each prompt describes a single physical motion that happens in one clip.
+The model already sees the image -- you do NOT need to describe what things look like.
+You DO need to describe WHAT MOVES, WHERE IT STARTS, and WHERE IT ENDS.
 
-STEP 1 -- READ THE PHOTO CAREFULLY. Note every visible element:
-- Subject markers (face, hair, clothing, skin tone, mech parts, fur, etc.)
-- Setting / location (room, landscape, weather, time of day)
-- Background and props (furniture, architecture, foliage, vehicles, objects)
-- Visual style cues (photorealistic, painted, anime, cinematic film stock, etc.)
+STEP 1 -- IDENTIFY the main subject and note their exact visual markers:
+  People/characters: hair color+style, clothing color+type, skin tone, any accessories
+  Landscapes: dominant features (water, trees, sky, architecture)
+  Objects: material, color, position
 
-Decide which scene type it is:
+STEP 2 -- PLAN a motion arc across the clips. Each clip = one distinct physical action
+that continues from where the last clip ended. Think of it as a sequence of shots in
+a music video -- each one shows something HAPPENING, building toward a peak.
 
-  TYPE A -- PEOPLE / CHARACTERS are the main subject (portrait, figure, face,
-    person, character, mech, creature):
-    - Identify their specific visual markers: hair color/style, clothing color/type, skin tone
-    - EVERY prompt must name these features: "red-haired woman in blue jacket..."
-    - Without this the video model generates a different person each clip
+MOTION PROMPT RULES (the model ignores vague language -- be physical and specific):
+- Describe WHERE the motion starts and WHERE it ends: "arm raises from hip to shoulder height"
+- Use distance and direction: "head turns 30 degrees left", "finger slides 5cm along table"
+- Use physical materials in motion: "fabric ripples outward from center", "smoke rises and disperses"
+- Name the subject with their exact markers in every clip: "red-haired woman in blue jacket..."
+  Without this the model generates a different person each clip.
+- Re-state the location in every clip (10-12 words): "in stone courtyard, golden afternoon light, photorealistic"
+  Without this the background drifts into generic fire/electric hallucinations.
 
-  TYPE B -- LANDSCAPE / ARCHITECTURE / NO PEOPLE (buildings, nature, seascape, cityscape):
-    - DO NOT invent characters, soldiers, people, or figures that are not in the photo
-    - Animate what is ALREADY IN THE SCENE: sea waves, clouds, flags, fire, smoke, wind,
-      light raking across surfaces, weather rolling in, water surging, trees thrashing
-    - The camera can react to these forces but does not invent new subjects
+BANNED (produce static output or identity loss):
+- Vague mood words: "tension", "energy", "atmosphere", "drama", "intensity"
+- Camera instructions: zoom, pan, push, pull, dolly, tilt, crane, truck
+- Abstract concepts: "power", "presence", "emotion", "reveals", "transforms"
+- Inventing subjects not in the photo
 
-CRITICAL: SCENE PRESERVATION ACROSS CLIPS. Each clip is a separate generation
-that hallucinates aggressively if you only describe motion. Every prompt MUST
-re-state the FULL VISUAL CONTEXT so the model holds the scene:
-  - Restate the subject + their visual markers
-  - Restate the setting / location (e.g. "in the same wood-panel room with
-    mushroom forest visible through the window, laptop on the desk")
-  - Restate the visual style (e.g. "photorealistic", "cinematic 35mm",
-    "painted illustration") so the look does not drift into generic
-    "fire / electric / anime" defaults
-This anchoring is mandatory for clips 2 onward; without it the model
-progressively replaces the original scene with motion-themed hallucinations.
-
-Common rules:
-- Describe only what is PHYSICALLY VISIBLE: bodies, surfaces, weather, objects in motion
-- Every action must be a real physical thing a camera could capture -- no abstract concepts
-- NO camera moves of any kind -- no zoom, no pan, no push, no pull, no dolly, no tilt
-- BANNED camera words (never use these): "zoom in", "zoom out", "zooms in", "zooms out",
-  "pull back", "push in", "pan left", "pan right", "dolly", "tilt up", "tilt down",
-  "camera moves", "camera pushes", "camera pulls", "camera zooms", "camera pans",
-  "slow zoom", "gentle zoom", "subtle zoom", "zoom reveals", "zoom into"
-- BANNED words/phrases: "establishes", "reveals", "opens on", "we see", "the camera",
-  "snaps to", "formation", "attention", "unfolds", "transforms", "becomes", "reveals"
-- BANNED: inventing subjects not in the photo (no new animals, people, or objects)
-- BANNED: dropping the setting / props / background after the first clip
-- Return ONLY valid JSON: {"clips": [{"prompt": "prompt1", "duration": 5}, {"prompt": "prompt2", "duration": 8}]}
-- duration is seconds per clip (integer 4-15). Vary durations for pacing.
-- Total durations should sum close to the target_total_seconds given in the prompt.\
+Return ONLY valid JSON: {"clips": [{"prompt": "...", "duration": 5}, ...]}
+Duration is seconds per clip (integer 4-12). Vary for pacing.
+Total durations should sum close to the target_total_seconds given in the prompt.\
 """
 
 _STORY_ARC_KINETIC = _STORY_ARC_BASE + """
 
-ENERGY: kinetic action. Each prompt 45-65 words, opens with a strong action verb
-(erupts, slams, surges, thrashes). Arc: intense opening -> escalation -> peak.
-Use this style only with Wan I2V models, which preserve identity through
-aggressive prompts. action/impact = 4-6s, sustained drama = 7-10s, final reveal = 6-12s.\
+ENERGY LEVEL: high-intensity physical motion for Wan I2V (25 denoising steps).
+Each prompt 45-60 words. Open with a strong physical verb describing MOVEMENT:
+"slams hand onto", "spins 180 degrees", "lunges forward two steps", "hurls arm upward".
+Arc across clips: escalating intensity -- start strong, build, peak at final clip.
+Clip timing: impact moments 4-6s, sustained action 7-10s, climax 6-10s.\
 """
 
 _STORY_ARC_GENTLE = _STORY_ARC_BASE + """
 
-ENERGY: micro-motion only. LTX-2 Distilled has a compressed denoising
-schedule -- prompts must be SHORT (35-50 words) and describe only ONE small
-change per clip. Long prompts, vague prompts, or prompts with multiple actions
-cause scale drift and subject replacement by clip 3.
+ENERGY LEVEL: subtle physical motion for LTX-2 Distilled (8 denoising steps).
+Keep prompts SHORT (30-45 words) and describe only ONE motion per clip.
+At 8 steps, the model can animate ONE clear physical change -- not multiple.
 
-PROMPT SHAPE (mandatory for every clip):
-  1. SUBJECT (10-15 words): Name the subject using their EXACT visual markers
-     from the photo -- clothing colour, species, material, hair colour, etc.
-     This anchors the model to the source image. Never omit this.
-  2. ONE MICRO-MOTION (15-20 words): ONE small physical change happening in
-     the scene. See motion hierarchy below.
-  3. SCENE ANCHOR (8-12 words): Setting + visual style, restated every clip.
-  4. CAMERA NOTE (4-5 words, LAST): "Static shot, fixed camera."
+MOTION SCALE for 8-step model (from safest to riskiest):
+  SAFE -- inanimate objects and environment:
+    "curtain drifts 10cm to the right", "steam rises from cup and disperses upward",
+    "shadow shifts 15cm across the floor", "leaf falls from upper left to lower right"
+  MODERATE -- body periphery only:
+    "right hand lifts from table surface by 5cm", "shoulders rise with one breath then fall",
+    "fabric along left sleeve ripples once then settles"
+  AVOID -- head and face (causes ghosting at 8 steps):
+    head turns, eyes move, mouth opens, brows shift
 
-MOTION HIERARCHY -- choose the SAFEST option available for the scene:
-  BEST (least risk of face blur):
-    - Props/objects on a surface shift, slide, or settle
-    - Background element stirs: leaf trembles, curtain moves, light shifts,
-      shadow changes, screen flickers, steam rises, water ripples
-    - Clothing/fabric: lapel stirs, sleeve shifts, collar moves, fabric settles
-  GOOD (moderate risk):
-    - Hand/arm: finger curls, hand shifts by a centimetre, wrist rotates slightly,
-      pen taps once, paper lifts at edge
-    - Shoulder/torso: chest rises with one breath, shoulders settle, weight shifts
-  RISKY -- avoid unless the subject has no face (landscape, object, text):
-    - Any head motion: head tilts, nods, turns
-    - Any facial feature: eyes move, mouth opens, brows shift
-    - Any species-specific face part: trunk sways, beak opens, ears flick,
-      whiskers twitch, muzzle moves
-  WHY: the face/head region has the highest spatial frequency. At low step
-  counts the denoiser cannot maintain facial detail while also animating it --
-  the result is temporal ghosting and blur. This applies to ALL subject types:
-  people, animals, creatures, robots, characters. Keep the face still.
-
-BANNED (cause LTX to replace the scene): walks, steps, runs, jumps, kneels,
-rises, turns, exits, enters, climbs, pivots, reaches across.
-BANNED: erupts, slams, explodes, thrashes, surges, screams, blasts, roars.
-BANNED: "camera locked", "locked off", "locked frame", "no zoom" -- use "static shot, fixed camera" LAST only.
-
-ARC: each clip = same scene, one different micro-detail. Vary which prop,
-which fabric element, which background feature moves. No crescendo.\
+Each clip: subject markers (15 words) + one motion with start/end position (15 words) + location (10 words).
+Arc: vary WHICH element moves each clip. Same scene, different physical detail each time.\
 """
 
 _STORY_ARC_LTX_ACTION = _STORY_ARC_BASE + """
 
-ENERGY: deliberate physical motion. LTX-2 Dev13B runs 40 denoising steps and
-can hold a complex subject through real movement -- strides, gestures, turns.
-Prompts should be 45-65 words. Every clip must name the subject's exact visual
-markers so the model re-anchors on each frame.
+ENERGY LEVEL: deliberate full-body motion for LTX-2 Dev13B (40 denoising steps).
+At 40 steps the model can hold identity through real movement.
+Prompts should be 45-60 words. Describe ONE complete physical action per clip.
 
-PROMPT SHAPE (mandatory every clip):
-  1. SUBJECT (12-18 words): exact visual markers from the photo -- colour,
-     material, size, style. For fantasy/painted subjects name the artistic style
-     ("moss-covered giant", "painted illustration style"). Never omit this.
-  2. ONE MAIN MOTION (20-30 words): a single deliberate physical action.
-     Prefer clear, filmable actions: a stride, a lean, arms swinging, a turn of
-     the head. Avoid vague energy words -- describe what the body DOES.
-  3. SCENE ANCHOR (10-14 words): setting + lighting + visual style, restated
-     every clip so the background does not drift.
-  4. CAMERA NOTE (4-5 words, LAST): "wide shot, fixed camera" or similar.
+MOTION EXAMPLES that work at 40 steps:
+  "takes one slow step forward, weight shifting from back foot to front foot"
+  "right arm swings from side upward until hand reaches shoulder height"
+  "turns 45 degrees to the left, completing the rotation by end of clip"
+  "crouches down from standing until knees are bent at 90 degrees"
+  "leans forward from the waist, torso angling 30 degrees toward camera"
 
-ALLOWED MOTION: strides, steps, leans, turns, reaches, gestures, swings arms,
-  tilts head, shifts weight, crouches, stands up, looks around. Moderate pace.
-BANNED: erupts, slams, explodes, thrashes, roars, blasts -- these cause too
-  much displacement and lose identity even at 40 steps.
-BANNED: inventing subjects or props not in the photo.
-
-CLIP COUNT vs PACING: 2-3 clips = single action arc. 4-5 clips = build and
-  hold. Do not escalate to a climax -- keep energy steady and legible.\
+Each clip: subject+markers (15 words) + one complete action with start/end state (25 words) + location+style (15 words).
+Arc: build a physical story -- each clip continues the body from where it was.
+AVOID: erupts, slams, explodes, thrashes -- too much displacement loses identity.\
 """
 
 _STORY_ARC_NARRATIVE = _STORY_ARC_BASE + """
@@ -375,8 +323,6 @@ PROMPT SHAPE (mandatory every clip):
      a viewer reads as story. Describe WHAT they do and where attention goes.
   3. SCENE ANCHOR (10-14 words): setting + lighting + visual style, restated
      every clip so the background does not drift.
-  4. CAMERA NOTE (4-5 words, LAST): "static shot, fixed camera" or "slow push
-     in" only if the action strongly warrants it.
 
 ALLOWED: reaches for / picks up / sets down, turns toward / looks at / glances
   away, takes one step toward / approaches, opens / closes / lifts / lowers,
@@ -432,10 +378,9 @@ No crescendo. No escalation. Pure scene preservation.\
 def _system_prompt_for_model(model_name: str, motion_style: str | None = None) -> str:
     is_ltx = "ltx" in (model_name or "").lower()
     is_ltx_dev13 = "dev13" in (model_name or "").lower()
-    # Resolve default per model family when not explicitly chosen.
-    # Dev13B defaults to dynamic (40 steps, handles real motion).
-    # Other LTX models (Distilled, 8 steps) default to calm.
-    resolved = motion_style or ("dynamic" if is_ltx_dev13 else ("calm" if is_ltx else "dynamic"))
+    # Default to narrative for all models -- generates motion-path prompts that
+    # produce actual physical movement rather than scene descriptions.
+    resolved = motion_style or "narrative"
     if resolved == "calm":
         return _STORY_ARC_CALM
     if resolved == "narrative":
@@ -1120,6 +1065,10 @@ _CAMERA_MOVE_RE = _re_cam.compile(
     r'|tilt(?:s|ing|ed)?\s+(?:up|down)'
     r'|track(?:s|ing|ed)?\s+(?:left|right|in|out|back)'
     r'|camera\s+(?:zooms?|pans?|pushes?|pulls?|moves?|drifts?|sweeps?|tracks?|dollies?|tilts?)'
+    r'|static\s+shot'
+    r'|fixed\s+camera'
+    r'|locked[\s-](?:off|down|frame)'
+    r'|wide\s+shot,?\s*fixed\s+camera'
     r')',
     _re_cam.IGNORECASE,
 )
@@ -1816,7 +1765,7 @@ def run_multi_pipeline(job, photo_path, settings):
     subject_anchor   = settings.pop("_subject_anchor", "")
     director_passes  = max(0, min(2, int(settings.get("director_passes", 0))))
     _is_ltx = "ltx" in model_name.lower()
-    motion_style     = settings.get("motion_style") or ("calm" if _is_ltx else "dynamic")
+    motion_style     = settings.get("motion_style") or "narrative"
 
     # reanchor_every: periodically reset the chain start-image back to the source
     # photo to break compounding drift. Default 0 (pure chain, no reset) because
@@ -2061,13 +2010,22 @@ def run_multi_pipeline(job, photo_path, settings):
               clip_prompt = subject_anchor + " " + clip_prompt
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.
           clip_start_image = prev_frame_path if prev_frame_path else prepped_photo
-          # For chained clips, lock the scene so the model continues from the
-          # anchor frame rather than drifting to a new composition. Same pattern
-          # as song_video pipeline which has consistent clip continuity.
+          # For chained clips, anchor the scene so the model continues from the
+          # conditioning frame rather than drifting to a new composition.
           if i > 0 and clip_start_image and clip_start_image != prepped_photo:
               clip_prompt = "Exact same location and subject as previous frame, continuous scene. " + clip_prompt
           finalized = _finalize_prompt(clip_prompt, model_name, motion_style)
           clip_out = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
+
+          # end_image: if the NEXT clip will reanchor to source, steer this clip
+          # to end near the source photo appearance so the reset is invisible.
+          _next_is_reanchor = (
+              reanchor_every > 0
+              and (i + 1) % reanchor_every == 0
+              and i < len(story_arc) - 1
+              and n_clips > reanchor_every
+          )
+          clip_end_image = prepped_photo if _next_is_reanchor else None
 
           # Chained clips: drop guidance hard so the anchor image dominates.
           # At 3.5 the text prompt can still override the conditioning frame's
@@ -2109,6 +2067,7 @@ def run_multi_pipeline(job, photo_path, settings):
                       steps=steps,
                       guidance=effective_guidance,
                       seed=seed,
+                      end_image_path=clip_end_image,
                       negative_prompt=video_generator.negative_prompt_for(model_name, motion_style or "dynamic"),
                       stop_check=_stopped,
                       log_fn=_log,
