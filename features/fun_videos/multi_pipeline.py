@@ -1185,7 +1185,7 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     return anchor_ok, new_dur
 
 
-_ANCHOR_BLEND_ALPHA = 0.82  # 82% last frame (motion continuity) + 18% source (identity)
+_ANCHOR_BLEND_ALPHA = 0.95  # 95% last frame (motion continuity) + 5% source (identity)
 
 
 def _blend_anchor_with_source(anchor_png: str, source_photo: str,
@@ -1992,11 +1992,11 @@ def run_multi_pipeline(job, photo_path, settings):
           if i == 0 or not clip_start_image or clip_start_image == prepped_photo:
               effective_guidance = guidance
           elif "distilled" in model_name.lower():
-              effective_guidance = min(guidance, 1.5)
+              effective_guidance = min(guidance, 2.8)
           elif "ltx" in model_name.lower():
-              effective_guidance = min(guidance, 2.0)
+              effective_guidance = min(guidance, 3.0)
           else:
-              effective_guidance = min(guidance, 2.5)
+              effective_guidance = min(guidance, 4.0)
 
           clip_path = None
           for _attempt in range(2):
