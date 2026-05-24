@@ -701,6 +701,27 @@ def _do_song_gpu_phase(
     merged = _merge_video_audio_trim(concat_path, audio_path, final_path, effective_dur)
 
     if merged:
+        # -- Phase 4: Beat-sync warp ------------------------------------------
+        # Squeeze/stretch the assembled video so scene changes land on beat and
+        # onset peaks in the song. Audio is untouched; only the video PTS moves.
+        # Skipped gracefully if librosa/cv2/scipy are missing or warp fails.
+        job.update(progress=92, message="Beat-syncing video to song...")
+        from features.song_video.beat_sync import apply_beat_sync
+        synced = apply_beat_sync(
+            merged_path = merged,
+            audio_path  = audio_path,
+            job_dir     = job_dir,
+            job_id      = job.id,
+            log_fn      = _log,
+        )
+        if synced != merged:
+            # Warp succeeded -- replace merged with synced version
+            try:
+                os.remove(merged)
+            except Exception:
+                pass
+            merged = synced
+
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
