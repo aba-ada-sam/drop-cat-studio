@@ -87,6 +87,7 @@ export function init(panel) {
       _songPath = f.path;
       _songDur  = f.duration || 0;
       _updateButtons();
+      _updateSingleBtn();
       _analyzeAudio(f.path);
     } catch (err) {
       toast('Song upload failed: ' + err.message, 'error');
@@ -104,6 +105,7 @@ export function init(panel) {
     analysisCard.style.display = 'none';
     analysisCard.innerHTML = '';
     _updateButtons();
+    _updateSingleBtn();
   }
 
   async function _analyzeAudio(path) {
