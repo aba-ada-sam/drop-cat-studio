@@ -235,6 +235,109 @@ async def generate(request: Request):
     }
 
 
+@router.post("/batch/start")
+async def batch_start(request: Request):
+    """Start a server-side song-video batch.
+
+    Body:
+        audio_path    str   path to uploaded audio file (required)
+        folder        str   display folder path (informational)
+        images        list  [{path: str, name: str}, ...]  absolute image paths
+        repeat        bool  loop the folder continuously
+        video_prompt  str   optional story direction applied to all images
+        model         str   WanGP model
+        clip_duration int   seconds per clip
+        steps         int
+        guidance      float
+        output_width  int
+        output_height int
+    """
+    from features.song_video import batch_runner
+
+    body       = await request.json()
+    audio_path = body.get("audio_path", "")
+    images     = body.get("images", [])
+    repeat     = bool(body.get("repeat", False))
+
+    if not audio_path or not os.path.isfile(audio_path):
+        raise HTTPException(400, "Audio file not found -- please re-upload the song")
+    if not images:
+        raise HTTPException(400, "No images provided")
+
+    config   = cfg.load()
+    clip_dur = max(8, min(10, int(body.get("clip_duration", 8))))
+
+    # Analyze audio once up-front so every image job skips re-analysis.
+    from features.song_video.audio_analyzer import analyze as _analyze
+    try:
+        analysis = await asyncio.to_thread(_analyze, audio_path, clip_dur)
+    except Exception as e:
+        log.warning("Batch audio analysis failed, using duration probe: %s", e)
+        from core.ffmpeg_utils import probe_duration
+        dur      = probe_duration(audio_path)
+        analysis = {"duration": dur, "suggested_clip_dur": clip_dur,
+                    "suggested_num_clips": max(1, math.ceil(dur / clip_dur))}
+
+    audio_dur = float(analysis.get("duration", 0))
+    if audio_dur <= 0:
+        from core.ffmpeg_utils import probe_duration
+        audio_dur = probe_duration(audio_path)
+    if audio_dur <= 0:
+        raise HTTPException(400, "Could not determine audio duration")
+
+    coverage_ratio = max(0.4, min(1.0, float(body.get("coverage_ratio", 1.0))))
+    n_clips = int(body.get("num_clips") or
+                  max(1, math.ceil(audio_dur * coverage_ratio / clip_dur)))
+    n_clips = max(1, min(50, n_clips))
+
+    settings = {
+        "video_prompt":   body.get("video_prompt", ""),
+        "variety_theme":  body.get("variety_theme", ""),
+        "lyrics_text":    body.get("lyrics_text", ""),
+        "user_direction": body.get("user_direction", "music video, energetic, bold"),
+        "audio_path":     audio_path,
+        "audio_name":     Path(audio_path).stem[:30],
+        "audio_duration": audio_dur,
+        "audio_analysis": analysis,
+        "num_clips":      n_clips,
+        "clip_duration":  clip_dur,
+        "model_name":     body.get("model", config.get("wan_model", "LTX-2 Dev19B Distilled")),
+        "resolution":     body.get("resolution", config.get("resolution", "580p")),
+        "override_width": body.get("output_width"),
+        "override_height":body.get("output_height"),
+        "video_steps":    body.get("steps",    config.get("fun_video_steps",    30)),
+        "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
+        "video_seed":     body.get("seed",     config.get("fun_video_seed",     -1)),
+    }
+
+    snapshot = batch_runner.start(
+        folder   = body.get("folder", ""),
+        images   = [{"path": i["path"], "name": i["name"]} for i in images],
+        settings = settings,
+        repeat   = repeat,
+    )
+    return snapshot
+
+
+@router.get("/batch/status")
+async def batch_status():
+    """Heartbeat + status for the running song-video batch.
+
+    The browser polls this every 5s while the batch is active.
+    Each call resets the heartbeat timer; missing it for 120s
+    triggers self-termination of the runner.
+    """
+    from features.song_video import batch_runner
+    return batch_runner.status()
+
+
+@router.post("/batch/stop")
+async def batch_stop():
+    """Signal the running batch to stop after the current image."""
+    from features.song_video import batch_runner
+    return batch_runner.stop()
+
+
 @router.post("/extract-frame")
 async def extract_frame(request: Request):
     """Extract the last frame from a video file and save it to uploads/.
