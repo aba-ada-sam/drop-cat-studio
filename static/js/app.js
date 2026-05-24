@@ -141,6 +141,8 @@ async function runSplash() {
   }
 
   function exitSplash() {
+    // Clear stale completed/failed/stopped jobs so queue sidebar starts fresh
+    fetch('/api/jobs', { method: 'DELETE' }).catch(() => {});
     window.dispatchEvent(new Event('dcs:ready'));
     splash.classList.add('fade-out');
     setTimeout(() => {
