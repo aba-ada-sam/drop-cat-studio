@@ -465,7 +465,8 @@ def _do_song_gpu_phase(
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
-    for i, clip_prompt in enumerate(story_arc):
+    for i, _arc_entry in enumerate(story_arc):
+        clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
         if _stopped():
             break
 
@@ -510,7 +511,10 @@ def _do_song_gpu_phase(
         if not finalized.strip():
             finalized = "Cinematic scene, natural movement, photorealistic, high quality"
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
-        this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
+        # Prefer duration from the beat-snapped arc entry; fall back to compute_clip_plan value
+        _arc_dur  = _arc_entry.get("duration") if isinstance(_arc_entry, dict) else None
+        this_dur  = float(_arc_dur) if _arc_dur else (clip_durations[i] if i < len(clip_durations) else clip_dur)
+        this_dur  = max(4.0, min(12.0, this_dur))
 
         # 3.5 guidance: high enough for the text prompt to drive real scene motion
         # and variety (avoids Ken Burns drift), low enough not to fully override
