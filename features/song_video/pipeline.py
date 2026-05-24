@@ -306,12 +306,15 @@ def run_song_prep(job, photo_path, settings):
     job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         # max_dur must be >= min_dur (clip_dur); cap at 10s for quality but never below clip_dur
         fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0))
         fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
         # Subject anchor runs concurrently -- vision LLM call, adds ~0 wall time.
         fut_anchor = pool.submit(_extract_subject_anchor, photo_path, llm_router) if photo_path else None
+        # Beat events for snap pass -- runs concurrently, CPU only.
+        from features.fun_videos.audio_analyzer import detect_audio_events
+        fut_events = pool.submit(detect_audio_events, audio_path) if os.path.isfile(audio_path) else None
 
         clip_durations, beat_positions = fut_beats.result()
         if fut_lyrics is not None:
@@ -322,6 +325,7 @@ def run_song_prep(job, photo_path, settings):
         subject_anchor = fut_anchor.result() if fut_anchor else ""
         if subject_anchor:
             log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
+        audio_events = fut_events.result() if fut_events else {}
 
     # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
     # collapses trailing boundaries to total_dur, producing zero-duration clips.
@@ -342,7 +346,30 @@ def run_song_prep(job, photo_path, settings):
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:
         log.warning("[song-video] Story arc failed: %s", e)
-        settings["_story_arc"] = [user_idea or "Subject erupts into motion"] * n_clips
+        arc = [user_idea or "Subject erupts into motion"] * n_clips
+        settings["_story_arc"] = arc
+
+    # Snap story arc clip boundaries to strong beats/energy peaks
+    if audio_events and arc:
+        try:
+            from features.fun_videos.audio_analyzer import snap_durations_to_beats
+            audio_dur_snap = float(analysis.get("duration") or probe_duration(audio_path) or 0)
+            arc = snap_durations_to_beats(arc, audio_events, audio_dur_snap, snap_window=2.0)
+            settings["_story_arc"] = arc
+            log.info("[song-video] Story arc durations snapped to beats")
+        except Exception as e:
+            log.warning("[song-video] Beat-snap failed (non-fatal): %s", e)
+
+    # Compute reanchor_every from section boundaries
+    sections = audio_events.get("sections", []) if audio_events else []
+    if sections and n_clips >= 2:
+        video_dur = sum(float(c.get("duration", clip_dur)) for c in arc) if isinstance(arc[0], dict) else n_clips * clip_dur
+        n_sections_in_video = max(1, sum(1 for s in sections if s.get("start", 0) < video_dur))
+        reanchor_every = max(2, min(5, round(n_clips / max(1, n_sections_in_video))))
+    else:
+        reanchor_every = 3  # default: reset every 3 clips
+    settings["_reanchor_every"] = reanchor_every
+    log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(sections))
 
     job.meta["stage"] = "waiting-gpu"
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
@@ -374,6 +401,7 @@ def run_song_pipeline(job, photo_path, settings):
     audio_dur     = float(settings.get("audio_duration", 0.0))
     story_arc      = settings.pop("_story_arc", [])
     subject_anchor = settings.pop("_subject_anchor", "")
+    reanchor_every = int(settings.pop("_reanchor_every", 3))
 
     if not story_arc:
         story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
@@ -403,6 +431,7 @@ def run_song_pipeline(job, photo_path, settings):
         n_clips, clip_durations, beat_positions, model_name,
         resolution, ow, oh, tw, th, steps, guidance, seed,
         audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
+        reanchor_every=reanchor_every,
     )
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
@@ -412,6 +441,7 @@ def _do_song_gpu_phase(
     n_clips, clip_durations, beat_positions, model_name,
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
+    reanchor_every=3,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator
@@ -615,7 +645,7 @@ def _do_song_gpu_phase(
         # center (beat_pos ~0.5) -- the edge guard and "peak already on beat" checks
         # inside align_clip_to_beat would skip them anyway after an expensive cv2
         # frame scan. Skipping here saves ~2-4s per clip for 60-70% of clips.
-        _beat_sync_useful = beat_pos > 0.05 and abs(beat_pos - 0.5) > 0.12
+        _beat_sync_useful = beat_pos > 0.02
         job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} -- syncing peak to beat...")
         try:
             applied, info = align_clip_to_beat(
@@ -680,6 +710,11 @@ def _do_song_gpu_phase(
                 _chain_frame = _extract_last_frame(clip_path, fallback)
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
+
+            # Periodic re-anchor: reset to source photo at section boundaries to prevent drift
+            if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
+                log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
+                _chain_frame = None  # next clip starts from source
 
         if _clip_secs and clip_num < n_clips:
             avg = sum(_clip_secs) / len(_clip_secs)
