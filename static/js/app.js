@@ -1261,15 +1261,26 @@ document.addEventListener('DOMContentLoaded', () => {
     card.addEventListener('click', () => openJobModal(card._job));
 
     const thumbUrl = _thumbUrl(job);
+    const thumbWrap = document.createElement('div');
+    thumbWrap.style.cssText = 'position:relative; flex-shrink:0;';
     if (thumbUrl) {
       const img = document.createElement('img');
       img.className = 'jf-thumb';
       img.src = thumbUrl;
       img.onerror = () => { img.replaceWith(ph()); };
-      card.appendChild(img);
+      thumbWrap.appendChild(img);
     } else {
-      card.appendChild(ph());
+      thumbWrap.appendChild(ph());
     }
+    // Loop badge for repeat batch jobs
+    if (job.meta?.batch_loop) {
+      const badge = document.createElement('div');
+      badge.title = 'Part of a continuous batch loop';
+      badge.style.cssText = 'position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; font-size:11px; color:#d4a017; pointer-events:none;';
+      badge.textContent = '↻';
+      thumbWrap.appendChild(badge);
+    }
+    card.appendChild(thumbWrap);
 
     const body = document.createElement('div');
     body.className = 'jf-body';

@@ -375,9 +375,9 @@ function _jobCard(job, active, idx, total) {
     card.style.background  = 'var(--surface-2)';
   });
 
-  // Thumbnail
+  // Thumbnail (wrapper is relative so the loop badge can be positioned over it)
   const thumb = el('div', {
-    style: 'width:64px; height:42px; flex-shrink:0; border-radius:5px; background:var(--surface-3); overflow:hidden; display:flex; align-items:center; justify-content:center;',
+    style: 'position:relative; width:64px; height:42px; flex-shrink:0; border-radius:5px; background:var(--surface-3); overflow:hidden; display:flex; align-items:center; justify-content:center;',
   });
   const srcImg  = job.meta?.source_image;
   // Show output thumbnail whenever output exists (not just on done) so stopped/
@@ -394,6 +394,15 @@ function _jobCard(job, active, idx, total) {
     thumb.appendChild(img);
   } else {
     thumb.appendChild(el('span', { text: '🎬', style: 'font-size:1.3rem;' }));
+  }
+  // Loop badge: shown on repeat batch jobs
+  if (job.meta?.batch_loop) {
+    const badge = el('div', {
+      title: 'Part of a continuous batch loop',
+      style: 'position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; color:#d4a017; pointer-events:none;',
+      text: '↻',
+    });
+    thumb.appendChild(badge);
   }
   card.appendChild(thumb);
 

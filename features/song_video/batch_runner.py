@@ -289,6 +289,9 @@ def _submit_one(img_path: str | None, img_name: str, settings: dict, use_satelli
         label    = f"Music video: {audio_name} / {img_name[:30]}"
         job_type = JOB_FUN_MULTI_VIDEO
 
+    # Flag so the queue UI can show a loop icon on repeat-batch jobs
+    job_settings["batch_loop"] = bool(_state.get("repeat", False))
+
     return job_manager.submit_with_prep(
         job_type,
         run_song_prep,

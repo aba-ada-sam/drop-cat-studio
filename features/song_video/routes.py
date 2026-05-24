@@ -224,6 +224,7 @@ async def generate(request: Request):
         "clip_duration": clip_dur,
         "audio_name":    audio_name,
         "audio_duration": audio_dur,
+        "batch_loop":    bool(settings.get("batch_loop", False)),
         # Full settings dict so the queue modal can branch this job back into
         # the source tab and pre-fill all the controls. Strip private fields
         # (those starting with "_") and the audio_analysis blob (large + not
