@@ -220,12 +220,7 @@ def resume(saved: dict) -> dict:
             try:
                 from features.song_video.audio_analyzer import analyze as _analyze
                 clip_dur = saved["settings"].get("clip_duration", 8)
-                import asyncio
-                loop = asyncio.new_event_loop()
-                analysis = loop.run_until_complete(
-                    asyncio.to_thread(_analyze, audio_path, int(clip_dur))
-                )
-                loop.close()
+                analysis = _analyze(audio_path, int(clip_dur))  # synchronous call
                 saved["settings"]["audio_analysis"] = analysis
                 log.info("[song-batch] re-analyzed audio for resume")
             except Exception as e:
