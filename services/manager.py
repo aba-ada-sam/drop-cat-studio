@@ -86,6 +86,18 @@ def _init_job_object() -> None:
 
         _JOB_HANDLE = job
         log.info("Job Object armed -- GPU subprocesses will die with DCS (any exit)")
+
+        # Register atexit to explicitly close the handle so KILL_ON_JOB_CLOSE fires.
+        # Python does not track ctypes handles -- without this the Job Object handle
+        # leaks on process exit and the kill never triggers.
+        import atexit
+        def _close_job():
+            try:
+                ctypes.WinDLL("kernel32").CloseHandle(job)
+            except Exception:
+                pass
+        atexit.register(_close_job)
+
     except Exception as exc:
         log.warning("Job Object setup failed (non-fatal): %s", exc)
 
