@@ -15,23 +15,33 @@ design of features/fun_videos/folder_loop.py exactly:
 * CONTINUE ON FAILURE. A single image error increments `failed`
   and moves to the next image.
 
-* IN-MEMORY ONLY. A DCS restart wipes the batch.
+* PERSISTENT STATE. Batch progress is saved to disk on every state
+  change and restored on DCS restart. A batch that was running when
+  DCS crashed will auto-resume from where it left off when the app
+  restarts and the browser reconnects.
 
 * ONE BATCH AT A TIME. Starting a new batch stops the previous one.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 log = logging.getLogger("song_batch")
 
 HEARTBEAT_TIMEOUT_SEC = 120
 _JOB_POLL_INTERVAL_SEC = 2.0
+
+# Persist state here so a DCS restart can auto-resume an in-progress batch.
+# audio_analysis blob is stripped before saving (large + can be re-run).
+_STATE_FILE = Path(__file__).resolve().parent.parent.parent / "output" / "batch_state.json"
 
 _state_lock = threading.RLock()
 _state: dict[str, Any] = {}
@@ -58,6 +68,47 @@ def _initial_state() -> dict[str, Any]:
         "updated_at":        None,
         "last_heartbeat_at": None,
     }
+
+
+def _save_state() -> None:
+    """Persist current batch state to disk. Called after every meaningful state change."""
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        save = {
+            k: v for k, v in _state.items()
+            if k not in ("last_heartbeat_at",)   # don't save ephemeral heartbeat
+        }
+        # Strip audio_analysis from settings — it's large and can be re-run.
+        settings = dict(save.get("settings", {}))
+        settings.pop("audio_analysis", None)
+        save["settings"] = settings
+        _STATE_FILE.write_text(json.dumps(save, default=str), encoding="utf-8")
+    except Exception as exc:
+        log.warning("[song-batch] state save failed: %s", exc)
+
+
+def _clear_state_file() -> None:
+    try:
+        _STATE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def load_saved_state() -> dict | None:
+    """Return persisted batch state if a batch was running when DCS last stopped.
+
+    Called by the API on startup. Returns None if no valid saved state.
+    The caller should call start() with the saved state to resume.
+    """
+    try:
+        if not _STATE_FILE.exists():
+            return None
+        data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+        if data.get("status") == "running" and data.get("images"):
+            return data
+    except Exception as exc:
+        log.warning("[song-batch] could not read saved state: %s", exc)
+    return None
 
 
 def _record_error(msg: str) -> None:
@@ -101,16 +152,19 @@ def start(
     images: list[dict],
     settings: dict,
     repeat: bool,
+    _resume_index: int = 0,
+    _resume_lap: int = 1,
+    _resume_succeeded: int = 0,
+    _resume_failed: int = 0,
 ) -> dict:
-    """Start a fresh song-video batch.
+    """Start (or resume) a song-video batch.
 
     Args:
         folder:   display path (informational)
         images:   list of {path: str, name: str} -- absolute filesystem paths
-        settings: template applied to every image; must include audio_path,
-                  audio_duration, audio_analysis, num_clips, clip_duration,
-                  model_name, and all other pipeline knobs.
+        settings: template applied to every image
         repeat:   restart at index 0 after the last image
+        _resume_*: internal resume parameters -- set by resume() only
     """
     global _runner_thread, _state
 
@@ -132,10 +186,15 @@ def start(
             "settings":          dict(settings),
             "repeat":            bool(repeat),
             "status":            "running",
+            "index":             _resume_index,
+            "lap":               _resume_lap,
+            "succeeded":         _resume_succeeded,
+            "failed":            _resume_failed,
             "started_at":        time.time(),
             "updated_at":        time.time(),
             "last_heartbeat_at": time.time(),
         })
+        _save_state()
         _runner_thread = threading.Thread(
             target=_runner, daemon=True, name="song-batch-runner",
         )
@@ -145,12 +204,51 @@ def start(
         return _public_snapshot()
 
 
+def resume(saved: dict) -> dict:
+    """Resume a batch from a saved state (called after DCS restart).
+
+    The browser must reconnect and start polling /batch/status within
+    HEARTBEAT_TIMEOUT_SEC or the runner will self-terminate as normal.
+    """
+    saved["last_heartbeat_at"] = time.time()
+    saved["status"] = "running"
+    saved["active"] = True
+    # Re-analyze audio if analysis was stripped from saved settings
+    if "audio_analysis" not in saved.get("settings", {}):
+        audio_path = saved.get("settings", {}).get("audio_path", "")
+        if audio_path and os.path.isfile(audio_path):
+            try:
+                from features.song_video.audio_analyzer import analyze as _analyze
+                clip_dur = saved["settings"].get("clip_duration", 8)
+                import asyncio
+                loop = asyncio.new_event_loop()
+                analysis = loop.run_until_complete(
+                    asyncio.to_thread(_analyze, audio_path, int(clip_dur))
+                )
+                loop.close()
+                saved["settings"]["audio_analysis"] = analysis
+                log.info("[song-batch] re-analyzed audio for resume")
+            except Exception as e:
+                log.warning("[song-batch] audio re-analysis failed on resume: %s", e)
+    return start(
+        folder   = saved.get("folder", ""),
+        images   = saved.get("images", []),
+        settings = saved.get("settings", {}),
+        repeat   = saved.get("repeat", False),
+        _resume_index = saved.get("index", 0),
+        _resume_lap   = saved.get("lap", 1),
+        _resume_succeeded = saved.get("succeeded", 0),
+        _resume_failed    = saved.get("failed", 0),
+    )
+
+
 def stop() -> dict:
     with _state_lock:
         if _state.get("active"):
             _state["status"] = "stopping"
             _state["updated_at"] = time.time()
             log.info("[song-batch] stop requested")
+        _save_state()
         return _public_snapshot()
 
 
@@ -252,6 +350,7 @@ def _runner() -> None:
                     _state["status"]     = "stopped"
                     _state["active"]     = False
                     _state["updated_at"] = time.time()
+                    _save_state()
                     break
 
                 idx   = _state["index"]
@@ -262,11 +361,13 @@ def _runner() -> None:
                         _state["lap"]   += 1
                         _state["index"]  = 0
                         idx = 0
+                        _save_state()
                         log.info("[song-batch] lap %d -- restarting from image 0", _state["lap"])
                     else:
                         _state["status"]     = "done"
                         _state["active"]     = False
                         _state["updated_at"] = time.time()
+                        _clear_state_file()   # clean up on normal completion
                         log.info("[song-batch] completed: %d/%d succeeded, %d failed",
                                  _state.get("succeeded", 0), total, _state.get("failed", 0))
                         break
@@ -287,12 +388,14 @@ def _runner() -> None:
                     _record_error(f"Submit failed for {img['name']}: {e}")
                     _state["index"]      += 1
                     _state["updated_at"]  = time.time()
+                    _save_state()
                 continue
 
             with _state_lock:
                 _state["current_job_id"] = job_id
                 _state["current_image"]  = img["name"]
                 _state["updated_at"]     = time.time()
+                _save_state()
 
             ok, err = _wait_for_job(job_id)
 
@@ -304,6 +407,7 @@ def _runner() -> None:
                     _record_error(f"{img['name']}: {err}")
                 _state["index"]          = idx + 1
                 _state["current_job_id"] = None
+                _save_state()
                 _state["current_image"]  = None
                 _state["updated_at"]     = time.time()
 

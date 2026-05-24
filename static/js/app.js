@@ -8,7 +8,8 @@
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260521a';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260521b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260520a';
-import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524f';
+import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260524a';
+import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524g';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260521a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
@@ -27,6 +28,7 @@ const TAB_INIT = {
   'express':           initExpress,
   'pipeline':          initPipeline,
   'create-videos':     initFunVideos,
+  'music-video':       initMusicVideo,
   'zoom':              initZoom,
   'bridges':           initBridges,
   'sd-prompts':        initSdPrompts,
@@ -38,6 +40,7 @@ const TAB_INIT = {
 const TAB_HANDOFF = {
   'express':           expressHandoff,
   'create-videos':     funHandoff,
+  'music-video':       musicVideoHandoff,
   'zoom':              zoomHandoff,
   'bridges':           bridgesHandoff,
   'sd-prompts':        sdPromptsHandoff,

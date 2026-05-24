@@ -319,6 +319,23 @@ async def batch_start(request: Request):
     return snapshot
 
 
+@router.post("/batch/resume")
+async def batch_resume():
+    """Auto-resume a batch that was running when DCS last restarted.
+
+    Called by the Music Video tab on page load. If there is a saved batch
+    state the runner restarts from where it left off. Returns the snapshot
+    (same shape as /batch/status). If nothing to resume, returns idle state.
+    """
+    from features.song_video import batch_runner
+    saved = batch_runner.load_saved_state()
+    if saved:
+        log.info("[batch] auto-resuming saved batch (index=%d/%d)",
+                 saved.get("index", 0), len(saved.get("images", [])))
+        return batch_runner.resume(saved)
+    return batch_runner.status()
+
+
 @router.get("/batch/status")
 async def batch_status():
     """Heartbeat + status for the running song-video batch.
