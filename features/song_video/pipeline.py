@@ -454,7 +454,13 @@ def _do_song_gpu_phase(
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
             prompt_to_use = subject_anchor + " " + prompt_to_use
 
+        # Guard: WanGP rejects empty prompts. If both the story arc entry and
+        # subject anchor are empty/whitespace, use a safe fallback.
+        if not prompt_to_use.strip():
+            prompt_to_use = subject_anchor or "Subject in atmospheric scene, natural movement, cinematic"
         finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
+        if not finalized.strip():
+            finalized = "Cinematic scene, natural movement, photorealistic, high quality"
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
         this_dur  = clip_durations[i] if i < len(clip_durations) else clip_dur
 
