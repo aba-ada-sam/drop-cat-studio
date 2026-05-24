@@ -215,8 +215,17 @@ export function init(panel) {
     return { wrap, input };
   }
 
-  const { wrap: loopWrap, input: loopCheck }     = _toggle('Loop continuously (repeat folder continuously)', false);
-  const { wrap: fastWrap, input: fastCheck }     = _toggle('Fast mode  (360P · 8 steps · 50% coverage · ~4x faster, upscaled after)', true);
+  const { wrap: loopWrap, input: loopCheck }   = _toggle('Loop continuously (repeat folder)', false);
+  const { wrap: fastWrap, input: fastCheck }   = _toggle('Fast mode  (360P · 8 steps · 50% coverage · ~4x faster, upscaled after)', true);
+  const { wrap: satWrap,  input: satCheck }    = _toggle('Use 3060 satellite  (both GPUs generate simultaneously)', false);
+  // Check if satellite is reachable and auto-enable the toggle
+  fetch('/api/song-video/batch/status').then(() =>
+    fetch('/api/satellite/status').then(r => r.json()).then(s => {
+      if (s && s.connected && s.services && s.services.wangp && s.services.wangp.state === 'running') {
+        satCheck.checked = true;
+      }
+    }).catch(() => {})
+  ).catch(() => {});
 
   // ── Batch controls ─────────────────────────────────────────────────────────
 
@@ -244,6 +253,7 @@ export function init(panel) {
 
   loopCheck.addEventListener('change', _updateButtons);
   fastCheck.addEventListener('change', _updateButtons);
+  satCheck.addEventListener('change', _updateButtons);
 
   let _pollActive = false;
 
@@ -321,6 +331,7 @@ export function init(panel) {
         folder:          _folderPath,
         images:          _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:          loopCheck.checked,
+        use_satellite:   satCheck.checked,
         model:           modelSel.value,
         clip_duration:   fast ? 5    : 8,
         num_clips:       fast ? null : undefined,
@@ -501,6 +512,7 @@ export function init(panel) {
       folderStatus,
       loopWrap,
       fastWrap,
+      satWrap,
       batchStatus,
       batchBtn,
     ]),

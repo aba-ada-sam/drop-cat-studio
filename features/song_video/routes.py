@@ -192,7 +192,12 @@ async def generate(request: Request):
         "video_steps":     body.get("steps",    config.get("fun_video_steps",    30)),
         "video_guidance":  body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",     config.get("fun_video_seed",     -1)),
+        "use_satellite":   bool(body.get("use_satellite", False)),
     }
+    # LTX Distilled sweet spot is 8 steps -- cap regardless of what the config says
+    _mn = settings["model_name"]
+    if "distilled" in _mn.lower() and "ltx" in _mn.lower():
+        settings["video_steps"] = min(int(settings["video_steps"]), 8)
 
     audio_name = Path(audio_path).stem[:20]
     label = f"Music video: {audio_name} ({n_clips} clips)"
@@ -308,7 +313,12 @@ async def batch_start(request: Request):
         "video_steps":    body.get("steps",    config.get("fun_video_steps",    30)),
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":     body.get("seed",     config.get("fun_video_seed",     -1)),
+        "use_satellite":  bool(body.get("use_satellite", False)),
     }
+    # LTX Distilled sweet spot is 8 steps
+    _mn = settings["model_name"]
+    if "distilled" in _mn.lower() and "ltx" in _mn.lower():
+        settings["video_steps"] = min(int(settings["video_steps"]), 8)
 
     snapshot = batch_runner.start(
         folder   = body.get("folder", ""),

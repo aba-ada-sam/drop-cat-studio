@@ -43,9 +43,13 @@ _JOB_POLL_INTERVAL_SEC = 2.0
 # audio_analysis blob is stripped before saving (large + can be re-run).
 _STATE_FILE = Path(__file__).resolve().parent.parent.parent / "output" / "batch_state.json"
 
-_state_lock = threading.RLock()
+_state_lock     = threading.RLock()
 _state: dict[str, Any] = {}
 _runner_thread: Optional[threading.Thread] = None
+
+# Separate lock for claiming the next image index so both worker threads
+# can advance independently without stepping on each other.
+_index_lock = threading.Lock()
 
 
 def _initial_state() -> dict[str, Any]:
@@ -327,94 +331,146 @@ def _wait_for_job(job_id: str) -> tuple[bool, str]:
 
 
 def _runner() -> None:
+    """Two-slot parallel runner.
+
+    Spawns up to two worker threads: one for the local 5080 and (if satellite
+    is reachable) one for the 3060.  Both threads share an atomic image-index
+    counter so whichever GPU finishes first immediately claims the next image.
+    If the satellite is unavailable at startup, only the local thread runs.
+    If the satellite dies mid-batch the satellite thread exits and the local
+    thread finishes alone -- no hang, no crash.
+    """
     log.info("[song-batch] runner thread up")
-    try:
-        while True:
-            with _state_lock:
-                if not _state.get("active"):
-                    break
-                if _state.get("status") == "stopping":
-                    _state["status"]     = "stopped"
-                    _state["active"]     = False
-                    _state["updated_at"] = time.time()
-                    break
-                if _heartbeat_stale():
-                    stale_for = int(time.time() - (_state.get("last_heartbeat_at") or time.time()))
-                    log.warning("[song-batch] heartbeat stale (%ds); stopping.", stale_for)
-                    _record_error(f"Browser disconnected ({stale_for}s without polling); batch stopped.")
-                    _state["status"]     = "stopped"
-                    _state["active"]     = False
-                    _state["updated_at"] = time.time()
-                    _save_state()
-                    break
 
-                idx   = _state["index"]
-                total = len(_state["images"])
+    use_satellite = bool(_state.get("settings", {}).get("use_satellite")) \
+                    and _satellite_available()
 
-                if idx >= total:
-                    if _state.get("repeat"):
-                        _state["lap"]   += 1
-                        _state["index"]  = 0
-                        idx = 0
-                        _save_state()
-                        log.info("[song-batch] lap %d -- restarting from image 0", _state["lap"])
-                    else:
-                        _state["status"]     = "done"
-                        _state["active"]     = False
-                        _state["updated_at"] = time.time()
-                        _clear_state_file()   # clean up on normal completion
-                        log.info("[song-batch] completed: %d/%d succeeded, %d failed",
-                                 _state.get("succeeded", 0), total, _state.get("failed", 0))
+    if use_satellite:
+        log.info("[song-batch] parallel mode: 5080 + 3060 satellite")
+    else:
+        log.info("[song-batch] single-GPU mode: 5080 only")
+
+    def _worker(slot_name: str, use_sat: bool) -> None:
+        """Worker loop for one GPU slot.  Runs until the batch is done/stopped."""
+        log.info("[song-batch][%s] worker started", slot_name)
+        try:
+            while True:
+                # ── Global stop / heartbeat checks ───────────────────────────
+                with _state_lock:
+                    if not _state.get("active"):
+                        break
+                    if _state.get("status") == "stopping":
+                        break
+                    if _heartbeat_stale():
+                        stale_for = int(time.time() - (_state.get("last_heartbeat_at") or time.time()))
+                        log.warning("[song-batch][%s] heartbeat stale (%ds); exiting slot.",
+                                    slot_name, stale_for)
                         break
 
-                img          = _state["images"][idx]
-                settings     = dict(_state["settings"])
-                # Satellite routing disabled by default -- use local 5080 only.
-                # Enable via settings["use_satellite"] = True once 3060 is confirmed stable.
-                use_sat      = bool(settings.get("use_satellite")) and _satellite_available()
+                # ── Claim next image index atomically ─────────────────────────
+                with _index_lock:
+                    with _state_lock:
+                        idx   = _state["index"]
+                        total = len(_state["images"])
 
-            try:
-                job    = _submit_one(img["path"], img["name"], settings, use_satellite=use_sat)
-                job_id = job.id
-            except Exception as e:
-                log.warning("[song-batch] submit failed for %s: %s", img.get("path"), e)
+                        if idx >= total:
+                            if _state.get("repeat"):
+                                # Only the first thread to notice end-of-lap bumps lap count
+                                _state["lap"]   += 1
+                                _state["index"]  = 0
+                                _save_state()
+                                log.info("[song-batch][%s] lap %d", slot_name, _state["lap"])
+                                idx = 0
+                            else:
+                                # Batch done -- signal stop so the other slot also exits
+                                if _state.get("status") == "running":
+                                    _state["status"]     = "done"
+                                    _state["active"]     = False
+                                    _state["updated_at"] = time.time()
+                                    _clear_state_file()
+                                    log.info("[song-batch] completed: %d/%d succeeded, %d failed",
+                                             _state.get("succeeded", 0), total,
+                                             _state.get("failed", 0))
+                                break
+
+                        # Claim this index
+                        img = _state["images"][idx]
+                        _state["index"] += 1
+
+                settings = dict(_state.get("settings", {}))
+
+                # ── Submit ────────────────────────────────────────────────────
+                try:
+                    job    = _submit_one(img["path"], img["name"], settings,
+                                         use_satellite=use_sat)
+                    job_id = job.id
+                except Exception as e:
+                    log.warning("[song-batch][%s] submit failed for %s: %s",
+                                slot_name, img.get("path"), e)
+                    with _state_lock:
+                        _state["failed"]    += 1
+                        _record_error(f"[{slot_name}] Submit failed for {img['name']}: {e}")
+                        _state["updated_at"] = time.time()
+                        _save_state()
+                    continue
+
                 with _state_lock:
-                    _state["failed"]     += 1
-                    _record_error(f"Submit failed for {img['name']}: {e}")
-                    _state["index"]      += 1
-                    _state["updated_at"]  = time.time()
+                    _state["current_job_id"] = job_id
+                    _state["current_image"]  = f"[{slot_name}] {img['name']}"
+                    _state["updated_at"]     = time.time()
                     _save_state()
-                continue
 
+                # ── Wait ──────────────────────────────────────────────────────
+                ok, err = _wait_for_job(job_id)
+
+                with _state_lock:
+                    if ok:
+                        _state["succeeded"] += 1
+                    elif err not in ("Browser disconnected", "Batch stopped"):
+                        _state["failed"] += 1
+                        _record_error(f"[{slot_name}] {img['name']}: {err}")
+                    _state["current_job_id"] = None
+                    _state["current_image"]  = None
+                    _state["updated_at"]     = time.time()
+                    _save_state()
+
+                time.sleep(0.5)
+
+        except Exception as e:
+            log.exception("[song-batch][%s] worker crashed: %s", slot_name, e)
             with _state_lock:
-                _state["current_job_id"] = job_id
-                _state["current_image"]  = img["name"]
-                _state["updated_at"]     = time.time()
-                _save_state()
+                _record_error(f"[{slot_name}] Worker crashed: {e}")
+                _state["updated_at"] = time.time()
 
-            ok, err = _wait_for_job(job_id)
+        log.info("[song-batch][%s] worker exiting", slot_name)
 
-            with _state_lock:
-                if ok:
-                    _state["succeeded"] += 1
-                elif err not in ("Browser disconnected", "Batch stopped"):
-                    _state["failed"] += 1
-                    _record_error(f"{img['name']}: {err}")
-                _state["index"]          = idx + 1
-                _state["current_job_id"] = None
-                _save_state()
-                _state["current_image"]  = None
-                _state["updated_at"]     = time.time()
+    # ── Launch worker threads ─────────────────────────────────────────────────
+    threads = [threading.Thread(target=_worker, args=("5080", False),
+                                daemon=True, name="song-batch-local")]
+    if use_satellite:
+        threads.append(threading.Thread(target=_worker, args=("3060", True),
+                                        daemon=True, name="song-batch-sat"))
 
-            time.sleep(1)
+    for t in threads:
+        t.start()
 
-    except Exception as e:
-        log.exception("[song-batch] runner crashed: %s", e)
-        with _state_lock:
+    for t in threads:
+        t.join()
+
+    # ── Final state cleanup ───────────────────────────────────────────────────
+    with _state_lock:
+        if _state.get("status") == "stopping":
+            _state["status"]     = "stopped"
             _state["active"]     = False
-            _state["status"]     = "error"
             _state["updated_at"] = time.time()
-            _record_error(f"Runner crashed: {e}")
+            _save_state()
+        elif _heartbeat_stale() and _state.get("active"):
+            stale = int(time.time() - (_state.get("last_heartbeat_at") or time.time()))
+            _record_error(f"Browser disconnected ({stale}s without polling); batch stopped.")
+            _state["status"]     = "stopped"
+            _state["active"]     = False
+            _state["updated_at"] = time.time()
+            _save_state()
 
     log.info("[song-batch] runner exiting (status=%s, succeeded=%d, failed=%d)",
              _state.get("status"), _state.get("succeeded", 0), _state.get("failed", 0))

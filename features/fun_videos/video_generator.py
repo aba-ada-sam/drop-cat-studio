@@ -309,6 +309,9 @@ def _generate_via_worker(
     # On success, capture the generation token so we can reject stale results if
     # this thread outlives its DCS job (e.g. after a timeout).
     _model_timeout = MODELS.get(model_name, {}).get("poll_timeout_s", 600)
+    # 3060 satellite has smaller VRAM and needs more RAM offloading -- give it 2x time
+    if worker_url and worker_url != WANGP_LOCAL_URL:
+        _model_timeout = _model_timeout * 2
     submit_deadline = time.time() + _model_timeout
     my_token = None
     while True:

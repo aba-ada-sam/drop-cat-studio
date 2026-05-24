@@ -364,6 +364,10 @@ def run_song_pipeline(job, photo_path, settings):
     ow            = settings.get("override_width")
     oh            = settings.get("override_height")
     steps         = int(settings.get("video_steps", 30))
+    # LTX Distilled sweet spot is 8 steps -- quality doesn't improve beyond that,
+    # it only costs time. Cap it here so any settings path lands at the right value.
+    if "distilled" in model_name.lower() and "ltx" in model_name.lower():
+        steps = min(steps, 8)
     guidance      = float(settings.get("video_guidance", 7.5))
     seed          = int(settings.get("video_seed", -1))
     audio_path    = settings.get("audio_path", "")   # user's uploaded song

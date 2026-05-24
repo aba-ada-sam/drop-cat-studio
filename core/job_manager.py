@@ -289,19 +289,27 @@ class JobManager:
                 job.finished_at = time.time()
                 return
 
-            # Prep done -- hand off to GPU queue
-            job.status = "queued"
-            job.message = "Waiting for GPU..."
-            with self._lock:
-                self._gpu_queue.append(job.id)
-            self._gpu_event.set()
-            log.info("Job %s (%s) prep done, queued for GPU -- position %d",
-                     job.id, job_type, len(self._gpu_queue))
-            # Auto-save queue so an unexpected restart can restore it.
-            try:
-                self.save_queue()
-            except Exception as _e:
-                log.debug("Auto-save queue failed (non-fatal): %s", _e)
+            if job_type in GPU_JOB_TYPES:
+                # GPU job -- hand off to the shared GPU queue (serialised execution)
+                job.status = "queued"
+                job.message = "Waiting for GPU..."
+                with self._lock:
+                    self._gpu_queue.append(job.id)
+                self._gpu_event.set()
+                log.info("Job %s (%s) prep done, queued for GPU -- position %d",
+                         job.id, job_type, len(self._gpu_queue))
+                try:
+                    self.save_queue()
+                except Exception as _e:
+                    log.debug("Auto-save queue failed (non-fatal): %s", _e)
+            else:
+                # Non-GPU job (e.g. satellite) -- run worker immediately in this
+                # prep thread.  Satellite jobs use a remote GPU so they must NOT
+                # enter the local GPU queue; doing so caused the "clusterfuck"
+                # where satellite and local jobs competed for the same queue slot.
+                log.info("Job %s (%s) prep done, running directly (non-GPU type)",
+                         job.id, job_type)
+                self._run_job(job)
 
         t = threading.Thread(target=_run_prep, daemon=True)
         t.start()

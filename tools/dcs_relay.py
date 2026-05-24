@@ -101,28 +101,60 @@ def _start_service(name):
         _log(f"Started {name}")
 
 
-def _ensure_wangp():
-    """Start WanGP worker if not already running. Called on relay startup."""
+def _start_wangp_proc():
+    """Launch a fresh WanGP worker process. Caller must hold _wangp_lock."""
     global _wangp_proc
+    try:
+        _wangp_proc = subprocess.Popen(
+            [WANGP_PYTHON, WANGP_WORKER_PY,
+             "--wangp-app", WANGP_APP_DIR,
+             "--port", "7899", "--host", "127.0.0.1"],
+            cwd=WANGP_APP_DIR,
+            stdout=open(r"C:\DCS-satellite\worker_out.log", "w"),
+            stderr=open(r"C:\DCS-satellite\worker_err.log", "w"),
+            creationflags=0x08000000,
+        )
+        _log(f"WanGP worker started (pid {_wangp_proc.pid})")
+    except Exception as e:
+        _log(f"Failed to start WanGP worker: {e}")
+
+
+def _wangp_watchdog():
+    """Background watchdog: start WanGP on boot, restart if it dies.
+
+    Runs every 30s. If health check fails and the process is gone, starts a
+    fresh worker.  This prevents satellite jobs from hanging forever when the
+    worker crashes mid-generation.
+    """
+    import time as _time
+    _log("WanGP watchdog starting...")
+    while True:
+        _time.sleep(30)
+        with _wangp_lock:
+            alive, _ = _check_service(f"{WANGP_WORKER_URL}/health")
+            if alive:
+                continue
+            # Process dead or unresponsive -- restart
+            if _wangp_proc is not None:
+                try:
+                    _wangp_proc.kill()
+                except Exception:
+                    pass
+            _log("WanGP worker not responding -- restarting...")
+            _start_wangp_proc()
+
+
+def _ensure_wangp():
+    """Start WanGP worker on relay startup and launch the watchdog thread."""
     with _wangp_lock:
         alive, _ = _check_service(f"{WANGP_WORKER_URL}/health")
         if alive:
             _log("WanGP worker already running")
-            return
-        _log("Starting WanGP worker...")
-        try:
-            _wangp_proc = subprocess.Popen(
-                [WANGP_PYTHON, WANGP_WORKER_PY,
-                 "--wangp-app", WANGP_APP_DIR,
-                 "--port", "7899", "--host", "127.0.0.1"],
-                cwd=WANGP_APP_DIR,
-                stdout=open(r"C:\DCS-satellite\worker_out.log", "w"),
-                stderr=open(r"C:\DCS-satellite\worker_err.log", "w"),
-                creationflags=0x08000000,
-            )
-            _log(f"WanGP worker started (pid {_wangp_proc.pid})")
-        except Exception as e:
-            _log(f"Failed to start WanGP worker: {e}")
+        else:
+            _log("Starting WanGP worker...")
+            _start_wangp_proc()
+    # Launch watchdog regardless -- it will keep the worker alive going forward
+    threading.Thread(target=_wangp_watchdog, daemon=True, name="wangp-watchdog").start()
 
 
 def _proxy_wangp(path: str, method: str, body: bytes, content_type: str):
