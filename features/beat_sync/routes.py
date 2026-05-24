@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
-from core.job_manager import submit_job, JOB_VIDEO_TOOL
-from core.session import get_session
+from core.job_manager import JOB_VIDEO_TOOL
+from core import session as _session
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -54,9 +54,10 @@ async def retime_video(body: dict):
         ok, err = _retime(vp, ap, op, remap_points=rp, auto_align=(rp is None))
         if ok:
             job.update(status="done", progress=100, output=op)
-            get_session().add_file(op, "video", "beat_sync", path=op)
+            _session.get_current().add_file(op, "video", "beat_sync", path=op)
         else:
             raise RuntimeError(err or "Retime failed")
 
-    job_id = submit_job(JOB_VIDEO_TOOL, _work)
-    return {"job_id": job_id}
+    from app import get_job_manager
+    job = get_job_manager().submit(JOB_VIDEO_TOOL, _work, label="Beat sync retime")
+    return {"job_id": job.id}
