@@ -139,8 +139,8 @@ def _smooth(arr, fps):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_warp(input_video: str, v_ctrl: list, a_ctrl: list,
-                audio_src: str, output_path: str) -> bool:
-    """Build and run ffmpeg setpts warp.  Returns True on success."""
+                output_path: str) -> bool:
+    """Build and run ffmpeg setpts warp (video only, no audio).  Returns True on success."""
     n_segs       = len(v_ctrl) - 1
     filter_parts = []
     seg_labels   = []
@@ -178,36 +178,23 @@ def _apply_warp(input_video: str, v_ctrl: list, a_ctrl: list,
         f"{''.join(seg_labels)}concat=n={len(seg_labels)}:v=1:a=0[outv]"
     )
 
-    tmp_dir   = tempfile.mkdtemp(prefix="bsync_")
-    tmp_video = os.path.join(tmp_dir, "warped_noaudio.mp4")
     try:
-        r1 = subprocess.run(
+        r = subprocess.run(
             ["ffmpeg", "-y", "-i", input_video,
              "-filter_complex", ";".join(filter_parts),
              "-map", "[outv]",
              "-c:v", "libx264", "-crf", "16", "-preset", "fast",
-             "-pix_fmt", "yuv420p", "-an", tmp_video],
+             "-pix_fmt", "yuv420p", "-an", output_path],
             capture_output=True, timeout=1200,
         )
-        if r1.returncode != 0:
+        if r.returncode != 0:
             log.error("[beat-sync] warp encode failed: %s",
-                      r1.stderr.decode(errors="replace")[-600:])
-            return False
-
-        r2 = subprocess.run(
-            ["ffmpeg", "-y",
-             "-i", tmp_video, "-i", audio_src,
-             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-             "-shortest", output_path],
-            capture_output=True, timeout=300,
-        )
-        if r2.returncode != 0:
-            log.error("[beat-sync] mux failed: %s",
-                      r2.stderr.decode(errors="replace")[-400:])
+                      r.stderr.decode(errors="replace")[-600:])
             return False
         return True
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        log.error("[beat-sync] warp exception: %s", e)
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,16 +203,13 @@ def _apply_warp(input_video: str, v_ctrl: list, a_ctrl: list,
 
 def apply_beat_sync(merged_path: str, audio_path: str, job_dir: Path,
                     job_id: str, log_fn=None) -> str:
-    """Beat-sync a finished music video against its song.
+    """DTW-warp the video track so scene changes align with audio beat/onset peaks.
 
-    Takes the fully assembled video (merged_path, video + audio already muxed)
-    and the original audio file (audio_path) and produces a warped version
-    whose scene-change moments align with the song's beat/onset peaks.
+    Input:  merged_path -- the raw concat (no audio, just the unique video clips)
+    Output: a warped video file (still no audio) whose motion peaks land on beats.
+            The caller loops this to fill the song and then muxes audio.
 
-    Returns the path to the synced output file.  If anything goes wrong the
-    original merged_path is returned unchanged so the job output is never lost.
-
-    log_fn: optional callable(str) for job-level progress messages.
+    Returns the warped path on success, or merged_path unchanged on any failure.
     """
     def _log(msg):
         log.info(msg)
@@ -250,7 +234,7 @@ def apply_beat_sync(merged_path: str, audio_path: str, job_dir: Path,
         return merged_path
 
     try:
-        ok = _apply_warp(merged_path, v_ctrl, a_ctrl, audio_path, synced_path)
+        ok = _apply_warp(merged_path, v_ctrl, a_ctrl, synced_path)
     except Exception as e:
         _log(f"[beat-sync] warp encode failed (skipping): {e}")
         log.exception("[beat-sync] warp error")

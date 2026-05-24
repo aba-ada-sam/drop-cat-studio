@@ -681,41 +681,38 @@ def _do_song_gpu_phase(
     if not _concat_clips(clip_paths, concat_path):
         concat_path = clip_paths[0]
 
-    # -- Phase 3: Merge with user's audio (loop clips to fill song if needed) -
-    job.meta["stage"] = "merging"
-    job.update(progress=88, message="Looping clips to fill song duration...")
-
-    model_tag  = model_name.split()[0].lower()
-    final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
-
-    # Trim to exact song duration so the video doesn't overhang
     effective_dur = audio_dur if audio_dur > 0 else (probe_duration(audio_path) or 0.0)
     if effective_dur <= 0:
         raise RuntimeError("Cannot determine audio duration -- file may be missing or corrupt")
-    merged = _merge_video_audio_trim(concat_path, audio_path, final_path, effective_dur)
+
+    # -- Phase 3: Beat-sync the raw concat BEFORE looping ---------------------
+    # Running beat-sync on the already-looped video was wrong: the looped video
+    # has the same motion pattern repeating, the DTW alignment is meaningless,
+    # and -shortest was clipping the output short of the full song duration.
+    # Correct order: sync the unique clip content first, then loop the synced
+    # content to fill the song. This also makes semantic sense -- we align the
+    # 14 unique shots once, then the loop repeats those synced shots.
+    job.update(progress=84, message="Beat-syncing clips to song...")
+    from features.song_video.beat_sync import apply_beat_sync
+    synced_concat = apply_beat_sync(
+        merged_path = concat_path,
+        audio_path  = audio_path,
+        job_dir     = job_dir,
+        job_id      = job.id,
+        log_fn      = _log,
+    )
+    # apply_beat_sync always returns a valid path (original on failure)
+    video_to_loop = synced_concat
+
+    # -- Phase 4: Loop to fill song + merge audio -----------------------------
+    job.meta["stage"] = "merging"
+    job.update(progress=92, message="Looping clips to fill song duration...")
+
+    model_tag  = model_name.split()[0].lower()
+    final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
+    merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur)
 
     if merged:
-        # -- Phase 4: Beat-sync warp ------------------------------------------
-        # Squeeze/stretch the assembled video so scene changes land on beat and
-        # onset peaks in the song. Audio is untouched; only the video PTS moves.
-        # Skipped gracefully if librosa/cv2/scipy are missing or warp fails.
-        job.update(progress=92, message="Beat-syncing video to song...")
-        from features.song_video.beat_sync import apply_beat_sync
-        synced = apply_beat_sync(
-            merged_path = merged,
-            audio_path  = audio_path,
-            job_dir     = job_dir,
-            job_id      = job.id,
-            log_fn      = _log,
-        )
-        if synced != merged:
-            # Warp succeeded -- replace merged with synced version
-            try:
-                os.remove(merged)
-            except Exception:
-                pass
-            merged = synced
-
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
@@ -744,30 +741,24 @@ def _do_song_gpu_phase(
         except Exception as e:
             log.warning("session.add_file failed: %s", e)
 
-        # Clean up intermediates
+        # Clean up intermediates (clips, concat, synced_concat if separate)
         for cp in clip_paths:
-            if cp != merged:
+            try:
+                os.remove(cp)
+            except Exception:
+                pass
+        for p in (concat_path, synced_concat):
+            if p and p != merged:
                 try:
-                    os.remove(cp)
+                    os.remove(p)
                 except Exception:
                     pass
-        if concat_path not in (merged, *clip_paths):
-            try:
-                os.remove(concat_path)
-            except Exception:
-                pass
     else:
-        # Merge failed -- return the concat without audio
-        job.output = concat_path
-        from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
-        job.message = f"Music video done ({len(clip_paths)} clips -- audio merge failed)"
-        try:
-            from core.session import get_current as get_session
-            get_session().add_file(Path(concat_path).name, "video", "song_video", path=concat_path)
-        except Exception:
-            pass
-        for seg in job_dir.glob("audio_seg_*.wav"):
-            try:
-                seg.unlink()
-            except Exception:
-                pass
+        # Merge failed -- log it but do NOT inbox a soundless video.
+        # The clip files remain in job_dir for manual recovery if needed.
+        log.error("[song-video] Audio merge failed for job %s -- no output produced", job.id)
+        job.message = f"Audio merge failed ({len(clip_paths)} clips generated but not merged)"
+        raise RuntimeError(
+            f"Audio merge failed -- {len(clip_paths)} clips were generated but could not be "
+            f"merged with audio. Clip files are in {job_dir}"
+        )
