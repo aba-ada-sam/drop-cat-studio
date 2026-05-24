@@ -1,6 +1,6 @@
 /**
  * Music Video Tab
- * Upload a song + folder of images -> generate beat-synced music videos overnight.
+ * Upload a song + folder of images -> generate beat-synced music videos continuously.
  * Also supports single-image generation for one-off videos.
  *
  * Batch runner is SERVER-SIDE: state persists across DCS restarts.
@@ -215,7 +215,7 @@ export function init(panel) {
     return { wrap, input };
   }
 
-  const { wrap: loopWrap, input: loopCheck }     = _toggle('Loop overnight (repeat folder continuously)', false);
+  const { wrap: loopWrap, input: loopCheck }     = _toggle('Loop continuously (repeat folder continuously)', false);
   const { wrap: fastWrap, input: fastCheck }     = _toggle('Fast mode  (360P · 8 steps · 50% coverage · ~4x faster, upscaled after)', true);
 
   // ── Batch controls ─────────────────────────────────────────────────────────
