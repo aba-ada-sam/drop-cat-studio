@@ -99,40 +99,41 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
 
 _SONG_ARC_SYSTEM = """\
 You write motion prompts for an image-to-video AI generating a music video.
-Each prompt is one 8-10 second clip. Clips chain from each other's last frame.
-ALL clips stay in ONE world: same location, same subject. Only camera angle
-and energy change with the music.
+Each prompt describes ONE physical action in ONE clip. Clips chain visually.
 
-WORLD RULE: Clip 01 names the SPECIFIC setting -- location, material, light, subject.
-Good: "Woman in red coat on rain-slick Tokyo street under sodium lamps"
-Bad: "figure in dramatic landscape bathed in ethereal light"
-Every clip after stays in this world. Never change location between clips.
+IDENTITY LOCK -- most important rule:
+Every single prompt MUST start with the subject's EXACT visual markers
+(hair/skin/clothing/features from the photo). Without this the model replaces
+the character. Example opener: "Bald pale elf with pointed ears, purple jacket,
+blue jeans, sitting among large purple mushrooms..."
+Never omit the subject description. Never describe a new person or creature.
 
-ANTI-SLOP RULE: Every word must earn its place.
-Banned vague words: blazing, sweeping, ethereal, cinematic, dramatic, luminous,
-breathtaking, majestic, haunting, mesmerizing, transcendent, otherworldly,
-pulsing, shimmering, glowing, twinkling, flickering, alive with energy.
-Use PHYSICAL SPECIFICS: not "dramatic shadows" but "hard light casting black bars on concrete".
+LOCATION LOCK:
+Every prompt MUST name the same setting as the source photo.
+If the photo shows a mushroom garden, EVERY clip stays in that mushroom garden.
+Never move to a new location. Never describe a bench, wall, arena, or any
+location not visible in the original photo.
 
-CAMERA-FIRST RULE -- the camera move IS the energy. Subject stays nearly still.
-Every clip has ONE camera move. Subject makes at most ONE micro-gesture.
-  LOW: slow drift or push-in. Subject completely still.
-  MED: steady pan or dolly. Subject: one head turn or weight shift.
-  HIGH: crisper zoom-in or pan. Subject: one step or arm raise only.
-A still subject with a moving camera renders FASTER and CLEANER than complex action.
-Never describe: running, jumping, spinning, dancing, or multi-step movement.
+MOTION RULE:
+Describe ONE physical action with a start and end position.
+Good: "right hand lifts from knee by 10cm then settles back"
+Good: "head tilts 15 degrees left then returns to center"
+Good: "shoulders rise with one slow breath then fall"
+Bad: "dramatic energy pulses through the scene"
+Bad: "character walks forward" (too much -- causes identity loss)
 
-PARTICLE BAN -- these always produce AI artifacts. Never write:
-dust, particles, embers, sparks, snow, ash, mist, fog, debris, steam, smoke,
-swirling, drifting, bokeh swirls, floating anything, confetti, rain, drizzle.
-Describe SOLID, GROUNDED elements only -- stone, fabric, wood, metal, skin.
+NO CAMERA MOVES -- never write: zoom, pan, push, pull, dolly, tilt, drift,
+truck, crane, sweep, rotate, circle. Camera is LOCKED. Subject moves, not camera.
 
-FRAME RULE: No close-up face shots. Use hands, feet, objects for close shots.
+NO STYLE WORDS -- never write: anime, cartoon, ethereal, cinematic, dramatic,
+blazing, pulsing, glowing, transcendent, otherworldly, magical, mystical.
 
-Rules:
-- 15-25 words per prompt -- one camera move + one grounded element. Nothing more.
-- Energy label (LOW/MED/HIGH) drives only camera speed and ONE subject micro-gesture.
-- Return ONLY valid JSON: {"clips": ["prompt1", "prompt2", ...]}\
+PARTICLE BAN -- causes AI artifacts: dust, embers, sparks, snow, fog, mist,
+smoke, swirling, bokeh, confetti, rain. Describe only solid physical things.
+
+Format: return ONLY valid JSON:
+{"clips": [{"prompt": "...", "duration": 7}, {"prompt": "...", "duration": 8}]}
+Duration is seconds (5-10). Vary for musical pacing.\
 """
 
 
@@ -213,20 +214,25 @@ def _generate_song_arc(
             raise ValueError("No JSON in LLM response")
         clips = data.get("clips", [])
         if isinstance(clips, list) and clips:
-            result = [str(c) for c in clips[:n_clips]]
-            # If LLM returned fewer clips than requested (truncated response),
-            # cycle through what we have rather than repeating the last prompt --
-            # repeating causes visually identical consecutive clips.
+            # Preserve dict format {prompt, duration} if LLM returned it;
+            # otherwise wrap plain strings into dicts with default duration.
+            result = []
+            for c in clips[:n_clips]:
+                if isinstance(c, dict) and c.get("prompt"):
+                    result.append({"prompt": str(c["prompt"]), "duration": float(c.get("duration", 7))})
+                elif isinstance(c, str) and c.strip():
+                    result.append({"prompt": c.strip(), "duration": 7.0})
+            # Pad if LLM returned fewer clips than needed
             src = len(result)
-            while len(result) < n_clips:
-                result.append(result[len(result) % src])
+            while len(result) < n_clips and src > 0:
+                result.append(dict(result[len(result) % src]))
             log.info("[song-video] Story arc: %d prompts from LLM, padded to %d", src, n_clips)
             return result
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
 
-    base = user_idea or "Wide shot of open landscape, camera dollies forward slowly as subject moves toward the horizon, warm late-afternoon light"
-    return [base] * n_clips
+    base = user_idea or "Subject in original scene, natural physical movement"
+    return [{"prompt": base, "duration": 7.0}] * n_clips
 
 
 def _merge_video_audio_trim(

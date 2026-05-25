@@ -38,21 +38,23 @@ WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
 # reactive (suppress problems you observe, not problems you fear).
 
 # LTX-2 calm/chained frames: no "static" to avoid particle-fill pressure.
-# Kept to 8 focused terms -- quality terms only, no particle enumeration.
+# anime/cartoon terms added -- LTX drifts to anime style on energetic prompts.
 _NEG_LTX_CALM = (
     "worst quality, low quality, blurry, distorted, jitter, stutter, "
-    "temporal artifacts, watermark, text, abrupt transition, jump cut"
+    "temporal artifacts, watermark, text, abrupt transition, jump cut, "
+    "anime, cartoon, illustration, 2d, drawing, painting, different person, new character"
 )
-# LTX-2 dynamic (unconstrained, no chained anchor): "static" included to prevent
-# fully frozen output. Still capped at ~10 terms.
+# LTX-2 dynamic: "static" included to prevent frozen output.
 _NEG_LTX_DYNAMIC = (
     "worst quality, low quality, blurry, distorted, jitter, stutter, "
-    "temporal artifacts, watermark, text, static, abrupt transition, jump cut"
+    "temporal artifacts, watermark, text, static, abrupt transition, jump cut, "
+    "anime, cartoon, illustration, 2d, drawing, painting, different person, new character"
 )
-# Wan2.1: keep it minimal, reactive to observed artifacts only.
+# Wan2.1: keep it minimal.
 _NEG_WAN = (
     "low quality, blurry, distorted, unnatural movement, "
-    "watermark, text, shaky camera, temporal artifacts"
+    "watermark, text, shaky camera, temporal artifacts, "
+    "anime, cartoon, illustration, different person"
 )
 
 
