@@ -25,7 +25,7 @@ def analyze_video_motion(video_path: str) -> dict:
     1. Frame-difference energy: detects where visual content changes significantly
        -- works for both hard cuts and soft transitions (xfade).
     2. Scene change detection at a lowered threshold: catches hard cuts.
-    3. If both find nothing, falls back to evenly-spaced positions every 8s.
+    3. If both find nothing or too few, falls back to evenly-spaced positions.
     """
     from core.ffmpeg_utils import probe_duration
     duration = probe_duration(video_path) or 0.0
@@ -43,11 +43,16 @@ def analyze_video_motion(video_path: str) -> dict:
         motion_peaks = [b for b in boundaries if b > 0.5]
         log.info("[beat_sync] No frame-diff peaks -- using %d scene cuts as motion peaks", len(motion_peaks))
 
-    # Method 4: last resort -- evenly spaced every 8s
-    if not motion_peaks and duration > 0:
-        step = 8.0
-        motion_peaks = [round(t, 2) for t in _frange(step, duration - step * 0.5, step)]
-        log.info("[beat_sync] No peaks detected -- using %d evenly-spaced positions", len(motion_peaks))
+    # Method 4: if we still have too few useful anchors, use evenly-spaced.
+    # Trigger at < 4 peaks OR < 1 per 12s of video -- not just at zero.
+    # Interpolated/already-retimed video often has nearly uniform YDIF, giving
+    # just 1-2 peaks that prevent this fallback from firing in the old code.
+    min_useful = max(4, int(duration / 12))
+    if len(motion_peaks) < min_useful and duration > 0:
+        step = max(3.0, duration / max(8, int(duration / 6)))
+        motion_peaks = [round(t, 2) for t in _frange(step, duration - step * 0.3, step)]
+        log.info("[beat_sync] Too few peaks (%d < %d) -- using %d evenly-spaced positions",
+                 len(motion_peaks), min_useful, len(motion_peaks))
 
     log.info("[beat_sync] video analysis: dur=%.1fs, boundaries=%d, motion_peaks=%d",
              duration, len(boundaries), len(motion_peaks))
@@ -99,10 +104,11 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
         if not diffs:
             return []
 
-        # Peaks must be well-separated -- beat sync points need room around them
-        min_gap = 2.5
-        # Cap total peaks: roughly 1 per 5 seconds of video
-        max_peaks = max(6, int(duration / 5))
+        # Peaks must be well-separated but not so much that short clips are missed.
+        # 2.0s matches typical LTX clip length (3-4s), gives ~1 peak per clip.
+        min_gap = 2.0
+        # Cap total peaks: roughly 1 per 4 seconds of video
+        max_peaks = max(6, int(duration / 4))
 
         sorted_d = sorted(diffs)
         peaks = []
