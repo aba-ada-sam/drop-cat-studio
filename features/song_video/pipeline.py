@@ -307,32 +307,33 @@ def run_song_prep(job, photo_path, settings):
     audio_path    = settings.get("audio_path", "")
     lyrics_text   = (settings.get("lyrics_text") or "").strip()
 
-    # Run beat alignment + lyric detection concurrently -- both CPU, no GPU needed.
+    # Prep strategy: I/O-bound API calls run concurrently with CPU work.
+    # CPU-heavy tasks (librosa x2, whisper) run sequentially so each gets full cores --
+    # running them simultaneously saturates CPU and slows all three.
     job.meta["stage"] = "analyzing"
     job.meta["clips_total"] = n_clips
     job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
+    from features.fun_videos.audio_analyzer import detect_audio_events
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        # max_dur must be >= min_dur (clip_dur); cap at 10s for quality but never below clip_dur
-        fut_beats  = pool.submit(compute_clip_plan, audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0))
-        fut_lyrics = pool.submit(_transcribe_lyrics, audio_path) if (not lyrics_text and os.path.isfile(audio_path)) else None
-        # Subject anchor runs concurrently -- vision LLM call, adds ~0 wall time.
-        fut_anchor = pool.submit(_extract_subject_anchor, photo_path, llm_router) if photo_path else None
-        # Beat events for snap pass -- runs concurrently, CPU only.
-        from features.fun_videos.audio_analyzer import detect_audio_events
-        fut_events = pool.submit(detect_audio_events, audio_path) if os.path.isfile(audio_path) else None
+    # Fire Anthropic vision call in background (pure I/O, no CPU competition).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as api_pool:
+        fut_anchor = api_pool.submit(_extract_subject_anchor, photo_path, llm_router) if photo_path else None
 
-        clip_durations, beat_positions = fut_beats.result()
-        if fut_lyrics is not None:
-            detected = fut_lyrics.result()
+        # CPU tasks run sequentially -- each gets full cores.
+        clip_durations, beat_positions = compute_clip_plan(
+            audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0)
+        )
+        audio_events = detect_audio_events(audio_path) if os.path.isfile(audio_path) else {}
+        if not lyrics_text and os.path.isfile(audio_path):
+            detected = _transcribe_lyrics(audio_path)
             if detected:
                 lyrics_text = detected
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
+
         subject_anchor = fut_anchor.result() if fut_anchor else ""
-        if subject_anchor:
-            log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
-        audio_events = fut_events.result() if fut_events else {}
+    if subject_anchor:
+        log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
 
     # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
     # collapses trailing boundaries to total_dur, producing zero-duration clips.

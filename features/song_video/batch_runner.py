@@ -303,6 +303,30 @@ def _submit_one(img_path: str | None, img_name: str, settings: dict, use_satelli
     )
 
 
+def _wait_until_gpu_phase(job_id: str) -> bool:
+    """Block until a job leaves the prep/preparing state (enters GPU queue or errors).
+
+    Returns True if the job is now in GPU phase (queued/running), False if it
+    failed during prep or the batch was stopped.  Called so the next image's
+    prep can start while the current job waits for the GPU.
+    """
+    from app import get_job_manager
+    job_manager = get_job_manager()
+    while True:
+        with _state_lock:
+            if not _state.get("active") or _state.get("status") in ("stopping", "stopped"):
+                return False
+        job = job_manager.get(job_id)
+        if job is None:
+            return False
+        s = job.status
+        if s in ("error", "stopped", "cancelled"):
+            return False
+        if s != "preparing":   # queued / running / done
+            return True
+        time.sleep(1)
+
+
 def _wait_for_job(job_id: str) -> tuple[bool, str]:
     from app import get_job_manager
     job_manager = get_job_manager()
@@ -354,77 +378,100 @@ def _runner() -> None:
         log.info("[song-batch] single-GPU mode: 5080 only")
 
     def _worker(slot_name: str, use_sat: bool) -> None:
-        """Worker loop for one GPU slot.  Runs until the batch is done/stopped."""
+        """Worker loop for one GPU slot.  Runs until the batch is done/stopped.
+
+        Uses a 1-ahead prep pipeline: as soon as the current job leaves the prep
+        phase and enters the GPU queue, the next image's prep starts immediately.
+        This overlaps LLM/audio analysis (~60s) with GPU clip generation (~20-40min),
+        eliminating dead time between consecutive images.
+        """
         log.info("[song-batch][%s] worker started", slot_name)
+
+        def _claim_next() -> tuple[dict | None, dict]:
+            """Claim the next image index under locks. Returns (img, settings) or (None, {})."""
+            with _index_lock:
+                with _state_lock:
+                    idx   = _state["index"]
+                    total = len(_state["images"])
+                    if idx >= total:
+                        if _state.get("repeat"):
+                            _state["lap"]   += 1
+                            _state["index"]  = 0
+                            _save_state()
+                            log.info("[song-batch][%s] lap %d", slot_name, _state["lap"])
+                            idx = 0
+                        else:
+                            if _state.get("status") == "running":
+                                _state["status"]     = "done"
+                                _state["active"]     = False
+                                _state["updated_at"] = time.time()
+                                _clear_state_file()
+                                log.info("[song-batch] completed: %d/%d succeeded, %d failed",
+                                         _state.get("succeeded", 0), total,
+                                         _state.get("failed", 0))
+                            return None, {}
+                    img = _state["images"][idx]
+                    _state["index"] += 1
+            return img, dict(_state.get("settings", {}))
+
+        def _stop_check() -> bool:
+            with _state_lock:
+                return (not _state.get("active") or
+                        _state.get("status") in ("stopping", "stopped") or
+                        _heartbeat_stale())
+
         try:
+            # Prime the pipeline: claim and submit the first image.
+            img, settings = _claim_next()
+            if img is None:
+                return
+
+            try:
+                current_job = _submit_one(img["path"], img["name"], settings, use_satellite=use_sat)
+            except Exception as e:
+                log.warning("[song-batch][%s] submit failed: %s", slot_name, e)
+                with _state_lock:
+                    _state["failed"] += 1
+                    _record_error(f"[{slot_name}] Submit failed for {img['name']}: {e}")
+                    _state["updated_at"] = time.time()
+                    _save_state()
+                return
+
             while True:
-                # ── Global stop / heartbeat checks ───────────────────────────
-                with _state_lock:
-                    if not _state.get("active"):
-                        break
-                    if _state.get("status") == "stopping":
-                        break
-                    if _heartbeat_stale():
-                        stale_for = int(time.time() - (_state.get("last_heartbeat_at") or time.time()))
-                        log.warning("[song-batch][%s] heartbeat stale (%ds); exiting slot.",
-                                    slot_name, stale_for)
-                        break
-
-                # ── Claim next image index atomically ─────────────────────────
-                with _index_lock:
-                    with _state_lock:
-                        idx   = _state["index"]
-                        total = len(_state["images"])
-
-                        if idx >= total:
-                            if _state.get("repeat"):
-                                # Only the first thread to notice end-of-lap bumps lap count
-                                _state["lap"]   += 1
-                                _state["index"]  = 0
-                                _save_state()
-                                log.info("[song-batch][%s] lap %d", slot_name, _state["lap"])
-                                idx = 0
-                            else:
-                                # Batch done -- signal stop so the other slot also exits
-                                if _state.get("status") == "running":
-                                    _state["status"]     = "done"
-                                    _state["active"]     = False
-                                    _state["updated_at"] = time.time()
-                                    _clear_state_file()
-                                    log.info("[song-batch] completed: %d/%d succeeded, %d failed",
-                                             _state.get("succeeded", 0), total,
-                                             _state.get("failed", 0))
-                                break
-
-                        # Claim this index
-                        img = _state["images"][idx]
-                        _state["index"] += 1
-
-                settings = dict(_state.get("settings", {}))
-
-                # ── Submit ────────────────────────────────────────────────────
-                try:
-                    job    = _submit_one(img["path"], img["name"], settings,
-                                         use_satellite=use_sat)
-                    job_id = job.id
-                except Exception as e:
-                    log.warning("[song-batch][%s] submit failed for %s: %s",
-                                slot_name, img.get("path"), e)
-                    with _state_lock:
-                        _state["failed"]    += 1
-                        _record_error(f"[{slot_name}] Submit failed for {img['name']}: {e}")
-                        _state["updated_at"] = time.time()
-                        _save_state()
-                    continue
+                if _stop_check():
+                    break
 
                 with _state_lock:
-                    _state["current_job_id"] = job_id
+                    _state["current_job_id"] = current_job.id
                     _state["current_image"]  = f"[{slot_name}] {img['name']}"
                     _state["updated_at"]     = time.time()
                     _save_state()
 
-                # ── Wait ──────────────────────────────────────────────────────
-                ok, err = _wait_for_job(job_id)
+                # Wait for prep to finish and job to enter the GPU queue.
+                # Once it does, immediately start the next image's prep so it
+                # overlaps with the current image's GPU generation work.
+                _wait_until_gpu_phase(current_job.id)
+
+                next_job = None
+                if not _stop_check():
+                    next_img, next_settings = _claim_next()
+                    if next_img is not None:
+                        try:
+                            next_job = _submit_one(next_img["path"], next_img["name"],
+                                                    next_settings, use_satellite=use_sat)
+                            log.debug("[song-batch][%s] started prep for next image: %s",
+                                      slot_name, next_img["name"])
+                        except Exception as e:
+                            log.warning("[song-batch][%s] next submit failed: %s", slot_name, e)
+                            with _state_lock:
+                                _state["failed"] += 1
+                                _record_error(f"[{slot_name}] Submit failed for {next_img['name']}: {e}")
+                                _state["updated_at"] = time.time()
+                                _save_state()
+                            next_job = None
+
+                # Now wait for the current job to fully complete.
+                ok, err = _wait_for_job(current_job.id)
 
                 with _state_lock:
                     if ok:
@@ -437,7 +484,18 @@ def _runner() -> None:
                     _state["updated_at"]     = time.time()
                     _save_state()
 
-                time.sleep(0.5)
+                if next_job is None:
+                    break  # No more images; batch complete or stopped.
+
+                # Advance to the next image.
+                img = next_img
+                current_job = next_job
+                time.sleep(0.3)
+
+        except Exception as e:
+            log.exception("[song-batch][%s] worker crashed: %s", slot_name, e)
+            with _state_lock:
+                _record_error(f"[{slot_name}] Worker crashed: {e}")
 
         except Exception as e:
             log.exception("[song-batch][%s] worker crashed: %s", slot_name, e)
