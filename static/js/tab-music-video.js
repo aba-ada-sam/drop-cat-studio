@@ -485,6 +485,7 @@ export function init(panel) {
           const idx = j.output.replace(/\\/g, '/').toLowerCase().indexOf('/output/');
           singleResult.src = idx !== -1 ? j.output.replace(/\\/g, '/').slice(idx) : '';
           singleResult.style.display = 'block';
+          if (_songPath) _showBeatSync(j.output, _songPath);
         }
         singleBtn.disabled = false; _updateSingleBtn();
         document.dispatchEvent(new Event('session-updated'));
@@ -512,6 +513,189 @@ export function init(panel) {
       }
     } catch {}
   })();
+
+  // ── Inline Beat Sync ────────────────────────────────────────────────────────
+
+  const syncSection = el('div', { style: 'display:none; flex-direction:column; gap:10px;' });
+  const syncTitle   = el('div', { style: 'font-size:13px; font-weight:700; color:var(--gold);', text: 'Beat Sync' });
+  const syncHint    = el('div', { style: 'font-size:11px; color:var(--text-3);', text: 'Orange = beats  |  Blue = energy peaks  |  White = clip cuts  |  Red diamonds = motion peaks (drag to align)  |  Yellow = manually set' });
+  const syncCanvasAudio = el('canvas', { style: 'display:block; width:100%; border-radius:4px; cursor:crosshair; background:#0a0202;' });
+  syncCanvasAudio.height = 70;
+  const syncCanvasVideo = el('canvas', { style: 'display:block; width:100%; border-radius:4px; cursor:crosshair; background:#050101;' });
+  syncCanvasVideo.height = 50;
+  const syncInfo = el('div', { style: 'font-size:11px; color:var(--text-3);' });
+  const syncAutoBtn   = el('button', { text: 'Auto-Align', style: 'padding:7px 14px; border-radius:var(--r-md); border:1px solid var(--accent-border); background:var(--accent-bg); color:var(--accent); font-size:12px; font-weight:600; cursor:pointer;' });
+  const syncResetBtn  = el('button', { text: 'Reset',      style: 'padding:7px 12px; border-radius:var(--r-md); border:1px solid var(--border-2); background:none; color:var(--text-3); font-size:12px; cursor:pointer;' });
+  const syncExportBtn = el('button', { text: 'Export Synced Video', style: 'padding:7px 16px; border-radius:var(--r-md); border:none; background:var(--circus-red); color:#fff; font-size:12px; font-weight:700; cursor:pointer;' });
+  const syncStatus    = el('div', { style: 'font-size:11px; color:var(--text-3); min-height:14px;' });
+  const syncProgress  = el('progress', { style: 'display:none; width:100%; height:3px;' });
+  syncProgress.max = 100;
+
+  syncSection.append(
+    syncTitle, syncHint,
+    syncCanvasAudio, syncCanvasVideo, syncInfo,
+    el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' }, [syncAutoBtn, syncResetBtn, syncExportBtn]),
+    syncStatus, syncProgress,
+  );
+
+  let _syncVideoPath = '', _syncAudioPath = '', _syncData = null, _syncRemap = [], _syncDragIdx = -1, _syncAudioBuf = null, _syncAudioCtx = null, _syncPlayPos = 0;
+  const MR = 7;
+
+  function _sToX(c, t, dur) { return Math.round(t / dur * c.width); }
+  function _xToS(c, x, dur) { return Math.max(0, Math.min(dur, x / c.width * dur)); }
+
+  function _drawSync() {
+    if (!_syncData) return;
+    const a = _syncData.audio || {}, v = _syncData.video || {};
+    const dur = a.duration || v.duration || 1;
+    const WA = syncCanvasAudio.clientWidth || 600;
+    if (syncCanvasAudio.width !== WA) { syncCanvasAudio.width = WA; syncCanvasVideo.width = WA; }
+
+    // Audio canvas
+    const ca = syncCanvasAudio.getContext('2d');
+    ca.clearRect(0, 0, WA, 70);
+    if (_syncAudioBuf) {
+      const d = _syncAudioBuf.getChannelData(0), step = Math.ceil(d.length / WA), cy = 35;
+      ca.strokeStyle = '#5a2020'; ca.lineWidth = 1;
+      for (let x = 0; x < WA; x++) {
+        let mn = 1, mx = -1;
+        for (let i = x*step; i < (x+1)*step && i < d.length; i++) { if(d[i]<mn)mn=d[i]; if(d[i]>mx)mx=d[i]; }
+        ca.beginPath(); ca.moveTo(x, cy+mn*cy*.85); ca.lineTo(x, cy+mx*cy*.85); ca.stroke();
+      }
+    }
+    ca.strokeStyle = 'rgba(232,124,42,.25)'; ca.lineWidth = 1;
+    for (const t of (a.beat_times||[])) { const x=_sToX(syncCanvasAudio,t,dur); ca.beginPath(); ca.moveTo(x,0); ca.lineTo(x,70); ca.stroke(); }
+    ca.strokeStyle = '#e87c2a'; ca.lineWidth = 2;
+    for (const t of (a.energy_peaks||[])) { const x=_sToX(syncCanvasAudio,t,dur); ca.beginPath(); ca.moveTo(x,0); ca.lineTo(x,70); ca.stroke(); }
+    const ph = _sToX(syncCanvasAudio, _syncPlayPos, dur);
+    ca.strokeStyle = '#fff'; ca.lineWidth = 1.5; ca.beginPath(); ca.moveTo(ph,0); ca.lineTo(ph,70); ca.stroke();
+
+    // Video canvas
+    const cv = syncCanvasVideo.getContext('2d');
+    cv.clearRect(0, 0, WA, 50);
+    cv.fillStyle = '#050101'; cv.fillRect(0,0,WA,50);
+    cv.strokeStyle = 'rgba(255,255,255,.35)'; cv.lineWidth = 1;
+    for (const t of (v.clip_boundaries||[])) { if(t<.1)continue; const x=_sToX(syncCanvasVideo,t,dur); cv.beginPath(); cv.moveTo(x,0); cv.lineTo(x,50); cv.stroke(); }
+    const peaks = v.motion_peaks||[];
+    for (let i=0; i<peaks.length; i++) {
+      const rp = _syncRemap.find(r=>r._i===i);
+      const t = rp ? rp.target_t : peaks[i];
+      const ot = peaks[i], x = _sToX(syncCanvasVideo,t,dur), ox = _sToX(syncCanvasVideo,ot,dur);
+      if (rp && Math.abs(x-ox)>2) {
+        cv.strokeStyle='rgba(232,74,74,.35)'; cv.lineWidth=1; cv.setLineDash([3,3]);
+        cv.beginPath(); cv.moveTo(ox,25); cv.lineTo(x,25); cv.stroke(); cv.setLineDash([]);
+      }
+      cv.fillStyle = rp ? '#ffaa00' : '#e84a4a'; cv.strokeStyle='#fff'; cv.lineWidth=1.5;
+      cv.beginPath(); cv.moveTo(x,25-MR); cv.lineTo(x+MR,25); cv.lineTo(x,25+MR); cv.lineTo(x-MR,25); cv.closePath(); cv.fill(); cv.stroke();
+    }
+    const pv = _sToX(syncCanvasVideo, _syncPlayPos, dur);
+    cv.strokeStyle='#fff'; cv.lineWidth=1.5; cv.beginPath(); cv.moveTo(pv,0); cv.lineTo(pv,50); cv.stroke();
+  }
+
+  function _peakAtX(x) {
+    if (!_syncData) return -1;
+    const dur = (_syncData.audio?.duration || _syncData.video?.duration || 1);
+    const peaks = _syncData.video?.motion_peaks || [];
+    for (let i=peaks.length-1; i>=0; i--) {
+      const rp = _syncRemap.find(r=>r._i===i);
+      const t = rp ? rp.target_t : peaks[i];
+      if (Math.abs(_sToX(syncCanvasVideo,t,dur)-x) <= MR+3) return i;
+    }
+    return -1;
+  }
+
+  syncCanvasVideo.addEventListener('mousedown', e => {
+    const r = syncCanvasVideo.getBoundingClientRect();
+    const x = (e.clientX-r.left)*(syncCanvasVideo.width/r.width);
+    _syncDragIdx = _peakAtX(x);
+    if (_syncDragIdx>=0) e.preventDefault();
+  });
+  syncCanvasVideo.addEventListener('mousemove', e => {
+    const r = syncCanvasVideo.getBoundingClientRect();
+    const x = (e.clientX-r.left)*(syncCanvasVideo.width/r.width);
+    syncCanvasVideo.style.cursor = _peakAtX(x)>=0 ? 'ew-resize' : 'crosshair';
+    if (_syncDragIdx<0) return;
+    const dur = (_syncData?.audio?.duration || _syncData?.video?.duration || 1);
+    const newT = _xToS(syncCanvasVideo, x, dur);
+    const origT = (_syncData?.video?.motion_peaks||[])[_syncDragIdx];
+    const ei = _syncRemap.findIndex(r=>r._i===_syncDragIdx);
+    if (ei>=0) _syncRemap[ei].target_t = newT;
+    else _syncRemap.push({ _i:_syncDragIdx, video_t:origT, target_t:newT });
+    _drawSync();
+  });
+  window.addEventListener('mouseup', () => { _syncDragIdx = -1; });
+  syncCanvasAudio.addEventListener('click', e => {
+    const r = syncCanvasAudio.getBoundingClientRect();
+    _syncPlayPos = _xToS(syncCanvasAudio, (e.clientX-r.left)*(syncCanvasAudio.width/r.width), _syncData?.audio?.duration || _syncData?.video?.duration || 1);
+    _drawSync();
+  });
+
+  syncAutoBtn.addEventListener('click', () => {
+    if (!_syncData) return;
+    const a = _syncData.audio||{}, v = _syncData.video||{};
+    const beats = a.beat_times||[], energy = a.energy_peaks||[], peaks = v.motion_peaks||[];
+    const dur = a.duration||v.duration||1;
+    const cands = [...new Set([...energy, ...beats.filter((_,i)=>i%4===0)])].sort((x,y)=>x-y);
+    const used = new Set(); _syncRemap = [];
+    for (let i=0; i<peaks.length; i++) {
+      const ot=peaks[i]; let best=null, bd=Infinity;
+      for (const c of cands) { const d=Math.abs(c-ot); if(d<bd&&d<=1.5&&!used.has(c)&&c>0&&c<dur){bd=d;best=c;} }
+      if (best!==null) { _syncRemap.push({_i:i,video_t:ot,target_t:best}); used.add(best); }
+    }
+    syncStatus.textContent = `Auto-aligned ${_syncRemap.length} of ${peaks.length} motion peaks`;
+    _drawSync();
+  });
+  syncResetBtn.addEventListener('click', () => { _syncRemap=[]; _drawSync(); syncStatus.textContent=''; });
+
+  syncExportBtn.addEventListener('click', async () => {
+    syncExportBtn.disabled=true; syncStatus.textContent='Submitting...';
+    syncProgress.style.display='block'; syncProgress.value=5;
+    const remap = _syncRemap.length>0 ? _syncRemap.map(({video_t,target_t})=>({video_t,target_t})) : null;
+    try {
+      const r = await apiFetch('/api/sync/retime',{method:'POST',body:JSON.stringify({video_path:_syncVideoPath,audio_path:_syncAudioPath,remap_points:remap})});
+      if (r.error) throw new Error(r.error);
+      const poll = setInterval(async () => {
+        const j = await apiFetch(`/api/jobs/${r.job_id}`);
+        syncProgress.value = j.progress||5;
+        syncStatus.textContent = j.message||'Retiming...';
+        if (j.status==='done') {
+          clearInterval(poll); syncProgress.style.display='none';
+          syncStatus.textContent = 'Synced video saved: ' + (j.output||'');
+          syncExportBtn.disabled=false;
+          document.dispatchEvent(new Event('session-updated'));
+          toast('Beat-synced video ready', 'success');
+        } else if (j.status==='error'||j.status==='stopped') {
+          clearInterval(poll); syncProgress.style.display='none';
+          syncStatus.textContent='Export failed: '+(j.error||j.status);
+          syncExportBtn.disabled=false;
+        }
+      }, 1500);
+    } catch(e) { syncProgress.style.display='none'; syncStatus.textContent='Error: '+e.message; syncExportBtn.disabled=false; }
+  });
+
+  async function _showBeatSync(videoPath, audioPath) {
+    _syncVideoPath = videoPath; _syncAudioPath = audioPath;
+    _syncRemap = []; _syncData = null; _syncPlayPos = 0;
+    syncSection.style.display = 'flex';
+    syncStatus.textContent = 'Analyzing...';
+    try {
+      _syncData = await apiFetch('/api/sync/analyze',{method:'POST',body:JSON.stringify({video_path:videoPath,audio_path:audioPath})});
+      const a=_syncData.audio||{}, v=_syncData.video||{};
+      syncInfo.textContent = `BPM: ${a.bpm?Math.round(a.bpm):'--'}  |  Beats: ${a.beat_times?.length||0}  |  Energy peaks: ${a.energy_peaks?.length||0}  |  Motion peaks: ${v.motion_peaks?.length||0}`;
+      syncStatus.textContent = 'Ready. Hit Auto-Align or drag red markers to sync.';
+      // Load waveform
+      try {
+        const resp = await fetch('/api/sync/serve?path='+encodeURIComponent(audioPath));
+        if (resp.ok) {
+          if (!_syncAudioCtx) _syncAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+          _syncAudioBuf = await _syncAudioCtx.decodeAudioData(await resp.arrayBuffer());
+        }
+      } catch(_) {}
+      _drawSync();
+    } catch(e) { syncStatus.textContent = 'Analysis failed: '+e.message; }
+  }
+
+  new ResizeObserver(()=>{ if(_syncData) _drawSync(); }).observe(syncSection);
 
   // ── Assemble layout ────────────────────────────────────────────────────────
 
@@ -557,6 +741,9 @@ export function init(panel) {
 
     // Model
     _card([LABEL('Video Model'), modelSel]),
+
+    // Beat sync -- appears after generation completes
+    _card([LABEL('Beat Sync'), syncSection]),
   );
 
   // Wire song-upload state to single-image button too
