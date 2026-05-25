@@ -167,7 +167,7 @@ export function init(panel) {
       const opt = el('option', { value: name, text: name });
       modelSel.appendChild(opt);
     }
-    const best = i2v.find(([n]) => n === 'LTX-2 Dev13B 360P') || i2v.find(([n]) => n === 'LTX-2 Dev19B Distilled') || i2v[0];
+    const best = i2v.find(([n]) => n === 'LTX-2 Dev13B') || i2v.find(([n]) => n === 'LTX-2 Dev19B Distilled') || i2v[0];
     if (best) modelSel.value = best[0];
   }).catch(() => {
     const opt = el('option', { value: 'LTX-2 Dev19B Distilled', text: 'LTX-2 Dev19B Distilled' });
@@ -228,7 +228,7 @@ export function init(panel) {
 
   // Fast mode and model selector are linked: fast forces Distilled, slow uses Dev13B.
   fastCheck.addEventListener('change', () => {
-    const target = fastCheck.checked ? 'LTX-2 Dev19B Distilled' : 'LTX-2 Dev13B 360P';
+    const target = fastCheck.checked ? 'LTX-2 Dev19B Distilled' : 'LTX-2 Dev13B';
     if ([...modelSel.options].some(o => o.value === target)) modelSel.value = target;
   });
 
@@ -360,7 +360,7 @@ export function init(panel) {
         use_satellite: satCheck.checked,
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
-        steps:         fast ? 8    : 20,
+        steps:         fast ? 8    : 40,
         guidance:      fast ? 2.5  : 3.5,
         pad_before:    parseInt(padBeforeSlider.value),
         pad_after:     parseInt(padAfterSlider.value),
@@ -454,7 +454,7 @@ export function init(panel) {
         lip_sync:       lipSyncCheck.checked,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
-        steps:          fast ? 8    : 20,
+        steps:          fast ? 8    : 40,
         guidance:       fast ? 2.5  : 3.5,
         pad_before:     parseInt(padBeforeSlider.value),
         pad_after:      parseInt(padAfterSlider.value),

@@ -209,10 +209,7 @@ async def generate(request: Request):
         "Wan2.1-I2V-14B-480P":    20,
         "Wan2.1-I2V-14B-720P":    20,
     }
-    _MODEL_MAX = {
-        "LTX-2 Dev19B Distilled": 8,
-        "LTX-2 Dev13B 360P":      20,
-    }
+    _MODEL_MAX = {"LTX-2 Dev19B Distilled": 8}
     _floor = _MODEL_MIN.get(_mn, 20)
     _ceil  = _MODEL_MAX.get(_mn, 9999)
     settings["video_steps"] = max(_floor, min(_raw, _ceil))
