@@ -451,8 +451,14 @@ def run_song_pipeline(job, photo_path, settings):
     job_dir = OUTPUT_DIR / ts / f"songvid_{slug}_{job.id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Output dimensions
-    if ow and oh:
+    # Lip sync requires 640x360 -- at full 1032x580 the spatial tokens fill LTX-2's
+    # context window leaving no room for audio tokens, so WanGP drops them silently.
+    # When lip sync is on: generate at 360p (audio conditioning fits) then upscale.
+    _lip_sync_requested = bool(settings.get("lip_sync", True)) and bool(audio_wav)
+    if _lip_sync_requested and not (ow and oh):
+        tw, th = 640, 360
+        log.info("[song-video] Lip sync ON -- generating at 640x360, will upscale after merge")
+    elif ow and oh:
         tw, th = int(ow), int(oh)
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
@@ -818,20 +824,22 @@ def _do_song_gpu_phase(
     merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before)
 
     if merged:
-        # Fast mode generates 360P for speed then upscales to 720P.
-        if ow and oh and int(oh) <= 360 and not _stopped():
-            job.update(progress=97, message="Upscaling fast-mode video to 720P...")
+        # Upscale to 1032x580 when output was generated at 360p.
+        # This covers both lip-sync mode (forced 360p for audio context) and
+        # any explicit 360p override. Skip if output is already full resolution.
+        if th <= 360 and not _stopped():
+            job.update(progress=97, message="Upscaling to 580p...")
             try:
                 from core.upscaler import upscale_video
-                up_path = merged.replace(".mp4", "_720p.mp4")
-                up_out, up_err = upscale_video(merged, up_path, scale=2.0, method="ffmpeg")
+                up_path = merged.replace(".mp4", "_580p.mp4")
+                up_out, up_err = upscale_video(merged, up_path, scale=1032/640, method="ffmpeg")
                 if up_out and Path(up_out).exists():
                     merged = up_out
-                    log.info("[song-video] Fast-mode upscale: %s -> %s", Path(up_path).name, up_out)
+                    log.info("[song-video] Upscaled 360p -> 580p: %s", Path(up_out).name)
                 else:
-                    log.warning("[song-video] Upscale failed (%s) -- keeping 360P output", up_err)
+                    log.warning("[song-video] Upscale failed (%s) -- keeping 360p output", up_err)
             except Exception as _ue:
-                log.warning("[song-video] Upscale exception: %s -- keeping 360P", _ue)
+                log.warning("[song-video] Upscale exception: %s -- keeping 360p", _ue)
 
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
