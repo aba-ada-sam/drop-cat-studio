@@ -1060,8 +1060,8 @@ import re as _re_cam
 _CAMERA_MOVE_RE = _re_cam.compile(
     r'\b(?:'
     r'zoom(?:s|ing|ed)?\s+(?:in|out|into|back)'
-    r'|(?:slow|gentle|subtle|gradual|slight)\s+zoom'
-    r'|zoom\s+(?:reveals?|shows?|uncovers?)'
+    r'|(?:slow|gentle|subtle|gradual|slight|sharp|quick|crisper?|faster?|crisp)\s+zoom'
+    r'|zoom\s+(?:reveals?|shows?|uncovers?|on\b)'
     r'|pull(?:s|ing|ed)?\s+(?:back|out|away)'
     r'|push(?:es|ing|ed)?\s+in'
     r'|pan(?:s|ning|ned)?\s+(?:left|right|across|up|down|over)'
@@ -1077,15 +1077,14 @@ _CAMERA_MOVE_RE = _re_cam.compile(
     _re_cam.IGNORECASE,
 )
 
+# Strip inline energy labels the LLM emits as prose prefixes: "HIGH:", "MED:", "LOW:"
+_ENERGY_LABEL_RE = _re_cam.compile(r'^\s*(?:HIGH|MED|LOW)\s*:\s*', _re_cam.IGNORECASE)
+
 
 def _strip_camera_moves(prompt: str) -> str:
-    """Remove zoom/pan/dolly/tilt camera instructions from a clip prompt.
-
-    Applied to every LLM-generated clip prompt before it reaches WanGP.
-    WanGP and LTX interpret camera words literally and apply the motion,
-    producing inconsistent clip-to-clip camera work.
-    """
-    cleaned = _CAMERA_MOVE_RE.sub('', prompt)
+    """Remove camera instructions and energy label prefixes from a clip prompt."""
+    cleaned = _ENERGY_LABEL_RE.sub('', prompt)   # strip "HIGH:", "MED:", "LOW:"
+    cleaned = _CAMERA_MOVE_RE.sub('', cleaned)
     cleaned = _re_cam.sub(r'[ ,;]+', ' ', cleaned).strip().strip(',').strip(';').strip()
     if cleaned != prompt:
         log.info("[prompt] stripped camera moves: %r -> %r", prompt[:60], cleaned[:60])

@@ -677,6 +677,8 @@ export function init(panel) {
     _syncVideoPath = videoPath; _syncAudioPath = audioPath;
     _syncRemap = []; _syncData = null; _syncPlayPos = 0;
     syncSection.style.display = 'flex';
+    const ph = panel.querySelector('#beat-sync-placeholder');
+    if (ph) ph.style.display = 'none';
     syncStatus.textContent = 'Analyzing...';
     try {
       _syncData = await apiFetch('/api/sync/analyze',{method:'POST',body:JSON.stringify({video_path:videoPath,audio_path:audioPath})});
@@ -743,7 +745,15 @@ export function init(panel) {
     _card([LABEL('Video Model'), modelSel]),
 
     // Beat sync -- appears after generation completes
-    _card([LABEL('Beat Sync'), syncSection]),
+    _card([
+      LABEL('Beat Sync'),
+      el('div', {
+        id: 'beat-sync-placeholder',
+        style: 'font-size:12px; color:var(--text-4); font-style:italic; padding:6px 0;',
+        text: 'Appears automatically after a Single Image video finishes generating.',
+      }),
+      syncSection,
+    ]),
   );
 
   // Wire song-upload state to single-image button too
