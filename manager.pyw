@@ -526,6 +526,11 @@ def _show_crash_ui(srv: "ServerManager", exit_code: int) -> None:
 
     def _restart():
         root.destroy()
+        # Kill GPU workers before restarting -- without this, the old WanGP process
+        # survives and a second one gets spawned by the new app.py, causing dual workers.
+        _kill_procs_on_port(7899, "WanGP")
+        _kill_procs_on_port(8020, "ACE-Step")
+        _kill_by_cmdline("wangp_worker.py", "WanGP")
         # show_splash drives the same startup sequence as initial launch
         show_splash(srv)
         if srv.port:
