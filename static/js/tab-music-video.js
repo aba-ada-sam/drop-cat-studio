@@ -706,22 +706,24 @@ export function init(panel) {
   function _buildExistingSync() {
     let _exVidPath = '', _exAudioPath = '', _exData = null, _exRemap = [], _exDragIdx = -1, _exAudioBuf = null, _exAudioCtx = null;
 
-    const pathInput = el('input', {
-      type: 'text', placeholder: 'Paste full path to existing MP4...',
-      style: 'flex:1; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-sm); padding:7px 10px; color:var(--text); font-size:13px; outline:none;',
-    });
+    // Drop zone
+    const dropHint = el('div', { style: 'font-size:13px; color:var(--text-3);', text: 'Drop MP4 here, or click to browse' });
+    const dropSub  = el('div', { style: 'font-size:11px; color:var(--text-4); margin-top:3px;', text: 'mp4 · mov · any video with audio' });
+    const dropZone = el('div', {
+      style: 'border:1px dashed var(--border-2); border-radius:var(--r-md); padding:18px; text-align:center; cursor:pointer; background:var(--surface-2); transition:border-color .12s, background .12s;',
+    }, [dropHint, dropSub]);
+    const fileInput = el('input', { type: 'file', accept: 'video/*,.mp4,.mov,.mkv,.webm' });
+    fileInput.style.display = 'none';
 
-    const loadBtn = el('button', {
-      text: 'Load & Analyze', disabled: true,
-      style: 'padding:8px 16px; border-radius:var(--r-md); border:none; background:var(--accent); color:#000; font-size:13px; font-weight:700; cursor:not-allowed; opacity:.45;',
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; dropZone.style.background = 'var(--accent-bg)'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-2)'; dropZone.style.background = 'var(--surface-2)'; });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault(); dropZone.style.borderColor = 'var(--border-2)'; dropZone.style.background = 'var(--surface-2)';
+      const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('video/') || /\.(mp4|mov|mkv|webm)$/i.test(f.name));
+      if (f) _exUploadAndAnalyze(f);
     });
-
-    pathInput.addEventListener('input', () => {
-      const ok = pathInput.value.trim().length > 0;
-      loadBtn.disabled = !ok;
-      loadBtn.style.opacity = ok ? '1' : '.45';
-      loadBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
-    });
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) _exUploadAndAnalyze(fileInput.files[0]); fileInput.value = ''; });
 
     const exStatus   = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:14px;' });
     const exProgress = el('progress', { style: 'display:none; width:100%; height:3px;' });
@@ -853,22 +855,28 @@ export function init(panel) {
       } catch(e) { exExProg.style.display='none'; exExStatus.textContent='Error: '+e.message; exExportBtn.disabled=false; }
     });
 
-    loadBtn.addEventListener('click', async () => {
-      const vid = pathInput.value.trim();
-      if (!vid) return;
-      _exVidPath = vid; _exRemap = []; _exData = null;
-      loadBtn.disabled=true; exStatus.textContent='Extracting audio from MP4...';
-      exProgress.style.display='block'; exProgress.value=10;
+    async function _exUploadAndAnalyze(file) {
+      _exRemap = []; _exData = null;
+      dropHint.textContent = 'Uploading ' + file.name + '...';
+      exStatus.textContent = 'Uploading...';
+      exProgress.style.display = 'block'; exProgress.value = 5;
       try {
-        const ex = await apiFetch('/api/sync/extract-audio',{method:'POST',body:JSON.stringify({video_path:vid})});
+        const up = await apiUpload('/api/fun/upload-video', [file]);
+        const f = up?.files?.[0];
+        if (!f?.path) throw new Error('Upload failed -- no path returned');
+        _exVidPath = f.path;
+        dropHint.textContent = file.name;
+        dropSub.textContent  = '';
+        exStatus.textContent = 'Extracting audio...'; exProgress.value = 20;
+        const ex = await apiFetch('/api/sync/extract-audio',{method:'POST',body:JSON.stringify({video_path:_exVidPath})});
         if (ex.error) throw new Error(ex.error);
         _exAudioPath = ex.audio_path;
-        exStatus.textContent='Analyzing beats and motion peaks...'; exProgress.value=40;
-        _exData = await apiFetch('/api/sync/analyze',{method:'POST',body:JSON.stringify({video_path:vid,audio_path:_exAudioPath})});
+        exStatus.textContent = 'Analyzing beats and motion peaks...'; exProgress.value = 50;
+        _exData = await apiFetch('/api/sync/analyze',{method:'POST',body:JSON.stringify({video_path:_exVidPath,audio_path:_exAudioPath})});
         const a=_exData.audio||{}, v=_exData.video||{};
-        exInfo.textContent=`BPM: ${a.bpm?Math.round(a.bpm):'--'}  |  Beats: ${a.beat_times?.length||0}  |  Energy peaks: ${a.energy_peaks?.length||0}  |  Motion peaks: ${v.motion_peaks?.length||0}`;
-        exStatus.textContent='Ready -- drag red diamonds or hit Auto-Align, then Export.';
-        exProgress.style.display='none';
+        exInfo.textContent = `BPM: ${a.bpm?Math.round(a.bpm):'--'}  |  Beats: ${a.beat_times?.length||0}  |  Energy peaks: ${a.energy_peaks?.length||0}  |  Motion peaks: ${v.motion_peaks?.length||0}`;
+        exStatus.textContent = 'Ready -- drag red diamonds to align, or hit Auto-Align, then Export.';
+        exProgress.style.display = 'none';
         [exCanvasA,exCanvasV,exHint,exAutoBtn,exResetBtn,exExportBtn].forEach(e=>e.style.display='block');
         try {
           const resp = await fetch('/api/sync/serve?path='+encodeURIComponent(_exAudioPath));
@@ -879,18 +887,19 @@ export function init(panel) {
         } catch(_) {}
         _exDraw();
       } catch(e) {
-        exProgress.style.display='none'; exStatus.textContent='Error: '+e.message; loadBtn.disabled=false;
-      } finally {
-        loadBtn.disabled=false;
+        exProgress.style.display='none'; exStatus.textContent='Error: '+e.message;
+        dropHint.textContent='Drop MP4 here, or click to browse';
+        dropSub.textContent='mp4 · mov · any video with audio';
       }
-    });
+    }
 
     new ResizeObserver(()=>{ if(_exData) _exDraw(); }).observe(exCanvasA);
 
     return _card([
       LABEL('Sync Existing MP4'),
-      el('div', { style: 'font-size:12px; color:var(--text-3); margin-bottom:4px;', text: 'Drop any MP4 here -- audio is extracted automatically. Video is retimed to match the beats. Original audio is muxed back unchanged.' }),
-      el('div', { style: 'display:flex; gap:6px;' }, [pathInput, loadBtn]),
+      el('div', { style: 'font-size:12px; color:var(--text-3); margin-bottom:6px;', text: 'Audio is extracted automatically. Video is retimed to match the beats. Your audio track is never touched.' }),
+      fileInput,
+      dropZone,
       exProgress,
       exStatus,
       exHint,
