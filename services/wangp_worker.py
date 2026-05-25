@@ -204,13 +204,19 @@ def _do_generate(params: dict) -> dict:
     # LTX-2 audio conditioning: "A" mode generates video synchronized with the
     # provided audio segment at model level. Set explicitly (not via setdefault)
     # to override any stale audio_prompt_type saved in WanGP's settings file.
+    # Audio conditioning only works with ltx2_distilled. Other model types (ltxv_13B,
+    # Wan I2V) reject the request when audio_prompt_type="A" is set, returning an
+    # empty task queue and producing "no clips generated" failures.
     audio_source_path = params.get("audio_source")
-    if audio_source_path and os.path.isfile(audio_source_path):
+    _supports_audio = (model_type == "ltx2_distilled")
+    if audio_source_path and os.path.isfile(audio_source_path) and _supports_audio:
         defaults["audio_source"]      = os.path.abspath(audio_source_path)
         defaults["audio_prompt_type"] = "A"
         defaults["audio_scale"]       = float(params.get("audio_scale", 1.0))
         print(f"[worker] audio conditioning: type=A scale={defaults['audio_scale']} src={os.path.basename(audio_source_path)}", flush=True)
     else:
+        if audio_source_path and not _supports_audio:
+            print(f"[worker] audio conditioning skipped -- {model_type} does not support audio_prompt_type=A", flush=True)
         defaults["audio_source"]      = None
         defaults["audio_prompt_type"] = ""
         defaults["audio_scale"]       = 1.0
