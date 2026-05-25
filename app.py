@@ -82,6 +82,7 @@ _g: dict = {
     "llm_router":         None,
     "available_encoders": [],
     "gpu_vram_gb":        None,   # float GB or None if undetectable
+    "boot_git_hash":      None,   # git HEAD at startup -- used for restart-needed banner
 }
 
 APP_DIR    = Path(__file__).resolve().parent
@@ -144,6 +145,16 @@ async def lifespan(app: FastAPI):
             log.debug("[startup] git pull error: %s", _e)
     import threading as _threading
     _threading.Thread(target=_bg_pull, daemon=True, name="git-pull").start()
+
+    # Record git HEAD at boot so the UI can show a "restart needed" banner
+    # when new commits have landed since this process started.
+    try:
+        import subprocess as _sp2
+        _r = _sp2.run(["git", "-C", str(APP_DIR), "rev-parse", "HEAD"],
+                      capture_output=True, text=True, timeout=5)
+        _g["boot_git_hash"] = _r.stdout.strip() if _r.returncode == 0 else None
+    except Exception:
+        pass
 
     # Ensure runtime directories exist
     try:
@@ -1126,6 +1137,19 @@ async def windows_theme():
 async def system_info():
     ollama_st = await asyncio.to_thread(keys.status)
     import json as _json
+    # Check if new commits have landed since this process started.
+    _restart_needed = False
+    _boot_hash = _g.get("boot_git_hash")
+    if _boot_hash:
+        try:
+            import subprocess as _sp3
+            _rn = _sp3.run(["git", "-C", str(APP_DIR), "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=3)
+            _restart_needed = (_rn.returncode == 0 and
+                               _rn.stdout.strip() != _boot_hash)
+        except Exception:
+            pass
+
     data = {
         "ffmpeg": ffmpeg_available(),
         "encoders": [{"id": e[0], "label": e[1], "hw": e[2]} for e in _g["available_encoders"]],
@@ -1133,6 +1157,8 @@ async def system_info():
         "gpu_vram_gb": _g.get("gpu_vram_gb"),
         "ollama": ollama_st,
         "services": svc.get_status(),
+        "restart_needed": _restart_needed,
+        "boot_git_hash": _boot_hash,
     }
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 

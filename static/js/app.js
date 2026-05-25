@@ -367,6 +367,14 @@ let _imageProvider = 'forge'; // synced from config; controls Image pill dot + l
 
 const _SVC_TO_TYPE = { forge: 'image', wangp: 'video', acestep: 'sound' };
 
+async function _checkRestartNeeded() {
+  try {
+    const data = await fetch('/api/system').then(r => r.json());
+    const banner = document.getElementById('restart-banner');
+    if (banner) banner.style.display = data.restart_needed ? 'flex' : 'none';
+  } catch (_) {}
+}
+
 async function pollServices() {
   try {
     const data = await fetch('/api/services').then(r => r.json());
@@ -1167,9 +1175,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
   pollServices();
   pollLogs();
+  _checkRestartNeeded();
 
   setInterval(pollServices, 5000);
   setInterval(pollLogs,     2000);
+  setInterval(_checkRestartNeeded, 15000);
 
   // -- GPU indicator pill: which service currently owns the GPU --------------
   const _gpuLabelMap = {
