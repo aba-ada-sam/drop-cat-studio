@@ -344,14 +344,22 @@ def run_song_prep(job, photo_path, settings):
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
-    # Compute the start time of each clip within the song (for per-clip audio conditioning).
-    # pad_before is the silence before the song starts; each clip then follows in sequence.
+    # Compute audio start time for each clip's conditioning slice.
+    # Each xfade overlaps consecutive clips by _SONG_XFADE_DUR seconds, shortening
+    # the output timeline. Clip i appears in the final video at:
+    #   T_i = pad_before + sum(d[0..i-1]) - i * xfade_dur
+    # Without this correction, later clips get conditioned on audio that is up to
+    # (n_clips-1) * xfade_dur seconds ahead of where they actually appear -- at 27
+    # clips and 0.75s xfade that's ~19 seconds of accumulated sync drift.
+    _SONG_XFADE_DUR = 0.75   # must match the fade_dur passed to _concat_with_xfade below
     _start_t = float(settings.get("pad_before", 1.0))
     _clip_start_times: list[float] = []
-    for _d in clip_durations:
-        _clip_start_times.append(_start_t)
+    for _idx, _d in enumerate(clip_durations):
+        corrected = max(0.0, _start_t - _idx * _SONG_XFADE_DUR)
+        _clip_start_times.append(corrected)
         _start_t += float(_d)
     settings["_clip_start_times"] = _clip_start_times
+    settings["_song_xfade_dur"]   = _SONG_XFADE_DUR
 
     # Pre-convert user audio to stereo 44100 Hz WAV for per-clip conditioning.
     # WAV is what WanGP's LTX-2 audio conditioning expects; the user's file may be
@@ -801,7 +809,8 @@ def _do_song_gpu_phase(
     # Collect per-clip durations for correct xfade offset math.
     clip_durations = [probe_duration(p) or 4.0 for p in clip_paths]
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_with_xfade(clip_paths, clip_durations, concat_path, fade_dur=0.5):
+    _xfade_dur = settings.get("_song_xfade_dur", 0.75)
+    if not _concat_with_xfade(clip_paths, clip_durations, concat_path, fade_dur=_xfade_dur):
         log.warning("[song-video] xfade concat failed -- falling back to hard cut")
         if not _concat_clips(clip_paths, concat_path):
             concat_path = clip_paths[0]
