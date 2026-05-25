@@ -193,8 +193,8 @@ async def interpolate_frames(request: Request):
     def _worker(job, s, d, fps, m):
         interpolate_video(job, s, d, fps, m)
         job.output = str(d)
-        from core.session import get_session
-        get_session().add_file(str(d), tab="video_tools", label=f"Smoothed ({m})")
+        from core.session import get_current as get_session
+        get_session().add_file(d.name, "video", "video_tools", path=str(d))
         job.update(status="done", progress=100, message=f"Saved: {d.name}")
 
     job = job_manager.submit(
