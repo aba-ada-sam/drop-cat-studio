@@ -222,8 +222,15 @@ export function init(panel) {
     return { wrap, input };
   }
 
-  const { wrap: loopWrap, input: loopCheck } = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: fastWrap, input: fastCheck } = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', true);
+  const { wrap: loopWrap, input: loopCheck }    = _toggle('Loop continuously (repeat folder)', false);
+  const { wrap: fastWrap, input: fastCheck }    = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', false);
+  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (audio drives subject mouth/face motion)', true);
+
+  // Fast mode and model selector are linked: fast forces Distilled, slow uses Dev13B.
+  fastCheck.addEventListener('change', () => {
+    const target = fastCheck.checked ? 'LTX-2 Dev19B Distilled' : 'LTX-2 Dev13B';
+    if ([...modelSel.options].some(o => o.value === target)) modelSel.value = target;
+  });
 
   // Clip duration slider
   function _numRow(labelText, min, max, step, def, unit) {
@@ -349,6 +356,7 @@ export function init(panel) {
         folder:        _folderPath,
         images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        loopCheck.checked,
+        lip_sync:      lipSyncCheck.checked,
         use_satellite: satCheck.checked,
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
@@ -445,6 +453,7 @@ export function init(panel) {
         photo_path:     singleImagePath.value || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
+        lip_sync:       lipSyncCheck.checked,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
         steps:          fast ? 8    : 40,
@@ -930,6 +939,7 @@ export function init(panel) {
       folderStatus,
       loopWrap,
       fastWrap,
+      lipSyncWrap,
       clipDurWrap,
       padBeforeWrap,
       padAfterWrap,

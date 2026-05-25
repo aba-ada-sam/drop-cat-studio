@@ -753,6 +753,22 @@ export function init(panel) {
       text: 'Music with lyrics (untick for silent clip)',
     }),
   ]));
+
+  let _lipSync = true;
+  const lipSyncChk = el('input', {
+    type: 'checkbox', id: 'express-lip-sync',
+    style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;',
+  });
+  lipSyncChk.checked = _lipSync;
+  lipSyncChk.addEventListener('change', () => { _lipSync = lipSyncChk.checked; });
+  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+    lipSyncChk,
+    el('label', {
+      for: 'express-lip-sync',
+      style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;',
+      text: 'Lip Sync (audio drives mouth/face motion)',
+    }),
+  ]));
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     upscaleChk,
     el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
@@ -1067,7 +1083,7 @@ export function init(panel) {
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
           lyric_direction: lyricInput.value.trim(), user_direction: 'character-driven, specific energy, not generic',
           model: _model, duration: _duration,
-          steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false,
+          steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false, lip_sync: _lipSync,
           output_width: _outW, output_height: _outH,
           auto_pick_model: _autoPick,
           // LTX Distilled (Photo Mood) defaults calm; Wan chips are dynamic.
@@ -1225,6 +1241,7 @@ export function init(panel) {
       seed:                -1,
       skip_audio:          !_addMusic,
       instrumental:        false,
+      lip_sync:            _lipSync,
       output_width:        _outW,
       output_height:       _outH,
       auto_pick_model:     _autoPick,
@@ -1376,6 +1393,7 @@ export function init(panel) {
           seed:            -1,
           skip_audio:      !_addMusic,
           instrumental:    false,
+          lip_sync:        _lipSync,
           output_width:    _outW,
           output_height:   _outH,
           auto_pick_model: _autoPick,

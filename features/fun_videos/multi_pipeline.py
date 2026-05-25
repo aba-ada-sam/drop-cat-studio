@@ -1759,6 +1759,7 @@ def run_multi_pipeline(job, photo_path, settings):
         steps = max(steps, 20)
     seed             = int(settings.get("video_seed", -1))
     skip_audio       = settings.get("skip_audio", False)
+    lip_sync         = bool(settings.get("lip_sync", True))
     instrumental     = settings.get("instrumental", False)
     lyric_dir        = settings.get("lyric_direction", "")
     user_dir         = settings.get("user_direction", "")
@@ -1845,8 +1846,10 @@ def run_multi_pipeline(job, photo_path, settings):
         # then reloading costs 3-8 min (model load), wiping out any sync benefit.
         # Audio-first is only free when WanGP would cold-start anyway.
         _wangp_warm = _gp0.current == "wangp"
-        if _wangp_warm:
+        if _wangp_warm and not lip_sync:
             log.info("[multi] Phase 0 skipped -- WanGP already warm, audio-first would cost 3-8 min reload")
+        elif _wangp_warm and lip_sync:
+            log.info("[multi] Phase 0 running despite warm WanGP -- lip sync requires pre-generated audio")
         else:
             try:
                 job.update(progress=10, message="Generating audio for sync analysis...")
@@ -1970,6 +1973,15 @@ def run_multi_pipeline(job, photo_path, settings):
       clip_durations: list[float] = []     # actual probed durations for director frame extraction
       prev_frame_path: str | None = None   # PNG chain frame from previous clip
 
+      # Lip sync: if Phase 0 generated audio and lip_sync is on, extract per-clip
+      # audio slices so LTX-2 can condition each clip's motion on the music waveform.
+      _lip_sync_audio_path = _audio_phase0_path if (lip_sync and _audio_phase0_path) else None
+      _lip_sync_slices_dir = job_dir / "lip_sync_slices"
+      _lip_sync_t0: float = 0.0   # running start time into the audio track
+      if _lip_sync_audio_path:
+          _lip_sync_slices_dir.mkdir(exist_ok=True)
+          log.info("[multi] Lip sync ON -- audio conditioning enabled using Phase 0 audio")
+
       # For continuation mode, clip 1 starts from the last frame of the original
       # video (not the uploaded photo), so the AI picks up exactly where it ended.
       video_last_frame   = settings.get("_start_video_last_frame")
@@ -2048,6 +2060,20 @@ def run_multi_pipeline(job, photo_path, settings):
           else:
               effective_guidance = min(guidance, 4.0)
 
+          # Extract lip-sync audio slice for this clip's time window.
+          _clip_audio_slice: str | None = None
+          if _lip_sync_audio_path:
+              _lss_path = str(_lip_sync_slices_dir / f"slice_{i:02d}.wav")
+              _lss_r = subprocess.run(
+                  ["ffmpeg", "-y", "-i", _lip_sync_audio_path,
+                   "-ss", f"{_lip_sync_t0:.4f}", "-t", f"{this_clip_dur:.4f}",
+                   "-ar", "44100", "-ac", "1", _lss_path],
+                  capture_output=True, timeout=30,
+              )
+              if _lss_r.returncode == 0 and Path(_lss_path).exists():
+                  _clip_audio_slice = _lss_path
+          _lip_sync_t0 += this_clip_dur
+
           clip_path = None
           for _attempt in range(2):
               if _stopped():
@@ -2072,6 +2098,7 @@ def run_multi_pipeline(job, photo_path, settings):
                       seed=seed,
                       end_image_path=clip_end_image,
                       negative_prompt=video_generator.negative_prompt_for(model_name, motion_style or "dynamic"),
+                      audio_source=_clip_audio_slice,
                       stop_check=_stopped,
                       log_fn=_log,
                       progress_fn=_video_progress,

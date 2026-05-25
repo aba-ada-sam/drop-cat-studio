@@ -970,6 +970,13 @@ export function init(panel) {
     el('label', { for: 'fv-instr', text: 'Instrumental (no vocals)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
 
+  // Lip sync -- on by default; drives subject mouth/face motion from audio waveform
+  const lipSyncChk = el('input', { type: 'checkbox', id: 'fv-lip-sync', checked: 'true' });
+  audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
+    lipSyncChk,
+    el('label', { for: 'fv-lip-sync', text: 'Lip Sync (audio drives subject mouth/face motion)', style: 'cursor:pointer; font-size:.85rem;' }),
+  ]));
+
   // Lyric direction (visible when not instrumental)
   const lyricGuideWrap = el('div');
   const lyricGuideTA = el('textarea', {
@@ -1335,6 +1342,7 @@ export function init(panel) {
       guidance:         parseFloat(guidanceSlider.value) || 8.5,
       seed:             parseInt(seedIn.value)           || -1,
       skip_audio:       !audioChk.checked,
+      lip_sync:         lipSyncChk.checked,
       instrumental:     instrChk.checked,
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
       end_photo_path:   _endImagePath || null,

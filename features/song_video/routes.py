@@ -197,11 +197,24 @@ async def generate(request: Request):
         "video_guidance":  body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":   bool(body.get("use_satellite", False)),
+        "lip_sync":        bool(body.get("lip_sync", True)),
     }
-    # LTX Distilled sweet spot is 8 steps -- cap regardless of what the config says
-    _mn = settings["model_name"]
-    if "distilled" in _mn.lower() and "ltx" in _mn.lower():
-        settings["video_steps"] = min(int(settings["video_steps"]), 8)
+    # Per-model step floors: Distilled caps at 8; everything else floors at 20.
+    _mn  = settings["model_name"]
+    _raw = int(settings["video_steps"])
+    _MODEL_MIN = {
+        "LTX-2 Dev19B Distilled": 4,
+        "LTX-2 Dev13B":           20,
+        "LTX-2 Dev13B 360P":      20,
+        "Wan2.1-I2V-14B-480P":    20,
+        "Wan2.1-I2V-14B-720P":    20,
+    }
+    _MODEL_MAX = {"LTX-2 Dev19B Distilled": 8}
+    _floor = _MODEL_MIN.get(_mn, 20)
+    _ceil  = _MODEL_MAX.get(_mn, 9999)
+    settings["video_steps"] = max(_floor, min(_raw, _ceil))
+    if settings["video_steps"] != _raw:
+        log.info("[song-video] step floor/ceil: ui=%d -> %d for %s", _raw, settings["video_steps"], _mn)
 
     audio_name = Path(audio_path).stem[:20]
     label = f"Music video: {audio_name} ({n_clips} clips)"

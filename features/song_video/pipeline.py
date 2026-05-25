@@ -482,9 +482,14 @@ def _do_song_gpu_phase(
     # Audio conditioning: extract per-clip audio slices so LTX-2 can synchronise
     # the subject's facial movement and body motion to the music waveform.
     # This is what enables lip-sync / singing behaviour.
+    _lip_sync = bool(settings.get("lip_sync", True))
     _audio_slices_dir = job_dir / "audio_slices"
     _audio_slices_dir.mkdir(exist_ok=True)
     _clip_start_times = clip_start_times or []
+    if _lip_sync:
+        log.info("[song-video] Lip sync ON -- audio conditioning enabled for all %d clips", n_clips)
+    else:
+        log.info("[song-video] Lip sync OFF -- skipping audio conditioning")
 
     for i, _arc_entry in enumerate(story_arc):
         clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
@@ -557,7 +562,7 @@ def _do_song_gpu_phase(
         # condition the video generation directly on the music. WAV avoids MP3
         # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
         _audio_slice: str | None = None
-        if audio_path and os.path.isfile(audio_path) and i < len(_clip_start_times):
+        if _lip_sync and audio_path and os.path.isfile(audio_path) and i < len(_clip_start_times):
             _slice_path = str(_audio_slices_dir / f"slice_{i:02d}.wav")
             _sr = subprocess.run(
                 ["ffmpeg", "-y", "-i", audio_path,
