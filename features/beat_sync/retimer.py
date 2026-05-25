@@ -61,8 +61,8 @@ def retime_video(video_path: str, audio_path: str, out_path: str,
             audio_data.get("energy_peaks", []),
             audio_data.get("beat_times", []),
             video_dur,
+            clip_boundaries=video_data.get("clip_boundaries", []),
         )
-        log.info("[retimer] Auto-computed %d remap points", len(remap_points))
 
     if not remap_points:
         # No alignment needed -- just mux audio onto video
@@ -124,18 +124,41 @@ def retime_video(video_path: str, audio_path: str, out_path: str,
 
 
 def _auto_remap(motion_peaks: list, energy_peaks: list, beat_times: list,
-                video_dur: float, snap_window: float = 1.5) -> list:
-    """Match each video motion peak to the nearest audio beat/energy peak."""
-    candidates = sorted(set(energy_peaks + beat_times[::4] if beat_times else energy_peaks))
-    if not candidates or not motion_peaks:
+                video_dur: float, snap_window: float = 2.0,
+                clip_boundaries: list | None = None) -> list:
+    """Match each video motion/cut point to the nearest audio beat or energy peak.
+
+    Falls back to aligning clip_boundaries if motion_peaks is empty.
+    snap_window raised to 2.0s -- music videos rarely have tight sync to begin with,
+    so a 1.5s window misses too many alignments.
+    """
+    # Use motion peaks if available, otherwise align clip cut points
+    targets = [t for t in (motion_peaks or []) if 0 < t < video_dur]
+    if not targets and clip_boundaries:
+        targets = [t for t in clip_boundaries if 0 < t < video_dur]
+        log.info("[retimer] No motion peaks -- aligning %d clip boundaries instead", len(targets))
+
+    # Candidates: energy peaks + every 4th beat (downbeats) + every 2nd beat for denser coverage
+    downbeats  = beat_times[::4] if beat_times else []
+    halfbeats  = beat_times[::2] if beat_times else []
+    candidates = sorted(set(list(energy_peaks) + downbeats + halfbeats))
+
+    if not candidates:
+        log.warning("[retimer] No audio candidates to align to")
         return []
+    if not targets:
+        log.warning("[retimer] No video targets to align (no peaks, no boundaries)")
+        return []
+
     remap = []
     used = set()
-    for vt in sorted(motion_peaks):
+    for vt in sorted(targets):
         best = min(candidates, key=lambda c: abs(c - vt))
         if abs(best - vt) <= snap_window and best not in used and 0 < best < video_dur:
             remap.append({"video_t": vt, "target_t": best})
             used.add(best)
+    log.info("[retimer] Auto-remap: %d/%d targets aligned (snap_window=%.1fs)",
+             len(remap), len(targets), snap_window)
     return remap
 
 
