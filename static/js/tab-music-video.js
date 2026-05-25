@@ -263,6 +263,7 @@ export function init(panel) {
     const hasAll = _folderFiles.length > 0 && !!_songPath;
     batchBtn.disabled = !hasAll;
     batchBtn.style.display  = hasAll ? '' : 'none';
+    batchBtn.style.cursor   = hasAll ? 'pointer' : 'not-allowed';
     if (hasAll) {
       const loop = loopCheck.checked;
       batchBtn.textContent = loop ? `Start Loop  (${_folderFiles.length} images)` : `Queue All  ${_folderFiles.length} Images`;
