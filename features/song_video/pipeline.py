@@ -742,21 +742,44 @@ def _do_song_gpu_phase(
         except Exception as e:
             log.warning("[song-video] Beat-sync exception on clip %d: %s -- keeping original", clip_num, e)
 
-        # LTX-2 bakes a ~0.2s fade-out into the tail of every clip.
-        # Trim intermediate clips so the boundary frame is in-motion.
-        # Leave the last clip untrimmed so the video ends with a natural fade.
+        # Two-sided boundary trim for intermediate clips (not first, not last):
+        # - Head trim (clips 1+): LTX-2 startup frames are brighter/different from
+        #   the conditioning frame, causing a visible flash at transition. Trim 0.25s
+        #   from the start so the xfade blends only stable frames.
+        # - Tail trim (clips 0 to N-2): LTX-2 bakes a ~0.2s fade-out into every clip.
+        #   Trim so the boundary frame is still in-motion.
+        # Chain frame is extracted BEFORE these trims (below) so it always comes
+        # from the raw generated output, not the trimmed version.
+        _HEAD_TRIM = 0.25  # seconds to remove from start of clips 1+
+        _TAIL_TRIM = 0.20  # seconds to remove from end of clips 0 to N-2
+
         if i < n_clips - 1:
             clip_real_dur = probe_duration(clip_path) or this_dur
-            trim_to = max(clip_real_dur - 0.2, clip_real_dur * 0.9)
-            tail_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
+            trim_start = _HEAD_TRIM if i > 0 else 0.0
+            trim_end   = max(0.0, clip_real_dur - _TAIL_TRIM)
+            trim_dur   = max(trim_end - trim_start, clip_real_dur * 0.5)
+            trim_out   = str(job_dir / f"clip_{i:02d}_fe.mp4")
             tr = subprocess.run(
-                ["ffmpeg", "-y", "-i", clip_path, "-t", f"{trim_to:.4f}", "-c", "copy", tail_out],
+                ["ffmpeg", "-y",
+                 "-ss", f"{trim_start:.4f}", "-i", clip_path,
+                 "-t", f"{trim_dur:.4f}", "-c", "copy", trim_out],
                 capture_output=True, timeout=60,
             )
-            if tr.returncode == 0 and Path(tail_out).exists():
-                os.replace(tail_out, clip_path)
+            if tr.returncode == 0 and Path(trim_out).exists():
+                os.replace(trim_out, clip_path)
             else:
-                log.debug("[song-video] Clip %d tail-trim failed -- using full clip", clip_num)
+                log.debug("[song-video] Clip %d boundary trim failed -- using full clip", clip_num)
+        elif i == n_clips - 1 and i > 0:
+            # Last clip: head trim only (keep natural tail fade, remove startup flash).
+            clip_real_dur = probe_duration(clip_path) or this_dur
+            trim_out = str(job_dir / f"clip_{i:02d}_fe.mp4")
+            tr = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{_HEAD_TRIM:.4f}", "-i", clip_path,
+                 "-c", "copy", trim_out],
+                capture_output=True, timeout=60,
+            )
+            if tr.returncode == 0 and Path(trim_out).exists():
+                os.replace(trim_out, clip_path)
 
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
