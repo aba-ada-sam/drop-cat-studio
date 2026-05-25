@@ -1185,7 +1185,7 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     return anchor_ok, new_dur
 
 
-_ANCHOR_BLEND_ALPHA = 0.85  # 85% last frame (motion continuity) + 15% source (identity gravity)
+_ANCHOR_BLEND_ALPHA = 0.95  # 95% last frame (motion continuity) + 5% source (identity gravity)
 
 
 def _blend_anchor_with_source(anchor_png: str, source_photo: str,

@@ -688,25 +688,22 @@ def _do_song_gpu_phase(
         })
 
         # Extract chain frame AFTER all processing (beat-sync + tail-trim) so
-        # the frame we give the next clip matches what this clip actually ends on.
-        # Extracting before would give a frame from the un-warped original that
-        # no longer corresponds to the processed clip's final visual state.
+        # the frame given to the next clip matches what this clip actually ends on.
+        # No source-photo blending: blending compounds across 30+ clips
+        # (0.85^30 leaves only 1% of the original motion state), converging every
+        # chain frame toward the source photo -- exactly the "same image" symptom.
+        # Identity is maintained via subject_anchor text in every prompt instead.
         if i < n_clips - 1:
             _cframe_path = str(job_dir / f"chain_{i:02d}.png")
             _chain_frame = _extract_last_frame(clip_path, _cframe_path)
             if not _chain_frame:
-                log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
-            elif prepped_photo:
-                try:
-                    from features.fun_videos.multi_pipeline import _blend_anchor_with_source
-                    _blend_anchor_with_source(_chain_frame, prepped_photo)
-                except Exception as _be:
-                    log.debug("[song-video] Blend anchor failed (non-fatal): %s", _be)
+                log.info("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
+            else:
+                log.info("[song-video] Clip %d chain frame: %s", clip_num, _cframe_path)
 
-            # Periodic re-anchor: reset to source photo at section boundaries.
             if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
                 log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
-                _chain_frame = None  # next clip starts from source
+                _chain_frame = None
 
         if _clip_secs and clip_num < n_clips:
             avg = sum(_clip_secs) / len(_clip_secs)
