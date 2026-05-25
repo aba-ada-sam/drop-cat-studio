@@ -2068,7 +2068,7 @@ def run_multi_pipeline(job, photo_path, settings):
                   ["ffmpeg", "-y",
                    "-ss", f"{_lip_sync_t0:.4f}", "-t", f"{this_clip_dur:.4f}",
                    "-i", _lip_sync_audio_path,
-                   "-c:a", "copy", _lss_path],
+                   "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2", _lss_path],
                   capture_output=True, timeout=30,
               )
               if _lss_r.returncode == 0 and Path(_lss_path).exists():

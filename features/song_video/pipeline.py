@@ -505,12 +505,16 @@ def _do_song_gpu_phase(
     # Lip sync: slice the pre-converted WAV per clip and pass as audio_source.
     # Uses the same -c:a copy slice approach as the Zoom pipeline (known to work).
     # Only enabled when user provided audio that converted successfully in prep.
-    _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav)
+    _clip_start_times = clip_start_times or []
+    _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav) and len(_clip_start_times) == n_clips
     _audio_slices_dir = job_dir / "audio_slices"
     if _lip_sync:
         _audio_slices_dir.mkdir(exist_ok=True)
         log.info("[song-video] Lip sync ON -- slicing user audio per clip")
-    _clip_start_times = clip_start_times or []
+    elif settings.get("lip_sync") and not audio_wav:
+        log.warning("[song-video] Lip sync requested but audio WAV conversion failed -- skipping")
+    elif settings.get("lip_sync") and len(_clip_start_times) != n_clips:
+        log.warning("[song-video] Lip sync skipped -- clip_start_times length %d != n_clips %d", len(_clip_start_times), n_clips)
 
     for i, _arc_entry in enumerate(story_arc):
         clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
