@@ -361,17 +361,19 @@ def run_song_prep(job, photo_path, settings):
         import tempfile as _tf
         _wav_dir = Path(_tf.gettempdir()) / "dcs_song_audio"
         _wav_dir.mkdir(exist_ok=True)
-        _wav_path = str(_wav_dir / f"{Path(audio_path).stem}.wav")
+        # Include job ID in filename so concurrent satellite jobs on the same
+        # song don't overwrite each other's WAV during simultaneous prep phases.
+        _wav_path = str(_wav_dir / f"{Path(audio_path).stem}_{job.id[:8]}.wav")
         _r = subprocess.run(
             ["ffmpeg", "-y", "-i", audio_path,
              "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2", _wav_path],
             capture_output=True, timeout=60,
         )
-        if _r.returncode == 0 and os.path.isfile(_wav_path):
+        if _r.returncode == 0 and os.path.isfile(_wav_path) and os.path.getsize(_wav_path) > 1024:
             _audio_wav = _wav_path
             log.info("[song-video] Audio converted to WAV for lip sync: %s", _wav_path)
         else:
-            log.warning("[song-video] Audio WAV conversion failed -- lip sync disabled")
+            log.warning("[song-video] Audio WAV conversion failed or empty -- lip sync disabled")
     settings["_audio_wav"] = _audio_wav
 
     settings["_subject_anchor"] = subject_anchor
@@ -462,15 +464,18 @@ def run_song_pipeline(job, photo_path, settings):
     # -- GPU: acquire WanGP exclusively (orchestrator evicts everything else)
     from core.gpu_orchestrator import gpu
     gpu.acquire("wangp", reason=f"song-video {n_clips} clips")
-    _do_song_gpu_phase(
-        job, photo_path, settings, job_dir,
-        n_clips, clip_durations, beat_positions, model_name,
-        resolution, ow, oh, tw, th, steps, guidance, seed,
-        audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
-        reanchor_every=reanchor_every, pad_before=pad_before,
-        clip_start_times=clip_start_times,
-        audio_wav=audio_wav,
-    )
+    try:
+        _do_song_gpu_phase(
+            job, photo_path, settings, job_dir,
+            n_clips, clip_durations, beat_positions, model_name,
+            resolution, ow, oh, tw, th, steps, guidance, seed,
+            audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
+            reanchor_every=reanchor_every, pad_before=pad_before,
+            clip_start_times=clip_start_times,
+            audio_wav=audio_wav,
+        )
+    finally:
+        _cleanup_gpu_phase_temps(job_dir, audio_wav)
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
 
@@ -876,3 +881,27 @@ def _do_song_gpu_phase(
             f"Audio merge failed -- {len(clip_paths)} clips were generated but could not be "
             f"merged with audio. Clip files are in {job_dir}"
         )
+
+
+def _cleanup_gpu_phase_temps(job_dir: Path, audio_wav: str | None) -> None:
+    """Remove per-job temp files that are no longer needed after GPU phase completes."""
+    import shutil as _shutil
+    # Audio slices (per-clip WAVs for lip sync conditioning)
+    slices_dir = job_dir / "audio_slices"
+    if slices_dir.exists():
+        try:
+            _shutil.rmtree(slices_dir)
+        except Exception:
+            pass
+    # Chain frame PNGs (used only to link consecutive clips)
+    for png in job_dir.glob("chain_*.png"):
+        try:
+            png.unlink()
+        except Exception:
+            pass
+    # Per-job WAV in temp dir
+    if audio_wav and os.path.isfile(audio_wav):
+        try:
+            os.remove(audio_wav)
+        except Exception:
+            pass

@@ -294,8 +294,10 @@ export function init(panel) {
       batchBtn.style.background = 'var(--red)';
       const cur  = s.current_image ? `  ${s.current_image}` : '';
       const lap  = s.lap > 1 ? `  (lap ${s.lap})` : '';
+      const clips = (s.clips_done != null && s.clips_total)
+        ? `  [clip ${s.clips_done}/${s.clips_total}]` : '';
       batchBtn.textContent = `Stop  (${s.index}/${s.total}${lap}${cur})`;
-      batchStatus.textContent = `Running ${s.index}/${s.total}${lap}${cur}  —  ${s.succeeded} done, ${s.failed} failed`;
+      batchStatus.textContent = `Running ${s.index}/${s.total}${lap}${cur}${clips}  —  ${s.succeeded} done, ${s.failed} failed`;
       if (s.folder && !_folderPath) {
         _folderPath = s.folder;
         folderNameEl.textContent = s.folder.split(/[\\/]/).pop() || s.folder;

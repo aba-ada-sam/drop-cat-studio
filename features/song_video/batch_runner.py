@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 log = logging.getLogger("song_batch")
 
-HEARTBEAT_TIMEOUT_SEC = 3600  # 1 hour -- survives with backgrounded/closed tab
+HEARTBEAT_TIMEOUT_SEC = 120   # 2 minutes -- batch stops if browser disconnects
 _JOB_POLL_INTERVAL_SEC = 2.0
 
 # Persist state here so a DCS restart can auto-resume an in-progress batch.
@@ -130,6 +130,21 @@ def _heartbeat_stale() -> bool:
 
 
 def _public_snapshot() -> dict[str, Any]:
+    # Pull per-clip progress from the currently running job so the UI can
+    # show "clip 5/27" without a separate API call.
+    clips_done = None
+    clips_total = None
+    job_id = _state.get("current_job_id")
+    if job_id:
+        try:
+            from app import get_job_manager
+            j = get_job_manager().get(job_id)
+            if j and j.meta:
+                clips_done  = j.meta.get("clips_done")
+                clips_total = j.meta.get("clips_total")
+        except Exception:
+            pass
+
     return {
         "active":          _state.get("active", False),
         "folder":          _state.get("folder", ""),
@@ -143,6 +158,8 @@ def _public_snapshot() -> dict[str, Any]:
         "errors":          list(_state.get("errors", []))[-5:],
         "current_job_id":  _state.get("current_job_id"),
         "current_image":   _state.get("current_image"),
+        "clips_done":      clips_done,
+        "clips_total":     clips_total,
         "status":          _state.get("status", "idle"),
         "started_at":      _state.get("started_at"),
         "heartbeat_timeout_sec": HEARTBEAT_TIMEOUT_SEC,
@@ -453,22 +470,29 @@ def _runner() -> None:
                 _wait_until_gpu_phase(current_job.id)
 
                 next_job = None
+                next_img = None
                 if not _stop_check():
-                    next_img, next_settings = _claim_next()
-                    if next_img is not None:
+                    # Keep trying images until one submits successfully or we run out.
+                    while True:
+                        next_img, next_settings = _claim_next()
+                        if next_img is None:
+                            break
                         try:
                             next_job = _submit_one(next_img["path"], next_img["name"],
                                                     next_settings, use_satellite=use_sat)
                             log.debug("[song-batch][%s] started prep for next image: %s",
                                       slot_name, next_img["name"])
+                            break
                         except Exception as e:
-                            log.warning("[song-batch][%s] next submit failed: %s", slot_name, e)
+                            log.warning("[song-batch][%s] submit failed for %s, skipping: %s",
+                                        slot_name, next_img["name"], e)
                             with _state_lock:
                                 _state["failed"] += 1
                                 _record_error(f"[{slot_name}] Submit failed for {next_img['name']}: {e}")
                                 _state["updated_at"] = time.time()
                                 _save_state()
-                            next_job = None
+                            next_img = None
+                            # Try the next image instead of stopping.
 
                 # Now wait for the current job to fully complete.
                 ok, err = _wait_for_job(current_job.id)
