@@ -343,6 +343,15 @@ def run_song_prep(job, photo_path, settings):
     log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
     log.info("[song-video] Beat positions per clip: %s", beat_positions)
 
+    # Compute the start time of each clip within the song (for per-clip audio conditioning).
+    # pad_before is the silence before the song starts; each clip then follows in sequence.
+    _start_t = float(settings.get("pad_before", 1.0))
+    _clip_start_times: list[float] = []
+    for _d in clip_durations:
+        _clip_start_times.append(_start_t)
+        _start_t += float(_d)
+    settings["_clip_start_times"] = _clip_start_times
+
     settings["_subject_anchor"] = subject_anchor
 
     job.meta["stage"] = "planning"
@@ -386,8 +395,9 @@ def run_song_pipeline(job, photo_path, settings):
     # -- Settings ----------------------------------------------------------
     n_clips        = int(settings.get("num_clips", 10))
     clip_dur       = float(settings.get("clip_duration", 8.0))
-    clip_durations = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
-    beat_positions = settings.pop("_beat_positions", None) or [0.5] * n_clips
+    clip_durations     = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
+    beat_positions     = settings.pop("_beat_positions", None) or [0.5] * n_clips
+    clip_start_times   = settings.pop("_clip_start_times", None) or []
     model_name     = settings.get("model_name", "LTX-2 Dev19B Distilled")
     resolution    = settings.get("resolution", "580p")
     ow            = settings.get("override_width")
@@ -435,6 +445,7 @@ def run_song_pipeline(job, photo_path, settings):
         resolution, ow, oh, tw, th, steps, guidance, seed,
         audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
         reanchor_every=reanchor_every, pad_before=pad_before,
+        clip_start_times=clip_start_times,
     )
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
@@ -444,7 +455,7 @@ def _do_song_gpu_phase(
     n_clips, clip_durations, beat_positions, model_name,
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
-    reanchor_every=3, pad_before=0.0,
+    reanchor_every=3, pad_before=0.0, clip_start_times=None,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator
@@ -467,6 +478,13 @@ def _do_song_gpu_phase(
     _last_error: list[str | None] = [None]
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
+
+    # Audio conditioning: extract per-clip audio slices so LTX-2 can synchronise
+    # the subject's facial movement and body motion to the music waveform.
+    # This is what enables lip-sync / singing behaviour.
+    _audio_slices_dir = job_dir / "audio_slices"
+    _audio_slices_dir.mkdir(exist_ok=True)
+    _clip_start_times = clip_start_times or []
 
     for i, _arc_entry in enumerate(story_arc):
         clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
@@ -538,6 +556,21 @@ def _do_song_gpu_phase(
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
         # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
+        _audio_slice: str | None = None
+        if audio_path and os.path.isfile(audio_path) and i < len(_clip_start_times):
+            _slice_path = str(_audio_slices_dir / f"slice_{i:02d}.wav")
+            _sr = subprocess.run(
+                ["ffmpeg", "-y", "-i", audio_path,
+                 "-ss", f"{_clip_start_times[i]:.4f}",
+                 "-t",  f"{this_dur:.4f}",
+                 "-ar", "44100", "-ac", "1", _slice_path],
+                capture_output=True, timeout=30,
+            )
+            if _sr.returncode == 0 and Path(_slice_path).exists():
+                _audio_slice = _slice_path
+            else:
+                log.debug("[song-video] Audio slice extraction failed for clip %d -- generating without audio conditioning", clip_num)
+
         try:
             clip_path = video_generator.generate_video(
                 image_path=clip_start_image,
@@ -552,6 +585,7 @@ def _do_song_gpu_phase(
                 guidance=effective_guidance,
                 seed=seed,
                 negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
+                audio_source=_audio_slice,
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
@@ -604,6 +638,7 @@ def _do_song_gpu_phase(
                         guidance=effective_guidance,
                         seed=seed,
                         negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
+                        audio_source=_audio_slice,
                         stop_check=_stopped,
                         log_fn=_log,
                         worker_url=_worker_url or None,
@@ -722,7 +757,7 @@ def _do_song_gpu_phase(
     # Collect per-clip durations for correct xfade offset math.
     clip_durations = [probe_duration(p) or 4.0 for p in clip_paths]
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_with_xfade(clip_paths, clip_durations, concat_path):
+    if not _concat_with_xfade(clip_paths, clip_durations, concat_path, fade_dur=0.5):
         log.warning("[song-video] xfade concat failed -- falling back to hard cut")
         if not _concat_clips(clip_paths, concat_path):
             concat_path = clip_paths[0]
@@ -745,6 +780,21 @@ def _do_song_gpu_phase(
     merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before)
 
     if merged:
+        # Fast mode generates 360P for speed then upscales to 720P.
+        if ow and oh and int(oh) <= 360 and not _stopped():
+            job.update(progress=97, message="Upscaling fast-mode video to 720P...")
+            try:
+                from core.upscaler import upscale_video
+                up_path = merged.replace(".mp4", "_720p.mp4")
+                up_out, up_err = upscale_video(merged, up_path, scale=2.0, method="ffmpeg")
+                if up_out and Path(up_out).exists():
+                    merged = up_out
+                    log.info("[song-video] Fast-mode upscale: %s -> %s", Path(up_path).name, up_out)
+                else:
+                    log.warning("[song-video] Upscale failed (%s) -- keeping 360P output", up_err)
+            except Exception as _ue:
+                log.warning("[song-video] Upscale exception: %s -- keeping 360P", _ue)
+
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
