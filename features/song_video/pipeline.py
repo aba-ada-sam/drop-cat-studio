@@ -367,14 +367,9 @@ def run_song_prep(job, photo_path, settings):
         except Exception as e:
             log.warning("[song-video] Beat-snap failed (non-fatal): %s", e)
 
-    # Compute reanchor_every from section boundaries
-    sections = audio_events.get("sections", []) if audio_events else []
-    if sections and n_clips >= 2:
-        video_dur = sum(float(c.get("duration", clip_dur)) for c in arc) if isinstance(arc[0], dict) else n_clips * clip_dur
-        n_sections_in_video = max(1, sum(1 for s in sections if s.get("start", 0) < video_dur))
-        reanchor_every = max(2, min(5, round(n_clips / max(1, n_sections_in_video))))
-    else:
-        reanchor_every = 0  # pure chain, no source resets
+    # Pure chain: never reset to source photo. Hard resets create the "same image"
+    # jump cut. Identity is maintained via subject_anchor text in every prompt.
+    reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
     log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(sections))
 
