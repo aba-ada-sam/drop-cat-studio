@@ -1185,7 +1185,7 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     return anchor_ok, new_dur
 
 
-_ANCHOR_BLEND_ALPHA = 0.95  # 95% last frame (motion continuity) + 5% source (identity)
+_ANCHOR_BLEND_ALPHA = 0.85  # 85% last frame (motion continuity) + 15% source (identity gravity)
 
 
 def _blend_anchor_with_source(anchor_png: str, source_photo: str,
@@ -1796,7 +1796,7 @@ def run_multi_pipeline(job, photo_path, settings):
             reanchor_every = max(2, min(5, round(n_clips / max(1, _n_in_video))))
             log.info("[multi] reanchor_every=%d (from %d audio sections)", reanchor_every, len(_sections))
         else:
-            reanchor_every = 3
+            reanchor_every = 0
 
     if not story_arc:
         base = (settings.get("video_prompt", "").strip() + ", ") if settings.get("video_prompt") else ""
@@ -2008,7 +2008,7 @@ def run_multi_pipeline(job, photo_path, settings):
           # Prepend subject anchor if the prompt doesn't already open with it.
           # This guards against LLM drift where later clip prompts describe a
           # different-looking subject than the source photo.
-          clip_prompt = _strip_camera_moves(clip_prompt)
+          clip_prompt = _enforce_static_camera(clip_prompt)
           if subject_anchor and not clip_prompt.lower().startswith(subject_anchor[:20].lower()):
               clip_prompt = subject_anchor + " " + clip_prompt
           # Clip 1 anchors to source photo; clips 2+ chain from previous last frame.

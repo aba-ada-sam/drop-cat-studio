@@ -45,12 +45,16 @@ WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
 _NEG_LTX_CALM = (
     "worst quality, low quality, blurry, distorted, temporal artifacts, "
     "watermark, text, anime, cartoon, 2d, morphing, warping, "
-    "bad face, deformed, different person"
+    "bad face, deformed, different person, "
+    "zoom in, zoom out, zooming, camera zoom, camera pan, panning, dolly, "
+    "camera motion, camera movement, ken burns, push in, pull back"
 )
 _NEG_LTX_DYNAMIC = (
     "worst quality, low quality, blurry, distorted, temporal artifacts, "
     "watermark, text, static, anime, cartoon, 2d, morphing, warping, "
-    "bad face, deformed, different person"
+    "bad face, deformed, different person, "
+    "zoom in, zoom out, zooming, camera zoom, camera pan, panning, dolly, "
+    "camera motion, camera movement, ken burns, push in, pull back"
 )
 # Wan2.1: negative prompts are more effective than LTX -- include quality + character terms.
 # bad hands/face are common Wan artifacts in character sequences.
