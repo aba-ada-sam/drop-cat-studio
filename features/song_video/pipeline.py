@@ -459,14 +459,12 @@ def run_song_pipeline(job, photo_path, settings):
     job_dir = OUTPUT_DIR / ts / f"songvid_{slug}_{job.id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Lip sync requires 640x360 -- at full 1032x580 the spatial tokens fill LTX-2's
-    # context window leaving no room for audio tokens, so WanGP drops them silently.
-    # When lip sync is on: generate at 360p (audio conditioning fits) then upscale.
-    _lip_sync_requested = bool(settings.get("lip_sync", True)) and bool(audio_wav)
-    if _lip_sync_requested and not (ow and oh):
-        tw, th = 640, 360
-        log.info("[song-video] Lip sync ON -- generating at 640x360, will upscale after merge")
-    elif ow and oh:
+    # Always generate at the model's native resolution (580p).
+    # Audio conditioning (lip sync) is attempted at full res; the WanGP worker
+    # automatically falls back without audio if the context limit is exceeded.
+    # Forcing 360p to fit audio tokens caused severe quality degradation over
+    # 27 chained clips -- character detail collapses and artifacts compound.
+    if ow and oh:
         tw, th = int(ow), int(oh)
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
@@ -833,18 +831,17 @@ def _do_song_gpu_phase(
     merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before)
 
     if merged:
-        # Upscale to 1032x580 when output was generated at 360p.
-        # This covers both lip-sync mode (forced 360p for audio context) and
-        # any explicit 360p override. Skip if output is already full resolution.
-        if th <= 360 and not _stopped():
-            job.update(progress=97, message="Upscaling to 580p...")
+        # Upscale only when an explicit low-res override was requested (e.g. fast mode).
+        # Native 580p output does not need upscaling.
+        if ow and oh and int(oh) <= 360 and not _stopped():
+            job.update(progress=97, message="Upscaling to 720P...")
             try:
                 from core.upscaler import upscale_video
-                up_path = merged.replace(".mp4", "_580p.mp4")
-                up_out, up_err = upscale_video(merged, up_path, scale=1032/640, method="ffmpeg")
+                up_path = merged.replace(".mp4", "_720p.mp4")
+                up_out, up_err = upscale_video(merged, up_path, scale=2.0, method="ffmpeg")
                 if up_out and Path(up_out).exists():
                     merged = up_out
-                    log.info("[song-video] Upscaled 360p -> 580p: %s", Path(up_out).name)
+                    log.info("[song-video] Upscaled 360p -> 720p: %s", Path(up_out).name)
                 else:
                     log.warning("[song-video] Upscale failed (%s) -- keeping 360p output", up_err)
             except Exception as _ue:
