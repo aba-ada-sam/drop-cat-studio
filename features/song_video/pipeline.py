@@ -437,7 +437,10 @@ def run_song_prep(job, photo_path, settings):
     # Without this correction, later clips get conditioned on audio that is up to
     # (n_clips-1) * xfade_dur seconds ahead of where they actually appear -- at 27
     # clips and 0.75s xfade that's ~19 seconds of accumulated sync drift.
-    _SONG_XFADE_DUR = 0.75   # must match the fade_dur passed to _concat_with_xfade below
+    _SONG_XFADE_DUR = 0.12   # must match the fade_dur passed to _concat_with_xfade below
+    # 0.12s = 3 frames at 24fps -- fast enough to read as a soft cut, not a dissolve.
+    # Longer fades (0.5-0.75s) create visible double-exposure "sludge" where the brain
+    # perceives two overlaid images. At 0.12s the blend is subliminal.
     _start_t = float(settings.get("pad_before", 1.0))
     _clip_start_times: list[float] = []
     for _idx, _d in enumerate(clip_durations):
@@ -875,7 +878,9 @@ def _do_song_gpu_phase(
         #   Trim so the boundary frame is still in-motion.
         # Chain frame is extracted BEFORE these trims (below) so it always comes
         # from the raw generated output, not the trimmed version.
-        _HEAD_TRIM = 0.25  # seconds to remove from start of clips 1+
+        _HEAD_TRIM = 0.08  # seconds to remove from start of clips 1+ (2 frames at 24fps)
+        # Removing only 2 frames eliminates the LTX-2 startup flash while keeping
+        # the frames closest to the conditioning image -- the best-anchored frames.
         _TAIL_TRIM = 0.20  # seconds to remove from end of clips 0 to N-2
 
         if i < n_clips - 1:
@@ -999,6 +1004,28 @@ def _do_song_gpu_phase(
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
         job.message = f"Music video complete! ({len(clip_paths)} clips)"
+
+        # Auto-evaluate quality so regressions surface in the log without manual review.
+        try:
+            from features.song_video.evaluator import evaluate_video
+            from app import get_llm_router
+            eval_result = evaluate_video(
+                merged, len(clip_paths), clip_dur,
+                xfade_dur=settings.get("_song_xfade_dur", 0.12),
+                llm_router=get_llm_router(),
+            )
+            score = eval_result.get("score", -1)
+            avg_diff = eval_result.get("avg_diff", -1)
+            vision = eval_result.get("vision_report") or ""
+            issues = eval_result.get("issues", [])
+            log.info("[eval] Quality score: %.1f/10 | avg seam diff: %.1fpx | %s",
+                     score, avg_diff, "; ".join(issues) if issues else "no issues detected")
+            if vision:
+                log.info("[eval] Vision: %s", vision)
+            job.meta["eval"] = {"score": score, "avg_diff": avg_diff,
+                                "issues": issues, "vision": vision}
+        except Exception as _ev:
+            log.debug("[eval] Auto-evaluation failed (non-fatal): %s", _ev)
 
         try:
             norm = merged.replace("\\", "/")
