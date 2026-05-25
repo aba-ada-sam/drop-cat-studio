@@ -262,6 +262,12 @@ def _do_generate(params: dict) -> dict:
     state["validate_success"] = 1
 
     _update_status(progress="Queuing generation task...")
+    print(f"[worker] DEBUG params: model={model_type} steps={steps} guidance={guidance} "
+          f"frames={num_frames} res={width}x{height} "
+          f"img_type={defaults.get('image_prompt_type')} "
+          f"audio_type={defaults.get('audio_prompt_type')} "
+          f"audio_src={bool(defaults.get('audio_source'))} "
+          f"start_imgs={len(defaults.get('image_start',[]))}", flush=True)
     wgp.process_prompt_and_add_tasks(state, 0, model_type)
     queue = wgp.get_gen_info(state).get("queue", [])
     if not queue:
