@@ -31,6 +31,92 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
+def _generate_forge_keyframes(
+    source_photo: str,
+    n_keyframes: int,
+    subject_anchor: str,
+    output_dir: Path,
+    width: int = 1032,
+    height: int = 580,
+) -> list[str]:
+    """Generate N+1 high-quality keyframe images using Forge img2img.
+
+    Each keyframe is generated independently from the source photo at very low
+    denoising (0.10), so character quality is maintained across all frames with
+    no compounding degradation. Different seeds provide subtle natural variation.
+
+    These are used as start_image + end_image for each LTX-2 clip:
+      clip[i]: start=keyframe[i], end=keyframe[i+1]
+
+    This guarantees smooth visual continuity at every clip boundary because the
+    clip ends approaching keyframe[i+1], and the next clip starts from keyframe[i+1].
+
+    Falls back gracefully if Forge is unavailable.
+    """
+    try:
+        from services.forge_client import img2img, forge_alive
+        if not forge_alive():
+            log.info("[song-video] Forge not available -- skipping keyframe pre-generation")
+            return []
+    except Exception as e:
+        log.debug("[song-video] Forge check failed: %s", e)
+        return []
+
+    try:
+        from core.llm_client import encode_image_b64
+        source_b64 = encode_image_b64(source_photo)
+        if not source_b64:
+            return []
+    except Exception:
+        return []
+
+    prompt = (subject_anchor or "photorealistic portrait, high quality") + \
+             ", natural lighting, consistent character appearance"
+    neg    = "ugly, deformed, blurry, low quality, artifacts, noise, anime, cartoon"
+
+    keyframes: list[str] = [source_photo]
+    import random
+    rng = random.Random(42)
+
+    log.info("[song-video] Generating %d Forge keyframes for seamless transitions...", n_keyframes)
+    for i in range(n_keyframes - 1):
+        out_path = str(output_dir / f"keyframe_{i+1:02d}.png")
+        seed = rng.randint(1, 2**31)
+        try:
+            result = img2img(
+                init_image_b64=source_b64,
+                prompt=prompt,
+                negative_prompt=neg,
+                denoising_strength=0.10,
+                width=width,
+                height=height,
+                steps=12,
+                cfg_scale=4.0,
+                seed=seed,
+                save_images=False,
+            )
+            if result.get("error") or not result.get("images"):
+                log.warning("[song-video] Forge keyframe %d failed: %s", i + 1, result.get("error"))
+                break
+            import base64 as _b64
+            img_data = result["images"][0]
+            if "," in img_data:
+                img_data = img_data.split(",", 1)[1]
+            Path(out_path).write_bytes(_b64.b64decode(img_data))
+            keyframes.append(out_path)
+            log.debug("[song-video] Keyframe %d/%d generated", i + 1, n_keyframes - 1)
+        except Exception as e:
+            log.warning("[song-video] Keyframe %d exception: %s -- stopping early", i + 1, e)
+            break
+
+    if len(keyframes) < 2:
+        log.warning("[song-video] Too few keyframes (%d) -- falling back to chain approach", len(keyframes))
+        return []
+
+    log.info("[song-video] Generated %d/%d keyframes via Forge", len(keyframes), n_keyframes)
+    return keyframes
+
+
 
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     """Extract the actual last frame of a video as a lossless PNG.
@@ -408,11 +494,26 @@ def run_song_prep(job, photo_path, settings):
         except Exception as e:
             log.warning("[song-video] Beat-snap failed (non-fatal): %s", e)
 
-    # Pure chain: never reset to source photo. Hard resets create the "same image"
-    # jump cut. Identity is maintained via subject_anchor text in every prompt.
     reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
-    log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(audio_events.get("sections", []) if audio_events else []))
+
+    # Generate Forge keyframes for seamless clip transitions.
+    # Runs here (in prep, before GPU acquisition) so Forge and WanGP don't compete for VRAM.
+    # Each keyframe is a fresh high-quality image from the source photo (denoising=0.10),
+    # used as start_image[i] and end_image[i+1] for each LTX-2 clip.
+    job.meta["stage"] = "keyframes"
+    job.update(progress=7, message="Generating transition keyframes via Forge...")
+    import tempfile as _tf2
+    _kf_dir = Path(_tf2.gettempdir()) / f"dcs_keyframes_{job.id[:8]}"
+    _kf_dir.mkdir(exist_ok=True)
+    _keyframes = []
+    if photo_path and os.path.isfile(photo_path):
+        _keyframes = _generate_forge_keyframes(
+            photo_path, n_clips + 1, subject_anchor, _kf_dir,
+        )
+    settings["_keyframes"] = _keyframes
+    if _keyframes:
+        log.info("[song-video] Forge keyframes ready: %d frames", len(_keyframes))
 
     job.meta["stage"] = "waiting-gpu"
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
@@ -448,6 +549,7 @@ def run_song_pipeline(job, photo_path, settings):
     story_arc      = settings.pop("_story_arc", [])
     subject_anchor = settings.pop("_subject_anchor", "")
     reanchor_every = int(settings.pop("_reanchor_every", 3))
+    keyframes      = settings.pop("_keyframes", [])  # Forge-generated start/end frames
 
     if not story_arc:
         story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
@@ -485,6 +587,7 @@ def run_song_pipeline(job, photo_path, settings):
             reanchor_every=reanchor_every, pad_before=pad_before,
             clip_start_times=clip_start_times,
             audio_wav=audio_wav,
+            keyframes=keyframes,
         )
     finally:
         _cleanup_gpu_phase_temps(job_dir, audio_wav)
@@ -497,6 +600,7 @@ def _do_song_gpu_phase(
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
     reanchor_every=3, pad_before=0.0, clip_start_times=None, audio_wav=None,
+    keyframes=None,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator
@@ -515,6 +619,17 @@ def _do_song_gpu_phase(
     prepped_photo: str | None = None
     if photo_path and os.path.isfile(photo_path):
         prepped_photo = _prep_photo(photo_path, tw, th, job_dir)
+
+    # Prep keyframes for use as start+end images (Forge-generated, if available).
+    # When keyframes exist: clip[i] starts at keyframe[i] and is guided to end at
+    # keyframe[i+1], guaranteeing seamless transitions without character degradation.
+    # When not available: fall back to chain frame approach.
+    _kf = keyframes or []
+    _use_keyframes = len(_kf) >= n_clips + 1
+    if _use_keyframes:
+        log.info("[song-video] Using %d Forge keyframes as start/end anchors", len(_kf))
+    else:
+        log.info("[song-video] No keyframes available -- using chain frame approach")
 
     _last_error: list[str | None] = [None]
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
@@ -564,8 +679,16 @@ def _do_song_gpu_phase(
         # continues from where the previous one ended. reanchor_every resets to
         # source periodically (at section boundaries) to prevent quality drift.
         # _chain_frame is None for clip 0 and after each reanchor reset.
-        clip_start_image = _chain_frame if _chain_frame else prepped_photo
-        _is_chained = bool(_chain_frame)
+        if _use_keyframes:
+            # Keyframe mode: each clip starts from a fresh Forge-quality image
+            # and is guided to end at the next keyframe. No chain degradation.
+            clip_start_image = _kf[i] if i < len(_kf) else prepped_photo
+            clip_end_image   = _kf[i + 1] if i + 1 < len(_kf) else None
+            _is_chained = i > 0
+        else:
+            clip_start_image = _chain_frame if _chain_frame else prepped_photo
+            clip_end_image   = None
+            _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
         # Strip camera moves and lock to static shot so LTX doesn't default to zoom/pan
@@ -634,6 +757,7 @@ def _do_song_gpu_phase(
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
+                end_image_path=clip_end_image,
                 negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
                 audio_source=_audio_slice,
                 stop_check=_stopped,
@@ -687,6 +811,7 @@ def _do_song_gpu_phase(
                         steps=steps,
                         guidance=effective_guidance,
                         seed=seed,
+                        end_image_path=clip_end_image,
                         negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
                         audio_source=_audio_slice,
                         stop_check=_stopped,
