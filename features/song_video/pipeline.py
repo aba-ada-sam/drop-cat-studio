@@ -352,6 +352,27 @@ def run_song_prep(job, photo_path, settings):
         _start_t += float(_d)
     settings["_clip_start_times"] = _clip_start_times
 
+    # Pre-convert user audio to stereo 44100 Hz WAV for per-clip conditioning.
+    # WAV is what WanGP's LTX-2 audio conditioning expects; the user's file may be
+    # MPEG/MP3/AAC. This runs once in prep so the GPU phase only does cheap slicing.
+    _audio_wav: str | None = None
+    if bool(settings.get("lip_sync", True)) and os.path.isfile(audio_path):
+        import tempfile as _tf
+        _wav_dir = Path(_tf.gettempdir()) / "dcs_song_audio"
+        _wav_dir.mkdir(exist_ok=True)
+        _wav_path = str(_wav_dir / f"{Path(audio_path).stem}.wav")
+        _r = subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path,
+             "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2", _wav_path],
+            capture_output=True, timeout=60,
+        )
+        if _r.returncode == 0 and os.path.isfile(_wav_path):
+            _audio_wav = _wav_path
+            log.info("[song-video] Audio converted to WAV for lip sync: %s", _wav_path)
+        else:
+            log.warning("[song-video] Audio WAV conversion failed -- lip sync disabled")
+    settings["_audio_wav"] = _audio_wav
+
     settings["_subject_anchor"] = subject_anchor
 
     job.meta["stage"] = "planning"
@@ -398,6 +419,7 @@ def run_song_pipeline(job, photo_path, settings):
     clip_durations     = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
     beat_positions     = settings.pop("_beat_positions", None) or [0.5] * n_clips
     clip_start_times   = settings.pop("_clip_start_times", None) or []
+    audio_wav          = settings.pop("_audio_wav", None)  # pre-converted WAV for lip sync
     model_name     = settings.get("model_name", "LTX-2 Dev19B Distilled")
     resolution    = settings.get("resolution", "580p")
     ow            = settings.get("override_width")
@@ -446,6 +468,7 @@ def run_song_pipeline(job, photo_path, settings):
         audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
         reanchor_every=reanchor_every, pad_before=pad_before,
         clip_start_times=clip_start_times,
+        audio_wav=audio_wav,
     )
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
@@ -455,7 +478,7 @@ def _do_song_gpu_phase(
     n_clips, clip_durations, beat_positions, model_name,
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
-    reanchor_every=3, pad_before=0.0, clip_start_times=None,
+    reanchor_every=3, pad_before=0.0, clip_start_times=None, audio_wav=None,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator
@@ -479,11 +502,14 @@ def _do_song_gpu_phase(
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
-    # Audio conditioning disabled pending investigation -- WanGP rejects
-    # audio_prompt_type=A even for ltx2_distilled when using extracted WAV slices.
-    # TODO: debug correct audio format/duration requirements, then re-enable.
-    _lip_sync = False
+    # Lip sync: slice the pre-converted WAV per clip and pass as audio_source.
+    # Uses the same -c:a copy slice approach as the Zoom pipeline (known to work).
+    # Only enabled when user provided audio that converted successfully in prep.
+    _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav)
     _audio_slices_dir = job_dir / "audio_slices"
+    if _lip_sync:
+        _audio_slices_dir.mkdir(exist_ok=True)
+        log.info("[song-video] Lip sync ON -- slicing user audio per clip")
     _clip_start_times = clip_start_times or []
 
     for i, _arc_entry in enumerate(story_arc):
@@ -557,19 +583,21 @@ def _do_song_gpu_phase(
         # condition the video generation directly on the music. WAV avoids MP3
         # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
         _audio_slice: str | None = None
-        if _lip_sync and audio_path and os.path.isfile(audio_path) and i < len(_clip_start_times):
+        if _lip_sync and i < len(_clip_start_times):
             _slice_path = str(_audio_slices_dir / f"slice_{i:02d}.wav")
             _sr = subprocess.run(
-                ["ffmpeg", "-y", "-i", audio_path,
+                ["ffmpeg", "-y",
                  "-ss", f"{_clip_start_times[i]:.4f}",
                  "-t",  f"{this_dur:.4f}",
-                 "-ar", "44100", "-ac", "1", _slice_path],
+                 "-i",  audio_wav,
+                 "-c:a", "copy", _slice_path],
                 capture_output=True, timeout=30,
             )
             if _sr.returncode == 0 and Path(_slice_path).exists():
                 _audio_slice = _slice_path
+                log.debug("[song-video] Audio slice %d: %.1fs+%.1fs", clip_num, _clip_start_times[i], this_dur)
             else:
-                log.debug("[song-video] Audio slice extraction failed for clip %d -- generating without audio conditioning", clip_num)
+                log.debug("[song-video] Audio slice %d failed -- no lip sync for this clip", clip_num)
 
         try:
             clip_path = video_generator.generate_video(

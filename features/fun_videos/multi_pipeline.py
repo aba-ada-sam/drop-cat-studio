@@ -2060,14 +2060,15 @@ def run_multi_pipeline(job, photo_path, settings):
           else:
               effective_guidance = min(guidance, 4.0)
 
-          # Extract lip-sync audio slice for this clip's time window.
+          # Extract lip-sync audio slice using fast seek + stream copy (same as Zoom pipeline).
           _clip_audio_slice: str | None = None
           if _lip_sync_audio_path:
               _lss_path = str(_lip_sync_slices_dir / f"slice_{i:02d}.wav")
               _lss_r = subprocess.run(
-                  ["ffmpeg", "-y", "-i", _lip_sync_audio_path,
+                  ["ffmpeg", "-y",
                    "-ss", f"{_lip_sync_t0:.4f}", "-t", f"{this_clip_dur:.4f}",
-                   "-ar", "44100", "-ac", "1", _lss_path],
+                   "-i", _lip_sync_audio_path,
+                   "-c:a", "copy", _lss_path],
                   capture_output=True, timeout=30,
               )
               if _lss_r.returncode == 0 and Path(_lss_path).exists():
