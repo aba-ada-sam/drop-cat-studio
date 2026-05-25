@@ -167,7 +167,7 @@ export function init(panel) {
       const opt = el('option', { value: name, text: name });
       modelSel.appendChild(opt);
     }
-    const best = i2v.find(([n]) => n === 'LTX-2 Dev13B') || i2v.find(([n]) => n === 'LTX-2 Dev19B Distilled') || i2v[0];
+    const best = i2v.find(([n]) => n === 'LTX-2 Dev19B Distilled') || i2v[0];
     if (best) modelSel.value = best[0];
   }).catch(() => {
     const opt = el('option', { value: 'LTX-2 Dev19B Distilled', text: 'LTX-2 Dev19B Distilled' });
@@ -223,14 +223,7 @@ export function init(panel) {
   }
 
   const { wrap: loopWrap, input: loopCheck }    = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: fastWrap, input: fastCheck }    = _toggle('Fast mode  (360P, 8 steps, ~4x faster, upscaled after)', false);
   const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (audio drives subject mouth/face motion)', true);
-
-  // Fast mode and model selector are linked: fast forces Distilled, slow uses Dev13B.
-  fastCheck.addEventListener('change', () => {
-    const target = fastCheck.checked ? 'LTX-2 Dev19B Distilled' : 'LTX-2 Dev13B';
-    if ([...modelSel.options].some(o => o.value === target)) modelSel.value = target;
-  });
 
   // Clip duration slider
   function _numRow(labelText, min, max, step, def, unit) {
@@ -245,10 +238,6 @@ export function init(panel) {
   }
 
   const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 12, 1, 8, 's');
-  fastCheck.addEventListener('change', () => {
-    if (fastCheck.checked) { clipDurSlider.value = '5'; clipDurSlider.dispatchEvent(new Event('input')); }
-    else                   { clipDurSlider.value = '8'; clipDurSlider.dispatchEvent(new Event('input')); }
-  });
 
   // Padding: seconds of silent video before song starts / after song ends
   const { wrap: padBeforeWrap, input: padBeforeSlider } = _numRow('Video before song starts', 0, 10, 1, 0, 's');
@@ -278,8 +267,6 @@ export function init(panel) {
   }
 
   loopCheck.addEventListener('change', _updateButtons);
-  fastCheck.addEventListener('change', _updateButtons);
-
   let _pollActive = false;
 
   function _startPoll() {
@@ -350,7 +337,6 @@ export function init(panel) {
     batchStatus.textContent = 'Analyzing song and starting batch...';
 
     try {
-      const fast = fastCheck.checked;
       const body = {
         audio_path:    _songPath,
         folder:        _folderPath,
@@ -360,8 +346,8 @@ export function init(panel) {
         use_satellite: satCheck.checked,
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
-        steps:         fast ? 8    : 40,
-        guidance:      fast ? 2.5  : 3.5,
+        steps:         8,
+        guidance:      3.0,
         pad_before:    parseInt(padBeforeSlider.value),
         pad_after:     parseInt(padAfterSlider.value),
       };
@@ -445,7 +431,6 @@ export function init(panel) {
     singleResult.style.display = 'none';
 
     try {
-      const fast = fastCheck.checked;
       const body = {
         audio_path:     _songPath,
         photo_path:     singleImagePath.value || '',
@@ -454,8 +439,8 @@ export function init(panel) {
         lip_sync:       lipSyncCheck.checked,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
-        steps:          fast ? 8    : 40,
-        guidance:       fast ? 2.5  : 3.5,
+        steps:          8,
+        guidance:       3.0,
         pad_before:     parseInt(padBeforeSlider.value),
         pad_after:      parseInt(padAfterSlider.value),
       };
@@ -934,7 +919,6 @@ export function init(panel) {
       el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]),
       folderStatus,
       loopWrap,
-      fastWrap,
       lipSyncWrap,
       clipDurWrap,
       padBeforeWrap,
