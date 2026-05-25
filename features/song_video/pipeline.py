@@ -371,7 +371,7 @@ def run_song_prep(job, photo_path, settings):
     # jump cut. Identity is maintained via subject_anchor text in every prompt.
     reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
-    log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(sections))
+    log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(audio_events.get("sections", []) if audio_events else []))
 
     job.meta["stage"] = "waiting-gpu"
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
