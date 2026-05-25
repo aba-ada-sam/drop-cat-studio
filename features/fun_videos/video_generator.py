@@ -37,24 +37,27 @@ WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
 # Wan2.1 research: negative prompts are inconsistent in 2.1. Keep them minimal and
 # reactive (suppress problems you observe, not problems you fear).
 
-# LTX-2 calm/chained frames: no "static" to avoid particle-fill pressure.
-# anime/cartoon terms added -- LTX drifts to anime style on energetic prompts.
+# Negative prompts tuned per model family per official research + community findings.
+# LTX-2: 8-10 terms max -- stacking 20+ terms degrades output quality.
+#   anime/cartoon must be blocked -- LTX drifts to anime style on energetic prompts.
+#   morphing/warping blocks the "warble" artifact (frame-to-frame micro-deformation).
+#   bad face/deformed blocks the character quality degradation in chained clips.
 _NEG_LTX_CALM = (
-    "worst quality, low quality, blurry, distorted, jitter, stutter, "
-    "temporal artifacts, watermark, text, abrupt transition, jump cut, "
-    "anime, cartoon, illustration, 2d, drawing, painting, different person, new character"
+    "worst quality, low quality, blurry, distorted, temporal artifacts, "
+    "watermark, text, anime, cartoon, 2d, morphing, warping, "
+    "bad face, deformed, different person"
 )
-# LTX-2 dynamic: "static" included to prevent frozen output.
 _NEG_LTX_DYNAMIC = (
-    "worst quality, low quality, blurry, distorted, jitter, stutter, "
-    "temporal artifacts, watermark, text, static, abrupt transition, jump cut, "
-    "anime, cartoon, illustration, 2d, drawing, painting, different person, new character"
+    "worst quality, low quality, blurry, distorted, temporal artifacts, "
+    "watermark, text, static, anime, cartoon, 2d, morphing, warping, "
+    "bad face, deformed, different person"
 )
-# Wan2.1: keep it minimal.
+# Wan2.1: negative prompts are more effective than LTX -- include quality + character terms.
+# bad hands/face are common Wan artifacts in character sequences.
 _NEG_WAN = (
-    "low quality, blurry, distorted, unnatural movement, "
-    "watermark, text, shaky camera, temporal artifacts, "
-    "anime, cartoon, illustration, different person"
+    "low quality, blurry, distorted, unnatural movement, watermark, text, "
+    "temporal artifacts, anime, cartoon, 2d, morphing, "
+    "bad face, bad hands, deformed, mutated, extra fingers, different person"
 )
 
 

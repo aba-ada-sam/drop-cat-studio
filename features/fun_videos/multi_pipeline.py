@@ -219,159 +219,163 @@ def _pick_cloud_provider(llm_router) -> str | None:
 #   GENTLE  -- micro-motion on props/fabric/hands, subject face stays still. LTX dynamic mode.
 #   KINETIC -- aggressive action verbs, Wan I2V only (25 steps handles it).
 
+# ── Story arc system prompts (research-informed, 2026-05-24) ──────────────────
+#
+# Key findings from official LTX-2 and Wan I2V prompting research:
+#
+# LTX-2 I2V: The model sees the reference image -- describe ONLY temporal change.
+#   Do NOT re-describe the scene appearance (the image already provides it).
+#   15-25 words for Distilled, 45-65 words for Dev13B.
+#   Subject identity markers MUST appear in every chained clip to prevent drift.
+#   Guidance: 3.0-3.5 full model; 1.0-1.5 distilled.
+#
+# Wan I2V: 80-120 words. Describe the motion as a sequence (Initially... then...).
+#   Camera terms (pan, dolly, orbit) work well and add variety.
+#   Guidance: 5-7.
+#
+# For CHAINED clips in both models: always include subject markers + scene anchor.
+# The model receives a drifted last frame, not the pristine source photo.
+# Without scene context it hallucinates a new location every clip.
+
 _STORY_ARC_BASE = """\
-You are writing motion prompts for an image-to-video AI model.
-Each prompt describes a single physical motion that happens in one clip.
-The model already sees the image -- you do NOT need to describe what things look like.
-You DO need to describe WHAT MOVES, WHERE IT STARTS, and WHERE IT ENDS.
+You are writing image-to-video motion prompts for a music video.
+The AI model already sees the reference image -- DO NOT describe appearance.
+Describe ONLY what changes: what moves, where it starts, where it ends.
 
-STEP 1 -- IDENTIFY the main subject and note their exact visual markers:
-  People/characters: hair color+style, clothing color+type, skin tone, any accessories
-  Landscapes: dominant features (water, trees, sky, architecture)
-  Objects: material, color, position
-
-STEP 2 -- PLAN a motion arc across the clips. Each clip = one distinct physical action
-that continues from where the last clip ended. Think of it as a sequence of shots in
-a music video -- each one shows something HAPPENING, building toward a peak.
-
-MOTION PROMPT RULES (the model ignores vague language -- be physical and specific):
-- Describe WHERE the motion starts and WHERE it ends: "arm raises from hip to shoulder height"
-- Use distance and direction: "head turns 30 degrees left", "finger slides 5cm along table"
-- Use physical materials in motion: "fabric ripples outward from center", "smoke rises and disperses"
-- Name the subject with their exact markers in every clip: "red-haired woman in blue jacket..."
+IDENTITY RULE -- mandatory in every prompt:
+  Include 8-12 words of the subject's exact visual markers from the photo.
+  Example: "pale elf, pointed ears, purple jacket, blue jeans"
   Without this the model generates a different person each clip.
-- Re-state the location in every clip (10-12 words): "in stone courtyard, golden afternoon light, photorealistic"
-  Without this the background drifts into generic fire/electric hallucinations.
 
-BANNED (produce static output or identity loss):
-- Vague mood words: "tension", "energy", "atmosphere", "drama", "intensity"
-- Camera instructions: zoom, pan, push, pull, dolly, tilt, crane, truck
-- Abstract concepts: "power", "presence", "emotion", "reveals", "transforms"
-- Inventing subjects not in the photo
+SCENE ANCHOR -- mandatory in every prompt:
+  Include 6-10 words restating the original setting.
+  Example: "among large purple mushrooms, wooden fence background"
+  Without this the background drifts to fire/electric hallucinations.
+
+ONE MOTION PER CLIP -- describe a single physical change with start + end:
+  Good: "right hand lifts from knee to waist height, then lowers back"
+  Good: "shoulders rise slowly with one breath, then settle down"
+  Good: "fabric on left sleeve ripples once, then goes still"
+  Bad: "moves with intense energy" (vague -- model produces static)
+  Bad: "walks across the scene" (too complex -- model loses identity)
+
+BANNED (causes artifacts, identity loss, or style drift):
+  - anime, cartoon, 2D, ethereal, transcendent, otherworldly, mystical
+  - multiple simultaneous actions (confuses the denoiser)
+  - inventing subjects, props, or locations not in the photo
 
 Return ONLY valid JSON: {"clips": [{"prompt": "...", "duration": 5}, ...]}
-Duration is seconds per clip (integer 4-12). Vary for pacing.
-Total durations should sum close to the target_total_seconds given in the prompt.\
+Duration: seconds per clip (integer 4-12). Vary for musical pacing.
+Total durations should sum close to target_total_seconds.\
 """
 
-_STORY_ARC_KINETIC = _STORY_ARC_BASE + """
-
-ENERGY LEVEL: high-intensity physical motion for Wan I2V (25 denoising steps).
-Each prompt 45-60 words. Open with a strong physical verb describing MOVEMENT:
-"slams hand onto", "spins 180 degrees", "lunges forward two steps", "hurls arm upward".
-Arc across clips: escalating intensity -- start strong, build, peak at final clip.
-Clip timing: impact moments 4-6s, sustained action 7-10s, climax 6-10s.\
-"""
 
 _STORY_ARC_GENTLE = _STORY_ARC_BASE + """
 
-ENERGY LEVEL: subtle physical motion for LTX-2 Distilled (8 denoising steps).
-Keep prompts SHORT (30-45 words) and describe only ONE motion per clip.
-At 8 steps, the model can animate ONE clear physical change -- not multiple.
+MODEL: LTX-2 Distilled, 8 denoising steps.
+At 8 steps the model animates ONE small change per clip reliably.
+Multiple actions, complex motion, or face animation all fail at 8 steps.
 
-MOTION SCALE for 8-step model (from safest to riskiest):
-  SAFE -- inanimate objects and environment:
-    "curtain drifts 10cm to the right", "steam rises from cup and disperses upward",
-    "shadow shifts 15cm across the floor", "leaf falls from upper left to lower right"
-  MODERATE -- body periphery only:
-    "right hand lifts from table surface by 5cm", "shoulders rise with one breath then fall",
-    "fabric along left sleeve ripples once then settles"
-  AVOID -- head and face (causes ghosting at 8 steps):
-    head turns, eyes move, mouth opens, brows shift
+PROMPT LENGTH: 15-25 words total per clip (model ignores long prompts at 8 steps).
 
-Each clip: subject markers (15 words) + one motion with start/end position (15 words) + location (10 words).
-Arc: vary WHICH element moves each clip. Same scene, different physical detail each time.\
+MOTION HIERARCHY (safest to riskiest at 8 steps):
+  SAFE: props/objects shift; background stirs; fabric settles; shadow moves
+    "curtain drifts 8cm right then stops", "shadow extends 10cm across floor"
+  MODERATE: body periphery (not face/head)
+    "right hand lifts 5cm from surface", "fabric on sleeve ripples once"
+  AVOID: any head, face, eye, or mouth motion -- causes ghosting
+
+EXAMPLE PROMPTS (15-25 words each):
+  "pale elf, purple jacket, blue jeans -- right index finger taps once on knee -- mushroom garden, wooden fence, photorealistic"
+  "pale elf, pointed ears, blue jeans -- sleeve fabric ripples once at wrist then settles -- purple mushrooms, evening light"
+
+Arc: vary which small element moves each clip. Same scene, different detail.\
 """
+
 
 _STORY_ARC_LTX_ACTION = _STORY_ARC_BASE + """
 
-ENERGY LEVEL: deliberate full-body motion for LTX-2 Dev13B (40 denoising steps).
-At 40 steps the model can hold identity through real movement.
-Prompts should be 45-60 words. Describe ONE complete physical action per clip.
+MODEL: LTX-2 Dev13B, 40 denoising steps.
+At 40 steps the model holds identity through real body movement.
+
+PROMPT LENGTH: 45-65 words per clip.
 
 MOTION EXAMPLES that work at 40 steps:
   "takes one slow step forward, weight shifting from back foot to front foot"
-  "right arm swings from side upward until hand reaches shoulder height"
-  "turns 45 degrees to the left, completing the rotation by end of clip"
-  "crouches down from standing until knees are bent at 90 degrees"
-  "leans forward from the waist, torso angling 30 degrees toward camera"
+  "right arm rises from side to shoulder height over 3 seconds, then holds"
+  "turns 30 degrees to the left, body rotating at the waist, head following"
+  "leans forward from the waist until torso is at 30 degrees, holds, returns"
 
-Each clip: subject+markers (15 words) + one complete action with start/end state (25 words) + location+style (15 words).
-Arc: build a physical story -- each clip continues the body from where it was.
-AVOID: erupts, slams, explodes, thrashes -- too much displacement loses identity.\
+STRUCTURE (every clip):
+  Subject markers (12 words) + single motion with start/end (25 words) + scene anchor (12 words)
+
+ALLOWED: step, lean, reach, lift, turn, crouch, stand, look toward, gesture.
+AVOID: run, jump, spin, erupt, explode -- too much displacement loses identity.\
 """
+
+
+_STORY_ARC_KINETIC = _STORY_ARC_BASE + """
+
+MODEL: Wan I2V, 25 denoising steps. Stronger identity preservation than LTX.
+PROMPT LENGTH: 80-120 words per clip. Describe motion as a sequence.
+
+SEQUENCE FORMAT (what the model responds to best):
+  "Initially [start state]. [Subject] [action verb] [direction/target] over [duration].
+   [What changes midway]. By the end, [final state]. [Scene anchor]."
+
+EXAMPLE:
+  "Initially standing with arms at sides. Pale elf in purple jacket slowly raises
+   both arms outward from hips until horizontal, palms facing up. Midway the
+   purple jacket fabric pulls taut across the shoulders. By the end both arms
+   are fully extended at shoulder height. Among large purple mushrooms,
+   wooden fence background, photorealistic, natural lighting."
+
+CAMERA TERMS that work with Wan I2V (use ONE per clip for variety):
+  "camera holds steady", "slow push-in toward subject", "gentle pan right 15 degrees"
+  -- vary across clips for musical energy but never zoom or rapid moves.
+
+Arc: build physical intensity across clips matching the song's energy sections.\
+"""
+
 
 _STORY_ARC_NARRATIVE = _STORY_ARC_BASE + """
 
-ENERGY: narrative motion. Each clip shows ONE purposeful action that advances
-the story -- not kinetic chaos, not ambient stillness. Think: the moment a
-character reaches for something, turns toward a sound, reacts to a discovery,
-or crosses a threshold. Actions the audience reads as story beats.
+MODEL: any. Balanced motion for music video storytelling.
+PROMPT LENGTH: 40-60 words per clip.
 
-NARRATIVE PRINCIPLES:
-- Every action implies causality: something causes the subject to move, or the
-  movement causes something. Do not describe motion for its own sake.
-- Prefer legible, unambiguous gestures readable in one glance: reaches for,
-  turns toward, kneels down, lifts, opens, steps to, looks up at.
-- Arc: the clip sequence should feel like a mini-scene with a beginning,
-  middle, and resolution -- not a random collection of motions.
+STRUCTURE (every clip):
+  1. Subject markers (10-12 words): exact visual markers from photo
+  2. One purposeful action (20-25 words): what happens, start to end
+  3. Scene anchor (10-12 words): original setting + visual style
 
-PROMPT SHAPE (mandatory every clip):
-  1. SUBJECT (12-16 words): exact visual markers from the photo -- clothing,
-     species, material, expression. Name the subject precisely.
-  2. ONE NARRATIVE ACTION (18-24 words): a single purposeful physical action
-     a viewer reads as story. Describe WHAT they do and where attention goes.
-  3. SCENE ANCHOR (10-14 words): setting + lighting + visual style, restated
-     every clip so the background does not drift.
+GOOD ACTIONS (legible in one glance, preserve identity):
+  reaches for, turns toward, picks up, sets down, opens, lifts,
+  leans in, leans back, looks up at, glances away, nods slowly
 
-ALLOWED: reaches for / picks up / sets down, turns toward / looks at / glances
-  away, takes one step toward / approaches, opens / closes / lifts / lowers,
-  leans in / leans back / stands up / sits down, nods / shakes head (sparing).
-BANNED: erupts, slams, explodes, thrashes, surges -- kills subject identity.
-BANNED: ambient-only events (shadow shifting, steam, curtain) as PRIMARY action.
-BANNED: abstract internal states ("contemplates", "realizes") -- show PHYSICAL
-  actions a camera can capture.
+AVOID: erupts, slams, explodes, thrashes, runs, jumps -- too much displacement.
+AVOID: "contemplates", "realizes", "feels" -- not physical, model ignores them.
 
-ARC STRUCTURE:
-  2 clips: action -> reaction
-  3 clips: notice -> approach -> act
-  4 clips: establish -> notice -> approach -> act
-  5+ clips: establish -> notice -> approach -> act -> consequence
-
-Do NOT escalate to chaos. The final clip is a natural endpoint, not a climax.\
+Arc: notice -> approach -> act -> consequence. Each clip follows from the last.\
 """
+
 
 _STORY_ARC_CALM = _STORY_ARC_BASE + """
 
-ENERGY: scene-hold mode. The subject does not move. Motion comes ONLY from the
-environment already visible in the photo.
+MODEL: LTX-2 Distilled, calm/scene-hold mode.
+PROMPT LENGTH: 20-30 words per clip.
 
-ALLOWED MOTION (environment only -- choose one per clip):
-  - Light: a shadow shifts slightly across a surface, window light brightens or dims
-  - Atmosphere: steam rises from a cup, smoke drifts from a fire, breath mist dissipates
-  - Background: a distant leaf stirs, a curtain shifts from unseen air, water surface ripples
-  - Gravity settle: fabric creases settle by weight, a prop shifts a millimetre by gravity
-  - Weather: clouds pass overhead casting a shadow change, rain visible in background only
+The SUBJECT is completely still. Motion comes ONLY from the environment.
 
-BANNED -- any motion involving the subject at all:
-  - No head, face, eyes, mouth, brows, ears, trunk, snout, beak
-  - No hands, arms, fingers, shoulders, torso breathing
-  - No stepping, shifting weight, turning, reaching, swaying
-  WHY: At 8-12 inference steps the denoiser cannot maintain facial/body detail while
-  computing motion. Even a 1-degree head tilt causes temporal ghosting across the entire
-  subject by frame 4. Environment-only motion keeps the subject pixel-stable.
+ALLOWED (one per clip):
+  light shifts across a surface, shadow lengthens by 10cm, curtain drifts 5cm,
+  steam rises from a vessel, leaf trembles once, water surface ripples slightly
 
-PROMPT SHAPE (use this exact structure, every clip):
-  1. SUBJECT (10-15 words): exact visual markers from photo -- clothing colour, species,
-     material, hair colour. Describe the subject as completely still.
-  2. ENVIRONMENT MOTION (12-18 words): ONE environmental change from the ALLOWED list.
-     Must be physically present in or plausible from the original scene.
-  3. SCENE ANCHOR (8-12 words): setting + visual style, restated every clip.
-  4. CAMERA LOCK (fixed, always last): "Static shot, fixed camera."
+BANNED -- subject motion of any kind (causes ghosting at 8 steps):
+  head, face, eyes, mouth, brows, hands, arms, torso breathing, any body part
 
-ARC: same scene, one different environmental detail per clip.
-Clips feel like a breathing photograph, not an action sequence.
-No crescendo. No escalation. Pure scene preservation.\
+STRUCTURE: [subject completely still, 10 words] + [one environmental change, 12 words] + [scene anchor, 8 words]
+
+Arc: same scene, one different environmental detail per clip. Breathing photograph.\
 """
 
 

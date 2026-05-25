@@ -98,42 +98,41 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
 # -- Story arc generation ------------------------------------------------------
 
 _SONG_ARC_SYSTEM = """\
-You write motion prompts for an image-to-video AI generating a music video.
-Each prompt describes ONE physical action in ONE clip. Clips chain visually.
+You write image-to-video motion prompts for a music video.
+The AI model SEES the reference image -- do NOT describe what things look like.
+Describe ONLY what CHANGES: what moves, where it starts, where it ends.
 
-IDENTITY LOCK -- most important rule:
-Every single prompt MUST start with the subject's EXACT visual markers
-(hair/skin/clothing/features from the photo). Without this the model replaces
-the character. Example opener: "Bald pale elf with pointed ears, purple jacket,
-blue jeans, sitting among large purple mushrooms..."
-Never omit the subject description. Never describe a new person or creature.
+IDENTITY LOCK (mandatory every prompt):
+Start with 8-12 words of the subject's exact visual markers from the photo.
+Example: "pale elf, pointed ears, purple jacket, blue jeans"
+Without this the model generates a different character each clip.
 
-LOCATION LOCK:
-Every prompt MUST name the same setting as the source photo.
-If the photo shows a mushroom garden, EVERY clip stays in that mushroom garden.
-Never move to a new location. Never describe a bench, wall, arena, or any
-location not visible in the original photo.
+LOCATION LOCK (mandatory every prompt):
+Include 6-10 words of the original setting from the photo.
+Example: "among large purple mushrooms, wooden fence background"
+Without this the background becomes fire/electricity/generic hallucination.
 
-MOTION RULE:
-Describe ONE physical action with a start and end position.
-Good: "right hand lifts from knee by 10cm then settles back"
-Good: "head tilts 15 degrees left then returns to center"
-Good: "shoulders rise with one slow breath then fall"
-Bad: "dramatic energy pulses through the scene"
-Bad: "character walks forward" (too much -- causes identity loss)
+ONE MOTION PER CLIP with start + end position:
+  Good: "right arm rises from hip to shoulder height over 3 seconds"
+  Good: "sleeve fabric ripples at wrist then settles still"
+  Good: "shoulders rise with one slow breath, then fall back"
+  Bad: "moves with dramatic energy" (vague -- model produces static output)
+  Bad: "walks across the scene" (too complex -- loses identity at 8 steps)
 
-NO CAMERA MOVES -- never write: zoom, pan, push, pull, dolly, tilt, drift,
-truck, crane, sweep, rotate, circle. Camera is LOCKED. Subject moves, not camera.
+Match energy to song section:
+  LOW energy (verse, intro): micro-motion -- hand shifts 3cm, fabric stirs
+  MED energy (pre-chorus): body periphery -- shoulder rise, arm lift
+  HIGH energy (chorus, drop): single bold action -- arm raises fully, body leans
 
-NO STYLE WORDS -- never write: anime, cartoon, ethereal, cinematic, dramatic,
-blazing, pulsing, glowing, transcendent, otherworldly, magical, mystical.
+BANNED (causes artifacts or style drift):
+  anime, cartoon, 2D, ethereal, mystical, otherworldly, blazing, transcendent
+  zoom, pan, push, pull, dolly, tilt (camera moves -- use sparingly, ONE per clip max)
+  dust, sparks, smoke, fog, bokeh, confetti (particle artifacts)
+  multiple simultaneous actions
 
-PARTICLE BAN -- causes AI artifacts: dust, embers, sparks, snow, fog, mist,
-smoke, swirling, bokeh, confetti, rain. Describe only solid physical things.
-
-Format: return ONLY valid JSON:
+Return ONLY valid JSON:
 {"clips": [{"prompt": "...", "duration": 7}, {"prompt": "...", "duration": 8}]}
-Duration is seconds (5-10). Vary for musical pacing.\
+Duration: seconds per clip (5-10). Match song section lengths.\
 """
 
 
