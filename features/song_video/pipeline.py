@@ -493,36 +493,47 @@ def _do_song_gpu_phase(
         # Worker URL: local by default, satellite if batch runner requested it.
         _worker_url = settings.get("wangp_worker_url") or None
 
-        # Every clip starts from the original source photo -- never chain frames.
-        # Chaining causes the subject to drift clip-by-clip as each generation
-        # compounds any appearance deviation from the previous frame. For music
-        # videos (independent shots) this is wrong: use the source photo every
-        # time to guarantee the subject looks the same in every clip. The xfade
-        # crossfade at each junction hides the "restart" visually.
-        clip_start_image = prepped_photo
-        prompt_to_use    = clip_prompt
+        # Clip chaining: clips 2+ start from the last frame of the previous clip,
+        # not the source photo. This gives narrative progression -- each clip
+        # continues from where the previous one ended. reanchor_every resets to
+        # source periodically (at section boundaries) to prevent quality drift.
+        # _chain_frame is None for clip 0 and after each reanchor reset.
+        clip_start_image = _chain_frame if _chain_frame else prepped_photo
+        _is_chained = bool(_chain_frame)
+
+        prompt_to_use = clip_prompt
+        # Strip any camera move language the LLM generated
+        from features.fun_videos.multi_pipeline import _strip_camera_moves
+        prompt_to_use = _strip_camera_moves(prompt_to_use)
 
         # Prepend subject anchor so every clip is grounded to the actual photo.
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
             prompt_to_use = subject_anchor + " " + prompt_to_use
 
-        # Guard: WanGP rejects empty prompts. If both the story arc entry and
-        # subject anchor are empty/whitespace, use a safe fallback.
+        # For chained clips, tell the model to continue from the anchor frame.
+        if _is_chained:
+            prompt_to_use = "Exact same location and subject as previous frame, continuous scene. " + prompt_to_use
+
         if not prompt_to_use.strip():
             prompt_to_use = subject_anchor or "Subject in atmospheric scene, natural movement, cinematic"
         finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
         if not finalized.strip():
             finalized = "Cinematic scene, natural movement, photorealistic, high quality"
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
-        # Prefer duration from the beat-snapped arc entry; fall back to compute_clip_plan value
         _arc_dur  = _arc_entry.get("duration") if isinstance(_arc_entry, dict) else None
         this_dur  = float(_arc_dur) if _arc_dur else (clip_durations[i] if i < len(clip_durations) else clip_dur)
         this_dur  = max(4.0, min(12.0, this_dur))
 
-        # 3.5 guidance: high enough for the text prompt to drive real scene motion
-        # and variety (avoids Ken Burns drift), low enough not to fully override
-        # the source photo's character/appearance.
-        effective_guidance = min(guidance, 3.5)
+        # Chained clips: reduce guidance so the anchor frame dominates over text.
+        # Clip 0 (source photo) keeps full guidance -- identity is ground truth.
+        if not _is_chained:
+            effective_guidance = min(guidance, 3.5)
+        elif "distilled" in model_name.lower():
+            effective_guidance = min(guidance, 2.8)
+        elif "ltx" in model_name.lower():
+            effective_guidance = min(guidance, 3.0)
+        else:
+            effective_guidance = min(guidance, 4.0)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
@@ -540,7 +551,7 @@ def _do_song_gpu_phase(
                 steps=steps,
                 guidance=effective_guidance,
                 seed=seed,
-                negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
+                negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
@@ -592,7 +603,7 @@ def _do_song_gpu_phase(
                         steps=steps,
                         guidance=effective_guidance,
                         seed=seed,
-                        negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="calm"),
+                        negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
                         stop_check=_stopped,
                         log_fn=_log,
                         worker_url=_worker_url or None,
@@ -716,9 +727,17 @@ def _do_song_gpu_phase(
                 fallback = str(job_dir / f"chain_{i:02d}.png")
                 _chain_frame = _extract_last_frame(clip_path, fallback)
             if not _chain_frame:
-                log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses T2V", clip_num)
+                log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
+            elif prepped_photo:
+                # Blend 5% of source photo into every chain frame to prevent
+                # cumulative character drift across clips.
+                try:
+                    from features.fun_videos.multi_pipeline import _blend_anchor_with_source
+                    _blend_anchor_with_source(_chain_frame, prepped_photo)
+                except Exception as _be:
+                    log.debug("[song-video] Blend anchor failed (non-fatal): %s", _be)
 
-            # Periodic re-anchor: reset to source photo at section boundaries to prevent drift
+            # Periodic re-anchor: reset to source photo at section boundaries.
             if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
                 log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
                 _chain_frame = None  # next clip starts from source
