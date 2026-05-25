@@ -95,17 +95,19 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
         if not diffs:
             return []
 
-        # Threshold at 75th percentile
+        # Start at 60th percentile; if that gives fewer than 5 peaks, lower to 40th
         sorted_d = sorted(diffs)
-        threshold = sorted_d[int(len(sorted_d) * 0.75)]
+        for pct in (0.60, 0.40, 0.20):
+            threshold = sorted_d[int(len(sorted_d) * pct)]
+            peaks = []
+            prev_t = -1.0
+            for t, d in zip(times, diffs):
+                if d >= threshold and t - prev_t >= 0.8:
+                    peaks.append(round(t, 3))
+                    prev_t = t
+            if len(peaks) >= 5:
+                break
 
-        # Pick local maxima above threshold, min 1s apart
-        peaks = []
-        prev_t = -2.0
-        for t, d in zip(times, diffs):
-            if d >= threshold and t - prev_t >= 1.0:
-                peaks.append(round(t, 3))
-                prev_t = t
         return peaks
     except Exception as e:
         log.warning("[beat_sync] Frame-diff detection failed: %s", e)
