@@ -166,7 +166,7 @@ def _kill_stale_gpu_processes() -> None:
                     continue
                 log.info("Killing stale %s orphan (PID %d)", label, pid)
                 subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
                     capture_output=True, timeout=5, **_popen_flags(),
                 )
         except Exception as e:
@@ -451,6 +451,12 @@ def start_wangp_worker() -> tuple[bool, str | None]:
     global _wangp_worker_proc
 
     with _wangp_start_lock:
+        # Always evict orphan workers before deciding whether one is running.
+        # Without this, a stale worker from a previous DCS session can pass the
+        # health check, trigger an early return, and then silently coexist with
+        # a second worker spawned later -- two workers, double VRAM, GPU fan noise.
+        _kill_stale_gpu_processes()
+
         if wangp_worker_alive():
             _set_status("wangp", state="running", message="WanGP worker already running")
             return True, None
