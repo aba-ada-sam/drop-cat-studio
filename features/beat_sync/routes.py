@@ -34,6 +34,37 @@ async def serve_file(path: str):
     return FileResponse(path, media_type="application/octet-stream")
 
 
+@router.post("/extract-audio")
+async def extract_audio(body: dict):
+    """Extract audio track from an existing MP4 into a WAV file for analysis."""
+    import asyncio, subprocess, time
+    video_path = body.get("video_path", "")
+    if not video_path or not os.path.isfile(video_path):
+        return {"error": "video_path not found"}
+
+    ts = time.strftime("%Y-%m-%d")
+    out_dir = OUTPUT_DIR / ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(video_path).stem[:24]
+    audio_out = str(out_dir / f"{stem}_audio_{int(time.time())}.wav")
+
+    def _extract():
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path,
+             "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+             audio_out],
+            capture_output=True, timeout=120,
+        )
+        if r.returncode != 0 or not Path(audio_out).exists():
+            return None, r.stderr.decode(errors="replace")[-400:]
+        return audio_out, None
+
+    path, err = await asyncio.to_thread(_extract)
+    if not path:
+        return {"error": err or "Audio extraction failed"}
+    return {"audio_path": path}
+
+
 @router.post("/analyze")
 async def analyze_sync(body: dict):
     """Analyze audio beats and video motion peaks for alignment UI."""

@@ -699,6 +699,210 @@ export function init(panel) {
 
   new ResizeObserver(()=>{ if(_syncData) _drawSync(); }).observe(syncSection);
 
+  // ── Sync Existing MP4 ────────────────────────────────────────────────────────
+  // Standalone beat sync for MP4 files that already have audio baked in.
+  // Drops audio from the MP4, shows waveform, lets user align, retimes video only.
+
+  function _buildExistingSync() {
+    let _exVidPath = '', _exAudioPath = '', _exData = null, _exRemap = [], _exDragIdx = -1, _exAudioBuf = null, _exAudioCtx = null;
+
+    const pathInput = el('input', {
+      type: 'text', placeholder: 'Paste full path to existing MP4...',
+      style: 'flex:1; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-sm); padding:7px 10px; color:var(--text); font-size:13px; outline:none;',
+    });
+
+    const loadBtn = el('button', {
+      text: 'Load & Analyze', disabled: true,
+      style: 'padding:8px 16px; border-radius:var(--r-md); border:none; background:var(--accent); color:#000; font-size:13px; font-weight:700; cursor:not-allowed; opacity:.45;',
+    });
+
+    pathInput.addEventListener('input', () => {
+      const ok = pathInput.value.trim().length > 0;
+      loadBtn.disabled = !ok;
+      loadBtn.style.opacity = ok ? '1' : '.45';
+      loadBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+    });
+
+    const exStatus   = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:14px;' });
+    const exProgress = el('progress', { style: 'display:none; width:100%; height:3px;' });
+    exProgress.max = 100;
+
+    const exHint = el('div', { style: 'font-size:11px; color:var(--text-3);', text: 'Orange = beats  |  Blue = energy peaks  |  White = clip cuts  |  Red diamonds = motion peaks (drag to align)' });
+    const exCanvasA = el('canvas', { style: 'display:none; width:100%; border-radius:4px; cursor:crosshair; background:#0a0202;' });
+    exCanvasA.height = 70;
+    const exCanvasV = el('canvas', { style: 'display:none; width:100%; border-radius:4px; cursor:crosshair; background:#050101;' });
+    exCanvasV.height = 50;
+    const exInfo = el('div', { style: 'font-size:11px; color:var(--text-3);' });
+
+    const exAutoBtn   = el('button', { text: 'Auto-Align', style: 'padding:7px 14px; border-radius:var(--r-md); border:1px solid var(--accent-border); background:var(--accent-bg); color:var(--accent); font-size:12px; font-weight:600; cursor:pointer; display:none;' });
+    const exResetBtn  = el('button', { text: 'Reset',      style: 'padding:7px 12px; border-radius:var(--r-md); border:1px solid var(--border-2); background:none; color:var(--text-3); font-size:12px; cursor:pointer; display:none;' });
+    const exExportBtn = el('button', { text: 'Export Synced MP4', style: 'padding:7px 16px; border-radius:var(--r-md); border:none; background:var(--circus-red); color:#fff; font-size:12px; font-weight:700; cursor:pointer; display:none;' });
+    const exExStatus  = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:14px;' });
+    const exExProg    = el('progress', { style: 'display:none; width:100%; height:3px;' });
+    exExProg.max = 100;
+
+    // Reuse the same draw logic as the post-gen sync but with ex* variables
+    function _exSToX(c, t, dur) { return Math.round(t / dur * c.width); }
+    function _exXToS(c, x, dur) { return Math.max(0, Math.min(dur, x / c.width * dur)); }
+
+    function _exDraw() {
+      if (!_exData) return;
+      const a = _exData.audio || {}, v = _exData.video || {};
+      const dur = a.duration || v.duration || 1;
+      const W = exCanvasA.clientWidth || 700;
+      if (exCanvasA.width !== W) { exCanvasA.width = W; exCanvasV.width = W; }
+
+      const ca = exCanvasA.getContext('2d');
+      ca.clearRect(0, 0, W, 70);
+      if (_exAudioBuf) {
+        const d = _exAudioBuf.getChannelData(0), step = Math.ceil(d.length / W), cy = 35;
+        ca.strokeStyle = '#5a2020'; ca.lineWidth = 1;
+        for (let x = 0; x < W; x++) {
+          let mn = 1, mx = -1;
+          for (let i = x*step; i < (x+1)*step && i < d.length; i++) { if(d[i]<mn)mn=d[i]; if(d[i]>mx)mx=d[i]; }
+          ca.beginPath(); ca.moveTo(x, cy+mn*cy*.85); ca.lineTo(x, cy+mx*cy*.85); ca.stroke();
+        }
+      }
+      ca.strokeStyle = 'rgba(232,124,42,.25)'; ca.lineWidth = 1;
+      for (const t of (a.beat_times||[])) { const x=_exSToX(exCanvasA,t,dur); ca.beginPath(); ca.moveTo(x,0); ca.lineTo(x,70); ca.stroke(); }
+      ca.strokeStyle = '#e87c2a'; ca.lineWidth = 2;
+      for (const t of (a.energy_peaks||[])) { const x=_exSToX(exCanvasA,t,dur); ca.beginPath(); ca.moveTo(x,0); ca.lineTo(x,70); ca.stroke(); }
+
+      const cv = exCanvasV.getContext('2d');
+      cv.clearRect(0, 0, W, 50); cv.fillStyle = '#050101'; cv.fillRect(0,0,W,50);
+      cv.strokeStyle = 'rgba(255,255,255,.35)'; cv.lineWidth = 1;
+      for (const t of (v.clip_boundaries||[])) { if(t<.1)continue; const x=_exSToX(exCanvasV,t,dur); cv.beginPath(); cv.moveTo(x,0); cv.lineTo(x,50); cv.stroke(); }
+      const peaks = v.motion_peaks||[];
+      for (let i=0; i<peaks.length; i++) {
+        const rp = _exRemap.find(r=>r._i===i);
+        const t = rp ? rp.target_t : peaks[i], ot = peaks[i];
+        const x = _exSToX(exCanvasV,t,dur), ox = _exSToX(exCanvasV,ot,dur);
+        if (rp && Math.abs(x-ox)>2) {
+          cv.strokeStyle='rgba(232,74,74,.35)'; cv.lineWidth=1; cv.setLineDash([3,3]);
+          cv.beginPath(); cv.moveTo(ox,25); cv.lineTo(x,25); cv.stroke(); cv.setLineDash([]);
+        }
+        cv.fillStyle = rp ? '#ffaa00' : '#e84a4a'; cv.strokeStyle='#fff'; cv.lineWidth=1.5;
+        cv.beginPath(); cv.moveTo(x,25-7); cv.lineTo(x+7,25); cv.lineTo(x,25+7); cv.lineTo(x-7,25); cv.closePath(); cv.fill(); cv.stroke();
+      }
+    }
+
+    function _exPeakAt(x) {
+      if (!_exData) return -1;
+      const dur = (_exData.audio?.duration || _exData.video?.duration || 1);
+      const peaks = _exData.video?.motion_peaks || [];
+      for (let i=peaks.length-1; i>=0; i--) {
+        const rp = _exRemap.find(r=>r._i===i), t = rp ? rp.target_t : peaks[i];
+        if (Math.abs(_exSToX(exCanvasV,t,dur)-x) <= 10) return i;
+      }
+      return -1;
+    }
+    exCanvasV.addEventListener('mousedown', e => {
+      const r = exCanvasV.getBoundingClientRect(), x = (e.clientX-r.left)*(exCanvasV.width/r.width);
+      _exDragIdx = _exPeakAt(x); if (_exDragIdx>=0) e.preventDefault();
+    });
+    exCanvasV.addEventListener('mousemove', e => {
+      const r = exCanvasV.getBoundingClientRect(), x = (e.clientX-r.left)*(exCanvasV.width/r.width);
+      exCanvasV.style.cursor = _exPeakAt(x)>=0 ? 'ew-resize' : 'crosshair';
+      if (_exDragIdx<0) return;
+      const dur = (_exData?.audio?.duration||_exData?.video?.duration||1), newT = _exXToS(exCanvasV,x,dur);
+      const origT = (_exData?.video?.motion_peaks||[])[_exDragIdx];
+      const ei = _exRemap.findIndex(r=>r._i===_exDragIdx);
+      if (ei>=0) _exRemap[ei].target_t=newT; else _exRemap.push({_i:_exDragIdx,video_t:origT,target_t:newT});
+      _exDraw();
+    });
+    window.addEventListener('mouseup', () => { _exDragIdx = -1; });
+
+    exAutoBtn.addEventListener('click', () => {
+      if (!_exData) return;
+      const a = _exData.audio||{}, v = _exData.video||{};
+      const beats=a.beat_times||[], energy=a.energy_peaks||[], peaks=v.motion_peaks||[];
+      const dur=a.duration||v.duration||1;
+      const cands=[...new Set([...energy,...beats.filter((_,i)=>i%4===0)])].sort((x,y)=>x-y);
+      const used=new Set(); _exRemap=[];
+      for (let i=0;i<peaks.length;i++) {
+        const ot=peaks[i]; let best=null,bd=Infinity;
+        for (const c of cands){const d=Math.abs(c-ot);if(d<bd&&d<=1.5&&!used.has(c)&&c>0&&c<dur){bd=d;best=c;}}
+        if(best!==null){_exRemap.push({_i:i,video_t:ot,target_t:best});used.add(best);}
+      }
+      exExStatus.textContent=`Auto-aligned ${_exRemap.length} of ${peaks.length} peaks`; _exDraw();
+    });
+    exResetBtn.addEventListener('click', () => { _exRemap=[]; _exDraw(); exExStatus.textContent=''; });
+
+    exExportBtn.addEventListener('click', async () => {
+      exExportBtn.disabled=true; exExStatus.textContent='Exporting...';
+      exExProg.style.display='block'; exExProg.value=5;
+      const remap = _exRemap.length>0 ? _exRemap.map(({video_t,target_t})=>({video_t,target_t})) : null;
+      try {
+        const r = await apiFetch('/api/sync/retime',{method:'POST',body:JSON.stringify({
+          video_path:_exVidPath, audio_path:_exAudioPath, remap_points:remap,
+        })});
+        if (r.error) throw new Error(r.error);
+        const poll = setInterval(async () => {
+          const j = await apiFetch(`/api/jobs/${r.job_id}`);
+          exExProg.value=j.progress||5; exExStatus.textContent=j.message||'Retiming...';
+          if (j.status==='done') {
+            clearInterval(poll); exExProg.style.display='none';
+            exExStatus.textContent='Done: '+j.output; exExportBtn.disabled=false;
+            document.dispatchEvent(new Event('session-updated'));
+            toast('Synced MP4 saved', 'success');
+          } else if (j.status==='error'||j.status==='stopped') {
+            clearInterval(poll); exExProg.style.display='none';
+            exExStatus.textContent='Failed: '+(j.error||j.status); exExportBtn.disabled=false;
+          }
+        }, 1500);
+      } catch(e) { exExProg.style.display='none'; exExStatus.textContent='Error: '+e.message; exExportBtn.disabled=false; }
+    });
+
+    loadBtn.addEventListener('click', async () => {
+      const vid = pathInput.value.trim();
+      if (!vid) return;
+      _exVidPath = vid; _exRemap = []; _exData = null;
+      loadBtn.disabled=true; exStatus.textContent='Extracting audio from MP4...';
+      exProgress.style.display='block'; exProgress.value=10;
+      try {
+        const ex = await apiFetch('/api/sync/extract-audio',{method:'POST',body:JSON.stringify({video_path:vid})});
+        if (ex.error) throw new Error(ex.error);
+        _exAudioPath = ex.audio_path;
+        exStatus.textContent='Analyzing beats and motion peaks...'; exProgress.value=40;
+        _exData = await apiFetch('/api/sync/analyze',{method:'POST',body:JSON.stringify({video_path:vid,audio_path:_exAudioPath})});
+        const a=_exData.audio||{}, v=_exData.video||{};
+        exInfo.textContent=`BPM: ${a.bpm?Math.round(a.bpm):'--'}  |  Beats: ${a.beat_times?.length||0}  |  Energy peaks: ${a.energy_peaks?.length||0}  |  Motion peaks: ${v.motion_peaks?.length||0}`;
+        exStatus.textContent='Ready -- drag red diamonds or hit Auto-Align, then Export.';
+        exProgress.style.display='none';
+        [exCanvasA,exCanvasV,exHint,exAutoBtn,exResetBtn,exExportBtn].forEach(e=>e.style.display='block');
+        try {
+          const resp = await fetch('/api/sync/serve?path='+encodeURIComponent(_exAudioPath));
+          if (resp.ok) {
+            if (!_exAudioCtx) _exAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+            _exAudioBuf = await _exAudioCtx.decodeAudioData(await resp.arrayBuffer());
+          }
+        } catch(_) {}
+        _exDraw();
+      } catch(e) {
+        exProgress.style.display='none'; exStatus.textContent='Error: '+e.message; loadBtn.disabled=false;
+      } finally {
+        loadBtn.disabled=false;
+      }
+    });
+
+    new ResizeObserver(()=>{ if(_exData) _exDraw(); }).observe(exCanvasA);
+
+    return _card([
+      LABEL('Sync Existing MP4'),
+      el('div', { style: 'font-size:12px; color:var(--text-3); margin-bottom:4px;', text: 'Drop any MP4 here -- audio is extracted automatically. Video is retimed to match the beats. Original audio is muxed back unchanged.' }),
+      el('div', { style: 'display:flex; gap:6px;' }, [pathInput, loadBtn]),
+      exProgress,
+      exStatus,
+      exHint,
+      exCanvasA,
+      exCanvasV,
+      exInfo,
+      el('div', { style: 'display:flex; gap:8px; flex-wrap:wrap;' }, [exAutoBtn, exResetBtn, exExportBtn]),
+      exExProg,
+      exExStatus,
+    ]);
+  }
+
   // ── Assemble layout ────────────────────────────────────────────────────────
 
   panel.style.cssText = 'display:flex; flex-direction:column; gap:14px; padding:16px; overflow-y:auto; height:100%;';
@@ -746,7 +950,7 @@ export function init(panel) {
 
     // Beat sync -- appears after generation completes
     _card([
-      LABEL('Beat Sync'),
+      LABEL('Beat Sync (after generation)'),
       el('div', {
         id: 'beat-sync-placeholder',
         style: 'font-size:12px; color:var(--text-4); font-style:italic; padding:6px 0;',
@@ -754,6 +958,9 @@ export function init(panel) {
       }),
       syncSection,
     ]),
+
+    // Standalone sync for existing MP4 files
+    _buildExistingSync(),
   );
 
   // Wire song-upload state to single-image button too
