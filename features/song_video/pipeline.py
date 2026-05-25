@@ -23,7 +23,7 @@ from pathlib import Path
 from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, TIER_FAST, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
-from features.fun_videos.multi_pipeline import _concat_clips
+from features.fun_videos.multi_pipeline import _concat_clips, _concat_with_xfade
 from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
@@ -374,7 +374,7 @@ def run_song_prep(job, photo_path, settings):
         n_sections_in_video = max(1, sum(1 for s in sections if s.get("start", 0) < video_dur))
         reanchor_every = max(2, min(5, round(n_clips / max(1, n_sections_in_video))))
     else:
-        reanchor_every = 3  # default: reset every 3 clips
+        reanchor_every = 0  # pure chain, no source resets
     settings["_reanchor_every"] = reanchor_every
     log.info("[song-video] reanchor_every=%d (from %d sections)", reanchor_every, len(sections))
 
@@ -507,9 +507,9 @@ def _do_song_gpu_phase(
         _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
-        # Strip any camera move language the LLM generated
-        from features.fun_videos.multi_pipeline import _strip_camera_moves
-        prompt_to_use = _strip_camera_moves(prompt_to_use)
+        # Strip camera moves and lock to static shot so LTX doesn't default to zoom/pan
+        from features.fun_videos.multi_pipeline import _enforce_static_camera
+        prompt_to_use = _enforce_static_camera(prompt_to_use)
 
         # Prepend subject anchor so every clip is grounded to the actual photo.
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
@@ -621,24 +621,6 @@ def _do_song_gpu_phase(
                 _log(f"[error] Clip {clip_num} produced no output -- stopping early")
             break
 
-        # Extract clean chain frame NOW from the original WanGP output BEFORE any
-        # re-encoding. Beat-sync (CRF-18) and tail-trim happen below; if we wait
-        # until after those, the "lossless PNG" carries H.264 block artifacts baked
-        # into skin pixels which LTX-2 reinforces each clip, producing the
-        # pox/pustule accumulation by clip 5-10.
-        _clean_chain_frame: str | None = None
-        if i < n_clips - 1:
-            _raw_dur = probe_duration(clip_path) or this_dur
-            _seek_t  = _raw_dur * 0.85
-            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
-            _cfr = subprocess.run(
-                ["ffmpeg", "-y", "-ss", f"{_seek_t:.4f}", "-i", clip_path,
-                 "-frames:v", "1", _cframe_path],
-                capture_output=True, timeout=30,
-            )
-            if _cfr.returncode == 0 and Path(_cframe_path).exists():
-                _clean_chain_frame = _cframe_path
-
         # Trim clip to exact beat-aligned duration so timing errors don't
         # accumulate across clips. WanGP may over/undershoot by up to ~0.5s.
         actual_dur = probe_duration(clip_path)
@@ -653,21 +635,10 @@ def _do_song_gpu_phase(
                 log.debug("[song-video] Clip %d trimmed %.2fs -> %.2fs", clip_num, actual_dur, this_dur)
 
         # -- Beat-sync via motion peak detection + speed ramp ----------------
-        # The LLM gave us a story arc with a clear visual climax in each clip,
-        # but the climax lands wherever WanGP put it -- not on the song's beat.
-        # We detect the natural peak via frame differencing then warp the clip
-        # so that peak slides onto target_time. Total clip duration is
-        # preserved, so downstream concat math doesn't change.
-        # Use the actual clip duration after the trim so target_time can't
-        # land beyond the real end if the trim couldn't bring duration into spec.
         post_trim_dur = probe_duration(clip_path) or this_dur
         beat_pos      = beat_positions[i] if i < len(beat_positions) else 0.5
         target_time   = beat_pos * post_trim_dur
         ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
-        # Skip beat-sync for clips whose target is at the edge (beat_pos ~0) or
-        # center (beat_pos ~0.5) -- the edge guard and "peak already on beat" checks
-        # inside align_clip_to_beat would skip them anyway after an expensive cv2
-        # frame scan. Skipping here saves ~2-4s per clip for 60-70% of clips.
         _beat_sync_useful = beat_pos > 0.02
         job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} -- syncing peak to beat...")
         try:
@@ -675,16 +646,12 @@ def _do_song_gpu_phase(
                 clip_path, target_time, post_trim_dur, ramped_out,
             ) if _beat_sync_useful else (False, {"reason": "beat_pos near 0 or 0.5 -- skipped"})
             if applied and Path(ramped_out).exists():
-                # Replace the original with the ramped version. The chain
-                # frame we extract below now comes from the ramped clip,
-                # so the next clip's start frame still matches what plays.
                 os.replace(ramped_out, clip_path)
                 _log(
                     f"[info] Clip {clip_num} beat-synced: peak {info['natural_time']:.2f}s "
                     f"-> {info['target_time']:.2f}s (conf {info['confidence']:.2f})"
                 )
             else:
-                # Clean up partial output if the ramp aborted mid-write.
                 if os.path.exists(ramped_out):
                     try:
                         os.remove(ramped_out)
@@ -696,10 +663,7 @@ def _do_song_gpu_phase(
             log.warning("[song-video] Beat-sync exception on clip %d: %s -- keeping original", clip_num, e)
 
         # LTX-2 bakes a ~0.2s fade-out into the tail of every clip.
-        # Trim intermediate clips before chain-frame extraction so the shared
-        # boundary frame is in-motion, not a fade-out still. Without this trim
-        # the hard cut looks like fade-out/fade-in: clip N fades to near-still,
-        # clip N+1 starts from that same near-still and slowly wakes up.
+        # Trim intermediate clips so the boundary frame is in-motion.
         # Leave the last clip untrimmed so the video ends with a natural fade.
         if i < n_clips - 1:
             clip_real_dur = probe_duration(clip_path) or this_dur
@@ -723,19 +687,16 @@ def _do_song_gpu_phase(
             "stage":       "generating",
         })
 
-        # Use the clean pre-encode chain frame (extracted before beat-sync).
-        # Falls back to extracting from the final clip if early extraction failed.
+        # Extract chain frame AFTER all processing (beat-sync + tail-trim) so
+        # the frame we give the next clip matches what this clip actually ends on.
+        # Extracting before would give a frame from the un-warped original that
+        # no longer corresponds to the processed clip's final visual state.
         if i < n_clips - 1:
-            if _clean_chain_frame:
-                _chain_frame = _clean_chain_frame
-            else:
-                fallback = str(job_dir / f"chain_{i:02d}.png")
-                _chain_frame = _extract_last_frame(clip_path, fallback)
+            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
+            _chain_frame = _extract_last_frame(clip_path, _cframe_path)
             if not _chain_frame:
                 log.debug("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
             elif prepped_photo:
-                # Blend 5% of source photo into every chain frame to prevent
-                # cumulative character drift across clips.
                 try:
                     from features.fun_videos.multi_pipeline import _blend_anchor_with_source
                     _blend_anchor_with_source(_chain_frame, prepped_photo)
@@ -765,14 +726,14 @@ def _do_song_gpu_phase(
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
 
-    # -- Phase 2: Concat
-    # song_video clips are all WanGP native format (no _chain_anchor involved).
-    # _concat_clips will fail stream-copy (mixed codec params) and fall back to
-    # a single CRF-15 re-encode of all clips in one ffmpeg pass -- faster than
-    # N separate normalize calls followed by a stream copy.
+    # -- Phase 2: Concat with xfade transitions
+    # Collect per-clip durations for correct xfade offset math.
+    clip_durations = [probe_duration(p) or 4.0 for p in clip_paths]
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
-    if not _concat_clips(clip_paths, concat_path):
-        concat_path = clip_paths[0]
+    if not _concat_with_xfade(clip_paths, clip_durations, concat_path):
+        log.warning("[song-video] xfade concat failed -- falling back to hard cut")
+        if not _concat_clips(clip_paths, concat_path):
+            concat_path = clip_paths[0]
 
     effective_dur = audio_dur if audio_dur > 0 else (probe_duration(audio_path) or 0.0)
     if effective_dur <= 0:
