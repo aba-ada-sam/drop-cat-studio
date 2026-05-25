@@ -70,20 +70,18 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
     """Detect motion peaks via per-frame pixel-difference energy.
 
     Uses ffmpeg signalstats to get YDIF (luma frame difference) per frame,
-    then picks local maxima above 75th percentile spaced at least 1s apart.
+    then picks local maxima above threshold spaced at least 2.5s apart.
     Works on both hard cuts and soft xfade transitions.
     """
     if duration <= 0:
         return []
     try:
-        # Extract YDIF metric: average absolute luma difference from previous frame
         r = subprocess.run(
             ["ffmpeg", "-i", video_path,
              "-vf", "signalstats=stat=YDIF",
              "-an", "-f", "null", "-"],
             capture_output=True, timeout=300, text=True, errors="replace",
         )
-        # Parse "pts_time:X ... YDIF:Y" from stderr
         times, diffs = [], []
         for line in r.stderr.splitlines():
             tm = re.search(r"pts_time:([\d.]+)", line)
@@ -95,18 +93,30 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
         if not diffs:
             return []
 
-        # Start at 60th percentile; if that gives fewer than 5 peaks, lower to 40th
+        # Peaks must be well-separated -- beat sync points need room around them
+        min_gap = 2.5
+        # Cap total peaks: roughly 1 per 5 seconds of video
+        max_peaks = max(6, int(duration / 5))
+
         sorted_d = sorted(diffs)
-        for pct in (0.60, 0.40, 0.20):
+        peaks = []
+        for pct in (0.75, 0.65, 0.55):
             threshold = sorted_d[int(len(sorted_d) * pct)]
             peaks = []
-            prev_t = -1.0
+            prev_t = -min_gap
             for t, d in zip(times, diffs):
-                if d >= threshold and t - prev_t >= 0.8:
+                if d >= threshold and t - prev_t >= min_gap:
                     peaks.append(round(t, 3))
                     prev_t = t
             if len(peaks) >= 5:
                 break
+
+        # If we still have too many, keep the top N by diff value
+        if len(peaks) > max_peaks:
+            diff_by_time = dict(zip(times, diffs))
+            peaks = sorted(
+                sorted(peaks, key=lambda t: -diff_by_time.get(t, 0))[:max_peaks]
+            )
 
         return peaks
     except Exception as e:
