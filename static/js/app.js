@@ -14,7 +14,7 @@ import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-b
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
-import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260503f';
+import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260525c';
 import { consumeHandoff } from './handoff.js?v=20260508a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260518a';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260521a';

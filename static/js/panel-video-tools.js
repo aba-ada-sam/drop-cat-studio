@@ -22,6 +22,8 @@ export function initBatch(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:28px; padding:16px; max-width:900px; margin:0 auto;' });
   panel.appendChild(root);
   _buildBatchSection(root);
+  _buildDivider(root, 'Frame Smoothing');
+  _buildInterpolateSection(root);
 }
 
 // -- Section 1: AI Music -------------------------------------------------------
@@ -211,10 +213,10 @@ function _buildAudioSection(root) {
 
 // -- Divider -------------------------------------------------------------------
 
-function _buildDivider(root) {
+function _buildDivider(root, label) {
   const div = el('div', { style: 'display:flex; align-items:center; gap:12px;' });
   div.appendChild(el('div', { style: 'flex:1; height:1px; background:var(--border);' }));
-  div.appendChild(el('span', { style: 'font-size:.68rem; font-weight:800; letter-spacing:.12em; color:var(--text-3); opacity:.6; text-transform:uppercase; white-space:nowrap;', text: 'Batch Processing' }));
+  div.appendChild(el('span', { style: 'font-size:.68rem; font-weight:800; letter-spacing:.12em; color:var(--text-3); opacity:.6; text-transform:uppercase; white-space:nowrap;', text: label || 'Batch Processing' }));
   div.appendChild(el('div', { style: 'flex:1; height:1px; background:var(--border);' }));
   root.appendChild(div);
 }
@@ -379,5 +381,166 @@ function _buildBatchSection(root) {
         err => { batchProg.hide(); processBtn.disabled = false; toast(err, 'error'); },
       );
     } catch (e) { batchProg.hide(); processBtn.disabled = false; toast(e.message, 'error'); }
+  });
+}
+
+// -- Section 3: Frame Smoothing ------------------------------------------------
+
+function _buildInterpolateSection(root) {
+  let _srcPath = null;
+  let _activeJobId = null;
+
+  // -- File picker -----------------------------------------------------------
+  const pickCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(pickCard);
+
+  const pickHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
+  pickCard.appendChild(pickHeader);
+  pickHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Frame Smoothing -- Fill Jerky Segments' }));
+  pickHeader.appendChild(el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Generates in-between frames via motion interpolation' }));
+
+  const fileInput = el('input', { type: 'file', accept: 'video/*', style: 'display:none' });
+  pickCard.appendChild(fileInput);
+
+  const btnRow = el('div', { style: 'display:flex; gap:8px; margin-bottom:10px;' });
+  pickCard.appendChild(btnRow);
+  const openBtn = el('button', { class: 'btn btn-sm', text: 'Open file...' });
+  btnRow.appendChild(openBtn);
+  openBtn.addEventListener('click', () => fileInput.click());
+
+  const sessionBtn2 = el('button', { class: 'btn btn-sm', text: '+ From Session' });
+  btnRow.appendChild(sessionBtn2);
+
+  const selectedStrip = el('div', { style: 'display:none; padding:7px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--border-2); font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;' });
+  pickCard.appendChild(selectedStrip);
+
+  const sessionPicker2 = el('div', { style: 'display:none; border:1px solid var(--border); border-radius:6px; max-height:140px; overflow-y:auto; margin-top:6px;' });
+  pickCard.appendChild(sessionPicker2);
+
+  function _setSource(path) {
+    _srcPath = path;
+    selectedStrip.textContent = path.split(/[\\/]/).pop();
+    selectedStrip.style.display = '';
+    sessionPicker2.style.display = 'none';
+  }
+
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/tools/upload', Array.from(fileInput.files));
+      if (data.files?.[0]) _setSource(data.files[0].path);
+    } catch (e) { toast(e.message, 'error'); }
+    fileInput.value = '';
+  });
+
+  sessionBtn2.addEventListener('click', async () => {
+    const show = sessionPicker2.style.display === 'none';
+    sessionPicker2.style.display = show ? '' : 'none';
+    if (!show) return;
+    try {
+      const data = await api('/api/session/videos');
+      sessionPicker2.innerHTML = '';
+      const vids = data.videos || [];
+      if (!vids.length) { sessionPicker2.appendChild(el('div', { style: 'padding:10px; font-size:.8rem; color:var(--text-3);', text: 'No session videos.' })); return; }
+      for (const v of vids) {
+        const row = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; border-bottom:1px solid var(--border-2);',
+          onclick() { _setSource(v.path); },
+        }, [
+          el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2);', text: v.filename }),
+          el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: formatDuration(v.duration) }),
+        ]);
+        sessionPicker2.appendChild(row);
+      }
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // -- Options ---------------------------------------------------------------
+  const optCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(optCard);
+  optCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Smoothing Options' }));
+
+  const targetFps = createSlider(optCard, { label: 'Target FPS (0 = 2x source)', min: 0, max: 120, step: 1, value: 0, unit: 'fps' });
+
+  const modeSelect = createSelect(optCard, {
+    label: 'Mode',
+    options: ['blend', 'mci', 'rife'],
+    value: 'blend',
+  });
+
+  const modeDesc = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:4px; line-height:1.5;' });
+  optCard.appendChild(modeDesc);
+
+  const modeDescriptions = {
+    blend: 'Blend -- fast, uses simple frame averaging. Good for mild jitter.',
+    mci: 'Motion-Compensated -- slower but tracks actual motion between frames. Better for fast action.',
+    rife: 'RIFE -- GPU-accelerated, best quality. Needs rife-ncnn-vulkan.exe at C:\\rife-ncnn-vulkan\\. Falls back to mci if not found.',
+  };
+
+  function _updateModeDesc() { modeDesc.textContent = modeDescriptions[modeSelect.value] || ''; }
+  modeSelect.el?.querySelector('select')?.addEventListener('change', _updateModeDesc);
+  _updateModeDesc();
+
+  // -- Run -------------------------------------------------------------------
+  const smoothBtn = el('button', {
+    class: 'btn btn-primary',
+    text: 'Smooth Frames',
+    style: 'width:100%; font-size:1.05rem; padding:13px; font-weight:700;',
+  });
+  root.appendChild(smoothBtn);
+
+  const progWrap = el('div');
+  root.appendChild(progWrap);
+  const prog = createProgressCard(progWrap);
+  prog.onCancel(async () => {
+    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping...', 'info'); _activeJobId = null; }
+  });
+
+  const vidWrap = el('div');
+  root.appendChild(vidWrap);
+  const player = createVideoPlayer(vidWrap);
+  player.onStartOver(() => player.hide());
+
+  smoothBtn.addEventListener('click', async () => {
+    if (!_srcPath) { toast('Select a video first', 'error'); return; }
+    smoothBtn.disabled = true;
+    prog.show();
+    prog.update(0, 'Starting...');
+    player.hide();
+
+    try {
+      const { job_id } = await api('/api/tools/interpolate', {
+        method: 'POST',
+        body: JSON.stringify({
+          video_path: _srcPath,
+          target_fps: targetFps.value || 0,
+          mode: modeSelect.value,
+        }),
+      });
+      _activeJobId = job_id;
+
+      pollJob(job_id,
+        j => prog.update(j.progress || 0, j.message || 'Interpolating...'),
+        j => {
+          prog.hide();
+          smoothBtn.disabled = false;
+          _activeJobId = null;
+          if (j.output) {
+            player.show(pathToUrl(j.output), j.output);
+            pushToGallery('video-tools', j.output, `Frame smooth (${modeSelect.value})`, null, {});
+            toast('Smoothing done!', 'success');
+          }
+        },
+        err => {
+          prog.hide();
+          smoothBtn.disabled = false;
+          _activeJobId = null;
+          toast(typeof err === 'string' ? err : (err?.message || 'Failed'), 'error');
+        },
+      );
+    } catch (e) {
+      prog.hide();
+      smoothBtn.disabled = false;
+      toast(e.message, 'error');
+    }
   });
 }
