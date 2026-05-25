@@ -262,14 +262,26 @@ def _do_generate(params: dict) -> dict:
     state["validate_success"] = 1
 
     _update_status(progress="Queuing generation task...")
-    print(f"[worker] DEBUG params: model={model_type} steps={steps} guidance={guidance} "
-          f"frames={num_frames} res={width}x{height} "
-          f"img_type={defaults.get('image_prompt_type')} "
-          f"audio_type={defaults.get('audio_prompt_type')} "
-          f"audio_src={bool(defaults.get('audio_source'))} "
-          f"start_imgs={len(defaults.get('image_start',[]))}", flush=True)
     wgp.process_prompt_and_add_tasks(state, 0, model_type)
     queue = wgp.get_gen_info(state).get("queue", [])
+
+    # If audio conditioning caused rejection (high res + audio tokens exceeds context),
+    # retry without audio so the generation still runs.
+    if not queue and defaults.get("audio_prompt_type") == "A":
+        print("[worker] Audio conditioning rejected -- retrying without audio (resolution may be too high for audio tokens)", flush=True)
+        defaults["audio_source"]      = None
+        defaults["audio_prompt_type"] = ""
+        defaults["audio_scale"]       = 1.0
+        state2 = _build_state(model_type)
+        defaults.setdefault("image_refs", [])
+        wgp.set_model_settings(state2, model_type, defaults)
+        state2["validate_success"] = 1
+        wgp.process_prompt_and_add_tasks(state2, 0, model_type)
+        queue = wgp.get_gen_info(state2).get("queue", [])
+        if queue:
+            state = state2
+            print("[worker] Fallback without audio accepted -- generating without lip sync", flush=True)
+
     if not queue:
         return {"ok": False, "output": None,
                 "error": "WanGP rejected the generation request -- this usually means a parameter is out "
