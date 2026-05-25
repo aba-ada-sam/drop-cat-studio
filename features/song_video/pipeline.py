@@ -479,17 +479,12 @@ def _do_song_gpu_phase(
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
-    # Audio conditioning: extract per-clip audio slices so LTX-2 can synchronise
-    # the subject's facial movement and body motion to the music waveform.
-    # This is what enables lip-sync / singing behaviour.
-    _lip_sync = bool(settings.get("lip_sync", True))
+    # Audio conditioning disabled pending investigation -- WanGP rejects
+    # audio_prompt_type=A even for ltx2_distilled when using extracted WAV slices.
+    # TODO: debug correct audio format/duration requirements, then re-enable.
+    _lip_sync = False
     _audio_slices_dir = job_dir / "audio_slices"
-    _audio_slices_dir.mkdir(exist_ok=True)
     _clip_start_times = clip_start_times or []
-    if _lip_sync:
-        log.info("[song-video] Lip sync ON -- audio conditioning enabled for all %d clips", n_clips)
-    else:
-        log.info("[song-video] Lip sync OFF -- skipping audio conditioning")
 
     for i, _arc_entry in enumerate(story_arc):
         clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
