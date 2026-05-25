@@ -157,3 +157,48 @@ async def mix_music(request: Request):
         label="Music mix",
     )
     return {"job_id": job.id}
+
+
+@router.post("/interpolate")
+async def interpolate_frames(request: Request):
+    """Smooth jerky footage by generating in-between frames.
+
+    Body:
+        video_path  -- absolute path to the source video
+        target_fps  -- desired output frame rate (default: 2x source)
+        mode        -- "blend" (fast), "mci" (quality), "rife" (best, needs RIFE exe)
+        out_dir     -- optional output directory override
+    """
+    from app import get_job_manager; job_manager = get_job_manager()
+    from features.video_tools.interpolator import interpolate_video
+    import datetime
+
+    body = await request.json()
+    video_path = body.get("video_path", "")
+    target_fps = float(body.get("target_fps", 0))
+    mode = body.get("mode", "blend")
+    out_dir = body.get("out_dir", "")
+
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, "Video file not found")
+    if mode not in ("blend", "mci", "rife"):
+        raise HTTPException(400, "mode must be blend, mci, or rife")
+
+    src = Path(video_path)
+    date_str = datetime.date.today().strftime("%Y-%m-%d")
+    dest_dir = Path(out_dir) if out_dir else OUTPUT_DIR / date_str
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dst = dest_dir / f"{src.stem}_smooth_{mode}{src.suffix}"
+
+    def _worker(job, s, d, fps, m):
+        interpolate_video(job, s, d, fps, m)
+        job.output = str(d)
+        from core.session import get_session
+        get_session().add_file(str(d), tab="video_tools", label=f"Smoothed ({m})")
+        job.update(status="done", progress=100, message=f"Saved: {d.name}")
+
+    job = job_manager.submit(
+        JOB_VIDEO_TOOL, _worker, str(src), str(dst), target_fps, mode,
+        label=f"Interpolate {src.name}",
+    )
+    return {"job_id": job.id}
