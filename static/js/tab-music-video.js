@@ -262,13 +262,8 @@ export function init(panel) {
   function _updateButtons() {
     const hasAll = _folderFiles.length > 0 && !!_songPath;
     batchBtn.disabled = !hasAll;
-    batchBtn.style.opacity  = hasAll ? '1' : '.45';
-    batchBtn.style.cursor   = hasAll ? 'pointer' : 'not-allowed';
-    if (!_songPath) {
-      batchBtn.textContent = 'Upload a song first';
-    } else if (!_folderFiles.length) {
-      batchBtn.textContent = 'Choose a folder of images first';
-    } else {
+    batchBtn.style.display  = hasAll ? '' : 'none';
+    if (hasAll) {
       const loop = loopCheck.checked;
       batchBtn.textContent = loop ? `Start Loop  (${_folderFiles.length} images)` : `Queue All  ${_folderFiles.length} Images`;
     }
