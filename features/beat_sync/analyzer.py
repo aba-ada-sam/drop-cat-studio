@@ -82,12 +82,18 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
              "-an", "-f", "null", "-"],
             capture_output=True, timeout=300, text=True, errors="replace",
         )
+        # ffmpeg signalstats outputs pts_time: on the frame info line and YDIF: on
+        # the following [Parsed_signalstats_...] line -- never on the same line.
+        # Track the last-seen pts_time and associate it with the next YDIF value.
         times, diffs = [], []
+        last_pts = None
         for line in r.stderr.splitlines():
             tm = re.search(r"pts_time:([\d.]+)", line)
+            if tm:
+                last_pts = float(tm.group(1))
             yd = re.search(r"YDIF:([\d.]+)", line)
-            if tm and yd:
-                times.append(float(tm.group(1)))
+            if yd is not None and last_pts is not None:
+                times.append(last_pts)
                 diffs.append(float(yd.group(1)))
 
         if not diffs:
@@ -100,8 +106,12 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
 
         sorted_d = sorted(diffs)
         peaks = []
-        for pct in (0.75, 0.65, 0.55):
+        # Try progressively lower percentile thresholds until we have enough peaks.
+        # Go all the way to 40th percentile for uniform/interpolated video.
+        for pct in (0.85, 0.75, 0.65, 0.55, 0.45, 0.40):
             threshold = sorted_d[int(len(sorted_d) * pct)]
+            if threshold <= 0:
+                continue
             peaks = []
             prev_t = -min_gap
             for t, d in zip(times, diffs):
