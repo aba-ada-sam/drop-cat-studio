@@ -172,7 +172,24 @@ async def generate(request: Request):
 
     n_clips = int(body.get("num_clips") or
                   min(20, max(1, math.ceil(total_video_dur / clip_dur))))
-    n_clips = max(1, min(20, n_clips))  # cap at 12: longer songs loop, quality stays high
+    n_clips = max(1, min(20, n_clips))
+
+    # Snap total clip count so the loop boundary lands on a bar boundary.
+    # When the video loops, the cut between the end and start must feel like
+    # a beat hit, not a random mid-phrase desync.
+    # Bar duration at the song's BPM; default to 4-beat bar.
+    bpm = analysis.get("bpm") or 120
+    bar_dur = 4 * 60.0 / max(40, min(240, bpm))
+    total_clip_dur = n_clips * clip_dur
+    # How many whole bars does the clip sequence cover?
+    bars_covered = round(total_clip_dur / bar_dur)
+    # Find the n_clips that most closely aligns with a whole number of bars.
+    ideal_dur = bars_covered * bar_dur
+    n_clips_aligned = max(1, min(20, round(ideal_dur / clip_dur)))
+    if n_clips_aligned != n_clips:
+        log.info("[song-video] Snap n_clips %d->%d to align loop with bar boundary (%.1f bars, bpm=%d)",
+                 n_clips, n_clips_aligned, bars_covered, bpm)
+        n_clips = n_clips_aligned
 
     # Per-job timeout: 5 min per clip + 15 min buffer, min 30 min
     timeout_sec = max(1800, n_clips * 300 + 900)
@@ -314,6 +331,12 @@ async def batch_start(request: Request):
     n_clips = int(body.get("num_clips") or
                   min(20, max(1, math.ceil(total_video_dur / clip_dur))))
     n_clips = max(1, min(20, n_clips))
+    _bpm2 = analysis.get("bpm") or 120
+    _bar2 = 4 * 60.0 / max(40, min(240, _bpm2))
+    _n2 = max(1, min(20, round(round(n_clips * clip_dur / _bar2) * _bar2 / clip_dur)))
+    if _n2 != n_clips:
+        log.info("[song-batch] Snap n_clips %d->%d to bar boundary (bpm=%d)", n_clips, _n2, _bpm2)
+        n_clips = _n2
 
     settings = {
         "video_prompt":   body.get("video_prompt", ""),
