@@ -594,10 +594,11 @@ def run_song_pipeline(job, photo_path, settings):
     #   Forge keyframes anchor both ends of every clip so 360p chain doesn't degrade.
     # - Lip sync OFF or no keyframes: native 580p, audio conditioning falls back gracefully.
     # - Explicit override: honour ow/oh directly.
+    # Use local variables -- _audio_wav and _keyframes are already popped from settings above.
     _lip_sync_res_active = (
         bool(settings.get("lip_sync", True)) and
-        bool(settings.get("_audio_wav")) and
-        len(settings.get("_keyframes", [])) >= 2
+        bool(audio_wav) and
+        len(keyframes) >= 2
     )
     if ow and oh:
         tw, th = int(ow), int(oh)
