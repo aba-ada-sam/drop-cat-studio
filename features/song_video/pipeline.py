@@ -734,10 +734,12 @@ def _do_song_gpu_phase(
         # source periodically (at section boundaries) to prevent quality drift.
         # _chain_frame is None for clip 0 and after each reanchor reset.
         if _use_keyframes:
-            # Keyframe mode: each clip starts from a fresh Forge-quality image
-            # and is guided to end at the next keyframe. No chain degradation.
+            # Keyframe mode: only use start_image. end_image is removed because
+            # Forge keyframes look nearly identical to each other (0.10 denoising),
+            # so start+end being the same image forces LTX into a Ken Burns zoom.
+            # Identity quality comes from the start_image alone.
             clip_start_image = _kf[i] if i < len(_kf) else prepped_photo
-            clip_end_image   = _kf[i + 1] if i + 1 < len(_kf) else None
+            clip_end_image   = None
             _is_chained = i > 0
         else:
             clip_start_image = _chain_frame if _chain_frame else prepped_photo
@@ -745,17 +747,18 @@ def _do_song_gpu_phase(
             _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
-        # Strip camera moves and lock to static shot so LTX doesn't default to zoom/pan
-        from features.fun_videos.multi_pipeline import _enforce_static_camera
-        prompt_to_use = _enforce_static_camera(prompt_to_use)
+        # Strip explicit camera direction words (zoom, pan, dolly) but do NOT
+        # lock to "static shot" -- that suppresses all motion. The subject_anchor
+        # and start_image handle identity; the prompt should drive movement.
+        from features.fun_videos.multi_pipeline import _strip_camera_moves
+        prompt_to_use = _strip_camera_moves(prompt_to_use)
 
         # Prepend subject anchor so every clip is grounded to the actual photo.
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
             prompt_to_use = subject_anchor + " " + prompt_to_use
 
-        # For chained clips, tell the model to continue from the anchor frame.
-        if _is_chained:
-            prompt_to_use = "Exact same location and subject as previous frame, continuous scene. " + prompt_to_use
+        # Do NOT add "exact same location" prefix -- it suppresses all motion.
+        # Identity is maintained by the Forge keyframe start_image and subject_anchor text.
 
         if not prompt_to_use.strip():
             prompt_to_use = subject_anchor or "Subject in atmospheric scene, natural movement, cinematic"
@@ -767,16 +770,10 @@ def _do_song_gpu_phase(
         this_dur  = float(_arc_dur) if _arc_dur else (clip_durations[i] if i < len(clip_durations) else clip_dur)
         this_dur  = max(4.0, min(12.0, this_dur))
 
-        # Chained clips: reduce guidance so the anchor frame dominates over text.
-        # Clip 0 (source photo) keeps full guidance -- identity is ground truth.
-        if not _is_chained:
-            effective_guidance = min(guidance, 3.5)
-        elif "distilled" in model_name.lower():
-            effective_guidance = min(guidance, 2.8)
-        elif "ltx" in model_name.lower():
-            effective_guidance = min(guidance, 3.0)
-        else:
-            effective_guidance = min(guidance, 4.0)
+        # Guidance: Forge keyframe start_image anchors identity visually,
+        # so we no longer need to suppress guidance to prevent character drift.
+        # Use full guidance for all clips to get actual motion.
+        effective_guidance = min(guidance, 3.5)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
