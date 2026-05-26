@@ -141,7 +141,7 @@ async def generate(request: Request):
         raise HTTPException(400, f"Image not found: {photo_path}")
 
     config    = cfg.load()
-    clip_dur  = max(8, min(15, int(body.get("clip_duration", 10))))
+    clip_dur  = max(4, min(15, int(body.get("clip_duration", 6))))
     analysis  = body.get("audio_analysis") or {}
 
     # If analysis not provided, run a fast probe for duration
@@ -171,8 +171,8 @@ async def generate(request: Request):
     total_video_dur = audio_dur + pad_before + pad_after
 
     n_clips = int(body.get("num_clips") or
-                  min(12, max(1, math.ceil(total_video_dur / clip_dur))))
-    n_clips = max(1, min(12, n_clips))  # cap at 12: longer songs loop, quality stays high
+                  min(20, max(1, math.ceil(total_video_dur / clip_dur))))
+    n_clips = max(1, min(20, n_clips))  # cap at 12: longer songs loop, quality stays high
 
     # Per-job timeout: 5 min per clip + 15 min buffer, min 30 min
     timeout_sec = max(1800, n_clips * 300 + 900)
@@ -312,8 +312,8 @@ async def batch_start(request: Request):
     pad_after  = max(0.0, min(10.0, float(body.get("pad_after",  0))))
     total_video_dur = audio_dur + pad_before + pad_after
     n_clips = int(body.get("num_clips") or
-                  min(12, max(1, math.ceil(total_video_dur / clip_dur))))
-    n_clips = max(1, min(12, n_clips))
+                  min(20, max(1, math.ceil(total_video_dur / clip_dur))))
+    n_clips = max(1, min(20, n_clips))
 
     settings = {
         "video_prompt":   body.get("video_prompt", ""),

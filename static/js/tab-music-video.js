@@ -237,7 +237,7 @@ export function init(panel) {
     return { wrap, input, val };
   }
 
-  const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 15, 1, 10, 's');
+  const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 15, 1, 6, 's');
 
   // Padding: seconds of silent video before song starts / after song ends
   const { wrap: padBeforeWrap, input: padBeforeSlider } = _numRow('Video before song starts', 0, 10, 1, 0, 's');

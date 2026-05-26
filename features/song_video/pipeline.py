@@ -90,7 +90,7 @@ def _generate_forge_keyframes(
                 denoising_strength=0.10,
                 width=width,
                 height=height,
-                steps=12,
+                steps=8,
                 cfg_scale=4.0,
                 seed=seed,
                 save_images=False,
@@ -679,9 +679,25 @@ def _do_song_gpu_phase(
     _clip_start_times = clip_start_times or []
     _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav) and len(_clip_start_times) == n_clips
     _audio_slices_dir = job_dir / "audio_slices"
+
+    # Pre-extract ALL audio slices before the clip generation loop starts.
+    # This runs once upfront so WanGP never waits for an ffmpeg subprocess
+    # between clips. Each slice: corrected start time + clip duration from WAV.
+    _audio_slices: list[str | None] = [None] * n_clips
     if _lip_sync:
         _audio_slices_dir.mkdir(exist_ok=True)
-        log.info("[song-video] Lip sync ON -- slicing user audio per clip")
+        log.info("[song-video] Lip sync ON -- pre-extracting %d audio slices", n_clips)
+        for _si, (_st, _arc) in enumerate(zip(_clip_start_times, story_arc)):
+            _sdur = float(_arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur)
+            _sp = str(_audio_slices_dir / f"slice_{_si:02d}.wav")
+            _sr = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{_st:.4f}", "-t", f"{_sdur:.4f}",
+                 "-i", audio_wav, "-c:a", "copy", _sp],
+                capture_output=True, timeout=30,
+            )
+            if _sr.returncode == 0 and Path(_sp).exists():
+                _audio_slices[_si] = _sp
+        log.info("[song-video] Audio slices ready: %d/%d", sum(1 for s in _audio_slices if s), n_clips)
     elif settings.get("lip_sync") and not audio_wav:
         log.warning("[song-video] Lip sync requested but audio WAV conversion failed -- skipping")
     elif settings.get("lip_sync") and len(_clip_start_times) != n_clips:
@@ -764,23 +780,8 @@ def _do_song_gpu_phase(
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
-        # seek-boundary artifacts that would give LTX-2 a misaligned audio window.
-        _audio_slice: str | None = None
-        if _lip_sync and i < len(_clip_start_times):
-            _slice_path = str(_audio_slices_dir / f"slice_{i:02d}.wav")
-            _sr = subprocess.run(
-                ["ffmpeg", "-y",
-                 "-ss", f"{_clip_start_times[i]:.4f}",
-                 "-t",  f"{this_dur:.4f}",
-                 "-i",  audio_wav,
-                 "-c:a", "copy", _slice_path],
-                capture_output=True, timeout=30,
-            )
-            if _sr.returncode == 0 and Path(_slice_path).exists():
-                _audio_slice = _slice_path
-                log.debug("[song-video] Audio slice %d: %.1fs+%.1fs", clip_num, _clip_start_times[i], this_dur)
-            else:
-                log.debug("[song-video] Audio slice %d failed -- no lip sync for this clip", clip_num)
+        # Slices were pre-extracted before the loop -- just look up the path.
+        _audio_slice: str | None = _audio_slices[i] if i < len(_audio_slices) else None
 
         try:
             clip_path = video_generator.generate_video(
