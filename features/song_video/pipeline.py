@@ -202,25 +202,30 @@ BEAT ALIGNMENT (critical):
 Each clip includes "PEAK AT Xs" -- this is the beat hit in the music.
 Your subject MUST reach their peak gesture/expression AT exactly that moment.
 Structure every prompt: build-up BEFORE the peak, peak AT the moment, resolution AFTER.
-  Example with PEAK AT 2.9s into a 8s clip:
-  "...right arm slowly rises from hip [builds 0-2.9s], reaches full overhead extension at 2.9s [peak], then lowers back with the breath [3-8s]"
 
-ONE MOTION PER CLIP with start + end position:
-  Good: "right arm rises from hip to shoulder height, peaks at 2.9s, settles"
-  Good: "head turns slowly left, snaps to face camera at beat, holds"
-  Bad: "moves with dramatic energy" (vague -- no beat anchor)
-  Bad: "walks across the scene" (too complex -- loses identity)
+VARIETY RULE (mandatory):
+Every clip must use a DIFFERENT motion from the clips before and after it.
+NEVER repeat the same action twice in a row. Arm lifts, head turns, weight shifts,
+reaching, leaning, swaying, shaking, nodding, tilting -- vary them.
+If clip 3 is a head turn, clip 4 must be something else entirely.
+
+Motion menu (pick a DIFFERENT one each clip):
+  Head/face: head turns left/right, chin drops/lifts, jaw opens/closes, eyes close, face tilts
+  Torso: body leans forward/back/sideways, chest expands, shoulder rolls, spine straightens
+  Arms: one arm rises/lowers, hand reaches out/retracts, fingers spread/close, wrist rotates
+  Weight: weight shifts hip left/right, slight crouch/rise, swaying, rocking
+  Fabric/texture: clothing stirs, hair moves, fabric ripples at one edge
 
 Match energy to song section:
-  LOW energy: micro-motion -- hand shifts 3cm, fabric stirs, single breath
-  MED energy: body periphery -- shoulder rise, arm lift, head turn
-  HIGH energy: single bold action -- arm fully raised, body leans sharply, sharp head snap
+  LOW energy (verse/intro): single small motion -- chin drops 5cm, one shoulder settles
+  MED energy (pre-chorus): medium motion -- torso leans, one arm lifts partway
+  HIGH energy (chorus/drop): bold single action -- full lean, sharp head snap, arm fully extended
 
 BANNED (causes artifacts):
   anime, cartoon, 2D, ethereal, mystical, blazing, transcendent
-  zoom, pan, push, pull, dolly (camera moves)
+  zoom, pan, push, pull, dolly, tilt (camera moves)
   dust, sparks, smoke, fog, bokeh, confetti
-  multiple simultaneous actions
+  multiple simultaneous actions, walking, dancing
 
 Return ONLY valid JSON:
 {"clips": [{"prompt": "...", "duration": 7}, {"prompt": "...", "duration": 8}]}
@@ -291,9 +296,10 @@ def _generate_song_arc(
         f"\nPer-clip beat map ({n_clips} clips) -- PEAK AT = exact second for visual climax:\n"
         f"{energy_text}\n\n"
         f"Generate exactly {n_clips} motion prompts. "
+        f"CRITICAL: use a completely DIFFERENT motion type for every single clip -- "
+        f"never the same action twice in a row. Choose from the motion menu in the system prompt. "
         f"Each prompt MUST build to its peak at the stated second, then resolve. "
-        f"Use the lyrics as emotional/thematic context for what kind of action fits. "
-        f"Continue the SAME story arc across all clips."
+        f"Use the lyrics as emotional/thematic context for what kind of action fits."
     )
 
     try:
