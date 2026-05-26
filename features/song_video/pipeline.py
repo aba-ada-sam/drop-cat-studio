@@ -624,6 +624,7 @@ def run_song_pipeline(job, photo_path, settings):
             clip_start_times=clip_start_times,
             audio_wav=audio_wav,
             keyframes=keyframes,
+            lip_sync_res_active=_lip_sync_res_active,
         )
     finally:
         _cleanup_gpu_phase_temps(job_dir, audio_wav)
@@ -636,7 +637,7 @@ def _do_song_gpu_phase(
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
     reanchor_every=3, pad_before=0.0, clip_start_times=None, audio_wav=None,
-    keyframes=None,
+    keyframes=None, lip_sync_res_active=False,
 ):
     from app import gallery_push
     from features.fun_videos import video_generator
@@ -947,7 +948,7 @@ def _do_song_gpu_phase(
         # Per-clip upscale when lip sync forced 360p generation.
         # Upscaling each clip individually (before concat) is cleaner than
         # upscaling the final merged video, which can blur across boundaries.
-        if _lip_sync_res_active and th <= 360:
+        if lip_sync_res_active and th <= 360:
             up_out = clip_path.replace(".mp4", "_up.mp4")
             try:
                 from core.upscaler import upscale_video
