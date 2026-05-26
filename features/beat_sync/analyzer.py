@@ -81,11 +81,14 @@ def _detect_by_frame_diff(video_path: str, duration: float) -> list:
     if duration <= 0:
         return []
     try:
+        # Downsample to 5fps before signalstats -- reduces frames from ~5000 to ~1000
+        # for a 3:30 video. Motion peak detection doesn't need per-frame precision;
+        # 5fps gives 0.2s resolution which is well within the 2s min-gap window.
         r = subprocess.run(
             ["ffmpeg", "-i", video_path,
-             "-vf", "signalstats=stat=YDIF",
+             "-vf", "fps=5,signalstats=stat=YDIF",
              "-an", "-f", "null", "-"],
-            capture_output=True, timeout=300, text=True, errors="replace",
+            capture_output=True, timeout=60, text=True, errors="replace",
         )
         # ffmpeg signalstats outputs pts_time: on the frame info line and YDIF: on
         # the following [Parsed_signalstats_...] line -- never on the same line.
