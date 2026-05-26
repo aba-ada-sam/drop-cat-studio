@@ -332,9 +332,9 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
                     scene_description: str = "") -> str:
     """Auto-generate ironic/satirical lyrics for a video.
 
-    Uses text-only routing (fast, no vision model) -- the music_prompt and
-    scene_description provide enough context. Passing frames triggers qwen3-vl
-    which is 4-5x slower due to thinking-mode overhead.
+    When video frames are provided AND the provider supports vision (Anthropic/OpenAI),
+    uses them so lyrics describe/match what is actually happening in the video.
+    Falls back to text-only when frames unavailable or local-only provider.
     """
     parts = ["Write sardonic song lyrics matching this music and scene."]
     if music_prompt:
@@ -348,17 +348,31 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
 
     prompt = "\n\n".join(parts)
     try:
-        text = router.route(
-            [{"role": "user", "content": prompt}],
-            # BALANCED (Sonnet) for lyrics: Haiku produces flat generic verses;
-            # Sonnet picks the user's stated style (gypsy punk, cabaret, etc.)
-            # and writes lines that actually rhyme and have wit.
-            tier=TIER_BALANCED,
-            system=LYRICS_SYSTEM,
-            max_tokens=300,  # bumped from 200: 6 content lines + 3 markers + occasional
-                              # preamble fits in 300 with margin; 200 was tight when the
-                              # model echoed any structure before the actual lyrics.
-        )
+        # Use vision if frames are provided and provider supports it.
+        # This makes lyrics describe what is actually happening in the video,
+        # not just the music style -- far better audio-visual match.
+        use_vision = bool(video_frames_b64) and router._provider() in ("anthropic", "openai")
+        if use_vision:
+            vision_prompt = (
+                "These are frames from a music video being generated. "
+                "Write sardonic song lyrics that DESCRIBE and MATCH what is visually happening -- "
+                "the subject's actions, expressions, and setting should be reflected in the words.\n\n"
+                + "\n".join(parts[1:])  # include music/scene context after the opening line
+            )
+            text = router.route_vision(
+                vision_prompt, video_frames_b64[:4],  # max 4 frames
+                tier=TIER_BALANCED, system=LYRICS_SYSTEM, max_tokens=300,
+            )
+        else:
+            text = router.route(
+                [{"role": "user", "content": prompt}],
+                # BALANCED (Sonnet) for lyrics: Haiku produces flat generic verses;
+                # Sonnet picks the user's stated style (gypsy punk, cabaret, etc.)
+                # and writes lines that actually rhyme and have wit.
+                tier=TIER_BALANCED,
+                system=LYRICS_SYSTEM,
+                max_tokens=300,
+            )
         result = (text or "").strip()
         log.info("[lyrics] LLM returned %d chars: %r", len(result), result[:200])
 

@@ -588,13 +588,22 @@ def run_song_pipeline(job, photo_path, settings):
     job_dir = OUTPUT_DIR / ts / f"songvid_{slug}_{job.id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Always generate at the model's native resolution (580p).
-    # Audio conditioning (lip sync) is attempted at full res; the WanGP worker
-    # automatically falls back without audio if the context limit is exceeded.
-    # Forcing 360p to fit audio tokens caused severe quality degradation over
-    # 27 chained clips -- character detail collapses and artifacts compound.
+    # Resolution strategy:
+    # - Lip sync ON + Forge keyframes available: generate at 640x360 so audio tokens
+    #   fit in LTX-2's context window, then upscale each clip to 580p before concat.
+    #   Forge keyframes anchor both ends of every clip so 360p chain doesn't degrade.
+    # - Lip sync OFF or no keyframes: native 580p, audio conditioning falls back gracefully.
+    # - Explicit override: honour ow/oh directly.
+    _lip_sync_res_active = (
+        bool(settings.get("lip_sync", True)) and
+        bool(settings.get("_audio_wav")) and
+        len(settings.get("_keyframes", [])) >= 2
+    )
     if ow and oh:
         tw, th = int(ow), int(oh)
+    elif _lip_sync_res_active:
+        tw, th = 640, 360
+        log.info("[song-video] Lip sync: generating at 640x360 (audio context fits), will upscale each clip to 580p")
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
@@ -934,6 +943,22 @@ def _do_song_gpu_phase(
             )
             if tr.returncode == 0 and Path(trim_out).exists():
                 os.replace(trim_out, clip_path)
+
+        # Per-clip upscale when lip sync forced 360p generation.
+        # Upscaling each clip individually (before concat) is cleaner than
+        # upscaling the final merged video, which can blur across boundaries.
+        if _lip_sync_res_active and th <= 360:
+            up_out = clip_path.replace(".mp4", "_up.mp4")
+            try:
+                from core.upscaler import upscale_video
+                up_result, up_err = upscale_video(clip_path, up_out, scale=1032/640, method="ffmpeg")
+                if up_result and Path(up_result).exists():
+                    os.replace(up_result, clip_path)
+                    log.debug("[song-video] Clip %d upscaled 360p->580p", clip_num)
+                else:
+                    log.debug("[song-video] Clip %d upscale failed (%s) -- keeping 360p", clip_num, up_err)
+            except Exception as _ue:
+                log.debug("[song-video] Clip %d upscale exception: %s", clip_num, _ue)
 
         clip_paths.append(clip_path)
         _clip_secs.append(time.time() - _clip_t0)
