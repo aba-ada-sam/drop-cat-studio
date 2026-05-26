@@ -198,27 +198,33 @@ Include 6-10 words of the original setting from the photo.
 Example: "among large purple mushrooms, wooden fence background"
 Without this the background becomes fire/electricity/generic hallucination.
 
+BEAT ALIGNMENT (critical):
+Each clip includes "PEAK AT Xs" -- this is the beat hit in the music.
+Your subject MUST reach their peak gesture/expression AT exactly that moment.
+Structure every prompt: build-up BEFORE the peak, peak AT the moment, resolution AFTER.
+  Example with PEAK AT 2.9s into a 8s clip:
+  "...right arm slowly rises from hip [builds 0-2.9s], reaches full overhead extension at 2.9s [peak], then lowers back with the breath [3-8s]"
+
 ONE MOTION PER CLIP with start + end position:
-  Good: "right arm rises from hip to shoulder height over 3 seconds"
-  Good: "sleeve fabric ripples at wrist then settles still"
-  Good: "shoulders rise with one slow breath, then fall back"
-  Bad: "moves with dramatic energy" (vague -- model produces static output)
-  Bad: "walks across the scene" (too complex -- loses identity at 8 steps)
+  Good: "right arm rises from hip to shoulder height, peaks at 2.9s, settles"
+  Good: "head turns slowly left, snaps to face camera at beat, holds"
+  Bad: "moves with dramatic energy" (vague -- no beat anchor)
+  Bad: "walks across the scene" (too complex -- loses identity)
 
 Match energy to song section:
-  LOW energy (verse, intro): micro-motion -- hand shifts 3cm, fabric stirs
-  MED energy (pre-chorus): body periphery -- shoulder rise, arm lift
-  HIGH energy (chorus, drop): single bold action -- arm raises fully, body leans
+  LOW energy: micro-motion -- hand shifts 3cm, fabric stirs, single breath
+  MED energy: body periphery -- shoulder rise, arm lift, head turn
+  HIGH energy: single bold action -- arm fully raised, body leans sharply, sharp head snap
 
-BANNED (causes artifacts or style drift):
-  anime, cartoon, 2D, ethereal, mystical, otherworldly, blazing, transcendent
-  zoom, pan, push, pull, dolly, tilt (camera moves -- use sparingly, ONE per clip max)
-  dust, sparks, smoke, fog, bokeh, confetti (particle artifacts)
+BANNED (causes artifacts):
+  anime, cartoon, 2D, ethereal, mystical, blazing, transcendent
+  zoom, pan, push, pull, dolly (camera moves)
+  dust, sparks, smoke, fog, bokeh, confetti
   multiple simultaneous actions
 
 Return ONLY valid JSON:
 {"clips": [{"prompt": "...", "duration": 7}, {"prompt": "...", "duration": 8}]}
-Duration: seconds per clip (5-10). Match song section lengths.\
+Duration: seconds per clip (5-10).\
 """
 
 
@@ -230,47 +236,64 @@ def _generate_song_arc(
     photo_path: str | None,
     variety_theme: str = "",
     lyrics_text: str = "",
+    clip_durations: list | None = None,
+    beat_positions: list | None = None,
 ) -> list[str]:
     """Generate N motion prompts that follow a single story across the song.
 
-    Beat alignment is handled in post-generation by the motion analyzer +
-    speed ramp -- the LLM only needs to ensure each clip has one clear visual
-    climax, not time it precisely.
+    Passes beat timing (peak second within each clip) and per-clip lyrics
+    so the LLM can instruct the model to peak at the exact musical moment.
     """
     clip_labels = analysis.get("clip_energy_labels", [])
     bpm    = analysis.get("bpm")
     key    = analysis.get("key", "")
     mode   = analysis.get("mode", "")
     mood   = analysis.get("mood", "")
+    clip_durations  = clip_durations or []
+    beat_positions  = beat_positions or []
 
-    # Per-clip pacing label only -- no percentages, no beat-timing instructions.
-    # The label hints at narrative intensity (intro / climb / peak / release)
-    # without dictating motion adjectives.
+    # Map lyrics lines to clip windows proportionally.
+    # Divides the full lyrics text into N roughly equal sections so each clip
+    # gets the lyrical content that plays during its time window.
+    lyrics_lines = [ln.strip() for ln in lyrics_text.splitlines() if ln.strip()] if lyrics_text else []
+    def _clip_lyrics(i: int) -> str:
+        if not lyrics_lines or not n_clips:
+            return ""
+        start = int(i * len(lyrics_lines) / n_clips)
+        end   = int((i + 1) * len(lyrics_lines) / n_clips)
+        snippet = " / ".join(lyrics_lines[start:end])
+        return snippet[:120] if snippet else ""
+
     clip_hints = []
     for i in range(n_clips):
         label = clip_labels[i] if i < len(clip_labels) else "MED"
-        clip_hints.append(f"Clip {i + 1:02d}: {label} energy section")
+        dur   = float(clip_durations[i]) if i < len(clip_durations) else 8.0
+        bpos  = float(beat_positions[i])  if i < len(beat_positions)  else 0.5
+        peak_sec = round(bpos * dur, 1)
+        lyrics_snip = _clip_lyrics(i)
+        lyric_part = f" | lyrics: \"{lyrics_snip}\"" if lyrics_snip else ""
+        clip_hints.append(
+            f"Clip {i + 1:02d} ({dur:.0f}s | {label} energy | PEAK AT {peak_sec}s){lyric_part}"
+        )
 
     energy_text = "\n".join(clip_hints)
-    key_str = f"{key} {mode}".strip() if key else ""
-    bpm_str = f"{bpm} BPM" if bpm else ""
+    key_str  = f"{key} {mode}".strip() if key else ""
+    bpm_str  = f"{bpm} BPM" if bpm else ""
     song_desc = ", ".join(filter(None, [key_str, bpm_str, mood]))
 
     story_direction = (user_idea or "").strip() or "a music video that visually matches the song's mood and energy"
-    style_line  = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
-    lyrics_line = (
-        f"\nSong lyrics / theme (first ~2 min):\n{lyrics_text[:800].strip()}\n"
-        if lyrics_text and lyrics_text.strip() else ""
-    )
+    style_line = f"Visual style / aesthetic: {variety_theme}\n" if variety_theme else ""
 
     user_msg = (
         f"Song character: {song_desc or 'dynamic track'}\n"
         f"Story direction: {story_direction}\n"
         f"{style_line}"
-        f"{lyrics_line}"
-        f"\nNarrative pacing per clip ({n_clips} clips):\n{energy_text}\n\n"
-        f"Generate exactly {n_clips} motion prompts that continue the SAME story "
-        f"and follow this pacing."
+        f"\nPer-clip beat map ({n_clips} clips) -- PEAK AT = exact second for visual climax:\n"
+        f"{energy_text}\n\n"
+        f"Generate exactly {n_clips} motion prompts. "
+        f"Each prompt MUST build to its peak at the stated second, then resolve. "
+        f"Use the lyrics as emotional/thematic context for what kind of action fits. "
+        f"Continue the SAME story arc across all clips."
     )
 
     try:
@@ -478,7 +501,8 @@ def run_song_prep(job, photo_path, settings):
     job.meta["stage"] = "planning"
     job.update(progress=4, message="Planning music video story arc...")
     try:
-        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text)
+        arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text,
+                                  clip_durations=clip_durations, beat_positions=beat_positions)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:
