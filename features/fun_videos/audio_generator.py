@@ -276,12 +276,11 @@ def generate_audio(
         # answers /health but cannot process tasks; a busy process answers both.
         # Only restart if /health also fails or if we are certain no task was
         # accepted (task_id was never returned so there is nothing to orphan).
-        _is_zombie = False
-        try:
-            _health = _post(f"{_api_base()}/health", {}, timeout=5)
-            _is_zombie = (_health is None)  # port open but /health also unresponsive
-        except Exception:
-            _is_zombie = True
+        # Use the same GET-based health check as the rest of the codebase.
+        # _post always sends HTTP POST; /health is GET-only and returns 405,
+        # which _post catches and converts to None -- making the zombie check
+        # always True. _acestep_alive() uses urlopen without data (GET).
+        _is_zombie = not _acestep_alive()
         if _is_zombie:
             log.warning("[audio] release_task timed out AND /health unresponsive "
                         "-- confirmed zombie ACE-Step, force-restarting...")

@@ -351,7 +351,11 @@ def open_app_window(port: int) -> "subprocess.Popen | None":
     or an existing window was focused instead.
     """
     if _focus_existing_dcs_window():
-        return None
+        # Existing window brought to front -- this manager instance has no
+        # further role. Exit cleanly so the original manager keeps tracking
+        # the Chrome lifecycle and handles shutdown when the window closes.
+        log.info("Focused existing window -- this manager instance exiting")
+        sys.exit(0)
     url = f"http://127.0.0.1:{port}"
     chrome_paths = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",

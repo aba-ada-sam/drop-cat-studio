@@ -447,14 +447,18 @@ export function init(panel) {
         pad_after:      parseInt(padAfterSlider.value),
       };
       const resp = await apiFetch('/api/song-video/generate', { method: 'POST', body: JSON.stringify(body) });
-      // Clear any previous poll before tracking the new job
-      if (_singlePoll) { clearInterval(_singlePoll); _singlePoll = null; }
-      _singleJobId = resp.job_id;
-      singleStatus.textContent = `Generating ${resp.n_clips} clips... (queued)`;
-      singleProgress.value = 10;
-      _singlePoll = setInterval(_pollSingle, 2000);
-      // Re-enable immediately so the user can queue another video while this one runs
-      singleBtn.disabled = false; _updateSingleBtn();
+      if (_singlePoll) {
+        // A job is already being tracked in this panel. The new job is queued
+        // on the server -- direct the user to the rail job feed to see both.
+        toast(`Video queued (${resp.n_clips} clips). Watch the job feed in the rail for its progress.`, 'success');
+        singleBtn.disabled = false; _updateSingleBtn();
+      } else {
+        _singleJobId = resp.job_id;
+        singleStatus.textContent = `Generating ${resp.n_clips} clips...`;
+        singleProgress.value = 10;
+        _singlePoll = setInterval(_pollSingle, 2000);
+        singleBtn.disabled = false; _updateSingleBtn();
+      }
     } catch (e) {
       singleStatus.textContent = 'Error: ' + e.message;
       singleProgress.style.display = 'none';
