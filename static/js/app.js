@@ -14,7 +14,6 @@ import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-b
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260508a';
 import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
-import { init as initBeatSync, receiveHandoff as beatSyncHandoff } from './tab-beat-sync.js?v=20260525a';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260525c';
 import { consumeHandoff } from './handoff.js?v=20260508a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260518a';
@@ -36,7 +35,6 @@ const TAB_INIT = {
   'video-tools':       initVideoTools,
   'video-tools-batch': initVideoToolsBatch,
   'adobe':             initAdobe,
-  'beat-sync':         initBeatSync,
   'queue':             initQueue,
 };
 const TAB_HANDOFF = {
@@ -49,7 +47,6 @@ const TAB_HANDOFF = {
   'video-tools':       null,
   'video-tools-batch': null,
   'adobe':             null,
-  'beat-sync':         beatSyncHandoff,
 };
 const _tabInitialized = new Set();
 
@@ -301,7 +298,8 @@ document.addEventListener('dcs:video-model', e => {
 // -- Tab routing -------------------------------------------------------------
 function switchTab(tabId) {
   state.activeTab = tabId;
-  if (state.galleryOpen) _galleryClose();
+  const _galOv = document.getElementById('gallery-overlay');
+  if (_galOv && _galOv.getAttribute('aria-hidden') !== 'true') _galleryClose();
 
   // Update rail buttons (Gallery has no data-tab so it's handled separately)
   document.querySelectorAll('.rail-tab[data-tab]').forEach(btn => {
