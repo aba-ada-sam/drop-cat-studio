@@ -307,15 +307,51 @@ def _ensure_shortcut() -> None:
 
 # -- Open app window -----------------------------------------------------------
 
+def _focus_existing_dcs_window() -> bool:
+    """Bring an already-open Drop Cat Go Studio Chrome window to the front.
+
+    Returns True if a window was found and focused, False if none exists.
+    Called before launching a new Chrome window to avoid duplicates.
+    """
+    try:
+        ps = (
+            "Add-Type -TypeDefinition '"
+            "using System; using System.Runtime.InteropServices; "
+            "public class WF { "
+            "[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h); "
+            "[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n); "
+            "}'; "
+            "$p = Get-Process -Name chrome -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.MainWindowTitle -like '*Drop Cat Go Studio*' } | "
+            "Select-Object -First 1; "
+            "if ($p) { [WF]::ShowWindow($p.MainWindowHandle, 9); "
+            "[WF]::SetForegroundWindow($p.MainWindowHandle); exit 0 } else { exit 1 }"
+        )
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, timeout=8, **_NW,
+        )
+        if r.returncode == 0:
+            log.info("Focused existing Drop Cat Go Studio window")
+            return True
+    except Exception as exc:
+        log.debug("_focus_existing_dcs_window failed: %s", exc)
+    return False
+
+
 def open_app_window(port: int) -> "subprocess.Popen | None":
     """Open the app in Chrome --app mode using a dedicated profile.
 
-    Using --user-data-dir ensures Chrome runs as its own process (not delegated
-    to an existing Chrome instance), so we can wait() on the returned Popen and
-    detect when the window is closed.
+    Checks for an existing Drop Cat Go Studio window first -- if one is found
+    it is focused and this function returns None (no new process to track).
+    This prevents duplicate windows when the shortcut is clicked while the app
+    is already open.
 
-    Returns the Popen object, or None if Chrome was not found (default browser).
+    Returns the Popen object, or None if Chrome was not found (default browser)
+    or an existing window was focused instead.
     """
+    if _focus_existing_dcs_window():
+        return None
     url = f"http://127.0.0.1:{port}"
     chrome_paths = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",

@@ -537,23 +537,10 @@ def run_song_prep(job, photo_path, settings):
     reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
 
-    # Generate Forge keyframes for seamless clip transitions.
-    # Runs here (in prep, before GPU acquisition) so Forge and WanGP don't compete for VRAM.
-    # Each keyframe is a fresh high-quality image from the source photo (denoising=0.10),
-    # used as start_image[i] and end_image[i+1] for each LTX-2 clip.
-    job.meta["stage"] = "keyframes"
-    job.update(progress=7, message="Generating transition keyframes via Forge...")
-    import tempfile as _tf2
-    _kf_dir = Path(_tf2.gettempdir()) / f"dcs_keyframes_{job.id[:8]}"
-    _kf_dir.mkdir(exist_ok=True)
-    _keyframes = []
-    if photo_path and os.path.isfile(photo_path):
-        _keyframes = _generate_forge_keyframes(
-            photo_path, n_clips + 1, subject_anchor, _kf_dir,
-        )
-    settings["_keyframes"] = _keyframes
-    if _keyframes:
-        log.info("[song-video] Forge keyframes ready: %d frames", len(_keyframes))
+    # Forge keyframe generation removed -- chain-frame anchoring handles identity.
+    # Forge is not required and may not be running. The _keyframes key is kept
+    # for backwards compatibility but is always empty now.
+    settings["_keyframes"] = []
 
     job.meta["stage"] = "waiting-gpu"
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
@@ -602,16 +589,17 @@ def run_song_pipeline(job, photo_path, settings):
     job_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolution strategy:
-    # - Lip sync ON + Forge keyframes available: generate at 640x360 so audio tokens
+    # - Lip sync ON + audio WAV available: generate at 640x360 so audio tokens
     #   fit in LTX-2's context window, then upscale each clip to 580p before concat.
-    #   Forge keyframes anchor both ends of every clip so 360p chain doesn't degrade.
-    # - Lip sync OFF or no keyframes: native 580p, audio conditioning falls back gracefully.
+    #   At 580p the audio token budget is exceeded and WanGP silently drops audio
+    #   conditioning -- 360p is required for any audio-driven motion to work.
+    # - Lip sync OFF or no audio WAV: native 580p, audio conditioning unavailable.
     # - Explicit override: honour ow/oh directly.
-    # Use local variables -- _audio_wav and _keyframes are already popped from settings above.
+    # Forge keyframe dependency removed: chain-frame anchoring alone is sufficient
+    # to prevent identity drift. Forge is not required.
     _lip_sync_res_active = (
         bool(settings.get("lip_sync", True)) and
-        bool(audio_wav) and
-        len(keyframes) >= 2
+        bool(audio_wav)
     )
     if ow and oh:
         tw, th = int(ow), int(oh)
