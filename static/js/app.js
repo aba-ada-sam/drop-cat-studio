@@ -8,7 +8,7 @@
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260525d';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260521b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260525d';
-import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260525j';
+import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260527c';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524g';
 import { init as initBridges,   receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260521a';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
@@ -615,7 +615,7 @@ function _applyLLMState(llm) {
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','acestep_host','satellite_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
+    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);

@@ -1322,6 +1322,7 @@ from features.video_tools.routes import router as tools_router
 from features.song_video.routes import router as song_router
 from features.zoom.routes import router as zoom_router
 from features.adobe_agent.routes import router as adobe_router
+from features.beat_sync.routes import router as beat_sync_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Create Videos"])
@@ -1330,6 +1331,7 @@ app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
 app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
 app.include_router(zoom_router, tags=["Infinite Zoom"])
+app.include_router(beat_sync_router, prefix="/api/sync", tags=["Sync Tools"])
 app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 
 
