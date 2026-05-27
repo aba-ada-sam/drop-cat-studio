@@ -158,21 +158,28 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
         if not b64:
             return ""
         raw = llm_router.route_vision(
-            "Describe the main subject in 20-25 words. "
-            "Include: exact hair color and style, clothing color and type, "
-            "skin tone, eye color, distinguishing features, species if not human, "
-            "any accessories. Visual details only, no emotions or context. "
-            "Example: 'Red-haired woman, loose shoulder curls, blue denim jacket, "
-            "white t-shirt, pale freckled skin, hazel eyes, small silver earrings.'",
+            "Describe the main subject's APPEARANCE in 15-20 words. "
+            "The subject may be human, animal, creature, object, or fantasy -- describe whatever is there. "
+            "Focus on: color, texture, material, shape, distinguishing features. "
+            "Output ONLY the description, no preamble like 'The subject is' or 'I see'. "
+            "Examples: "
+            "'Dusty rose skull, exposed cheekbones, dark hollow eye sockets, root tendrils at jaw.' "
+            "'Brown teddy bear, worn felt nose, dark bead eyes, soft fluffy ears.' "
+            "'Red-haired woman, blue denim jacket, pale freckled skin, hazel eyes.'",
             [b64], tier=TIER_FAST, max_tokens=90,
         )
-        # Strip any markdown the LLM adds (headers, bullets, bold, etc.)
         import re as _re
         anchor = raw.strip()
-        anchor = _re.sub(r'^#+\s*[^\n]*\n+', '', anchor)   # strip # headings
-        anchor = _re.sub(r'\*\*([^*]+)\*\*', r'\1', anchor) # **bold**
-        anchor = _re.sub(r'\*([^*]+)\*', r'\1', anchor)     # *italic*
+        anchor = _re.sub(r'^#+\s*[^\n]*\n+', '', anchor)
+        anchor = _re.sub(r'\*\*([^*]+)\*\*', r'\1', anchor)
+        anchor = _re.sub(r'\*([^*]+)\*', r'\1', anchor)
         anchor = anchor.strip().strip('"').strip("'").split('\n')[0].strip()
+        # Reject unhelpful non-description responses
+        bad_starts = ("i don't see", "i cannot", "i can't", "there is no", "no person",
+                      "i see no", "i'm unable", "i am unable", "the image shows no")
+        if any(anchor.lower().startswith(b) for b in bad_starts):
+            log.warning("[song-video] Subject anchor rejected unhelpful response: %r", anchor[:80])
+            return ""
         if anchor and not anchor.endswith("."):
             anchor += "."
         return anchor
@@ -776,10 +783,11 @@ def _do_song_gpu_phase(
         this_dur  = float(_arc_dur) if _arc_dur else (clip_durations[i] if i < len(clip_durations) else clip_dur)
         this_dur  = max(4.0, min(12.0, this_dur))
 
-        # Guidance: Forge keyframe start_image anchors identity visually,
-        # so we no longer need to suppress guidance to prevent character drift.
-        # Use full guidance for all clips to get actual motion.
-        effective_guidance = min(guidance, 3.5)
+        # Guidance 3.0: enough above the 2.8 near-static floor to produce visible
+        # motion, but low enough that the conditioning start_image still dominates
+        # identity. At 3.5 the model follows text so aggressively it transforms the
+        # subject's appearance across clips.
+        effective_guidance = min(guidance, 3.0)
 
         # Extract the audio segment for this clip's time window so LTX-2 can
         # condition the video generation directly on the music. WAV avoids MP3
