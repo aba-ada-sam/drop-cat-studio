@@ -303,15 +303,29 @@ class JobManager:
                 except Exception as _e:
                     log.debug("Auto-save queue failed (non-fatal): %s", _e)
             else:
-                # Non-GPU job (e.g. satellite) -- run worker immediately in this
-                # prep thread.  Satellite jobs use a remote GPU so they must NOT
-                # enter the local GPU queue; doing so caused the "clusterfuck"
-                # where satellite and local jobs competed for the same queue slot.
+                # Non-GPU job (e.g. satellite) -- run worker in a daemon thread
+                # with a timeout so a hung remote connection doesn't hold the
+                # prep thread open forever.
                 log.info("Job %s (%s) prep done, running directly (non-GPU type)",
                          job.id, job_type)
                 job.status     = "running"
                 job.started_at = time.time()
-                self._run_job(job)
+                _timeout_s = job.timeout_seconds or cfg.get("gpu_job_timeout_seconds") or 1800
+
+                def _run_non_gpu(j=job, t=_timeout_s):
+                    _wt = threading.Thread(target=self._run_job, args=(j,), daemon=True)
+                    _wt.start()
+                    _wt.join(timeout=t)
+                    if _wt.is_alive():
+                        log.warning("Non-GPU job %s timed out after %ss -- marking error",
+                                    j.id, t)
+                        j.stop_event.set()
+                        if j.status not in ("done", "error", "stopped"):
+                            j.status      = "error"
+                            j.error       = f"Timed out after {t}s"
+                            j.finished_at = time.time()
+
+                threading.Thread(target=_run_non_gpu, daemon=True).start()
 
         t = threading.Thread(target=_run_prep, daemon=True)
         t.start()

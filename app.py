@@ -1137,10 +1137,18 @@ async def windows_theme():
 async def system_info():
     ollama_st = await asyncio.to_thread(keys.status)
     import json as _json
+    import time as _time
     # Check if new commits have landed since this process started.
-    _restart_needed = False
+    # Cached for 60s to avoid spawning a git subprocess on every poll cycle
+    # (frontend polls /api/system every 15s per tab).
     _boot_hash = _g.get("boot_git_hash")
-    if _boot_hash:
+    _cache = _g.get("_git_check_cache", {})
+    if not _boot_hash:
+        _restart_needed = False
+    elif _time.time() - _cache.get("ts", 0) < 60:
+        _restart_needed = _cache.get("result", False)
+    else:
+        _restart_needed = False
         try:
             import subprocess as _sp3
             _rn = _sp3.run(["git", "-C", str(APP_DIR), "rev-parse", "HEAD"],
@@ -1149,6 +1157,7 @@ async def system_info():
                                _rn.stdout.strip() != _boot_hash)
         except Exception:
             pass
+        _g["_git_check_cache"] = {"ts": _time.time(), "result": _restart_needed}
 
     data = {
         "ffmpeg": ffmpeg_available(),

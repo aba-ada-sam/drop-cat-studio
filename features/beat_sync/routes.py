@@ -104,7 +104,7 @@ async def retime_video(body: dict):
         ok, err = _retime(vp, ap, op, remap_points=rp, auto_align=(rp is None))
         if ok:
             job.update(status="done", progress=100, output=op)
-            _session.get_current().add_file(op, "video", "beat_sync", path=op)
+            _session.get_current().add_file(Path(op).name, "video", "beat_sync", path=op)
         else:
             raise RuntimeError(err or "Retime failed")
 

@@ -243,9 +243,17 @@ The AI model already sees the reference image -- DO NOT describe appearance.
 Describe ONLY what changes: what moves, where it starts, where it ends.
 
 IDENTITY RULE -- mandatory in every prompt:
-  Include 8-12 words of the subject's exact visual markers from the photo.
-  Example: "pale elf, pointed ears, purple jacket, blue jeans"
-  Without this the model generates a different person each clip.
+  Look at the photo and decide:
+  TYPE A (person / character / creature / robot / animal is the main subject):
+    Include 8-12 words of their exact visual markers: clothing colour, species,
+    hair, material, style.
+    Example: "pale elf, pointed ears, purple jacket, blue jeans"
+    Without this the model generates a different-looking character each clip.
+  TYPE B (landscape / architecture / object / scene with no person):
+    Include 8-12 words of the scene's key visual elements: terrain, sky, light,
+    dominant colours, structures.
+    Example: "pine forest, granite peaks, morning mist, golden hour light"
+    Do NOT invent a person or character. Animate what is already in the scene.
 
 SCENE ANCHOR -- mandatory in every prompt:
   Include 6-10 words restating the original setting.

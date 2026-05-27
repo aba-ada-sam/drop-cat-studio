@@ -266,23 +266,40 @@ def generate_audio(
         except (TypeError, ValueError):
             pass
 
-    resp = _post(f"{_api_base()}/release_task", payload, timeout=30)
+    # Use a longer timeout: ACE-Step's /release_task should return a task_id
+    # quickly, but a slow-but-alive server can take several seconds under load.
+    # 60s is still fast enough to distinguish a stuck socket from normal latency.
+    resp = _post(f"{_api_base()}/release_task", payload, timeout=60)
     if resp is None:
-        # release_task timed out despite health check passing -- classic zombie:
-        # a crashed ACE-Step process left a ghost on port 8020 that answers /health
-        # but cannot process tasks. Force-kill and restart, then retry once.
-        log.warning("[audio] release_task timed out -- zombie ACE-Step suspected, force-restarting...")
+        # /release_task timed out. Before killing ACE-Step, confirm it is
+        # genuinely unresponsive (zombie) rather than just slow. A zombie process
+        # answers /health but cannot process tasks; a busy process answers both.
+        # Only restart if /health also fails or if we are certain no task was
+        # accepted (task_id was never returned so there is nothing to orphan).
+        _is_zombie = False
         try:
-            from services.manager import stop_service, start_acestep as _start
-            stop_service("acestep")
-            ok, _err = _start()
-            if ok:
-                log.info("[audio] ACE-Step restarted -- retrying release_task")
-                resp = _post(f"{_api_base()}/release_task", payload, timeout=30)
-            else:
-                log.warning("[audio] ACE-Step restart failed: %s", _err)
-        except Exception as _exc:
-            log.warning("[audio] ACE-Step restart attempt failed: %s", _exc)
+            _health = _post(f"{_api_base()}/health", {}, timeout=5)
+            _is_zombie = (_health is None)  # port open but /health also unresponsive
+        except Exception:
+            _is_zombie = True
+        if _is_zombie:
+            log.warning("[audio] release_task timed out AND /health unresponsive "
+                        "-- confirmed zombie ACE-Step, force-restarting...")
+            try:
+                from services.manager import stop_service, start_acestep as _start
+                stop_service("acestep")
+                ok, _err = _start()
+                if ok:
+                    log.info("[audio] ACE-Step restarted -- retrying release_task")
+                    resp = _post(f"{_api_base()}/release_task", payload, timeout=60)
+                else:
+                    log.warning("[audio] ACE-Step restart failed: %s", _err)
+            except Exception as _exc:
+                log.warning("[audio] ACE-Step restart attempt failed: %s", _exc)
+        else:
+            log.warning("[audio] release_task timed out but /health OK "
+                        "-- ACE-Step is alive, task may have been accepted; "
+                        "not restarting to avoid duplicate submission")
         if resp is None:
             return None, "Failed to submit task to ACE-Step"
 

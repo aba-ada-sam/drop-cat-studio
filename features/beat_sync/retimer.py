@@ -35,6 +35,9 @@ def build_remap(video_dur: float, audio_dur: float, remap_points: list) -> list:
         v_span = v1 - v0
         t_span = t1 - t0
         if v_span <= 0.01 or t_span <= 0.01:
+            log.warning("[retimer] Skipping degenerate segment anchors[%d->%d]: "
+                        "v_span=%.4f t_span=%.4f -- sync points too close together",
+                        i, i + 1, v_span, t_span)
             continue
         # speed > 1: more video than time → play faster
         # speed < 1: less video than time → play slower
@@ -82,26 +85,34 @@ def retime_video(video_path: str, audio_path: str, out_path: str,
              len(segments), video_dur, audio_dur)
 
     with tempfile.TemporaryDirectory() as tmp:
-        # Interpolate to 60fps so slow sections look smooth
-        interp_path = os.path.join(tmp, "interp.mp4")
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-i", video_path,
-             "-vf", "minterpolate=fps=60:mi_mode=mci",
-             "-an", "-c:v", "libx264", "-crf", "15", "-preset", "fast",
-             interp_path],
-            capture_output=True, timeout=600,
-        )
-        if r.returncode != 0 or not Path(interp_path).exists():
-            log.warning("[retimer] minterpolate failed -- using original video")
-            interp_path = video_path
+        # Only interpolate to 60fps when at least one segment needs slow-motion
+        # (speed < 1.0). For pure speed-up jobs the interpolated frames are
+        # discarded by setpts anyway, so the expensive minterpolate pass adds
+        # nothing and can time out for long videos on CPU.
+        needs_interp = any(seg["speed"] < 1.0 for seg in segments)
+        interp_path = video_path
+        if needs_interp:
+            _interp_tmp = os.path.join(tmp, "interp.mp4")
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-i", video_path,
+                 "-vf", "minterpolate=fps=60:mi_mode=mci",
+                 "-an", "-c:v", "libx264", "-crf", "15", "-preset", "fast",
+                 _interp_tmp],
+                capture_output=True, timeout=600,
+            )
+            if r.returncode == 0 and Path(_interp_tmp).exists():
+                interp_path = _interp_tmp
+            else:
+                log.warning("[retimer] minterpolate failed -- using original video")
 
         seg_files = []
         for j, seg in enumerate(segments):
             seg_out = os.path.join(tmp, f"seg_{j:03d}.mp4")
             speed = seg["speed"]
-            # setpts=PTS*(1/speed): speed>1 → smaller PTS → faster playback
-            # setpts=PTS*(1/speed): speed<1 → larger PTS  → slower playback
-            pts_expr = f"PTS*{1.0/speed:.8f}"
+            # (PTS-STARTPTS) normalises each segment to start at zero before
+            # speed scaling. Without STARTPTS, trimmed segments carry their
+            # original large timestamp into the concat and create a gap.
+            pts_expr = f"(PTS-STARTPTS)*{1.0/speed:.8f}"
             r2 = subprocess.run(
                 ["ffmpeg", "-y", "-i", interp_path,
                  "-ss", f"{seg['v_start']:.4f}", "-to", f"{seg['v_end']:.4f}",
