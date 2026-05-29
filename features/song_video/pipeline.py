@@ -1029,6 +1029,34 @@ def _do_song_gpu_phase(
             except Exception as _ue:
                 log.warning("[song-video] Upscale exception: %s -- keeping 360p", _ue)
 
+        # -- Lip sync post-pass (MuseTalk) ------------------------------------
+        # The real lip sync is a MuseTalk post-pass, NOT LTX-2 audio
+        # conditioning -- this WanGP build ignores the per-clip audio we feed it
+        # (services/wangp_worker.py _supports_audio=False), so the clips have no
+        # mouth motion on their own. Run MuseTalk on the finished video to drive
+        # the mouth from the song's isolated vocals. Best-effort: any failure
+        # (no detectable face, MuseTalk not installed) keeps the un-synced video.
+        if bool(settings.get("lip_sync", True)) and not _stopped():
+            try:
+                from features.lipsync.runner import lipsync_available, lipsync_video
+                if lipsync_available():
+                    job.meta["stage"] = "lip-sync"
+                    job.update(progress=96, message="Lip-syncing to vocals (MuseTalk)...")
+                    ls_out = merged.replace(".mp4", "_ls.mp4")
+                    synced = lipsync_video(job, merged, audio_path, ls_out, isolate_vocals=True)
+                    if synced and os.path.isfile(synced):
+                        if synced != merged:
+                            try:
+                                os.remove(merged)
+                            except Exception:
+                                pass
+                        merged = synced
+                        log.info("[song-video] Lip sync applied: %s", Path(synced).name)
+                else:
+                    log.info("[song-video] Lip sync requested but MuseTalk not installed -- skipping")
+            except Exception as _ls:
+                log.warning("[song-video] Lip sync post-pass failed (keeping un-synced video): %s", _ls)
+
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
