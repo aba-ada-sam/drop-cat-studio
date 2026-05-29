@@ -750,7 +750,13 @@ def _do_song_gpu_phase(
             _is_chained = i > 0
         else:
             clip_start_image = _chain_frame if _chain_frame else prepped_photo
-            clip_end_image   = None
+            # For chained clips (1+), pull every clip toward the source photo
+            # at its END so identity is continuously anchored without a visible
+            # "reset" cut. Without this, 5 chain hops were enough for a
+            # stylized propaganda-poster cat to drift into a photoreal tabby in
+            # a leather jacket. Clip 0 keeps end_image=None because its start
+            # is already the source -- start=end would force a Ken Burns zoom.
+            clip_end_image   = prepped_photo if _chain_frame else None
             _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
