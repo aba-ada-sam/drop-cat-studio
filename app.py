@@ -299,6 +299,12 @@ async def no_cache_static(request: Request, call_next):
 # Mount static files and media directories (before routes for correct priority)
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# DCS_SUBAPP_STATIC: when a sub-app (DCMVS) wants its own branding assets
+# alongside the shared /static mount, it sets this env to its static dir and
+# we expose it at /subapp/* without disturbing /static/*.
+_subapp_static = os.environ.get("DCS_SUBAPP_STATIC")
+if _subapp_static and Path(_subapp_static).is_dir():
+    app.mount("/subapp", StaticFiles(directory=_subapp_static), name="subapp")
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 # NOTE: /output is served via a route below, not StaticFiles, because Starlette's
 # StaticFiles path joining on Windows breaks for nested subdirectories.
@@ -328,7 +334,10 @@ _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "
 
 @app.get("/")
 async def index():
-    index_path = STATIC_DIR / "index.html"
+    # DCS_INDEX_HTML lets a sub-app (DCMVS etc.) substitute its own branded
+    # index without forking DCS -- the rest of the server is unchanged.
+    _override = os.environ.get("DCS_INDEX_HTML")
+    index_path = Path(_override) if _override else (STATIC_DIR / "index.html")
     if index_path.exists():
         html = index_path.read_text(encoding="utf-8")
         # Stamp app.js URL with server-start time so Chrome's ES module map

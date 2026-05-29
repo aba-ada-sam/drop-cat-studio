@@ -17,11 +17,14 @@ from pathlib import Path
 
 log = logging.getLogger("dropcat")
 
+import os as _os
 ROOT = Path(__file__).resolve().parent.parent
-PORT_FILE = ROOT / ".dcs-port"
+# Each sub-app (DCMVS etc.) writes its own .dcs-port via DCS_PORT_FILE so
+# launchers can locate the right server instance without collision.
+PORT_FILE = Path(_os.environ.get("DCS_PORT_FILE") or (ROOT / ".dcs-port"))
 
-PORT_START = 7860
-PORT_TRIES = 20  # 7860..7879
+PORT_START = int(_os.environ.get("DCS_PORT_START") or 7860)
+PORT_TRIES = 20  # 20-port window from PORT_START
 
 
 def _port_free(port: int) -> bool:

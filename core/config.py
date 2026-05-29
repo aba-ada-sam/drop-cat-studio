@@ -12,7 +12,8 @@ import os
 import threading
 from pathlib import Path
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.json"
+CONFIG_FILE = Path(os.environ.get("DCS_CONFIG_FILE")
+                   or Path(__file__).resolve().parent.parent / "config.json")
 
 DEFAULTS: dict = {
     # -- Global (shared across features) ----------------------------------
