@@ -6,7 +6,7 @@
 
 // tab-imports.js removed -- import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260525d';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue, openJobModal } from './tab-queue.js?v=20260521b';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260521b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260528a';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260528a';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524g';
@@ -1248,197 +1248,15 @@ document.addEventListener('DOMContentLoaded', () => {
   pollSatellite();
   setInterval(pollSatellite, 8000);
 
-  // -- Sidebar job feed ------------------------------------------------------
-  const _feedEl = document.getElementById('job-feed');
-  const _feedCards    = new Map(); // job_id -> card element
-  const _feedDone     = [];        // completed job ids, newest-first (capped at 5)
-  const _feedDismissed = new Set(); // job ids the user explicitly closed
-
-  function _thumbUrl(job) {
-    const src = job.meta?.source_image;
-    if (src) return `/api/thumbnail?path=${encodeURIComponent(src)}&size=88`;
-    const out = Array.isArray(job.output) ? job.output[0] : job.output;
-    if (out && /\.(png|jpg|jpeg|webp)/i.test(out))
-      return `/api/thumbnail?path=${encodeURIComponent(out)}&size=88`;
-    return null;
-  }
-
-  function _makeCard(job) {
-    const card = document.createElement('div');
-    card.className = 'jf-card';
-    card.style.cursor = 'pointer';
-    card.title = 'Click to see details';
-    card._job = job;
-    card.addEventListener('click', () => openJobModal(card._job));
-
-    const thumbUrl = _thumbUrl(job);
-    const thumbWrap = document.createElement('div');
-    thumbWrap.style.cssText = 'position:relative; flex-shrink:0;';
-    if (thumbUrl) {
-      const img = document.createElement('img');
-      img.className = 'jf-thumb';
-      img.src = thumbUrl;
-      img.onerror = () => { img.replaceWith(ph()); };
-      thumbWrap.appendChild(img);
-    } else {
-      thumbWrap.appendChild(ph());
-    }
-    // Loop badge for repeat batch jobs
-    if (job.meta?.batch_loop) {
-      const badge = document.createElement('div');
-      badge.title = 'Part of a continuous batch loop';
-      badge.style.cssText = 'position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; font-size:11px; color:#d4a017; pointer-events:none;';
-      badge.textContent = '↻';
-      thumbWrap.appendChild(badge);
-    }
-    card.appendChild(thumbWrap);
-
-    const body = document.createElement('div');
-    body.className = 'jf-body';
-
-    const lbl = document.createElement('div');
-    lbl.className = 'jf-label';
-    lbl.textContent = job.label || job.type || 'Job';
-    body.appendChild(lbl);
-
-    const sta = document.createElement('div');
-    sta.className = 'jf-status';
-    body.appendChild(sta);
-
-    const barWrap = document.createElement('div');
-    barWrap.className = 'jf-bar-wrap';
-    const bar = document.createElement('div');
-    bar.className = 'jf-bar';
-    bar.style.width = '0%';
-    barWrap.appendChild(bar);
-    body.appendChild(barWrap);
-
-    card.appendChild(body);
-
-    const dismiss = document.createElement('button');
-    dismiss.className = 'jf-dismiss';
-    dismiss.textContent = 'x';
-    dismiss.title = 'Dismiss';
-    dismiss.addEventListener('click', e => {
-      e.stopPropagation();
-      const id = card._job?.id;
-      const status = card._job?.status;
-      card.remove();
-      if (id) {
-        _feedCards.delete(id);
-        _feedDismissed.add(id);
-        const idx = _feedDone.indexOf(id);
-        if (idx !== -1) _feedDone.splice(idx, 1);
-        // Cancel the server-side job if it's still active
-        if (status === 'running' || status === 'queued') {
-          fetch(`/api/jobs/${id}/stop`, { method: 'POST' }).catch(() => {});
-        }
-      }
-    });
-    card.appendChild(dismiss);
-
-    card._sta = sta;
-    card._bar = bar;
-    return card;
-  }
-
-  function ph() {
-    const d = document.createElement('div');
-    d.className = 'jf-thumb-placeholder';
-    d.textContent = '🎬';
-    return d;
-  }
-
-  function _updateCard(card, job, queueInfo = null) {
-    card._job = job;  // keep modal data fresh on every poll
-    const pct = job.progress || 0;
-
-    card.classList.remove('jf-running', 'jf-done', 'jf-error', 'jf-queued');
-    if (job.status === 'running') {
-      card.classList.add('jf-running');
-      card._bar.style.width = pct + '%';
-      card._sta.textContent = job.message || 'Running...';
-    } else if (job.status === 'queued') {
-      card.classList.add('jf-queued');
-      // width set to 100% by CSS; animation handled by .jf-queued .jf-bar
-      if (queueInfo && queueInfo.total > 1) {
-        card._sta.textContent = queueInfo.pos === 1 ? 'Up next' : `Queue position ${queueInfo.pos} of ${queueInfo.total}`;
-      } else {
-        card._sta.textContent = 'Up next';
-      }
-    } else if (job.status === 'done') {
-      card.classList.add('jf-done');
-      card._bar.style.width = '100%';
-      card._sta.textContent = job.message || 'Done';
-    } else if (job.status === 'error' || job.status === 'stopped') {
-      card.classList.add('jf-error');
-      card._bar.style.width = '100%';
-      card._sta.textContent = job.message || job.status;
-    }
-  }
-
-  let _feedFirstPoll = true;
-
-  async function _pollFeed() {
-    if (!_feedEl) return;
+  // -- Queue rail hint (active job count) ------------------------------------
+  async function _pollQueueHint() {
     try {
       const data = await fetch('/api/queue').then(r => r.json());
-      const active = [...(data.running || []), ...(data.queued || [])];
-      const done   = (data.completed || []).slice(0, 5);
-
-      // On first poll after page load, mark all existing completed jobs as
-      // already-seen so they never appear in the sidebar. Only completions
-      // that happen AFTER the page loaded should show up.
-      if (_feedFirstPoll) {
-        _feedFirstPoll = false;
-        for (const job of done) _feedDone.push(job.id);
-      }
-
-      // Update/create active cards (running first, then queued)
-      const seen = new Set();
-      const queuedJobs = (data.queued || []).filter(j => !_feedDismissed.has(j.id));
-      for (const job of active) {
-        if (_feedDismissed.has(job.id)) continue;
-        seen.add(job.id);
-        if (!_feedCards.has(job.id)) {
-          const card = _makeCard(job);
-          _feedEl.prepend(card);
-          _feedCards.set(job.id, card);
-        }
-        const qPos = queuedJobs.findIndex(j => j.id === job.id);
-        _updateCard(_feedCards.get(job.id), job, qPos >= 0 ? { pos: qPos + 1, total: queuedJobs.length } : null);
-      }
-
-      // Add freshly completed jobs to top (newest-first, max 5)
-      for (const job of done) {
-        if (_feedDone.includes(job.id) || _feedDismissed.has(job.id)) continue;
-        _feedDone.unshift(job.id);
-        if (_feedDone.length > 5) {
-          const old = _feedDone.pop();
-          const el = _feedCards.get(old);
-          if (el) { el.remove(); _feedCards.delete(old); }
-        }
-        // Remove the active card for this job before adding the done card
-        // (prevents the same job appearing twice during the active->done transition)
-        const existing = _feedCards.get(job.id);
-        if (existing) existing.remove();
-        const card = _makeCard(job);
-        _updateCard(card, job);
-        _feedEl.prepend(card);
-        _feedCards.set(job.id, card);
-      }
-
-      // Remove cards for jobs no longer active or in recent completed
-      const keep = new Set([...seen, ..._feedDone]);
-      for (const [id, el] of _feedCards) {
-        if (!keep.has(id)) { el.remove(); _feedCards.delete(id); }
-      }
-
-      // Update Queue hint (only when Queue tab is not open -- tab-queue.js owns it then)
+      const n = [...(data.running || []), ...(data.queued || [])].length;
+      // Only when Queue tab is not open -- tab-queue.js owns the hint then
       if (!document.querySelector('.rail-tab.active[data-tab="queue"]')) {
         const hint = document.getElementById('queue-rail-hint');
         if (hint) {
-          const n = active.length;
           if (n === 0)      hint.textContent = '(no items processing)';
           else if (n === 1) hint.textContent = '(1 item processing)';
           else              hint.textContent = `(${n} items processing)`;
@@ -1447,6 +1265,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (_) {}
   }
 
-  _pollFeed();
-  setInterval(_pollFeed, 2500);
+  _pollQueueHint();
+  setInterval(_pollQueueHint, 2500);
 });
