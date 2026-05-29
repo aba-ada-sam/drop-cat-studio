@@ -1606,22 +1606,6 @@ def run_multi_prep(job, photo_path, settings):
     )
     settings["_story_arc"] = arc
 
-    # Snap clip boundaries to strong beats if audio analysis is available.
-    _a_events = settings.get("_audio_events", {})
-    if _a_events and settings.get("_story_arc"):
-        try:
-            from features.fun_videos.audio_analyzer import snap_durations_to_beats
-            from core.ffmpeg_utils import probe_duration as _pd
-            _a_path = settings.get("audio_path", "")
-            _a_dur = float(_a_events.get("duration") or (_pd(_a_path) if _a_path else 0) or 0)
-            if _a_dur > 0:
-                settings["_story_arc"] = snap_durations_to_beats(
-                    settings["_story_arc"], _a_events, _a_dur, snap_window=2.0
-                )
-                log.info("[multi] Story arc durations snapped to beats")
-        except Exception as _e:
-            log.warning("[multi] Beat-snap failed (non-fatal): %s", _e)
-
     # Extract a concrete subject description from the source image so every
     # clip prompt is anchored to the actual visual content, not the LLM's
     # memory of what it hallucinated for clip 1.
@@ -1899,24 +1883,6 @@ def run_multi_pipeline(job, photo_path, settings):
                     _audio_events = _aa.detect_audio_events(_ap0)
                     if _audio_events.get("bpm"):
                         settings["_detected_bpm"] = _audio_events["bpm"]
-
-                    # Snap clip boundaries to strong beats so cuts land on musical moments.
-                    # story_arc durations are inflated by 1/TRIM_RATIO for planning;
-                    # audio beat times are in real seconds. Deflate to real time before
-                    # snapping, then re-inflate so planning compensation is preserved.
-                    _real_arc = [
-                        dict(c, duration=float(c.get("duration", clip_dur)) * _CHAIN_TRIM_RATIO)
-                        if isinstance(c, dict) else c
-                        for c in story_arc
-                    ]
-                    _snapped_real = _aa.snap_durations_to_beats(
-                        _real_arc, _audio_events, _audio_events.get("duration", audio_dur_p0)
-                    )
-                    story_arc = [
-                        dict(c, duration=round(float(c.get("duration", clip_dur)) / _CHAIN_TRIM_RATIO, 2))
-                        if isinstance(c, dict) else c
-                        for c in _snapped_real
-                    ]
 
                     # Build per-clip audio context and refine prompts with lyric hints
                     planned_clip_durs = [

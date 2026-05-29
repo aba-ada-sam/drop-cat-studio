@@ -24,7 +24,6 @@ from core.ffmpeg_utils import probe_duration
 from core.llm_client import TIER_BALANCED, TIER_FAST, encode_image_b64, parse_json_response
 from features.fun_videos.pipeline import _prep_photo, _finalize_prompt
 from features.fun_videos.multi_pipeline import _concat_clips, _concat_with_xfade
-from features.song_video.motion_analyzer import align_clip_to_beat
 
 log = logging.getLogger(__name__)
 
@@ -249,12 +248,10 @@ def _generate_song_arc(
     variety_theme: str = "",
     lyrics_text: str = "",
     clip_durations: list | None = None,
-    beat_positions: list | None = None,
 ) -> list[str]:
     """Generate N motion prompts that follow a single story across the song.
 
-    Passes beat timing (peak second within each clip) and per-clip lyrics
-    so the LLM can instruct the model to peak at the exact musical moment.
+    Passes per-clip lyrics so the LLM can align the action to the words.
     """
     clip_labels = analysis.get("clip_energy_labels", [])
     bpm    = analysis.get("bpm")
@@ -262,7 +259,6 @@ def _generate_song_arc(
     mode   = analysis.get("mode", "")
     mood   = analysis.get("mood", "")
     clip_durations  = clip_durations or []
-    beat_positions  = beat_positions or []
 
     # Map lyrics lines to clip windows proportionally.
     # Divides the full lyrics text into N roughly equal sections so each clip
@@ -280,12 +276,10 @@ def _generate_song_arc(
     for i in range(n_clips):
         label = clip_labels[i] if i < len(clip_labels) else "MED"
         dur   = float(clip_durations[i]) if i < len(clip_durations) else 8.0
-        bpos  = float(beat_positions[i])  if i < len(beat_positions)  else 0.5
-        peak_sec = round(bpos * dur, 1)
         lyrics_snip = _clip_lyrics(i)
         lyric_part = f" | lyrics: \"{lyrics_snip}\"" if lyrics_snip else ""
         clip_hints.append(
-            f"Clip {i + 1:02d} ({dur:.0f}s | {label} energy | PEAK AT {peak_sec}s){lyric_part}"
+            f"Clip {i + 1:02d} ({dur:.0f}s | {label} energy){lyric_part}"
         )
 
     energy_text = "\n".join(clip_hints)
@@ -436,17 +430,15 @@ def run_song_prep(job, photo_path, settings):
     job.meta["clips_total"] = n_clips
     job.update(progress=2, message="Analysing beat structure and detecting lyrics...")
     from features.song_video.audio_analyzer import compute_clip_plan, _transcribe_lyrics
-    from features.fun_videos.audio_analyzer import detect_audio_events
 
     # Fire Anthropic vision call in background (pure I/O, no CPU competition).
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as api_pool:
         fut_anchor = api_pool.submit(_extract_subject_anchor, photo_path, llm_router) if photo_path else None
 
         # CPU tasks run sequentially -- each gets full cores.
-        clip_durations, beat_positions = compute_clip_plan(
+        clip_durations, _ = compute_clip_plan(
             audio_path, n_clips, clip_dur, max(float(clip_dur), 10.0)
         )
-        audio_events = detect_audio_events(audio_path) if os.path.isfile(audio_path) else {}
         if not lyrics_text and os.path.isfile(audio_path):
             detected = _transcribe_lyrics(audio_path)
             if detected:
@@ -462,9 +454,7 @@ def run_song_prep(job, photo_path, settings):
     # ffmpeg -t 0 then writes an empty file and all subsequent clips fail.
     clip_durations = [max(8.0, min(10.0, d)) for d in clip_durations]
     settings["_clip_durations"] = clip_durations
-    settings["_beat_positions"] = beat_positions
-    log.info("[song-video] Clip durations (beat-aligned): %s", clip_durations)
-    log.info("[song-video] Beat positions per clip: %s", beat_positions)
+    log.info("[song-video] Clip durations: %s", clip_durations)
 
     # Compute audio start time for each clip's conditioning slice.
     # Each xfade overlaps consecutive clips by _SONG_XFADE_DUR seconds, shortening
@@ -515,24 +505,13 @@ def run_song_prep(job, photo_path, settings):
     job.update(progress=4, message="Planning music video story arc...")
     try:
         arc = _generate_song_arc(llm_router, n_clips, analysis, user_idea, photo_path, variety_theme, lyrics_text,
-                                  clip_durations=clip_durations, beat_positions=beat_positions)
+                                  clip_durations=clip_durations)
         settings["_story_arc"] = arc
         log.info("[song-video] Story arc (%d clips) generated", n_clips)
     except Exception as e:
         log.warning("[song-video] Story arc failed: %s", e)
         arc = [user_idea or "Subject erupts into motion"] * n_clips
         settings["_story_arc"] = arc
-
-    # Snap story arc clip boundaries to strong beats/energy peaks
-    if audio_events and arc:
-        try:
-            from features.fun_videos.audio_analyzer import snap_durations_to_beats
-            audio_dur_snap = float(analysis.get("duration") or probe_duration(audio_path) or 0)
-            arc = snap_durations_to_beats(arc, audio_events, audio_dur_snap, snap_window=2.0)
-            settings["_story_arc"] = arc
-            log.info("[song-video] Story arc durations snapped to beats")
-        except Exception as e:
-            log.warning("[song-video] Beat-snap failed (non-fatal): %s", e)
 
     reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
@@ -556,7 +535,6 @@ def run_song_pipeline(job, photo_path, settings):
     n_clips        = int(settings.get("num_clips", 10))
     clip_dur       = float(settings.get("clip_duration", 8.0))
     clip_durations     = settings.pop("_clip_durations", None) or [clip_dur] * n_clips
-    beat_positions     = settings.pop("_beat_positions", None) or [0.5] * n_clips
     clip_start_times   = settings.pop("_clip_start_times", None) or []
     audio_wav          = settings.pop("_audio_wav", None)  # pre-converted WAV for lip sync
     model_name     = settings.get("model_name", "LTX-2 Dev19B Distilled")
@@ -619,7 +597,7 @@ def run_song_pipeline(job, photo_path, settings):
     try:
         _do_song_gpu_phase(
             job, photo_path, settings, job_dir,
-            n_clips, clip_durations, beat_positions, model_name,
+            n_clips, clip_durations, model_name,
             resolution, ow, oh, tw, th, steps, guidance, seed,
             audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
             reanchor_every=reanchor_every, pad_before=pad_before,
@@ -635,7 +613,7 @@ def run_song_pipeline(job, photo_path, settings):
 
 def _do_song_gpu_phase(
     job, photo_path, settings, job_dir,
-    n_clips, clip_durations, beat_positions, model_name,
+    n_clips, clip_durations, model_name,
     resolution, ow, oh, tw, th, steps, guidance, seed,
     audio_path, audio_dur, story_arc, clip_dur, subject_anchor,
     reanchor_every=3, pad_before=0.0, clip_start_times=None, audio_wav=None,
@@ -876,34 +854,6 @@ def _do_song_gpu_phase(
             if trim_r.returncode == 0 and Path(trimmed).exists():
                 os.replace(trimmed, clip_path)
                 log.debug("[song-video] Clip %d trimmed %.2fs -> %.2fs", clip_num, actual_dur, this_dur)
-
-        # -- Beat-sync via motion peak detection + speed ramp ----------------
-        post_trim_dur = probe_duration(clip_path) or this_dur
-        beat_pos      = beat_positions[i] if i < len(beat_positions) else 0.5
-        target_time   = beat_pos * post_trim_dur
-        ramped_out    = clip_out.replace(".mp4", "_synced.mp4")
-        _beat_sync_useful = beat_pos > 0.02
-        job.update(progress=pct_end, message=f"Clip {clip_num}/{n_clips} -- syncing peak to beat...")
-        try:
-            applied, info = align_clip_to_beat(
-                clip_path, target_time, post_trim_dur, ramped_out,
-            ) if _beat_sync_useful else (False, {"reason": "beat_pos near 0 or 0.5 -- skipped"})
-            if applied and Path(ramped_out).exists():
-                os.replace(ramped_out, clip_path)
-                _log(
-                    f"[info] Clip {clip_num} beat-synced: peak {info['natural_time']:.2f}s "
-                    f"-> {info['target_time']:.2f}s (conf {info['confidence']:.2f})"
-                )
-            else:
-                if os.path.exists(ramped_out):
-                    try:
-                        os.remove(ramped_out)
-                    except OSError:
-                        pass
-                if info.get("reason"):
-                    log.debug("[song-video] Clip %d sync skipped: %s", clip_num, info["reason"])
-        except Exception as e:
-            log.warning("[song-video] Beat-sync exception on clip %d: %s -- keeping original", clip_num, e)
 
         # Two-sided boundary trim for intermediate clips (not first, not last):
         # - Head trim (clips 1+): LTX-2 startup frames are brighter/different from

@@ -194,11 +194,12 @@ Key design rules that must not be violated:
 
 ### Audio analyzer (`features/fun_videos/audio_analyzer.py`)
 
-Beat-sync pipeline used by Phase 0. Key functions:
+Audio analysis for lyric/energy context (NOT timing). Key functions:
 - `transcribe_audio(path)` — faster-whisper tiny/int8 on CPU, returns `[{start, end, text}]`
 - `detect_audio_events(path)` — librosa: returns `{bpm, beat_times, energy_peaks, sections, duration}`. Energy peaks filtered to 75th percentile, min 2s apart.
-- `snap_durations_to_beats(story_arc, events, audio_duration, snap_window=2.0)` — moves clip boundaries to the nearest strong beat (every 4th beat) or energy peak within `snap_window`. Clips that would become <3s after snap revert to original duration. Interior boundaries only — last boundary is never snapped.
 - `build_clip_audio_context(...)` — per-clip lyric/energy context dicts for prompt refinement.
+
+Beat-sync was removed entirely (2026-05-28): no clip-timing warping, no boundary snapping, no post-generation retime UI/`/api/sync`. Clips generate at their natural timing. Lip sync is independent (audio WAV passed to LTX-2 as conditioning) and unaffected. Do not reintroduce beat-snapping or speed-ramp-to-beat code.
 
 ### Smart wildcards (sd-prompts)
 
