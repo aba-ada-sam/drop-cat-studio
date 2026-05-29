@@ -1543,18 +1543,6 @@ export function init(panel) {
               });
             }
 
-            // Send to Bridges tab for sequence building
-            const existing = vidWrap.querySelector('.to-seq-btn');
-            const seqBtn = existing || (() => {
-              const b = el('button', { class: 'btn btn-sm to-seq-btn', text: '+ Add to Transitions', style: 'margin-top:8px;' });
-              vidWrap.appendChild(b);
-              return b;
-            })();
-            seqBtn.onclick = () => {
-              handoff('bridges', { type: 'video', path: bestPath, url: pathToUrl(bestPath) });
-              document.querySelector('.rail-tab[data-tab="bridges"]')?.click();
-              toast('Clip sent to Add Transitions tab', 'success');
-            };
           } else {
             toast('Generation finished but no output file found -- check server logs', 'error');
           }

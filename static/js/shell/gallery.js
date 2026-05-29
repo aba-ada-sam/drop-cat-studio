@@ -115,7 +115,6 @@ function _render() {
           <option value="sd-prompts">SD Prompts</option>
           <option value="image-gen">Image Gen</option>
           <option value="create-videos">Videos</option>
-          <option value="bridges">Bridges</option>
         </select>
       </div>
     </div>

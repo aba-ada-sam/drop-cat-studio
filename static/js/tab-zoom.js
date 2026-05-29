@@ -887,7 +887,6 @@ export function init(panel) {
             outputArea.style.display = 'flex'; outputActions.innerHTML = '';
             outputActions.append(
               _actionBtn('Open in folder', () => apiFetch('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-              _actionBtn('Send to Bridges', () => { handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) }); toast('Sent to Bridges', 'success'); }),
             );
           }
           if (_loopMode && !_stopAfter) {
@@ -954,7 +953,6 @@ export function init(panel) {
             outputArea.style.display = 'flex'; outputActions.innerHTML = '';
             outputActions.append(
               _actionBtn('Open in folder', () => apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-              _actionBtn('Send to Bridges', () => { handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) }); toast('Sent to Bridges', 'success'); }),
               _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
             );
           }
@@ -997,7 +995,7 @@ export function init(panel) {
           j => {
             _decActive(); progressArea.style.display = 'none';
             const out = Array.isArray(j.output) ? j.output[0] : j.output;
-            if (out) { videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load(); outputArea.style.display = 'flex'; outputActions.innerHTML = ''; outputActions.append(_actionBtn('Open in folder', () => apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})), _actionBtn('Send to Bridges', () => { handoff('bridges', { type: 'video', path: out, url: pathToUrl(out) }); toast('Sent to Bridges', 'success'); }), _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection))); }
+            if (out) { videoEl.src = pathToUrl(out); videoEl.style.opacity = '1'; videoEl.load(); outputArea.style.display = 'flex'; outputActions.innerHTML = ''; outputActions.append(_actionBtn('Open in folder', () => apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})), _actionBtn('Continue zoom...', () => _showExtendPanel(out, capturedDirection))); }
             toast('Zoom extended!', 'success'); document.dispatchEvent(new CustomEvent('session-updated'));
           },
           msg => { _decActive(); progressArea.style.display = 'none'; progressFill.style.width = '0%'; toast(`Extend failed: ${msg}`, 'error'); },

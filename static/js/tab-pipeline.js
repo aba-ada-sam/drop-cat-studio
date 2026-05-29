@@ -37,19 +37,7 @@ const STEPS = [
     },
   },
   {
-    num: '03', icon: '', label: 'Create Transitions',
-    hint: 'Create cinematic bridge clips between scenes',
-    tab: 'bridges', svc: 'wangp',
-    svcLabels: {
-      running:        'WanGP ready',
-      ready:          'WanGP configured',
-      not_running:    'WanGP offline',
-      not_configured: 'Set path in Settings',
-      unknown:        'Checking...',
-    },
-  },
-  {
-    num: '04', icon: '', label: 'Audio',
+    num: '03', icon: '', label: 'Audio',
     hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
     tab: 'video-tools', svc: 'acestep',
     svcLabels: {

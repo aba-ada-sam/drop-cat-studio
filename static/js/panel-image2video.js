@@ -119,10 +119,6 @@ export function init(panel) {
             }
             ar.innerHTML = '';
             ar.append(
-              el('button', { class: 'btn btn-sm', text: '-> Add Transitions', onclick() {
-                handoff('bridges', { type: 'video', path: job.output });
-                document.querySelector('[data-tab="bridges"]')?.click();
-              }}),
               el('button', { class: 'btn btn-primary btn-sm', text: '-> Audio & Export', onclick() {
                 handoff('video-tools', { type: 'video', path: job.output });
                 document.querySelector('[data-tab="video-tools"]')?.click();
