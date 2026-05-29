@@ -7,7 +7,16 @@ is separate from Forge/DCS and carries the Blackwell/Windows fixes baked in:
   - sitecustomize.py forces torch.load(weights_only=False) for legacy ckpts
   - TORCHDYNAMO_DISABLE=1  (no Triton on Windows)
   - PYTHONUTF8=1           (MuseTalk prints non-ASCII chars)
-  - mmpose swapped for face-alignment in musetalk/utils/preprocessing.py
+  - mmpose swapped for face-alignment in musetalk/utils/preprocessing.py, and
+    the face box derived from those landmarks (the human-only SFD detector
+    missed creature faces -> only ~13/776 frames processed)
+  - scripts/inference.py writes the ORIGINAL frame for any skipped index so the
+    %08d PNG sequence stays contiguous (gaps made ffmpeg's image2 reader stop at
+    the first miss -> 27/776 frames = near-frozen "no lip sync")
+
+For a song, the full mix is poor sync material for the speech-trained model, so
+Demucs isolates the vocal stem to drive the mouth and the original song is
+re-muxed for the final (see isolate_vocals).
 
 Limitation: mouth-sync needs a detectable frontal face. Abstract/non-face
 content (e.g. a skull sculpture) won't sync.
@@ -52,14 +61,54 @@ def _extract_audio(video_path: str, out_wav: str) -> str | None:
     return out_wav if r.returncode == 0 and os.path.isfile(out_wav) else None
 
 
-def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str, bbox_shift: int = 0) -> str:
-    """Lip-sync video_path to audio_path (or the video's own audio). Returns out_path."""
+def _separate_vocals(musetalk_py: Path, in_audio: str, out_vocals: str) -> bool:
+    """Isolate the vocal stem via Demucs, run in the MuseTalk venv (has demucs)."""
+    helper = Path(__file__).resolve().parent / "_demucs_separate.py"
+    env = dict(os.environ)
+    env["TORCHDYNAMO_DISABLE"] = "1"
+    env["PYTHONUTF8"] = "1"
+    try:
+        r = subprocess.run(
+            [str(musetalk_py), str(helper), in_audio, out_vocals],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600, env=env,
+        )
+        if r.returncode != 0:
+            log.warning("[lipsync] demucs failed:\n%s", (r.stderr or "")[-800:])
+        return r.returncode == 0 and os.path.isfile(out_vocals)
+    except Exception as e:
+        log.warning("[lipsync] demucs exception: %s", e)
+        return False
+
+
+def _remux_audio(video_in: str, audio_in: str, out_path: str) -> bool:
+    """Replace the video's audio with audio_in (full song), keeping the video stream."""
+    r = run_ffmpeg(
+        ["ffmpeg", "-y", "-i", video_in, "-i", audio_in,
+         "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+         "-movflags", "+faststart", out_path],
+        timeout=300,
+    )
+    return r.returncode == 0 and os.path.isfile(out_path)
+
+
+def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str,
+                  bbox_shift: int = 0, isolate_vocals: bool | None = None) -> str:
+    """Lip-sync video_path to audio_path (or the video's own audio). Returns out_path.
+
+    When isolate_vocals (default from config lipsync_isolate_vocals), Demucs
+    extracts the vocal stem to DRIVE MuseTalk (a song's full mix is poor sync
+    material for the speech-trained model), then the ORIGINAL full audio is
+    re-muxed onto the result so the final video plays the whole song.
+    """
     d, py = _paths()
     if not lipsync_available():
         raise RuntimeError(
             "MuseTalk is not installed. Expected the venv + models under "
             f"{d} (set musetalk_dir / musetalk_python in config)."
         )
+    if isolate_vocals is None:
+        isolate_vocals = bool(cfg.get("lipsync_isolate_vocals", True))
 
     job.update(progress=6, message="Preparing lip-sync...")
 
@@ -71,17 +120,26 @@ def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str, b
         log.warning("[lipsync] gpu release_all failed (continuing): %s", e)
 
     work = d / "results" / f"dcs_{job.id[:8]}"
+    work.mkdir(parents=True, exist_ok=True)
     cfg_path = d / "configs" / "inference" / f"_dcs_{job.id[:8]}.yaml"
 
-    # Driving audio: use the provided file, else extract the video's own track.
-    drive_audio = audio_path
-    tmp_wav = None
-    if not drive_audio or not os.path.isfile(drive_audio):
-        tmp_wav = str(work / "_drive.wav")
-        work.mkdir(parents=True, exist_ok=True)
-        drive_audio = _extract_audio(video_path, tmp_wav)
-        if not drive_audio:
+    # The full audio that plays in the FINAL video (provided file or the video's
+    # own track).
+    original_audio = audio_path
+    if not original_audio or not os.path.isfile(original_audio):
+        original_audio = _extract_audio(video_path, str(work / "_orig.wav"))
+        if not original_audio:
             raise RuntimeError("No audio provided and could not extract audio from the video")
+
+    # What MuseTalk's mouth syncs to: isolated vocals (better) or the full audio.
+    drive_audio = original_audio
+    if isolate_vocals:
+        job.update(progress=10, message="Isolating vocals...")
+        voc = str(work / "_vocals.wav")
+        if _separate_vocals(py, original_audio, voc):
+            drive_audio = voc
+        else:
+            log.warning("[lipsync] vocal isolation failed -- driving with full audio")
 
     cfg_yaml = (
         "task_0:\n"
@@ -132,7 +190,16 @@ def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str, b
     src = max(finals, key=lambda p: p.stat().st_mtime)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src), out_path)
+    if drive_audio != original_audio:
+        # MuseTalk muxed the vocal stem; swap in the full song (same timeline,
+        # so the mouth still matches). Fall back to the vocals-audio output if
+        # the re-mux fails.
+        job.update(progress=88, message="Restoring full song audio...")
+        if not _remux_audio(str(src), original_audio, out_path):
+            log.warning("[lipsync] re-mux failed -- keeping vocals-only audio")
+            shutil.move(str(src), out_path)
+    else:
+        shutil.move(str(src), out_path)
 
     # Cleanup the MuseTalk work dir + temp config.
     try:

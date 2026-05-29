@@ -363,8 +363,13 @@ def _merge_video_audio_trim(
     target_dur = max(true_audio_dur + pad_before, audio_duration)
 
     need_loop = video_dur > 0 and video_dur < target_dur * 0.98
+    log.info("[song-video] merge: video=%.2fs song=%.2fs target=%.2fs loop=%s "
+             "(full song must play; video loops/holds to fit, audio is never trimmed below the song)",
+             video_dur, true_audio_dur, target_dur, need_loop)
 
-    # Build audio filter: delay by pad_before ms if requested
+    # Build audio filter: delay by pad_before ms if requested. apad pads with
+    # silence AFTER the song so the output can reach target_dur without ever
+    # truncating the song itself.
     audio_filter = f"adelay={int(pad_before * 1000)}|{int(pad_before * 1000)},apad" if pad_before > 0 else "apad"
 
     if need_loop:
@@ -399,6 +404,15 @@ def _merge_video_audio_trim(
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=600)
         if r.returncode == 0 and Path(out_path).exists():
+            # Safety net: the output must contain the whole song. If it ever
+            # comes up short (some odd codec/keyframe edge case), flag it loudly
+            # rather than silently shipping a clipped song.
+            out_dur = probe_duration(out_path) or 0.0
+            if out_dur + 0.2 < true_audio_dur:
+                log.error("[song-video] OUTPUT IS SHORT: %.2fs < song %.2fs -- the song would be "
+                          "clipped. Investigate the merge.", out_dur, true_audio_dur)
+            else:
+                log.info("[song-video] merge ok: output %.2fs (song %.2fs preserved)", out_dur, true_audio_dur)
             return out_path
         log.error("[song-video] merge failed:\n%s", r.stderr.decode(errors="replace")[-2000:])
     except Exception as e:
