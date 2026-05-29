@@ -1030,13 +1030,14 @@ def _do_song_gpu_phase(
                 log.warning("[song-video] Upscale exception: %s -- keeping 360p", _ue)
 
         # -- Lip sync post-pass (MuseTalk) ------------------------------------
-        # The real lip sync is a MuseTalk post-pass, NOT LTX-2 audio
-        # conditioning -- this WanGP build ignores the per-clip audio we feed it
-        # (services/wangp_worker.py _supports_audio=False), so the clips have no
-        # mouth motion on their own. Run MuseTalk on the finished video to drive
-        # the mouth from the song's isolated vocals. Best-effort: any failure
-        # (no detectable face, MuseTalk not installed) keeps the un-synced video.
-        if bool(settings.get("lip_sync", True)) and not _stopped():
+        # MuseTalk is human-face-trained: on real human/humanoid faces it works,
+        # on stylized cartoon-animal faces (e.g. propaganda-poster cats) it
+        # places a smeared inpaint blob across the mouth region -- worse than
+        # no lip sync. Gated behind an EXPLICIT opt-in (`auto_lipsync`,
+        # default False) so the human-face case can be enabled per-job, while
+        # the default music-video output stays clean. The manual "Lip-sync to
+        # audio" button on the Queue/Gallery detail still works case-by-case.
+        if bool(settings.get("auto_lipsync", False)) and not _stopped():
             try:
                 from features.lipsync.runner import lipsync_available, lipsync_video
                 if lipsync_available():
