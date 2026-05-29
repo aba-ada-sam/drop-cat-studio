@@ -6,7 +6,7 @@
 
 // tab-imports.js removed -- import is handled per-tab
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260525d';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260521b';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260528b';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260528a';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260528a';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260524g';
@@ -17,7 +17,7 @@ import { init as initAdobe     } from './tab-adobe.js?v=20260510o';
 import { init as initVideoTools, initBatch as initVideoToolsBatch } from './panel-video-tools.js?v=20260525c';
 import { consumeHandoff } from './handoff.js?v=20260508a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260518a';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260521a';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260528b';
 import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260421c';
 import './shell/ai-intent.js?v=20260503h';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260421c';

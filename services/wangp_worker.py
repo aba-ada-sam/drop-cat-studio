@@ -201,14 +201,15 @@ def _do_generate(params: dict) -> dict:
         defaults["MMAudio_setting"] = 1
     else:
         defaults["MMAudio_setting"] = 0     # never inherit a saved MMAudio=1
-    # LTX-2 audio conditioning: "A" mode generates video synchronized with the
-    # provided audio segment at model level. Set explicitly (not via setdefault)
-    # to override any stale audio_prompt_type saved in WanGP's settings file.
-    # Audio conditioning only works with ltx2_distilled. Other model types (ltxv_13B,
-    # Wan I2V) reject the request when audio_prompt_type="A" is set, returning an
-    # empty task queue and producing "no clips generated" failures.
+    # LTX-2 audio conditioning ("A" mode) is DISABLED. This WanGP build rejects
+    # audio_prompt_type="A" on every clip (audio+video tokens exceed LTX-2's
+    # context window -> empty task queue -> no-audio fallback), so it never
+    # produced lip sync and only added a wasted retry + log spam. Real lip sync
+    # now runs as a separate MuseTalk post-pass (features/lipsync/, /api/lipsync).
+    # If a future WanGP/LTX build supports audio conditioning, flip _supports_audio
+    # back to (model_type == "ltx2_distilled") to re-enable the attempt.
     audio_source_path = params.get("audio_source")
-    _supports_audio = (model_type == "ltx2_distilled")
+    _supports_audio = False
     if audio_source_path and os.path.isfile(audio_source_path) and _supports_audio:
         defaults["audio_source"]      = os.path.abspath(audio_source_path)
         defaults["audio_prompt_type"] = "A"

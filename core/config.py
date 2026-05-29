@@ -25,6 +25,9 @@ DEFAULTS: dict = {
     "resolution": "480p",
     "acestep_root": "",
     "acestep_host": "localhost",    # set to remote IP/hostname to use ACE-Step on another machine
+    # MuseTalk lip-sync (dedicated isolated venv, never shares Forge/DCS env).
+    "musetalk_dir": "",             # repo dir; blank -> C:\MuseTalk
+    "musetalk_python": "",          # venv python; blank -> <musetalk_dir>\venv\Scripts\python.exe
     "satellite_host": "",           # IP of the 3060 relay (port 9999); blank = no satellite
     # Auto-discovery for satellite-hosted services (ACE-Step, Ollama, Forge):
     # when the configured host is remote (not localhost) and unreachable, try

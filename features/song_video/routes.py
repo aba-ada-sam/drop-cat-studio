@@ -191,6 +191,16 @@ async def generate(request: Request):
                  n_clips, n_clips_aligned, bars_covered, bpm)
         n_clips = n_clips_aligned
 
+    # Feasibility: the clip planner uses clip_dur as its per-clip floor, so a
+    # song can hold at most floor(audio_dur / clip_dur) clips. Requesting more
+    # collapses the trailing clip to a degenerate sliver (e.g. 0.2s) and
+    # over-generates clips that the final trim throws away. Clamp here.
+    _max_feasible = max(1, int(audio_dur // clip_dur))
+    if n_clips > _max_feasible:
+        log.info("[song-video] Clamp n_clips %d->%d for feasibility (song %.1fs / clip_dur %ds)",
+                 n_clips, _max_feasible, audio_dur, clip_dur)
+        n_clips = _max_feasible
+
     # Per-job timeout: 5 min per clip + 15 min buffer, min 30 min
     timeout_sec = max(1800, n_clips * 300 + 900)
 
@@ -337,6 +347,14 @@ async def batch_start(request: Request):
     if _n2 != n_clips:
         log.info("[song-batch] Snap n_clips %d->%d to bar boundary (bpm=%d)", n_clips, _n2, _bpm2)
         n_clips = _n2
+
+    # Feasibility clamp: at most floor(audio_dur / clip_dur) clips, else the
+    # trailing clip collapses to a degenerate sliver and clips are wasted.
+    _max_feasible = max(1, int(audio_dur // clip_dur))
+    if n_clips > _max_feasible:
+        log.info("[song-batch] Clamp n_clips %d->%d for feasibility (song %.1fs / clip_dur %ds)",
+                 n_clips, _max_feasible, audio_dur, clip_dur)
+        n_clips = _max_feasible
 
     settings = {
         "video_prompt":   body.get("video_prompt", ""),

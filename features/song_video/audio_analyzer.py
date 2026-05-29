@@ -65,9 +65,10 @@ def _place_boundaries(
     """Shared boundary-placement logic used by both clip functions.
 
     Clamps each chosen boundary to <= total_dur so the final clip can never
-    have a negative duration when n_clips * min_dur exceeds total_dur. The
-    caller still gets n_clips boundaries, but the trailing ones may collapse
-    to zero-length when the song is too short for the requested clip count.
+    have a negative duration when n_clips * min_dur exceeds total_dur. Returns
+    n_clips + 1 boundaries. Callers should feasibility-clamp n_clips first
+    (n_clips <= floor(total_dur / min_dur)); this function additionally guards
+    the final clip from collapsing below min_dur when the song has room.
     """
     import numpy as np
     boundaries = [0.0]
@@ -84,6 +85,15 @@ def _place_boundaries(
         else:
             chosen = max(lo, min(hi, ideal))
         boundaries.append(min(chosen, total_dur))
+    # Guard against a degenerate final clip: if peak-snapping pushed the last
+    # interior boundary too close to the song end, pull it back so the final
+    # clip is at least min_dur -- but never below where it starves the
+    # second-to-last clip. If there's genuinely no room, leave it.
+    if n_clips >= 2:
+        cap   = total_dur - min_dur
+        floor = boundaries[-2] + min_dur
+        if boundaries[-1] > cap and cap >= floor:
+            boundaries[-1] = cap
     last_end = min(total_dur, boundaries[-1] + max_dur)
     boundaries.append(max(last_end, boundaries[-1]))
     return boundaries

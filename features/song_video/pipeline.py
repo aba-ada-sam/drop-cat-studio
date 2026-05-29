@@ -449,10 +449,12 @@ def run_song_prep(job, photo_path, settings):
     if subject_anchor:
         log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
 
-    # Guard: if the song is shorter than n_clips * min_dur, _place_boundaries
-    # collapses trailing boundaries to total_dur, producing zero-duration clips.
-    # ffmpeg -t 0 then writes an empty file and all subsequent clips fail.
-    clip_durations = [max(8.0, min(10.0, d)) for d in clip_durations]
+    # Light guard only: the planner already fits durations to the song (each in
+    # [clip_dur, max(clip_dur,10)]) and the feasibility clamp + boundary guard
+    # prevent degenerate clips. Clamp to the same [4,12] band the GPU phase uses
+    # for this_dur -- this avoids ffmpeg -t 0 without INFLATING the plan (the old
+    # max(8, min(10, d)) forced every clip to >=8s, blowing a 32s song up to 48s).
+    clip_durations = [max(4.0, min(12.0, d)) for d in clip_durations]
     settings["_clip_durations"] = clip_durations
     log.info("[song-video] Clip durations: %s", clip_durations)
 
@@ -513,6 +515,12 @@ def run_song_prep(job, photo_path, settings):
         arc = [user_idea or "Subject erupts into motion"] * n_clips
         settings["_story_arc"] = arc
 
+    # Do NOT re-anchor: resetting the chain start back to the source photo
+    # visibly repeats the same opening shot, which is not what we want -- the
+    # goal is continuity (same characters + set carried forward), not a repeated
+    # starter frame. Identity is held by chain-frame continuity + the subject
+    # anchor text in every prompt; generating at native resolution (not the old
+    # 360p) is what actually keeps the chain from melting.
     reanchor_every = 0
     settings["_reanchor_every"] = reanchor_every
 
@@ -579,14 +587,20 @@ def run_song_pipeline(job, photo_path, settings):
         bool(settings.get("lip_sync", True)) and
         bool(audio_wav)
     )
+    # Always generate at native model resolution. We previously dropped to
+    # 640x360 when lip sync was on "so audio tokens fit", but WanGP rejects the
+    # audio conditioning anyway (empty task queue -> no-audio fallback), so the
+    # downscale was pure quality loss: every clip rendered at 360p then upscaled
+    # ~2.5x to 928p = mush. Generating at native res and letting the audio
+    # attempt fall back to no-audio costs nothing and is far sharper.
     if ow and oh:
         tw, th = int(ow), int(oh)
-    elif _lip_sync_res_active:
-        tw, th = 640, 360
-        log.info("[song-video] Lip sync: generating at 640x360 (audio context fits), will upscale each clip to 580p")
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
+    if _lip_sync_res_active:
+        log.info("[song-video] Lip sync requested -- audio conditioning attempted at native %dx%d "
+                 "(no downscale); falls back to no-audio if WanGP rejects the audio tokens", tw, th)
 
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")

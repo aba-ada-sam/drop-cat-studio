@@ -7,6 +7,8 @@ import { apiFetch, toast } from './toast.js?v=20260518a';
 import { applySettingsToTab } from './ai-intent.js?v=20260503h';
 import { handoff } from '../handoff.js?v=20260422a';
 import { pathToUrl } from '../components.js?v=20260507a';
+import { VideoStretchTool } from '../components/video-stretch.js?v=20260528b';
+import { mountLipSyncTool } from '../components/lipsync-tool.js?v=20260528b';
 
 let _items = [];
 let _totalItems = 0;
@@ -365,6 +367,8 @@ function _openDetail(item) {
           <button class="btn btn-sm" id="gd-branch">Branch &amp; Tweak</button>
           <button class="btn btn-sm btn-danger" id="gd-delete">Delete File</button>
         </div>
+        ${isVideo ? `<div id="gd-stretch-slot" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-2)"></div>` : ''}
+        ${isVideo ? `<div id="gd-lipsync-slot" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-2)"></div>` : ''}
       </div>
     </div>`;
 
@@ -417,6 +421,26 @@ function _openDetail(item) {
   });
 
   overlay.classList.add('open');
+
+  // Manual Stretch & Lock tool for video items
+  if (isVideo) {
+    const slot = overlay.querySelector('#gd-stretch-slot');
+    const vid  = overlay.querySelector('video');
+    if (slot && vid) {
+      try {
+        new VideoStretchTool(slot, {
+          videoUrl: item.url,
+          videoPath: item.metadata?.path || item.url,
+          videoEl: vid,
+        });
+      } catch (e) { console.error('VideoStretchTool init failed', e); }
+    }
+    const lipSlot = overlay.querySelector('#gd-lipsync-slot');
+    if (lipSlot) {
+      mountLipSyncTool(lipSlot, { videoPath: item.metadata?.path || item.url })
+        .catch(e => console.error('LipSync mount failed', e));
+    }
+  }
 }
 
 function _loadItemSettings(item) {

@@ -5,6 +5,8 @@
 import { api } from './api.js?v=20260505e';
 import { toast } from './shell/toast.js?v=20260518a';
 import { el, pathToUrl } from './components.js?v=20260507a';
+import { VideoStretchTool } from './components/video-stretch.js?v=20260528b';
+import { mountLipSyncTool } from './components/lipsync-tool.js?v=20260528b';
 
 let _root        = null;
 let _pollTimer   = null;
@@ -43,7 +45,7 @@ function _persistDismissed() {
 export function init(panel) {
   _root = panel;
   _root.innerHTML = '';
-  _root.style.cssText = 'display:flex; flex-direction:column; height:100%; overflow:hidden;';
+  _root.style.cssText = 'display:flex; flex-direction:column; height:100%; overflow:hidden; position:relative;';
   _PAGE_LOAD_TIME = Date.now() / 1000;  // reset to actual tab-open time
   _loadDismissed();
   _injectStyles();
@@ -67,7 +69,7 @@ function _injectStyles() {
 
 export function pause()  { _stopPoll(); }
 export function resume() { _startPoll(); }
-export function openJobModal(job) { _showModal(job); }
+export function openJobModal(job) { _showDetailPage(job); }
 
 // -- Shell (toolbar + list area, built once) -----------------------------------
 
@@ -364,7 +366,7 @@ function _jobCard(job, active, idx, total) {
 
   card.addEventListener('click', e => {
     if (e.target.closest('button')) return;
-    _showModal(job);
+    _showDetailPage(job);
   });
   card.addEventListener('mouseenter', () => {
     card.style.borderColor = isFailed ? '#e05' : 'var(--accent)';
@@ -595,34 +597,39 @@ export function formatDuration(sec) {
 }
 const _formatDuration = formatDuration;
 
-function _showModal(job) {
+function _showDetailPage(job) {
   _stopModalTimers();
-  document.getElementById('queue-job-modal')?.remove();
+  document.getElementById('queue-detail-page')?.remove();
 
-  const overlay = el('div', {
-    id: 'queue-job-modal',
-    style: 'position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,.82); display:flex; align-items:center; justify-content:center;',
+  // Full detail page that covers the Queue tab (not a popup). Back button
+  // returns to the job list.
+  const page = el('div', {
+    id: 'queue-detail-page',
+    style: 'position:absolute; inset:0; z-index:20; background:var(--surface-1); display:flex; flex-direction:column; overflow:hidden;',
   });
   function _close() {
     _stopModalTimers();
-    overlay.querySelector('video')?.pause();
-    overlay.remove();
+    page.querySelector('video')?.pause();
+    document.removeEventListener('keydown', _onKey);
+    page.remove();
   }
-  overlay.addEventListener('click', e => { if (e.target === overlay) _close(); });
+  function _onKey(e) { if (e.key === 'Escape') _close(); }
+  document.addEventListener('keydown', _onKey);
 
-  const box = el('div', {
-    style: 'background:var(--surface-1); border-radius:12px; padding:20px; max-width:min(860px,90vw); width:100%; display:flex; flex-direction:column; gap:14px; max-height:90vh; overflow:auto;',
-  });
-
-  // -- Header --
-  const hdr        = el('div', { style: 'display:flex; align-items:center; gap:10px;' });
+  // -- Back bar (sticky header) --
+  const backBar    = el('div', { style: 'display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border-2); flex-shrink:0;' });
+  const backBtn    = el('button', { class: 'btn btn-sm', text: '< Back to queue' });
+  backBtn.addEventListener('click', _close);
   const titleEl    = el('span', { style: 'font-size:.95rem; font-weight:700; flex:1; color:var(--text-1);', text: job.label || job.type });
   const chipSlot   = el('span', { style: 'display:inline-flex; align-items:center;' });
   chipSlot.appendChild(_statusChip(job));
-  const closeX     = el('button', { class: 'btn btn-sm', text: 'X', style: 'padding:2px 8px;' });
-  closeX.addEventListener('click', _close);
-  hdr.appendChild(titleEl); hdr.appendChild(chipSlot); hdr.appendChild(closeX);
-  box.appendChild(hdr);
+  backBar.appendChild(backBtn); backBar.appendChild(titleEl); backBar.appendChild(chipSlot);
+  page.appendChild(backBar);
+
+  // -- Scrollable content --
+  const box = el('div', {
+    style: 'flex:1; overflow:auto; padding:20px; display:flex; flex-direction:column; gap:14px; max-width:900px; width:100%; margin:0 auto;',
+  });
 
   // -- Output video (when done) --
   const videoSlot = el('div');
@@ -691,8 +698,8 @@ function _showModal(job) {
   rerunBtn.addEventListener('click', () => _doBranch(job, '', _close));
   contBtn.addEventListener('click', () => _doContinuation(job, _close));
 
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
+  page.appendChild(box);
+  (_root || document.body).appendChild(page);
 
   // -- Initial render + start the live refresh loop --
   _modalState = { jobId: job.id, lastEta: null, lastEtaAt: 0 };
@@ -802,6 +809,17 @@ function _renderModal(job, els) {
       vid.style.cssText = 'width:100%; max-height:55vh; border-radius:8px; background:#000;';
       vid.src = pathToUrl(out);
       els.videoSlot.appendChild(vid);
+      // Manual Stretch & Lock tool for finished videos
+      if (/\.(mp4|mov|mkv|webm)$/i.test(out)) {
+        const stretchSlot = el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px solid var(--border-2);' });
+        els.videoSlot.appendChild(stretchSlot);
+        try {
+          new VideoStretchTool(stretchSlot, { videoUrl: pathToUrl(out), videoPath: out, videoEl: vid });
+        } catch (e) { console.error('VideoStretchTool init failed', e); }
+        const lipSlot = el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px solid var(--border-2);' });
+        els.videoSlot.appendChild(lipSlot);
+        mountLipSyncTool(lipSlot, { videoPath: out }).catch(e => console.error('LipSync mount failed', e));
+      }
     }
   } else if (!isDone && els.videoSlot.querySelector('video')) {
     els.videoSlot.innerHTML = '';
@@ -866,7 +884,7 @@ async function _doContinuation(job, closeFn) {
     return;
   }
 
-  const contBtn = document.querySelector('#queue-job-modal .btn[title*="last frame"]');
+  const contBtn = document.querySelector('#queue-detail-page .btn[title*="last frame"]');
   if (contBtn) { contBtn.disabled = true; contBtn.textContent = '...'; }
 
   let frameData;
