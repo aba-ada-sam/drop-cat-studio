@@ -201,15 +201,18 @@ def _do_generate(params: dict) -> dict:
         defaults["MMAudio_setting"] = 1
     else:
         defaults["MMAudio_setting"] = 0     # never inherit a saved MMAudio=1
-    # LTX-2 audio conditioning ("A" mode) is DISABLED. This WanGP build rejects
-    # audio_prompt_type="A" on every clip (audio+video tokens exceed LTX-2's
-    # context window -> empty task queue -> no-audio fallback), so it never
-    # produced lip sync and only added a wasted retry + log spam. Real lip sync
-    # now runs as a separate MuseTalk post-pass (features/lipsync/, /api/lipsync).
-    # If a future WanGP/LTX build supports audio conditioning, flip _supports_audio
-    # back to (model_type == "ltx2_distilled") to re-enable the attempt.
+    # LTX-2 audio conditioning ("A" mode) is supported, but only inside a tight
+    # token budget. Confirmed lip-sync output on a satellite running WanGP v10.952
+    # with LTX-2 Distilled 19B at 960x544 / 249 frames / audio_scale 0.6. The
+    # earlier "rejects A on every clip" failure was caused by oversized clips
+    # (1032x580 / longer durations) that overflow LTX-2's context window. At the
+    # recipe above the audio+video tokens fit and the model lip-syncs natively;
+    # callers that overflow the budget fall back to no-audio (see the empty-queue
+    # retry on line ~270 below). Re-enabled 2026-05-29 once the satellite proof
+    # arrived; the MuseTalk post-pass (features/lipsync/) remains available for
+    # content where audio conditioning isn't a good fit.
     audio_source_path = params.get("audio_source")
-    _supports_audio = False
+    _supports_audio = (model_type == "ltx2_distilled")
     if audio_source_path and os.path.isfile(audio_source_path) and _supports_audio:
         defaults["audio_source"]      = os.path.abspath(audio_source_path)
         defaults["audio_prompt_type"] = "A"
