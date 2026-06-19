@@ -23,6 +23,10 @@ WANGP_LOCAL_URL       = f"http://127.0.0.1:{WANGP_WORKER_PORT}"
 # /wangp/* on the relay forwards to the local worker at 127.0.0.1:7899 there.
 WANGP_SATELLITE_RELAY = "http://192.168.86.49:9999"
 WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
+# Satellite (second-box) generation is a FUTURE-DEV feature, NOT current ops.
+# Hard-off so no job ever routes off this machine. Flip to True (and configure
+# satellite_host) to re-enable for development.
+SATELLITE_ENABLED = False
 
 # Negative prompts tuned per model family and motion style.
 #
@@ -109,7 +113,10 @@ def _worker_alive(base_url: str = WANGP_LOCAL_URL) -> bool:
 
 
 def satellite_alive() -> bool:
-    """Return True if the 3060 satellite WanGP proxy is reachable and healthy."""
+    """Return True if the 3060 satellite WanGP proxy is reachable and healthy.
+    Always False in current ops (SATELLITE_ENABLED) -- future-dev feature."""
+    if not SATELLITE_ENABLED:
+        return False
     return _worker_alive(WANGP_SATELLITE_URL)
 
 
@@ -187,8 +194,9 @@ def generate_video(
         time.sleep(2)
 
     # Satellite shortcut: if caller supplied a worker_url, skip local worker
-    # entirely and route directly to that endpoint.
-    if worker_url and worker_url != WANGP_LOCAL_URL:
+    # entirely and route directly to that endpoint. Gated by SATELLITE_ENABLED
+    # (off in current ops) so a stale satellite worker_url falls through to local.
+    if SATELLITE_ENABLED and worker_url and worker_url != WANGP_LOCAL_URL:
         return _generate_via_worker(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,

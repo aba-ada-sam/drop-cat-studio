@@ -298,8 +298,8 @@ export function init(panel) {
 
         // Samplers -- default from config
         samplerSelect.innerHTML = '';
-        const defaultSampler = forgeStatus.default_sampler || 'DPM++ 2M SDE';
-        for (const s of forgeStatus.samplers || ['DPM++ 2M SDE', 'Euler', 'DDIM']) {
+        const defaultSampler = forgeStatus.default_sampler || 'DPM++ 3M SDE';
+        for (const s of forgeStatus.samplers || ['DPM++ 3M SDE', 'Euler', 'DDIM']) {
           const opt = el('option', { value: s, text: s });
           if (s === defaultSampler) opt.selected = true;
           samplerSelect.appendChild(opt);

@@ -9,7 +9,7 @@ import { createSlider, el, escHtml } from './components.js?v=20260507a';
 import { toast, apiFetch } from './shell/toast.js?v=20260518a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260509a';
 import { handoff } from './handoff.js?v=20260422a';
-import { RegionEditor } from './components/region-editor.js';
+import { RegionEditor } from './components/region-editor.js?v=20260619a';
 
 // -- Module state -------------------------------------------------------------
 let forgeStatus    = null;
@@ -325,6 +325,43 @@ export function init(panel) {
   }
   fcDirSel.addEventListener('change', _rebuildFcEditor);
   fcCountSel.addEventListener('change', _rebuildFcEditor);
+
+  // -- LoRAs (style / character add-ons) ------------------------------------
+  const loraDet = el('details', { style: 'margin-top:8px' });
+  loraDet.appendChild(el('summary', { style: 'cursor:pointer; font-size:.8rem; color:var(--text-3)', text: 'LoRAs (style / character add-ons)' }));
+  const loraBody = el('div', { style: 'margin-top:8px; display:flex; flex-direction:column; gap:6px' });
+  loraDet.appendChild(loraBody);
+  settingsBody.appendChild(loraDet);
+
+  let _loraRows = [];
+  function renderLoras() {
+    loraBody.innerHTML = '';
+    _loraRows = [];
+    const loras = (forgeStatus && forgeStatus.loras) || [];
+    if (!loras.length) {
+      loraBody.appendChild(el('div', { style: 'font-size:.78rem; color:var(--text-3)',
+        text: 'No LoRAs found. Drop .safetensors into C:\\forge\\models\\Lora, then Refresh.' }));
+    }
+    for (const lo of loras) {
+      const name = lo.name || lo.alias;
+      if (!name) continue;
+      const row = el('div', { style: 'display:grid; grid-template-columns:auto 1fr 90px 34px; gap:8px; align-items:center' });
+      const cb  = el('input', { type: 'checkbox', style: 'cursor:pointer' });
+      const nm  = el('label', { text: name, title: name, style: 'font-size:.78rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap' });
+      const wt  = el('input', { type: 'range', min: '0', max: '1.5', step: '0.05', value: '0.8' });
+      const wv  = el('span', { text: '0.80', style: 'font-size:.7rem; color:var(--accent); font-family:monospace; text-align:right' });
+      wt.addEventListener('input', () => { wv.textContent = Number(wt.value).toFixed(2); });
+      row.appendChild(cb); row.appendChild(nm); row.appendChild(wt); row.appendChild(wv);
+      loraBody.appendChild(row);
+      _loraRows.push({ name, cb, wt });
+    }
+    loraBody.appendChild(el('button', { class: 'btn btn-sm', text: 'Refresh LoRAs',
+      style: 'font-size:.75rem; margin-top:4px', onclick: async () => { await checkForge(); } }));
+  }
+  function loraSuffix() {
+    return _loraRows.filter(r => r.cb.checked)
+      .map(r => ` <lora:${r.name}:${Number(r.wt.value).toFixed(2)}>`).join('');
+  }
 
   // -- Generate button row --------------------------------------------------
   // -- Loop state ------------------------------------------------------------
@@ -824,11 +861,12 @@ export function init(panel) {
             sel.appendChild(opt);
           }
         };
-        fill(samplerSel, forgeStatus.samplers, forgeStatus.default_sampler || 'DPM++ 2M SDE');
+        fill(samplerSel, forgeStatus.samplers, forgeStatus.default_sampler || 'DPM++ 3M SDE');
         fill(schedulerSel, forgeStatus.schedulers, forgeStatus.default_scheduler || 'Karras');
         hrUpscalerSel.innerHTML = '';
         for (const u of forgeStatus.upscalers || ['ESRGAN_4x', 'Latent', 'None'])
           hrUpscalerSel.appendChild(el('option', { value: u, text: u }));
+        renderLoras();
 
       } else {
         if (_backend !== 'openai') genBtn.disabled = true;
@@ -838,7 +876,12 @@ export function init(panel) {
           _forgeAutoStarted = true;
           forgeDot.className   = 'dot starting';
           forgeMsg.textContent = 'Starting Forge automatically...';
-          api('/api/services/start/forge', { method: 'POST' }).catch(() => {});
+          api('/api/services/start/forge', { method: 'POST' }).catch((e) => {
+            if (String(e?.message || '').toLowerCase().includes('rendering')) {
+              _forgeAutoStarted = false;  // retry once the video render finishes
+              forgeMsg.textContent = 'A video is rendering -- Forge will start when it finishes.';
+            }
+          });
         } else {
           // Already starting -- poll service status for live progress message
           forgeDot.className = 'dot starting';
@@ -858,7 +901,12 @@ export function init(panel) {
         _forgeAutoStarted = true;
         forgeDot.className   = 'dot starting';
         forgeMsg.textContent = 'Starting Forge automatically...';
-        api('/api/services/start/forge', { method: 'POST' }).catch(() => {});
+        api('/api/services/start/forge', { method: 'POST' }).catch((e) => {
+          if (String(e?.message || '').toLowerCase().includes('rendering')) {
+            _forgeAutoStarted = false;  // retry once the video render finishes
+            forgeMsg.textContent = 'A video is rendering -- Forge will start when it finishes.';
+          }
+        });
       } else {
         forgeDot.className   = 'dot not_configured';
         forgeMsg.textContent = 'Forge not detected -- check logs';
@@ -958,12 +1006,14 @@ export function init(panel) {
 
     try {
       const useFc = fcEnabled.checked;
-      const fcRegions = useFc ? fcEditor.getRegions().map(r => r.prompt || '') : [];
+      // Advanced mapping: send each region's rectangle + prompt so geometry
+      // (rule-of-thirds, off-center hero, grids) is honored instead of equal strips.
+      const fcMapping = useFc ? fcEditor.getMapping() : [];
 
       const data = await api('/api/prompts/forge/txt2img', {
         method: 'POST',
         body: JSON.stringify({
-          prompt,
+          prompt: prompt + loraSuffix(),
           negative_prompt: negArea.value,
           steps: Number(stepsSlider.value),
           cfg_scale: Number(cfgSlider.value),
@@ -982,9 +1032,9 @@ export function init(panel) {
           adetailer_denoise: Number(adDenoiseSlider.value),
           adetailer_confidence: Number(adConfidenceSlider.value),
           use_forge_couple: useFc,
-          columns: fcRegions,
+          forge_couple_mode: useFc ? 'Advanced' : 'Basic',
+          region_map: fcMapping,
           forge_couple_direction: fcDirSel.value,
-          forge_couple_background: 'First Line',
           forge_couple_bg_weight: Number(fcBgWeight.value),
         }),
       });

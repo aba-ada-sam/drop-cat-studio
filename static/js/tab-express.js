@@ -217,8 +217,12 @@ export function init(panel) {
   }
 
   function _resetPromptsForNewImage() {
-    if (typeof ideaInput !== 'undefined' && ideaInput) ideaInput.value = '';
-    if (typeof lyricInput !== 'undefined' && lyricInput) lyricInput.value = '';
+    // 2026-06-18: deliberately do NOT wipe ideaInput/lyricInput here. Auto-erasing
+    // a prompt the user typed or generated with Spark was destroying their work --
+    // it got wiped on image swap / blob-preview re-render, and then Create rejected
+    // with "Drop an image or type a video idea first." The Create flow already
+    // auto-fills an empty idea, and the user can re-Spark for a fresh one; silently
+    // deleting their text is the worse failure. Only reset the ephemeral chat state.
     if (typeof talkReplyEl !== 'undefined' && talkReplyEl) {
       talkReplyEl.textContent = '';
       talkReplyEl.style.display = 'none';
@@ -413,19 +417,63 @@ export function init(panel) {
     }
   });
 
+  // Toggle: derive the music + lyrics from a vision pass on the photo itself
+  // (colors, mood, subject, setting). Works on cloud providers too. Off by
+  // default -- opt-in, since it adds a vision call and cloud may refuse some images.
+  let _audioFromImage = false;
+  const audioFromImgChk = el('input', {
+    type: 'checkbox', id: 'express-audio-from-image',
+    style: 'cursor:pointer; width:14px; height:14px; flex-shrink:0;',
+  });
+  audioFromImgChk.addEventListener('change', () => { _audioFromImage = audioFromImgChk.checked; });
+  const audioFromImgRow = el('label', {
+    for: 'express-audio-from-image',
+    style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:.75rem; color:var(--text-3); margin-top:6px;',
+    title: 'Analyze the photo and base the music + lyrics on what is actually in the image, not just your text idea.',
+  }, [
+    audioFromImgChk,
+    el('span', { text: 'Generate audio from the image (analyze the photo)' }),
+  ]);
+
+  // Optional: the user writes their own lyrics. When filled, used verbatim
+  // (AI lyric generation is skipped).
+  const customLyricsTA = el('textarea', {
+    rows: '3',
+    style: 'width:100%; resize:vertical; font-size:.82rem; margin-top:4px;',
+    placeholder: 'Your own lyrics (optional) -- leave blank to let AI write them. Use [verse] / [chorus] tags to mark sections.',
+  });
+
+  // Length of the finished piece. A still image has no intrinsic duration, so
+  // this is where you say how long it should be -- the audio is generated to
+  // match. Two-way synced with the Story-length / Per-clip-duration sliders
+  // (single source of truth); wiring lives next to those sliders below.
+  const audioLenSlider = el('input', { type: 'range', min: '1', max: '120', step: '1', value: '10', style: 'flex:1; accent-color:var(--accent);' });
+  const audioLenLabel  = el('span', { style: 'font-size:.82rem; color:var(--accent); font-weight:600; min-width:34px; text-align:right;', text: '10s' });
+  const audioLenRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px;' }, [
+    el('span', { style: 'font-size:.75rem; color:var(--text-3); width:64px; flex-shrink:0;', text: 'Length' }),
+    audioLenSlider,
+    audioLenLabel,
+  ]);
+  const audioLenHint = el('div', { style: 'font-size:.7rem; color:var(--text-3); margin-top:2px;', text: 'Length of the whole video -- audio matches it (max 120s).' });
+
   // Music vibe is auto-generated from the creative brief if left blank, so
   // it lives behind a "Customize music" expander -- novices never see it.
   const musicVibeBlock = el('details', { style: 'margin-top:2px;' }, [
     el('summary', {
       style: 'cursor:pointer; font-size:.72rem; color:var(--text-3); user-select:none; padding:4px 0; outline:none; list-style:none;',
-      text: '+  Customize music vibe (auto-generated if left blank)',
+      text: '+  Customize music: vibe, lyrics, length & image-based audio',
     }),
     el('div', { style: 'display:flex; flex-direction:column; gap:4px; margin-top:6px;' }, [
       el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
-        el('div', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Music vibe' }),
+        el('div', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Music vibe / style' }),
         lyricGenBtn,
       ]),
       lyricInput,
+      audioFromImgRow,
+      audioLenRow,
+      audioLenHint,
+      el('div', { style: 'font-size:.75rem; color:var(--text-3); margin-top:6px;', text: 'Your lyrics (optional)' }),
+      customLyricsTA,
     ]),
   ]);
 
@@ -702,8 +750,44 @@ export function init(panel) {
   function _refreshClipInfo() {
     _numClips = Math.max(2, Math.round(_targetSecs / _duration));
     clipInfoLabel.textContent = `~${_numClips} clips at ${_duration}s each - AI adjusts pacing`;
+    _syncAudioLenDisplay();
   }
   durSlider.addEventListener('input', _refreshClipInfo);
+
+  // -- Length control: mirror the real length knob into the music section -----
+  // The "Length" slider under Customize music is the discoverable place to set
+  // duration when starting from a still image. It reflects/controls the active
+  // length knob -- Story length when extending the scene, Per-clip duration
+  // otherwise -- so there is a single source of truth. Audio is sized to match
+  // the video; ACE-Step caps it at 120s.
+  function _effLenMax() {
+    return _multiVideo ? 120 : (QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20);
+  }
+  function _syncAudioLenDisplay() {
+    const eff = _multiVideo ? _targetSecs : _duration;
+    audioLenSlider.min   = _multiVideo ? '10' : '1';
+    audioLenSlider.max   = String(_effLenMax());
+    audioLenSlider.value = String(eff);
+    audioLenLabel.textContent = `${eff}s`;
+    audioLenHint.textContent = _multiVideo
+      ? 'Length of the whole video -- audio matches it (max 120s).'
+      : 'Single-clip length -- audio matches it (turn on Extend scene for longer).';
+  }
+  function _applyAudioLength(secs) {
+    const v = Math.max(1, Math.min(Number(secs), _effLenMax()));
+    if (_multiVideo) {
+      _targetSecs = Math.max(10, Math.round(v / 5) * 5);  // story slider: 10-120 step 5
+      lenSlider.value = String(_targetSecs);
+      lenLabel.textContent = `${_targetSecs}s`;
+    } else {
+      _duration = Math.round(v);
+      durSlider.value = String(_duration);
+      durLabel.textContent = `${_duration}s`;
+    }
+    _refreshClipInfo();  // recomputes clip count + re-syncs the audio-len display
+  }
+  audioLenSlider.addEventListener('input', () => _applyAudioLength(audioLenSlider.value));
+  _syncAudioLenDisplay();
 
   const upscaleChk = el('input', { type: 'checkbox', id: 'express-upscale', style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;' });
 
@@ -1027,6 +1111,9 @@ export function init(panel) {
   // -- Core generation -------------------------------------------------------
   // Returns Promise<boolean> -- true = queued/success, false = failure
   async function _generateOne() {
+    // If the background image upload is still running, wait for the real server
+    // path so we don't submit with _imagePath still null (the no-image race).
+    if (_uploadInFlight) { try { await _uploadInFlight; } catch (_) {} }
     let motionPrompt = ideaInput.value.trim();
     const needIdea   = !motionPrompt;
     const needLyric  = !lyricInput.value.trim();
@@ -1082,6 +1169,7 @@ export function init(panel) {
         body: JSON.stringify({
           photo_path: _imagePath, video_prompt: motionPrompt, music_prompt: '',
           lyric_direction: lyricInput.value.trim(), user_direction: 'character-driven, specific energy, not generic',
+          audio_from_image: _audioFromImage, custom_lyrics: customLyricsTA.value.trim(),
           model: _model, duration: _duration,
           steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false, lip_sync: _lipSync,
           output_width: _outW, output_height: _outH,
@@ -1226,6 +1314,8 @@ export function init(panel) {
       video_prompt:        ideaInput.value.trim(),
       music_prompt:        '',
       lyric_direction:     lyricInput.value.trim(),
+      audio_from_image:    _audioFromImage,
+      custom_lyrics:       customLyricsTA.value.trim(),
       user_direction:      'cinematic narrative, story continuity',
       model:               _model,
       duration:            _duration,       // single-clip path
@@ -1375,6 +1465,8 @@ export function init(panel) {
           video_prompt:    motionPrompt,
           music_prompt:    '',
           lyric_direction: lyricInput.value.trim(),
+          audio_from_image: _audioFromImage,
+          custom_lyrics:    customLyricsTA.value.trim(),
           // No "dramatic" here -- Express defaults to LTX which defaults to CALM
           // motion. "Dramatic" in the user direction fights the CALM system prompt
           // and forces the story-arc LLM to reconcile contradictory signals. Let

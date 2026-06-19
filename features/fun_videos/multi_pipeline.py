@@ -1193,7 +1193,7 @@ def _chain_anchor(clip_path: str, anchor_png: str, ratio: float = _CHAIN_TRIM_RA
     return anchor_ok, new_dur
 
 
-_ANCHOR_BLEND_ALPHA = 0.95  # 95% last frame (motion continuity) + 5% source (identity gravity)
+_ANCHOR_BLEND_ALPHA = 0.82  # 82% last frame (motion continuity) + 18% source (identity gravity). 2026-06-19: was 0.95 (only 5% source) which contradicted this function's own docstring and was too weak to pull skin/identity drift back toward the clean source -- per-clip texture noise accumulated instead of being corrected.
 
 
 def _blend_anchor_with_source(anchor_png: str, source_photo: str,
@@ -1668,30 +1668,47 @@ def run_multi_prep(job, photo_path, settings):
         job.update(progress=10, message="Story arc ready, waiting for GPU...")
         return
 
+    # Image-driven audio + user-supplied lyrics (opt-in via UI).
+    audio_from_image = bool(settings.get("audio_from_image", False))
+    custom_lyrics    = (settings.get("custom_lyrics") or "").strip()
+
+    # User typed their own lyrics -> use them verbatim, skip lyric generation.
+    if custom_lyrics and not instrumental:
+        settings["_prepped_lyrics"] = custom_lyrics
+        log.info("[multi] Using user-supplied lyrics (%d chars)", len(custom_lyrics))
+
+    # Photo frames for vision-based audio. Always sent for Ollama (original
+    # behavior); also sent for any provider when the user asked to derive the
+    # audio from the image. Cloud has no VRAM cost; Ollama needs free VRAM.
+    audio_frames = []
+    if photo_path and os.path.isfile(photo_path):
+        provider = llm_router._provider()
+        if provider == "ollama" or (audio_from_image and (provider != "ollama" or _vision_ok)):
+            _ab64 = encode_image_b64(photo_path)
+            if _ab64:
+                audio_frames = [_ab64]
+
     # -- Music direction ----------------------------------------------------
     music_prompt = settings.get("music_prompt", "")
     if not music_prompt:
-        job.update(progress=7, message="Getting music direction...")
+        _from_img = audio_from_image and bool(audio_frames)
+        job.update(progress=7, message="Analysing image for music direction..." if _from_img else "Getting music direction...")
         try:
-            provider = llm_router._provider()
-            if provider == "ollama" and photo_path and os.path.isfile(photo_path):
-                b64 = encode_image_b64(photo_path)
-                frames = [b64] if b64 else []
-            else:
-                frames = []
             arc = settings.get("_story_arc", [])
             video_context = " ".join(
                 a.get("prompt", "") if isinstance(a, dict) else str(a) for a in arc[:2]
             ) if arc else user_idea
             result = analyzer.generate_music_prompt(
-                llm_router, frames, user_idea, video_prompt=video_context
+                llm_router, audio_frames, user_idea, video_prompt=video_context,
+                force_vision=audio_from_image,
             )
             music_prompt = result.get("music_prompt", "")
             if not settings.get("bpm") and result.get("bpm"):
                 settings["bpm"] = result["bpm"]
             if music_prompt:
                 settings["_prepped_music_prompt"] = music_prompt
-                log.info("[multi] Music direction: %s", music_prompt[:80])
+                log.info("[multi] Music direction%s: %s",
+                         " (from image)" if _from_img else "", music_prompt[:80])
         except Exception as e:
             log.warning("[multi] Music prep failed: %s", e)
 
@@ -1699,8 +1716,9 @@ def run_multi_prep(job, photo_path, settings):
     if not instrumental and not settings.get("_prepped_lyrics") and music_prompt:
         job.update(progress=9, message="Writing lyrics...")
         try:
+            lyric_frames = audio_frames if audio_from_image else []
             lyrics = analyzer.generate_lyrics(
-                llm_router, [], music_prompt, lyric_direction or user_idea,
+                llm_router, lyric_frames, music_prompt, lyric_direction or user_idea,
             )
             if lyrics:
                 settings["_prepped_lyrics"] = lyrics

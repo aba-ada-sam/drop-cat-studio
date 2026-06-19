@@ -15,6 +15,7 @@ No ACE-Step involved. The user's uploaded song is the audio track.
 """
 import logging
 import os
+import random
 import shutil
 import subprocess
 import time
@@ -639,6 +640,70 @@ def run_song_pipeline(job, photo_path, settings):
     # Orchestrator keeps WanGP loaded; next acquire of a different service evicts.
 
 
+def _seed_pool(base_seed, n, clip_index):
+    """Distinct, reproducible seeds for the N best-of-N attempts of one clip.
+    A real requested seed (>=0) goes first; the rest come from a per-clip
+    deterministic RNG so re-runs reproduce but attempts within a clip differ."""
+    rng = random.Random(10_000 + int(clip_index))
+    seeds: list[int] = []
+    if base_seed is not None and int(base_seed) >= 0:
+        seeds.append(int(base_seed))
+    while len(seeds) < n:
+        s = rng.randint(1, 2**31 - 1)
+        if s not in seeds:
+            seeds.append(s)
+    return seeds[:max(1, n)]
+
+
+def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log_fn=print):
+    """Generate `n` seeds for one clip, score each take with the audio<->mouth
+    sync QC, and keep the BEST by mouth_sync_score. Early-accepts the first take
+    that clears the sync gate (saves GPU). Returns the chosen clip path (==
+    out_path), or None if every take failed."""
+    from features.song_video import sync_qc
+    seeds = _seed_pool(base_seed, n, clip_index)
+    base, ext = os.path.splitext(out_path)
+    best = None  # (score, path)
+    for sd in seeds:
+        attempt = f"{base}_s{sd}{ext}"
+        res_path = gen_fn(sd, attempt)
+        if not res_path or not os.path.isfile(res_path):
+            log_fn(f"[best-of-{len(seeds)}] seed {sd}: no output -- skipped")
+            continue
+        try:
+            r = sync_qc.analyze(res_path, audio_path=audio_slice)
+            score = sync_qc.mouth_sync_score(r)
+            log_fn(f"[best-of-{len(seeds)}] seed {sd}: score={score:.3f} "
+                   f"sync_y={r.get('sync_y')} contrast={r.get('sync_contrast')} "
+                   f"motion={r.get('total_motion')}")
+        except Exception as _e:
+            r, score = None, 0.0
+            log_fn(f"[best-of-{len(seeds)}] seed {sd}: QC failed ({_e}) -- scored 0")
+        if best is None or score > best[0]:
+            best = (score, res_path)
+        if r is not None and sync_qc.is_synced(r):
+            log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate -- keeping it")
+            break
+    if best is None:
+        return None
+    score, best_path = best
+    if os.path.abspath(best_path) != os.path.abspath(out_path):
+        try:
+            shutil.copy2(best_path, out_path)
+        except Exception:
+            out_path = best_path  # fall back to using the winner in place
+    # Remove the non-winning attempt files to control disk.
+    for sd in seeds:
+        attempt = f"{base}_s{sd}{ext}"
+        if os.path.isfile(attempt) and os.path.abspath(attempt) != os.path.abspath(out_path):
+            try:
+                os.remove(attempt)
+            except Exception:
+                pass
+    log_fn(f"[best-of-{len(seeds)}] kept score={score:.3f}")
+    return out_path
+
+
 def _do_song_gpu_phase(
     job, photo_path, settings, job_dir,
     n_clips, clip_durations, model_name,
@@ -709,6 +774,19 @@ def _do_song_gpu_phase(
         log.warning("[song-video] Lip sync requested but audio WAV conversion failed -- skipping")
     elif settings.get("lip_sync") and len(_clip_start_times) != n_clips:
         log.warning("[song-video] Lip sync skipped -- clip_start_times length %d != n_clips %d", len(_clip_start_times), n_clips)
+
+    # Best-of-N seed selection (opt-in via best_of_n; default 1 = off). Needs the
+    # audio<->mouth sync QC to rank takes; degrades gracefully if unavailable.
+    _best_of_n = max(1, int(settings.get("best_of_n", 1) or 1))
+    try:
+        from features.song_video import sync_qc as _sync_qc
+    except Exception:
+        _sync_qc = None
+    if _best_of_n > 1 and _sync_qc is None:
+        log.warning("[song-video] best_of_n=%d requested but sync_qc unavailable -- single-take", _best_of_n)
+        _best_of_n = 1
+    if _best_of_n > 1:
+        log.info("[song-video] best-of-%d seed selection ON (ranked by audio<->mouth sync)", _best_of_n)
 
     for i, _arc_entry in enumerate(story_arc):
         clip_prompt = _arc_entry.get("prompt", "") if isinstance(_arc_entry, dict) else str(_arc_entry)
@@ -794,11 +872,11 @@ def _do_song_gpu_phase(
         # Slices were pre-extracted before the loop -- just look up the path.
         _audio_slice: str | None = _audio_slices[i] if i < len(_audio_slices) else None
 
-        try:
-            clip_path = video_generator.generate_video(
+        def _gen_one(_seed, _out):
+            return video_generator.generate_video(
                 image_path=clip_start_image,
                 prompt=finalized,
-                out_path=clip_out,
+                out_path=_out,
                 duration=this_dur,
                 model_name=model_name,
                 resolution=resolution,
@@ -806,7 +884,7 @@ def _do_song_gpu_phase(
                 override_height=int(oh) if oh else None,
                 steps=steps,
                 guidance=effective_guidance,
-                seed=seed,
+                seed=_seed,
                 end_image_path=clip_end_image,
                 negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
                 audio_source=_audio_slice,
@@ -815,6 +893,18 @@ def _do_song_gpu_phase(
                 progress_fn=_video_progress,
                 worker_url=_worker_url or None,
             )
+
+        try:
+            # Best-of-N: LTX-2 at 8 steps is a seed lottery -- the same recipe
+            # lands audio-driven motion on the mouth vs the eyes depending on the
+            # seed. When best_of_n>1 AND this clip has audio to sync to, generate
+            # several seeds and keep the highest audio<->mouth sync score.
+            # best_of_n=1 (default) -> single generation, identical to before.
+            if _best_of_n > 1 and _audio_slice and _sync_qc is not None and not _use_keyframes:
+                clip_path = _pick_best_seed(i, clip_out, _gen_one, _audio_slice,
+                                            seed, _best_of_n, log_fn=_log)
+            else:
+                clip_path = _gen_one(seed, clip_out)
         except Exception as e:
             err = str(e)
             _log(f"[error] Clip {clip_num} failed: {err}")
@@ -930,7 +1020,31 @@ def _do_song_gpu_phase(
             if tr.returncode == 0 and Path(trim_out).exists():
                 os.replace(trim_out, clip_path)
 
-        # Per-clip upscale when lip sync forced 360p generation.
+        # POX-MARK FIX (2026-06-19): extract the chain frame for the NEXT clip
+        # from the clip BEFORE the lossy per-clip upscale below. The boundary
+        # trims above are all `-c copy` (lossless), but the upscale re-encodes at
+        # libx264 CRF 18 and overwrites clip_path in place; reading the
+        # conditioning frame from that re-encoded file baked H.264/VAE compression
+        # into the next clip's seed, and the diffusion model re-synthesized +
+        # amplified it on every hop -> cumulative skin "pox marks" as the video
+        # progresses. Capture the clean (pre-upscale) frame first; the upscale then
+        # runs only on the copy used for the final concat, never fed into the chain.
+        # (This mirrors the documented contract in multi_pipeline._chain_anchor.)
+        if i < n_clips - 1:
+            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
+            _chain_frame = _extract_last_frame(clip_path, _cframe_path)
+            if not _chain_frame:
+                log.info("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
+            else:
+                log.info("[song-video] Clip %d chain frame (pre-upscale, clean): %s", clip_num, _cframe_path)
+
+            if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
+                log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
+                _chain_frame = None
+
+        # Per-clip upscale when lip sync forced 360p generation. This re-encodes
+        # (CRF) and overwrites clip_path; it now runs AFTER the chain frame is
+        # already captured above, so its compression can never enter the chain.
         # Upscaling each clip individually (before concat) is cleaner than
         # upscaling the final merged video, which can blur across boundaries.
         if lip_sync_res_active and th <= 360:
@@ -954,24 +1068,6 @@ def _do_song_gpu_phase(
             "clips_total": n_clips,
             "stage":       "generating",
         })
-
-        # Extract chain frame AFTER all processing (beat-sync + tail-trim) so
-        # the frame given to the next clip matches what this clip actually ends on.
-        # No source-photo blending: blending compounds across 30+ clips
-        # (0.85^30 leaves only 1% of the original motion state), converging every
-        # chain frame toward the source photo -- exactly the "same image" symptom.
-        # Identity is maintained via subject_anchor text in every prompt instead.
-        if i < n_clips - 1:
-            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
-            _chain_frame = _extract_last_frame(clip_path, _cframe_path)
-            if not _chain_frame:
-                log.info("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
-            else:
-                log.info("[song-video] Clip %d chain frame: %s", clip_num, _cframe_path)
-
-            if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
-                log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
-                _chain_frame = None
 
         if _clip_secs and clip_num < n_clips:
             avg = sum(_clip_secs) / len(_clip_secs)

@@ -675,7 +675,21 @@ def startup_all():
             _set_status("ollama", state="not_running",
                         message=err or "Ollama not available")
 
-    for label, fn in [("WanGP", _start_wan), ("Ollama", _ensure_ollama)]:
+    # Ollama is backup-only: do NOT auto-start the local process unless the user
+    # has explicitly opted in (provider == "ollama", or fallback enabled). A remote
+    # Ollama host is always just health-checked (_ensure_ollama never spawns it).
+    # When opted out, leave it stopped; start it on demand from the Services panel.
+    _ollama_host = cfg.get("ollama_host") or "http://localhost:11434"
+    _ollama_remote = _is_remote_host(_ollama_host.replace("http://", "").split(":")[0])
+    _ollama_optin = (cfg.get("llm_provider") == "ollama") or bool(cfg.get("allow_ollama_fallback"))
+
+    _start_list = [("WanGP", _start_wan)]
+    if _ollama_remote or _ollama_optin:
+        _start_list.append(("Ollama", _ensure_ollama))
+    else:
+        _set_status("ollama", state="not_running",
+                    message="Ollama is backup-only (not auto-started); start it from Services when needed")
+    for label, fn in _start_list:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
     # ACE-Step: deferred -- only started when music generation is needed.
@@ -908,11 +922,27 @@ def start_forge() -> tuple[bool, str | None]:
                         message="Starting Forge SD -- loading model, please wait (~90s)...")
             log.info("Starting Forge SD from %s (detached)...", forge_root)
 
-            # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser
+            # IMPORTANT (2026-06-18): launch Forge's entry point DIRECTLY with its
+            # venv Python -- do NOT run webui-user.bat. That .bat frees port 7861 via
+            #   netstat -ano | findstr ":7861 "  ->  taskkill /F /PID <col 5>
+            # which also matches THIS app's own outbound polling connections to 7861
+            # (the PID in those rows is the client side = us), so running it would
+            # taskkill the Drop Cat Go Studio server itself -- the "exit code 1" crash.
+            # Start-Process still detaches Forge so it survives app restarts.
+            # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser.
+            forge_py = Path(forge_root) / "venv" / "Scripts" / "python.exe"
+            entry = "launch.py" if (Path(forge_root) / "launch.py").exists() else "webui.py"
+            if forge_py.exists():
+                target = str(forge_py)
+                arglist = f"'{entry}','--cuda-malloc','--api','--port','{FORGE_PORT}'"
+            else:
+                # venv Python missing -- last-resort fallback to the .bat
+                target = "cmd.exe"
+                arglist = f"'/c','\"{webui_bat}\"'"
             ps_args = (
                 f"$env:WEBUI_LAUNCH_LIVE_PREVIEW='0'; "
-                f"Start-Process -FilePath 'cmd.exe'"
-                f" -ArgumentList '/c \"{webui_bat}\"'"
+                f"Start-Process -FilePath '{target}'"
+                f" -ArgumentList {arglist}"
                 f" -WorkingDirectory '{forge_root}'"
                 f" -WindowStyle Hidden"
             )

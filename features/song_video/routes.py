@@ -225,6 +225,17 @@ async def generate(request: Request):
         "video_seed":      body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":   bool(body.get("use_satellite", False)),
         "lip_sync":        bool(body.get("lip_sync", True)),
+        # NOTE: lip_sync drives LTX-2's NATIVE audio conditioning (mouth moves
+        # during diffusion). MuseTalk post-pass (auto_lipsync) is intentionally
+        # NOT wired to this toggle: it force-crops the face to 256x256 and pastes
+        # it back, which on a small/stylized creature face is a glitchy rectangle
+        # uncorrelated to the music. Native audio conditioning is the right path
+        # (see DCMVS chain.py recipe). auto_lipsync stays opt-in/default-off.
+        "auto_lipsync":    bool(body.get("auto_lipsync", False)),
+        # Best-of-N seed selection for lip-sync clips: 1=Fast (single take),
+        # 2=Balanced, 3=Best. Each clip generates N seeds and keeps the one whose
+        # audio<->mouth sync score is highest. N>1 multiplies GPU time ~Nx.
+        "best_of_n":       max(1, min(5, int(body.get("best_of_n", 1) or 1))),
     }
     # Per-model step floors: Distilled caps at 8; everything else floors at 20.
     _mn  = settings["model_name"]

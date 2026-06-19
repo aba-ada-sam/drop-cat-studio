@@ -211,16 +211,38 @@ def _do_generate(params: dict) -> dict:
     # retry on line ~270 below). Re-enabled 2026-05-29 once the satellite proof
     # arrived; the MuseTalk post-pass (features/lipsync/) remains available for
     # content where audio conditioning isn't a good fit.
+    # CRITICAL: WanGP "Audio Source" mode (audio_prompt_type="A") reads the
+    # conditioning audio from "audio_guide", NOT "audio_source". The UI label is
+    # misleading -- audio_source is a different field controlling the OUTPUT
+    # soundtrack. Confirmed in wgp.py (~line 888):
+    #     if "A" in audio_prompt_type and audio_guide is None:
+    #         return err("You must provide an Audio Source")
+    # Setting audio_source (and not audio_guide) was the silent bug that made the
+    # empty-queue no-audio fallback fire on every clip -> subjects never sang.
     audio_source_path = params.get("audio_source")
     _supports_audio = (model_type == "ltx2_distilled")
     if audio_source_path and os.path.isfile(audio_source_path) and _supports_audio:
-        defaults["audio_source"]      = os.path.abspath(audio_source_path)
+        _scale = float(params.get("audio_scale", 0.6))   # 0.6 = satellite-proven
+        defaults["audio_guide"]       = os.path.abspath(audio_source_path)
         defaults["audio_prompt_type"] = "A"
-        defaults["audio_scale"]       = float(params.get("audio_scale", 1.0))
-        print(f"[worker] audio conditioning: type=A scale={defaults['audio_scale']} src={os.path.basename(audio_source_path)}", flush=True)
+        defaults["audio_scale"]       = _scale
+        # audio_source controls the OUTPUT soundtrack, not the conditioning input
+        # -- keep it None so it doesn't echo back as a duplicate track.
+        defaults["audio_source"]      = None
+        # audio_cfg_scale / audio_guidance_scale is a CLASSIFIER-FREE GUIDANCE knob
+        # (1.0 = OFF, <1.0 = anti-sync), separate from audio_scale (embedding
+        # strength 0..1). WanGP forces it to 1.0 for distilled = near-no audio
+        # guidance -> static mouth. It MUST be >1.0; mirror the video guidance
+        # (exactly what ltx2.py uses as its own None-fallback). Caller may override.
+        _audio_cfg = float(params.get("audio_cfg_scale",
+                           params.get("audio_guidance_scale", guidance)))
+        defaults["audio_cfg_scale"]       = _audio_cfg
+        defaults["audio_guidance_scale"]  = _audio_cfg
+        print(f"[worker] audio conditioning: type=A scale={_scale} cfg={_audio_cfg} guide={os.path.basename(audio_source_path)}", flush=True)
     else:
         if audio_source_path and not _supports_audio:
             print(f"[worker] audio conditioning skipped -- {model_type} does not support audio_prompt_type=A", flush=True)
+        defaults["audio_guide"]       = None
         defaults["audio_source"]      = None
         defaults["audio_prompt_type"] = ""
         defaults["audio_scale"]       = 1.0
@@ -273,6 +295,7 @@ def _do_generate(params: dict) -> dict:
     # retry without audio so the generation still runs.
     if not queue and defaults.get("audio_prompt_type") == "A":
         print("[worker] Audio conditioning rejected -- retrying without audio (resolution may be too high for audio tokens)", flush=True)
+        defaults["audio_guide"]       = None
         defaults["audio_source"]      = None
         defaults["audio_prompt_type"] = ""
         defaults["audio_scale"]       = 1.0

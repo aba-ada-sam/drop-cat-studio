@@ -403,25 +403,37 @@ def generate_lyrics(router, video_frames_b64: list[str], music_prompt: str = "",
 
 
 def generate_music_prompt(router, video_frames_b64: list[str], user_direction: str = "",
-                          video_prompt: str = "") -> dict:
+                          video_prompt: str = "", force_vision: bool = False) -> dict:
     """Suggest music direction for a video.
 
     When frames are provided and Ollama is the active provider, sends them for
     visual analysis.  When no frames are given (or a cloud provider is active),
-    falls back to text-only generation from user_direction + video_prompt -- cloud
-    APIs refuse NSFW images so we never send frames to them.
+    falls back to text-only generation from user_direction + video_prompt.
+
+    force_vision: when True, send the provided image/frames to the configured
+    provider's vision model -- including cloud (Anthropic/OpenAI) -- instead of
+    restricting vision to Ollama. This backs the "generate audio from the image"
+    toggle so the score is derived from what is actually in the photo. Cloud APIs
+    may refuse explicit NSFW images; the except below falls back to text-only.
     """
-    use_vision = bool(video_frames_b64) and router._provider() == "ollama"
+    use_vision = bool(video_frames_b64) and (force_vision or router._provider() == "ollama")
 
     if use_vision:
-        prompt = "Analyze these frames from a generated video and suggest matching background music."
+        # One frame = a source image; many frames = sampled from a video.
+        if len(video_frames_b64) > 1:
+            prompt = "Analyze these frames from a generated video and suggest matching background music."
+        else:
+            prompt = "Analyze this image and suggest matching background music for a short video built from it."
         if user_direction:
             prompt += f'\nCreative direction: "{user_direction}"'
+        # Pin to Ollama only when it is the active provider; when force_vision is
+        # set on a cloud provider, route_vision must use that cloud provider.
+        _vp = "ollama" if router._provider() == "ollama" else None
         try:
             text = router.route_vision(
                 prompt, video_frames_b64,
                 tier=TIER_BALANCED, system=MUSIC_PROMPT_SYSTEM,
-                force_provider="ollama",
+                force_provider=_vp,
                 format_json=True,
             )
             result = parse_json_response(text)

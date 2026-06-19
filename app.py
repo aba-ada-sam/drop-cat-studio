@@ -117,6 +117,10 @@ APP_VERSION = _read_git_version()
 
 # Written by /api/jobs/save-and-restart; read at next startup to auto-restore queue.
 PLANNED_RESTART_MARKER = APP_DIR / ".dcs-planned-restart"
+# Written just before a planned SIGTERM; read by manager.pyw's watchdog so it
+# respawns silently (no "stopped unexpectedly" dialog) instead of treating the
+# code-reload exit as a crash.
+MANAGER_RESPAWN_MARKER = APP_DIR / ".dcs-manager-respawn"
 
 
 # -- Lifespan -----------------------------------------------------------------
@@ -512,9 +516,18 @@ async def satellite_status():
 
 @app.get("/api/gpu/status")
 async def gpu_status():
-    """Which service currently owns the GPU + recent eviction history."""
+    """Which service currently owns the GPU + recent eviction history.
+
+    `rendering` is True when WanGP is actively generating a video -- the UI uses
+    it to show a render-in-progress state and to warn before interrupting it.
+    """
     from core.gpu_orchestrator import gpu
-    return JSONResponse(content=gpu.status(), headers={"Cache-Control": "no-store"})
+    st = gpu.status()
+    try:
+        st["rendering"] = gpu.is_wangp_rendering()
+    except Exception:
+        st["rendering"] = False
+    return JSONResponse(content=st, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/gpu/release")
@@ -526,7 +539,7 @@ async def gpu_release_all():
 
 
 @app.post("/api/services/start/{name}")
-async def start_service(name: str):
+async def start_service(name: str, force: bool = False):
     # GPU-using services MUST go through the orchestrator so the current
     # VRAM holder is evicted before the new service loads its model on top.
     # Without this, clicking 'Start Forge' while WanGP is in VRAM causes
@@ -534,10 +547,24 @@ async def start_service(name: str):
     if name not in ("wangp", "acestep", "forge", "ollama"):
         return JSONResponse({"error": f"Unknown service: {name}"}, 404)
 
+    from core.gpu_orchestrator import gpu, GPUBusyError
+    # Refuse (clear 409) to start a GPU service that would interrupt an active
+    # WanGP render, unless the user explicitly forces it. Synchronous so the UI
+    # gets the busy signal instead of a fire-and-forget "Starting...".
+    if not force and name != "wangp" and gpu.is_wangp_rendering():
+        return JSONResponse(
+            {"ok": False, "busy": True, "service": name,
+             "error": f"A video is rendering. Starting {name} would interrupt it. "
+                      f"Wait for it to finish, or cancel the render first."},
+            409)
+
     def _safe_start():
         try:
-            from core.gpu_orchestrator import gpu
-            gpu.acquire(name, reason="manual service start from UI")
+            gpu.acquire(name, reason="manual service start from UI", force=force)
+        except GPUBusyError as e:
+            # Lost a race (render started between the pre-check and here). Do NOT
+            # fall back to a direct start -- that would collide with WanGP's VRAM.
+            log.info("[services] start %s skipped -- WanGP is rendering: %s", name, e)
         except Exception as e:
             log.error("[services] start %s via orchestrator failed: %s", name, e)
             # Fall back to direct start so user isn't blocked if orchestrator hits a bug
@@ -575,6 +602,10 @@ async def restart_app():
     """
     import signal, os
     log.info("App restart requested via /api/app/restart -- exiting for watchdog respawn")
+    try:
+        MANAGER_RESPAWN_MARKER.write_text("restart")
+    except Exception:
+        pass
     def _do_exit():
         import time; time.sleep(0.5)
         os.kill(os.getpid(), signal.SIGTERM)
@@ -801,6 +832,10 @@ async def save_and_restart(background_tasks: BackgroundTasks):
         log.error("[save-restart] save_queue timed out -- restarting anyway without save")
         count = 0
     PLANNED_RESTART_MARKER.write_text("planned")
+    try:
+        MANAGER_RESPAWN_MARKER.write_text("restart")
+    except Exception:
+        pass
     log.info("Save-and-restart: saved %d jobs -- triggering watchdog restart", count)
 
     async def _scheduled_exit():
@@ -1344,6 +1379,9 @@ app.include_router(zoom_router, tags=["Infinite Zoom"])
 app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 app.include_router(retime_router, prefix="/api/retime", tags=["Retime"])
 app.include_router(lipsync_router, prefix="/api/lipsync", tags=["Lip Sync"])
+# NOTE: dcmvs_chain_router is unfinished WIP (no module/import yet) and crashes
+# startup with NameError. Commented so this build runs; re-enable when implemented.
+# app.include_router(dcmvs_chain_router, prefix="/api/dcmvs-chain", tags=["DCMVS Chain"])
 
 
 # -- Presets (WS8) ------------------------------------------------------------

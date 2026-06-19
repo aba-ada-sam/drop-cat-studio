@@ -52,7 +52,7 @@
   "sd_wildcards_dir": "C:\\DropCat-Studio\\wildcards",
   "sd_model": "ollama",
   "forge_url": "http://127.0.0.1:7861",
-  "forge_default_sampler": "DPM++ 2M SDE",
+  "forge_default_sampler": "DPM++ 3M SDE",
   "forge_default_scheduler": "Karras",
   "forge_default_steps": 30,
   "forge_default_cfg": 7,

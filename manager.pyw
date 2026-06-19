@@ -103,6 +103,10 @@ ROOT       = Path(__file__).resolve().parent
 APP_PY     = ROOT / "app.py"
 ICO_PATH   = ROOT / "dropcat.ico"
 PORT_FILE  = ROOT / ".dcs-port"
+# Written by app.py (/api/app/restart, /api/jobs/save-and-restart) just before it
+# SIGTERMs itself for a code reload. Tells this watchdog the exit was planned, so
+# it respawns silently instead of popping the "stopped unexpectedly" dialog.
+RESTART_MARKER = ROOT / ".dcs-manager-respawn"
 LOG_DIR    = ROOT / "logs"
 SERVER_LOG = LOG_DIR / "server.log"
 
@@ -339,7 +343,7 @@ def _focus_existing_dcs_window() -> bool:
     return False
 
 
-def open_app_window(port: int) -> "subprocess.Popen | None":
+def open_app_window(port: int, is_owner: bool = False) -> "subprocess.Popen | None":
     """Open the app in Chrome --app mode using a dedicated profile.
 
     Checks for an existing Drop Cat Go Studio window first -- if one is found
@@ -351,9 +355,16 @@ def open_app_window(port: int) -> "subprocess.Popen | None":
     or an existing window was focused instead.
     """
     if _focus_existing_dcs_window():
-        # Existing window brought to front -- this manager instance has no
-        # further role. Exit cleanly so the original manager keeps tracking
-        # the Chrome lifecycle and handles shutdown when the window closes.
+        if is_owner:
+            # WE started the server this run. Exiting now would close our job
+            # object (KILL_ON_JOB_CLOSE) and take the freshly-started server down
+            # with it -- the "app dies ~10-25s after launch" bug. A leftover Chrome
+            # window from a crashed prior session is NOT another live instance, so
+            # stay alive as the supervisor; the focused window now points at our new
+            # server. Returning None -> manager falls into keepalive/watchdog mode.
+            log.info("Focused existing window, but we own the server -- staying alive as supervisor")
+            return None
+        # Attaching to a pre-existing server owned by another manager -- safe to exit.
         log.info("Focused existing window -- this manager instance exiting")
         sys.exit(0)
     url = f"http://127.0.0.1:{port}"
@@ -509,6 +520,20 @@ class ServerManager:
             if self._stop_event.is_set():
                 log.info("Server exited (manager stopping)")
                 return
+            # Planned restart (code reload via the API wrote the marker): respawn
+            # silently with the SAME watch thread -- no crash dialog.
+            if RESTART_MARKER.exists():
+                try:
+                    RESTART_MARKER.unlink()
+                except OSError:
+                    pass
+                log.info("Server exited for a planned restart (code %s) -- respawning silently", ret)
+                self._ready_event.clear()
+                self._port = None
+                with self._lock:
+                    self._proc = None
+                self._spawn()
+                continue
             # Unexpected exit -- notify the user instead of silently restarting.
             log.warning("Server exited unexpectedly (code %s)", ret)
             self._ready_event.clear()
@@ -988,7 +1013,7 @@ def main() -> None:
         show_splash(srv)
         _diag(f"show_splash returned -- srv.port={srv.port}")
         if srv.port:
-            chrome_proc = open_app_window(srv.port)
+            chrome_proc = open_app_window(srv.port, is_owner=True)
         else:
             log.error("Server never became ready")
 

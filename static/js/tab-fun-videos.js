@@ -963,6 +963,24 @@ export function init(panel) {
     el('div', { style: 'display:flex; gap:6px;' }, [musicIn, musicSuggestBtn]),
   ]));
 
+  // Image-driven audio -- base the music + lyrics on a vision pass of the photo
+  // (colors, mood, subject, setting) instead of just the motion text. Off by default.
+  const audioFromImgChk = el('input', { type: 'checkbox', id: 'fv-audio-from-image' });
+  audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
+    audioFromImgChk,
+    el('label', { for: 'fv-audio-from-image', text: 'Generate audio from the image (analyze the photo)', style: 'cursor:pointer; font-size:.85rem;', title: 'Analyze the start image and base the music + lyrics on what is actually in it, not just the motion prompt.' }),
+  ]));
+
+  // Audio length is derived from the video length (Duration x clips). Surface it
+  // here so it's clear how long the audio will be when starting from a still
+  // image. Set length via the Duration slider (and Clips, for stories) above.
+  // Updated by _refreshAudioLenInfo(), wired to those controls further down.
+  const audioLenInfo = el('div', {
+    style: 'font-size:.78rem; color:var(--text-3); margin-bottom:8px; padding:6px 8px; background:var(--bg-raised); border-radius:6px;',
+    text: 'Audio length: set by the Duration slider above',
+  });
+  audioBody.appendChild(audioLenInfo);
+
   // Song/instrumental -- default is SONG (unchecked)
   const instrChk = el('input', { type: 'checkbox', id: 'fv-instr' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
@@ -987,6 +1005,16 @@ export function init(panel) {
   lyricGuideWrap.appendChild(el('div', {}, [
     el('label', { text: 'Lyric Direction', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
     lyricGuideTA,
+  ]));
+  // Optional: user writes their own lyrics. When filled, used verbatim.
+  const customLyricsTA = el('textarea', {
+    rows: '3',
+    placeholder: 'Your own lyrics (optional) -- blank = AI writes them. Use [verse] / [chorus] tags to mark sections.',
+    style: 'width:100%; resize:vertical; font-size:.82rem;',
+  });
+  lyricGuideWrap.appendChild(el('div', { style: 'margin-top:8px;' }, [
+    el('label', { text: 'Your Lyrics (optional)', style: 'display:block; font-size:.82rem; color:var(--text-3); margin-bottom:4px;' }),
+    customLyricsTA,
   ]));
   audioBody.appendChild(lyricGuideWrap);
 
@@ -1145,10 +1173,23 @@ export function init(panel) {
     clipsLabel.textContent = String(_multiClips);
     const dur = parseFloat(durSlider.value) || 8;
     totalLabel.textContent = `~${_multiClips * dur}s total`;
+    _refreshAudioLenInfo();
+  }
+  // Live readout of how long the generated audio will be. Length itself is set
+  // by the Duration slider (x Clips for stories) -- audio is sized to match the
+  // video, with ACE-Step's hard 120s ceiling surfaced here.
+  function _refreshAudioLenInfo() {
+    const dur = parseFloat(durSlider.value) || 0;
+    const total = _multiVideo ? dur * _multiClips : dur;
+    if (!total) { audioLenInfo.textContent = 'Audio length: set by the Duration slider above'; return; }
+    audioLenInfo.textContent = total > 120
+      ? `Audio length ≈ ${Math.round(total)}s → capped to 120s (ACE-Step max). Lower Duration${_multiVideo ? '/Clips' : ''} to fit.`
+      : `Audio length ≈ ${Math.round(total)}s (matches the video; max 120s).`;
   }
   clipsSlider.addEventListener('input', _refreshMultiTotal);
   // durSlider is a createSlider() wrapper -- listen on the inner <input>
   durSlider.el.querySelector('input').addEventListener('input', _refreshMultiTotal);
+  _refreshAudioLenInfo();
 
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [
     el('label', { style: 'font-size:.82rem; color:var(--text-3); white-space:nowrap;', text: 'Clips:' }),
@@ -1345,6 +1386,8 @@ export function init(panel) {
       lip_sync:         lipSyncChk.checked,
       instrumental:     instrChk.checked,
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
+      audio_from_image: audioFromImgChk.checked,
+      custom_lyrics:    instrChk.checked ? '' : customLyricsTA.value.trim(),
       end_photo_path:   _endImagePath || null,
       start_video_path:         _startVideoPath || null,
       start_video_seek_seconds: _startVideoSeekSeconds,

@@ -45,6 +45,7 @@ REPLY: <one short sentence, <= 20 words, saying what you built>
 - Describe quality through specificity: "soft diffused rim light" beats "best quality"; "4K sharp detail" beats "highly detailed"
 - Wardrobe/body/pose/expression are always valid tags -- describe, don't evaluate
 - Wrap the single most important subject/feature tag in () parentheses for emphasis: (glossy black latex catsuit)
+- Composition: favor off-center, rule-of-thirds framing ("subject off-center, dynamic composition"); avoid dead-center placement unless symmetry is explicitly requested -- centered subjects read as amateur
 - Use ONLY plain ASCII characters. NO unicode, NO em dashes, NO curly quotes, NO bullet symbols, NO asterisks (*), NO markdown.
 
 === COLUMNS (regional prompts) ===
@@ -74,11 +75,11 @@ REPLY: Birthday princess styled in glossy black latex with a carnival scene behi
 regal young woman, glossy black latex catsuit, jeweled crown, leather collar, birthday party, balloons, candlelit cake, playful smirk, dramatic rim light, shallow depth of field
 
 ## COLUMNS
-velvet curtains, string lights
+(princess), latex catsuit, tiara, off-center left
 ---COL_SEP---
-(princess centered), latex catsuit, tiara, lit cake
+lit birthday cake, candles
 ---COL_SEP---
-costumed guests, confetti
+costumed guests, confetti, string lights
 """
 
 FORMAT_REMINDER = """OUTPUT FORMAT -- tags only, no prose, no software talk, no refusals:
@@ -494,7 +495,8 @@ def _enhance_system(
 Produce exactly {regions_n} region entries in `regions`. Each region:
 - 2-5 tags max, ONLY what is unique to that zone.
 - NEVER repeat tags already in the global `prompt`.
-- Wrap the center region focus in (parentheses) for emphasis.
+- Wrap each region's focal subject in (parentheses) for emphasis.
+- Compose for the RULE OF THIRDS: put the main subject in a SIDE or CORNER region, NOT the center. Dead-center subjects look amateur. Use the remaining regions for supporting and background elements.
 """
     else:
         regions_block = "\n=== SINGLE PROMPT MODE (no regions) -- do NOT include a `regions` field ===\n"
@@ -545,7 +547,7 @@ Rules for new wildcards:
 
     output_keys = '"reply": "...", "prompt": "tags"'
     if regional:
-        output_keys += ', "regions": ["left tags", "(center focus), detail", "right tags"]'
+        output_keys += ', "regions": ["(hero subject), off-center, rim light", "supporting detail", "background accent"]'
     if smart_wildcards:
         output_keys += ', "create_wildcards": [... only if user asked ...]'
 

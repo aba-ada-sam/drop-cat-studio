@@ -843,6 +843,9 @@ async def make_it(request: Request):
         "video_prompt": body.get("video_prompt", ""),
         "music_prompt": body.get("music_prompt", ""),
         "lyric_direction": body.get("lyric_direction", ""),
+        # Image-driven audio toggle + user-supplied lyrics (both optional).
+        "audio_from_image": bool(body.get("audio_from_image", False)),
+        "custom_lyrics": body.get("custom_lyrics", ""),
         "user_direction": body.get("user_direction", ""),
         "use_wildcards": body.get("use_wildcards", False),
         "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
@@ -985,6 +988,9 @@ async def make_it_multi(request: Request):
         "video_prompt":    body.get("video_prompt", ""),
         "music_prompt":    body.get("music_prompt", ""),
         "lyric_direction": body.get("lyric_direction", ""),
+        # Image-driven audio toggle + user-supplied lyrics (both optional).
+        "audio_from_image": bool(body.get("audio_from_image", False)),
+        "custom_lyrics":    body.get("custom_lyrics", ""),
         "user_direction":  body.get("user_direction", ""),
         "num_clips":       n_clips,
         "clip_duration":   clip_dur,

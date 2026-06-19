@@ -44,7 +44,7 @@ def upscale_ffmpeg(
         r = subprocess.run(
             ["ffmpeg", "-y", "-i", input_path,
              "-vf", f"scale={new_w}:{new_h}:flags=lanczos",
-             "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+             "-c:v", "libx264", "-crf", "14", "-preset", "fast",
              "-c:a", "copy",
              output_path],
             capture_output=True, text=True, timeout=300,
@@ -118,7 +118,7 @@ def upscale_ai(
                  "-i", str(up_dir / "f%05d.png"),
                  "-i", input_path,
                  "-map", "0:v", "-map", "1:a?",
-                 "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                 "-c:v", "libx264", "-crf", "14", "-preset", "fast",
                  "-c:a", "copy", "-shortest",
                  output_path],
                 capture_output=True, timeout=300,

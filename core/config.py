@@ -102,7 +102,7 @@ DEFAULTS: dict = {
     "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
     "sd_model": "ollama",  # uses ollama_power_model via llm_router
     "forge_url": "http://127.0.0.1:7861",
-    "forge_default_sampler": "DPM++ 2M SDE",
+    "forge_default_sampler": "DPM++ 3M SDE",
     "forge_default_scheduler": "Karras",
     "forge_default_steps": 30,
     "forge_default_cfg": 2.5,
@@ -213,9 +213,19 @@ def save(data: dict):
         _invalidate()
 
 
-def get(key: str):
-    """Get a single config value."""
-    return load().get(key, DEFAULTS.get(key))
+def get(key: str, default=None):
+    """Get a single config value.
+
+    Resolution order: live config file -> built-in DEFAULTS -> caller `default`.
+    The trailing `default` lets callers use dict.get-style two-arg calls
+    (e.g. cfg.get("lipsync_isolate_vocals", True)) without crashing.
+    """
+    cfg = load()
+    if key in cfg:
+        return cfg[key]
+    if key in DEFAULTS:
+        return DEFAULTS[key]
+    return default
 
 
 def set_val(key: str, value):

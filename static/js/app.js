@@ -5,12 +5,12 @@
  */
 
 // tab-imports.js removed -- import is handled per-tab
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260525d';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260619a';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260528b';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260529a';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260610b';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260528a';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260529a';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260521a';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260619a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260529a';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260525c';
 import { consumeHandoff } from './handoff.js?v=20260508a';
@@ -1185,7 +1185,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const lbl = document.getElementById('gpu-indicator-label');
       if (!dot || !lbl) return;
       const meta = data.current ? _gpuLabelMap[data.current] : null;
-      if (meta) {
+      if (data.rendering) {
+        // Active WanGP video render -- make it unmistakable so the user doesn't
+        // open an image tab and interrupt it.
+        dot.style.background = '#e0a000';
+        dot.style.animation  = 'gpuPulse 1s ease-in-out infinite';
+        lbl.textContent      = 'GPU: Rendering video';
+        document.getElementById('gpu-indicator').title =
+          'A video is rendering on the GPU. Opening the image tabs would interrupt it -- '
+          + 'wait for it to finish (or cancel it in the Queue).';
+      } else if (meta) {
+        dot.style.animation  = '';
         dot.style.background = meta.color;
         lbl.textContent = meta.label;
         const hist = (data.history || []).slice(-3).reverse()
@@ -1193,6 +1203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('gpu-indicator').title =
           `Currently held by ${data.current}.` + (hist ? `\n\nRecent transitions:\n${hist}` : '');
       } else {
+        dot.style.animation  = '';
         dot.style.background = '#555';
         lbl.textContent = 'GPU: idle';
         document.getElementById('gpu-indicator').title = 'No service is holding the GPU right now.';
@@ -1235,8 +1246,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (_) { /* silent */ }
   }
-  pollSatellite();
-  setInterval(pollSatellite, 8000);
+  // Satellite polling DISABLED for current ops (future-dev feature). No
+  // /api/satellite/status requests are made and the pill stays hidden.
+  // Re-enable by restoring the two calls below.
+  // pollSatellite();
+  // setInterval(pollSatellite, 8000);
+  if (_satPill) _satPill.style.display = 'none';
 
   // -- Queue rail hint (active job count) ------------------------------------
   async function _pollQueueHint() {

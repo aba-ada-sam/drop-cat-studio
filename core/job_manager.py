@@ -85,6 +85,26 @@ class Job:
         }
 
 
+def _persist_job_manifest(job: "Job") -> None:
+    """Persist a finished job's full record to logs/jobs/<id>.json so its
+    diagnostics (meta, error, timing, output) survive the 15-minute in-memory
+    cleanup and failures can be reviewed + improved later. Best-effort: must
+    NEVER raise -- it runs in the job's finally block and cannot break completion.
+    (2026-06-19: closes the 'failures are unreviewable after 15 min' logging gap.)"""
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        d = _Path(__file__).resolve().parent.parent / "logs" / "jobs"
+        d.mkdir(parents=True, exist_ok=True)
+        rec = job.to_dict()
+        rec["persisted_at"] = time.time()
+        (d / f"{job.id}.json").write_text(
+            _json.dumps(rec, indent=2, default=str), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+
 class JobManager:
     """Manages job lifecycle across all features.
 
@@ -652,3 +672,6 @@ class JobManager:
             # worker returned, raised, or hit the stop event.
             if job.finished_at is None:
                 job.finished_at = time.time()
+            # Persist the full job record to disk (logs/jobs/<id>.json) so its
+            # diagnostics outlive the 15-min in-memory cleanup -- review later.
+            _persist_job_manifest(job)

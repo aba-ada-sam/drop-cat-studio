@@ -591,8 +591,12 @@ async def forge_txt2img(request: Request):
     # Orchestrator: acquire Forge, evicting WanGP/ACE-Step if needed.
     # gpu.acquire() may block up to 5 min if Forge isn't running yet
     # (auto-start path). Run in a thread so the event loop stays alive.
-    from core.gpu_orchestrator import gpu
-    await _asyncio.to_thread(gpu.acquire, "forge", "txt2img")
+    # Refuses (409) rather than interrupt an active WanGP render.
+    from core.gpu_orchestrator import gpu, GPUBusyError
+    try:
+        await _asyncio.to_thread(gpu.acquire, "forge", "txt2img")
+    except GPUBusyError as _e:
+        raise HTTPException(409, str(_e))
 
     body = await request.json()
 
@@ -601,10 +605,36 @@ async def forge_txt2img(request: Request):
     columns = body.get("columns", [])     # [left, center, right] from SD Prompts
     use_forge_couple = body.get("use_forge_couple", False)
 
-    if columns and len([c for c in columns if c.strip()]) > 1:
+    # Advanced regional mode: caller sends explicit rectangles (region_map) so the
+    # user can place regions anywhere (rule-of-thirds, off-center hero, grids) instead
+    # of equal Basic strips. Each region is one couple; the base `prompt` is the global
+    # (a full-canvas region at background weight, prepended below).
+    fc_mode = body.get("forge_couple_mode", "Basic")
+    region_map = body.get("region_map") or []
+    fc_bg_weight = float(body.get("forge_couple_bg_weight", 0.5))
+    advanced_regions = bool(use_forge_couple and fc_mode == "Advanced" and region_map)
+    fc_advanced_mapping = None
+
+    if advanced_regions:
+        # couple 0 = global (whole frame), then one couple per region, in editor order.
+        region_prompts = [str(r.get("prompt", "")).strip() for r in region_map]
+        prompt = "\n".join([prompt or ""] + region_prompts)
+        # Mapping rows must line up 1:1 with the couples above.
+        fc_advanced_mapping = [[0.0, 1.0, 0.0, 1.0, fc_bg_weight]]
+        for r in region_map:
+            x1 = max(0.0, min(1.0, float(r.get("x1", 0.0))))
+            x2 = max(0.0, min(1.0, float(r.get("x2", 1.0))))
+            y1 = max(0.0, min(1.0, float(r.get("y1", 0.0))))
+            y2 = max(0.0, min(1.0, float(r.get("y2", 1.0))))
+            if x2 <= x1:
+                x2 = min(1.0, x1 + 0.01)
+            if y2 <= y1:
+                y2 = min(1.0, y1 + 0.01)
+            fc_advanced_mapping.append([x1, x2, y1, y2, float(r.get("weight", 1.0))])
+    elif columns and len([c for c in columns if c.strip()]) > 1:
         non_empty = [c.strip() for c in columns if c.strip()]
         if use_forge_couple:
-            # Forge Couple: join with newline, first line is the background/global prompt
+            # Forge Couple Basic: join with newline, first line is the background/global prompt
             if prompt:
                 prompt = prompt + "\n" + "\n".join(non_empty)
             else:
@@ -638,12 +668,23 @@ async def forge_txt2img(request: Request):
     else:
         adetailer_args = None
 
-    forge_couple_args = build_forge_couple_args(
-        enabled=use_forge_couple,
-        direction=body.get("forge_couple_direction", "Horizontal"),
-        background=body.get("forge_couple_background", "First Line"),
-        background_weight=float(body.get("forge_couple_bg_weight", 0.5)),
-    ) if use_forge_couple else None
+    if advanced_regions:
+        forge_couple_args = build_forge_couple_args(
+            enabled=True,
+            mode="Advanced",
+            background="None",            # ignored in Advanced; global is mapping row 0
+            background_weight=fc_bg_weight,
+            mapping=fc_advanced_mapping,
+        )
+    elif use_forge_couple:
+        forge_couple_args = build_forge_couple_args(
+            enabled=True,
+            direction=body.get("forge_couple_direction", "Horizontal"),
+            background=body.get("forge_couple_background", "First Line"),
+            background_weight=fc_bg_weight,
+        )
+    else:
+        forge_couple_args = None
 
     result = await asyncio.to_thread(
         txt2img,
@@ -652,7 +693,7 @@ async def forge_txt2img(request: Request):
         width=int(body.get("width", 1440)),
         height=int(body.get("height", 810)),
         steps=int(body.get("steps", 25)),
-        sampler_name=body.get("sampler", "DPM++ 2M SDE"),
+        sampler_name=body.get("sampler", "DPM++ 3M SDE"),
         scheduler=body.get("scheduler", "Karras"),
         cfg_scale=float(body.get("cfg_scale", 7.0)),
         seed=int(body.get("seed", -1)),
@@ -720,7 +761,7 @@ async def forge_img2img(request: Request):
         width=int(body.get("width", 1440)),
         height=int(body.get("height", 810)),
         steps=int(body.get("steps", 25)),
-        sampler_name=body.get("sampler", "DPM++ 2M SDE"),
+        sampler_name=body.get("sampler", "DPM++ 3M SDE"),
         scheduler=body.get("scheduler", "Karras"),
         cfg_scale=float(body.get("cfg_scale", 7.0)),
         seed=int(body.get("seed", -1)),

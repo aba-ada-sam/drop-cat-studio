@@ -256,6 +256,8 @@ def build_forge_couple_args(
     background: str = "First Line",
     background_weight: float = 0.5,
     separator: str = "\n",
+    compatibility: bool = True,
+    mapping: list | None = None,
 ) -> dict:
     """Build alwayson_scripts entry for Forge Couple (regional prompting).
 
@@ -265,20 +267,32 @@ def build_forge_couple_args(
     NOTE: When using Forge Couple with our 3-column SD prompts, join
     columns with '\\n' (not BREAK). The BREAK keyword is for standard
     regional conditioning; Forge Couple uses its own separator.
+
+    ARG ORDER (fixed 2026-06-18): the list MUST match the installed Forge
+    Couple v6.0.1 ui() return order -- i.e. the after_extra_networks_activate
+    signature: enable, disable_hr(Compatibility), mode, separator, direction,
+    background, background_weight, mapping, common_parser, common_debug,
+    def_in_prompt. The previous 8-item order matched an OLDER Forge Couple
+    build and silently scrambled every field against v6.0.1 (mode landed in
+    the Compatibility slot, separator became the background, etc.), which
+    broke regional prompting and could yield noise/ERROR output.
     """
     if not enabled:
         return {}
     return {
         "forge couple": {
             "args": [
-                True,               # enabled
-                mode,               # "Basic" or "Advanced"
-                direction,          # "Horizontal" or "Vertical"
-                background,         # "First Line", "Last Line", or "None"
-                background_weight,  # weight for background region
-                separator,          # separator character
-                False,              # compatibility mode
-                "{}",               # extra config JSON
+                True,               # 1. enable
+                compatibility,      # 2. disable_hr (Compatibility): skip during Hires.fix
+                mode,               # 3. mode: "Basic" / "Advanced" / "Mask"
+                separator,          # 4. separator: splits the prompt into regions
+                direction,          # 5. direction: "Horizontal" (cols) / "Vertical" (rows)
+                background,         # 6. background (Global Effect): "First Line"/"Last Line"/"None"
+                background_weight,  # 7. background weight (Global Effect Weight)
+                mapping or [],      # 8. mapping: [[x1,x2,y1,y2,w],...] for Advanced; [] for Basic
+                "{ }",              # 9. common_parser (Common Prompts syntax)
+                False,              # 10. common_debug
+                True,               # 11. def_in_prompt (Include Definitions in Prompt)
             ]
         }
     }
@@ -325,7 +339,7 @@ def txt2img(
     width: int = 1440,
     height: int = 810,
     steps: int = 25,
-    sampler_name: str = "DPM++ 2M SDE",
+    sampler_name: str = "DPM++ 3M SDE",
     scheduler: str = "Karras",
     cfg_scale: float = 7.0,
     seed: int = -1,
@@ -401,7 +415,7 @@ def img2img(
     width: int = 1440,
     height: int = 810,
     steps: int = 25,
-    sampler_name: str = "DPM++ 2M SDE",
+    sampler_name: str = "DPM++ 3M SDE",
     scheduler: str = "Karras",
     cfg_scale: float = 7.0,
     seed: int = -1,

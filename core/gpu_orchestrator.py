@@ -36,6 +36,12 @@ ServiceName = Literal["wangp", "acestep", "forge", "ollama"]
 _ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge", "ollama")
 
 
+class GPUBusyError(RuntimeError):
+    """Raised by acquire() when taking the GPU would evict an actively-rendering
+    WanGP video job. Callers should surface a 'video is rendering' message rather
+    than kill the render. Pass force=True to acquire() to override."""
+
+
 def _is_remote(service: ServiceName) -> bool:
     """Return True if this service is configured to run on another machine.
 
@@ -122,13 +128,25 @@ class GPUOrchestrator:
         except Exception:
             return False  # unreachable = idle
 
-    def acquire(self, service: ServiceName, reason: str = "") -> None:
+    def is_wangp_rendering(self) -> bool:
+        """True if WanGP holds the GPU and is actively generating a video."""
+        if not self._is_alive("wangp"):
+            return False
+        return self._wangp_busy()
+
+    def acquire(self, service: ServiceName, reason: str = "", force: bool = False) -> None:
         """Ensure `service` owns the GPU exclusively. Evicts everyone else.
 
         Idempotent when `service` already holds. If the holder process died
         out-of-band (crash, OOM kill), this transparently restarts it.
 
         Remote services (another machine) manage their own GPU -- no eviction.
+
+        Refuses to evict an actively-rendering WanGP (raises GPUBusyError) unless
+        force=True. This stops a manual Forge/image-gen start from killing a
+        running video job and leaving it hung (the "frozen render" bug). Internal
+        pipeline transitions (e.g. acestep after the video phase) run when WanGP
+        is already idle, so they are unaffected.
         """
         self._last_acquire = time.time()
         if _is_remote(service):
@@ -140,6 +158,16 @@ class GPUOrchestrator:
                     log.info("[gpu] holder %s is dead -- restarting", service)
                     self._start(service)
                 return
+
+            # Don't yank the GPU out from under a live render.
+            if (not force and service != "wangp"
+                    and self._is_alive("wangp") and self._wangp_busy()):
+                log.warning("[gpu] refused: acquiring %s would interrupt an active "
+                            "WanGP render (use force=True to override)", service)
+                raise GPUBusyError(
+                    f"WanGP is rendering -- refusing to start '{service}' and "
+                    f"interrupt the video. Wait for it to finish or cancel it."
+                )
 
             prev = self._current
             t0 = time.time()

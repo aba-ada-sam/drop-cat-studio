@@ -150,6 +150,16 @@ def run_prep(job, photo_path, settings):
     skip_audio      = settings.get("skip_audio", False)
     use_mmaudio     = settings.get("audio_provider", "acestep") == "ltx_native"
 
+    # Image-driven audio + user-supplied lyrics (opt-in via UI).
+    audio_from_image = bool(settings.get("audio_from_image", False))
+    custom_lyrics    = (settings.get("custom_lyrics") or "").strip()
+    _img_b64 = ""
+    if audio_from_image and photo_path and os.path.isfile(photo_path):
+        try:
+            _img_b64 = encode_image_b64(photo_path) or ""
+        except Exception:
+            _img_b64 = ""
+
     needs_audio = not skip_audio and not use_mmaudio
 
     video_prompt = settings.get("video_prompt", "")
@@ -192,12 +202,16 @@ def run_prep(job, photo_path, settings):
                 continue  # already tried this provider
             try:
                 provider = llm_router._provider()
-                # Only pass image frames to Ollama (cloud refuses NSFW images).
-                if provider == "ollama" and _vision_ok and photo_path and os.path.isfile(photo_path) and not _force:
-                    src_b64 = encode_image_b64(photo_path)
-                    frames = [src_b64] if src_b64 else []
-                else:
-                    frames = []
+                # Send image frames to Ollama (cloud historically refused NSFW),
+                # OR to any provider when the user asked to derive the audio from
+                # the image. Skip on the cloud-retry pass (_force) which is text-only.
+                frames = []
+                if not _force and photo_path and os.path.isfile(photo_path):
+                    if audio_from_image:
+                        frames = [_img_b64] if _img_b64 else []
+                    elif provider == "ollama" and _vision_ok:
+                        src_b64 = encode_image_b64(photo_path)
+                        frames = [src_b64] if src_b64 else []
                 # generate_music_prompt has no force_provider param; call the underlying
                 # route directly with force when retrying via cloud.
                 if _force:
@@ -217,7 +231,8 @@ def run_prep(job, photo_path, settings):
                     music_result = parse_json_response(_txt) or {}
                 else:
                     music_result = analyzer.generate_music_prompt(
-                        llm_router, frames, user_direction, video_prompt=video_prompt
+                        llm_router, frames, user_direction, video_prompt=video_prompt,
+                        force_vision=audio_from_image,
                     )
                 music_prompt = music_result.get("music_prompt", "")
                 scene_desc   = music_result.get("reasoning", "")
@@ -231,8 +246,13 @@ def run_prep(job, photo_path, settings):
                 log.warning("[warning] Music direction failed (%s, force=%s): %s",
                             "configured" if not _force else _force, _force, e)
 
+    # User-supplied lyrics win outright -- use them verbatim, skip generation.
+    if custom_lyrics and not instrumental:
+        settings["_prepped_lyrics"] = custom_lyrics
+        log.info("[info] Using user-supplied lyrics (%d chars)", len(custom_lyrics))
+
     # Lyrics: try configured provider, then force cloud on failure.
-    if not instrumental and music_prompt:
+    if not instrumental and music_prompt and not custom_lyrics:
         job.update(progress=8, message="Writing lyrics...")
         for _force in (None, _cloud):
             try:
@@ -253,8 +273,11 @@ def run_prep(job, photo_path, settings):
                     )
                     lyrics = (_txt or "").strip()
                 else:
+                    # Pass the source image when the user asked for image-driven
+                    # audio so the lyrics reflect what is actually in the photo.
+                    _lf = [_img_b64] if (audio_from_image and _img_b64) else []
                     lyrics = analyzer.generate_lyrics(
-                        llm_router, [],
+                        llm_router, _lf,
                         music_prompt, lyric_direction or user_direction,
                         scene_description=scene_desc,
                     )
@@ -398,7 +421,7 @@ def run_pipeline(job, photo_path, settings):
                     if not settings.get("bpm") and music_result.get("bpm"):
                         settings["bpm"] = music_result["bpm"]
                     _log(f"[info] Music direction: {music_prompt[:80]}")
-                if not instrumental:
+                if not instrumental and not lyrics:
                     job.update(progress=7, message="Writing lyrics...")
                     lyrics = analyzer.generate_lyrics(
                         llm_router, [],  # text-only: faster, avoids qwen3-vl thinking mode

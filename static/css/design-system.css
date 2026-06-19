@@ -11,14 +11,21 @@
   < 1400px  -> 16px  (standard 1080p/1440p)
   1400-1800 -> 17px  (large 1440p/4K)
   1800-2560 -> 18px  (4K / large ultrawide)
-  2560-3840 -> 19px  (49" ultrawide 3840x1080)
-  > 3840    -> 20px  (49" ultrawide 5120x1440)
+  2560-3840 -> 26px  (49" ultrawide 3840x1080)
+  > 3840    -> 28px  (49" ultrawide 5120x1440)
+  (2026-06-18: bumped ~40% -- prior values were unreadable on the 49" ultrawide)
 */
-html { font-size: 16px; }
-@media (min-width: 1400px) { html { font-size: 17px; } }
-@media (min-width: 1800px) { html { font-size: 18px; } }
-@media (min-width: 2560px) { html { font-size: 19px; } }
-@media (min-width: 3840px) { html { font-size: 20px; } }
+html { font-size: 18px; }
+@media (min-width: 1400px) { html { font-size: 20px; } }
+@media (min-width: 1800px) { html { font-size: 23px; } }
+@media (min-width: 2560px) { html { font-size: 26px; } }
+@media (min-width: 3840px) { html { font-size: 28px; } }
+
+/* Music Video & Infinite Zoom tabs were authored in fixed px (pre-rem design
+   system), so the responsive html font-size above does NOT scale their text.
+   Zoom the whole panel to bring them in line with the rem-based tabs on large
+   displays. (2026-06-18) */
+#panel-music-video, #panel-zoom { zoom: 1.4; }
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -66,6 +73,9 @@ body {
   animation: dc-lines-fade 0.3s ease-out 0.42s forwards;
 }
 @keyframes dc-lines-fade { to { opacity: 0; } }
+/* GPU "rendering video" indicator pulse -- draws the eye so the user doesn't
+   open an image tab and interrupt an active render. */
+@keyframes gpuPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 
 /* Shadow on ground -- pops in at impact */
 #dc-shadow {
