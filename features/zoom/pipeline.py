@@ -496,17 +496,50 @@ def _run_zoom_body(
         pct_start, pct_end = 12, 72
         pct_per_clip = (pct_end - pct_start) / n_clips
 
+        # Explicit camera-direction clause appended to EVERY clip prompt. It goes
+        # LAST so it carries the highest token weight -- this is what actually
+        # drives the zoom. The LLM scene description sets WHAT is in frame; this
+        # sets HOW the camera moves through it. Without it (and with the old calm
+        # negative prompt that banned all camera motion) the model drifted into
+        # an uncontrolled zoom-out regardless of the selected direction.
+        if direction == "in":
+            _focal = (focal_target or subject_anchor or "the focal point").rstrip(". ")
+            camera_clause = (
+                f"The camera slowly and steadily pushes forward toward {_focal}, "
+                "one smooth continuous dolly-in, the subject growing larger and "
+                "filling more of the frame as the view advances deeper into the scene."
+            )
+        else:
+            camera_clause = (
+                "The camera slowly and steadily pulls back in one smooth continuous "
+                "dolly-out, the subject becoming smaller as more of the surrounding "
+                "environment enters the frame at the edges."
+            )
+
         for i, clip_spec in enumerate(arc[:n_clips]):
             if _stopped():
                 return
 
-            prompt = clip_spec.get("prompt", "")
+            scene = clip_spec.get("prompt", "")
             dur = float(clip_spec.get("duration", clip_dur))
             # Add trim compensation so the trimmed clip is the right length
             gen_dur = dur / _CHAIN_TRIM_RATIO
-            # Lock scene for chained clips so model continues from anchor frame
+
+            # Continuity (mirrors the music-video pipeline): lead every clip with
+            # the LLM-extracted subject anchor so identity does not drift across
+            # the chain, restate scene continuity for chained clips, then the LLM
+            # scene, then the camera move last. The subject anchor was previously
+            # computed but never injected -- that omission is why earlier clips
+            # "didn't correlate to each other."
+            parts: list[str] = []
+            if subject_anchor:
+                parts.append(subject_anchor.rstrip(". ") + ".")
             if i > 0 and prev_frame and prev_frame != source_path:
-                prompt = "Exact same location, continuous scene, " + prompt
+                parts.append("Same subject, same scene, one continuous unbroken shot.")
+            if scene:
+                parts.append(scene)
+            parts.append(camera_clause)
+            prompt = " ".join(p.strip() for p in parts if p and p.strip())
 
             pct = int(pct_start + i * pct_per_clip)
             job.update(progress=pct,
@@ -554,7 +587,7 @@ def _run_zoom_body(
                         guidance=_eff_guidance,
                         duration=gen_dur,
                         seed=-1,
-                        negative_prompt=video_generator.negative_prompt_for(model_name, "calm"),
+                        negative_prompt=video_generator.zoom_negative_prompt(model_name, direction),
                         stop_check=job.stop_event.is_set,
                         audio_source=clip_audio_slice,
                         progress_fn=lambda cur, tot: job.update(
@@ -594,7 +627,13 @@ def _run_zoom_body(
 
             clip_paths.append(clip_out)
 
-            # Extract last frame as next clip's start (lossless chain, no re-anchor)
+            # Extract last frame as next clip's start (lossless chain, no re-anchor).
+            # NOTE: unlike the music-video pipeline, we deliberately do NOT blend
+            # the anchor with the un-zoomed source photo. That blend pulls framing
+            # back toward the original wide shot -- correct for a static-camera
+            # music video, but it would fight the zoom and ghost a wide image over
+            # the zoomed one. Identity continuity here comes from the subject-anchor
+            # text prepended to every clip prompt instead.
             frame_out = str(job_dir / f"frame_{i:02d}.png")
             anchor_ok, actual_dur = _chain_anchor(clip_out, frame_out)
             clip_durations.append(actual_dur)

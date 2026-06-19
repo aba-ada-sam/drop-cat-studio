@@ -77,6 +77,45 @@ def negative_prompt_for(model_name: str, motion_style: str = "dynamic") -> str:
         return _NEG_LTX_DYNAMIC
     return _NEG_WAN
 
+
+# Infinite Zoom negative prompts.
+#
+# The standard negative prompts (above) BAN all camera motion -- correct for
+# Create Videos (subject moves, camera holds), catastrophic for Zoom (the whole
+# point is camera motion). A zoom job that uses _NEG_LTX_CALM is told "zoom in,
+# zoom out, push in, pull back, camera motion" are forbidden, so the model
+# produces an uncontrolled drift -- which reads as a slow zoom-out no matter
+# which direction was selected.
+#
+# Zoom needs the OPPOSITE: keep the quality + identity terms, allow the wanted
+# camera move, and ban the WRONG direction so the model can't reverse it.
+_NEG_ZOOM_BASE = (
+    "worst quality, low quality, blurry, distorted, temporal artifacts, "
+    "watermark, text, anime, cartoon, 2d, morphing, warping, "
+    "bad face, deformed, different person, scene change, different location, "
+    "cut, jump cut, teleport"
+)
+_NEG_ZOOM_OPPOSITE = {
+    # zoom IN job -> forbid any pull-back so the camera can't reverse to zoom out
+    "in":  "zoom out, zooming out, pull back, pulling back, pullback, dolly out, "
+           "camera retreating, camera pulls away, widening view, revealing surroundings",
+    # zoom OUT job -> forbid any push-in
+    "out": "zoom in, zooming in, push in, pushing in, push forward, dolly in, "
+           "camera advancing, camera moves closer, narrowing view, close-up crash",
+}
+
+
+def zoom_negative_prompt(model_name: str, direction: str) -> str:
+    """Negative prompt for an Infinite Zoom clip.
+
+    Unlike negative_prompt_for(), this ALLOWS camera motion (zoom is camera
+    motion) and instead bans the opposite direction so the model holds the
+    selected zoom. model_name is accepted for parity/future per-model tuning;
+    the base terms are safe for both LTX and Wan.
+    """
+    opp = _NEG_ZOOM_OPPOSITE.get(direction, "")
+    return f"{_NEG_ZOOM_BASE}, {opp}" if opp else _NEG_ZOOM_BASE
+
 MODELS = {
     # Per-model defaults sent to the UI so controls change automatically on model switch.
     # vram_min_gb: minimum VRAM to run this model without system thrashing.
