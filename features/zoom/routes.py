@@ -19,6 +19,40 @@ from features.fun_videos.video_generator import MODELS as _VG_MODELS
 _PER_CLIP_TIMEOUT_S = 900
 _AUDIO_BUFFER_S = 300
 
+# Best full-resolution chained-zoom model that fits a 16 GB card. LTX-2 Dev19B
+# Distilled is the ONLY model confirmed to run full-res chained clips on the
+# RTX 5080 (15.9 GB) without a step-0 deadlock.
+_ZOOM_SAFE_MODEL = "LTX-2 Dev19B Distilled"
+
+
+def _fit_zoom_model(requested: str) -> tuple[str, str | None]:
+    """Pick the best zoom model that actually runs on the detected GPU.
+
+    Returns (model_name, note). On cards below a model's vram_min_gb, the
+    request is substituted with _ZOOM_SAFE_MODEL so the zoom produces the best
+    expected outcome for this machine instead of silently deadlocking:
+      * LTX-2 Dev13B (40 steps) and Wan I2V deadlock at step 0 on 16 GB cards --
+        WanGP caps its budget at 80% VRAM (~13 GB) and their first denoising
+        step exceeds that.
+      * The 360P Dev13B variant fits but is rejected for zoom because low
+        resolution compounds artifacts through the chain anchor.
+    On a >=20 GB card the requested model is honored unchanged.
+    """
+    if requested not in _VG_MODELS:
+        return _ZOOM_SAFE_MODEL, None
+    try:
+        from app import _g as _app_g
+        vram = _app_g.get("gpu_vram_gb") or 0
+    except Exception:
+        vram = 0
+    need = _VG_MODELS.get(requested, {}).get("vram_min_gb", 0)
+    if vram and need and need > vram and requested != _ZOOM_SAFE_MODEL:
+        return _ZOOM_SAFE_MODEL, (
+            f"{requested} needs {need} GB VRAM but {vram:.0f} GB detected -- "
+            f"using {_ZOOM_SAFE_MODEL} for a stable full-resolution zoom"
+        )
+    return requested, None
+
 
 @router.post("/api/zoom/make")
 async def zoom_make(request: Request):
@@ -62,6 +96,10 @@ async def zoom_make(request: Request):
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
+    # Substitute a VRAM-safe model if the requested one would deadlock here.
+    model_name, _vram_note = _fit_zoom_model(model_name)
+    if _vram_note:
+        log.info("[zoom] %s", _vram_note)
 
     # Use the model's native resolution. The 832x480 shortcut was removed --
     # lower resolution compounds artifacts through the chain anchor and produces
@@ -174,6 +212,9 @@ async def zoom_extend(request: Request):
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
+    model_name, _vram_note = _fit_zoom_model(model_name)
+    if _vram_note:
+        log.info("[zoom] extend: %s", _vram_note)
 
     _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
     _zoom_res = body.get("zoom_res") or _model_res
@@ -281,6 +322,9 @@ async def zoom_folder_loop_start(request: Request):
     model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
     if model_name not in _VG_MODELS:
         model_name = "LTX-2 Dev19B Distilled"
+    model_name, _vram_note = _fit_zoom_model(model_name)
+    if _vram_note:
+        log.info("[zoom] folder-loop: %s", _vram_note)
     _model_info = _VG_MODELS.get(model_name, {})
     _zoom_res = _model_info.get("res", (1032, 580))
 
