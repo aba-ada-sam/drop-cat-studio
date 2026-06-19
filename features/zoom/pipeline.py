@@ -246,6 +246,62 @@ def extract_frame_from_video(video_path: str, out_png: str, position: str = "las
         return False
 
 
+# ---------------------------------------------------------------------------
+# Zoom keyframe builder (monotonic-motion fix)
+# ---------------------------------------------------------------------------
+
+# Fraction the framing changes per clip. 0.82 = each clip ends showing the
+# centre 82% (zoom in) / the view shrunk to 82% (zoom out). Gentle enough to
+# look smooth, strong enough to read as motion. Over 5 clips: 0.82^5 ~= 0.37,
+# i.e. a ~2.7x cumulative zoom.
+_ZOOM_STEP_DEFAULT = 0.82
+
+
+def _make_zoom_endframe(start_img: str, direction: str, step: float, out_path: str) -> str | None:
+    """Build the end keyframe for one zoom clip from its start frame.
+
+    Returns out_path on success, None on failure.
+
+    Why this exists: image-to-video models "boomerang" -- given only a start
+    frame and a 'push in' prompt they ease the camera in, then drift back to the
+    original framing by the end of the clip. Chained, that reads as
+    zoom-in / zoom-out / repeat and never accumulates. Pinning an explicit end
+    frame (a more-zoomed crop for IN, a shrunk-and-surrounded frame for OUT)
+    forces a strictly monotonic interpolation -- the model cannot return to the
+    start because the last frame is fixed.
+
+    zoom IN  -> end = centre crop of start, scaled back up (digital zoom in).
+    zoom OUT -> end = start shrunk to the centre over a blurred backdrop of
+                itself (primes the model to outpaint surroundings as it pulls back).
+    """
+    try:
+        from PIL import Image, ImageFilter
+        img = Image.open(start_img).convert("RGB")
+        w, h = img.size
+        step = max(0.55, min(0.95, float(step)))
+        if direction == "in":
+            cw, ch = max(8, int(w * step)), max(8, int(h * step))
+            x, y = (w - cw) // 2, (h - ch) // 2
+            end = img.crop((x, y, x + cw, y + ch)).resize((w, h), Image.LANCZOS)
+        else:
+            # Blurred, magnified copy of the source as a neutral backdrop, then
+            # the current view shrunk and pasted in the centre.
+            inv = 1.0 / step
+            bg = img.resize((max(1, int(w * inv)), max(1, int(h * inv))), Image.LANCZOS)
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=max(6, w // 40)))
+            bx, by = (bg.size[0] - w) // 2, (bg.size[1] - h) // 2
+            bg = bg.crop((bx, by, bx + w, by + h))
+            sw, sh = max(8, int(w * step)), max(8, int(h * step))
+            small = img.resize((sw, sh), Image.LANCZOS)
+            bg.paste(small, ((w - sw) // 2, (h - sh) // 2))
+            end = bg
+        end.save(out_path, "JPEG", quality=95)
+        return out_path
+    except Exception as e:
+        log.warning("[zoom] end-frame build failed (%s) -- clip will run without end pin", e)
+        return None
+
+
 
 # ---------------------------------------------------------------------------
 # Prep phase (no GPU lock)
@@ -559,6 +615,14 @@ def _run_zoom_body(
             except Exception:
                 prepped = start_img
 
+            # Pin a more-zoomed end keyframe so the model interpolates
+            # monotonically toward it instead of boomeranging back to the start
+            # framing (the zoom-in / zoom-out / repeat artifact).
+            _zstep = float(settings.get("zoom_step", _ZOOM_STEP_DEFAULT))
+            zoom_end_img = _make_zoom_endframe(
+                prepped, direction, _zstep, str(job_dir / f"endframe_{i:02d}.jpg")
+            )
+
             # Slice the pre-generated audio for this clip's time window so LTX-2
             # can condition the video on it (audio_first mode).
             clip_audio_slice: str | None = None
@@ -587,6 +651,7 @@ def _run_zoom_body(
                         guidance=_eff_guidance,
                         duration=gen_dur,
                         seed=-1,
+                        end_image_path=zoom_end_img,
                         negative_prompt=video_generator.zoom_negative_prompt(model_name, direction),
                         stop_check=job.stop_event.is_set,
                         audio_source=clip_audio_slice,
@@ -705,14 +770,14 @@ def _run_zoom_body(
             return
 
     finally:
-        # Clean up chain frame PNGs -- they were only needed during generation
+        # Clean up chain frame PNGs + zoom end keyframes -- only needed during generation
         for i in range(n_clips):
-            frame_png = job_dir / f"frame_{i:02d}.png"
-            if frame_png.exists():
-                try:
-                    frame_png.unlink()
-                except Exception:
-                    pass
+            for _tmp in (job_dir / f"frame_{i:02d}.png", job_dir / f"endframe_{i:02d}.jpg"):
+                if _tmp.exists():
+                    try:
+                        _tmp.unlink()
+                    except Exception:
+                        pass
 
     # -- Audio -----------------------------------------------------------------
     # Ensure audio_path / audio_err are always defined (NameError guard for the
