@@ -305,6 +305,91 @@ def build_zoom_stack(
 
 
 # ---------------------------------------------------------------------------
+# Zoom-IN build stage (Forge SD inpaint/detail) -- generates NEW detail inward
+# ---------------------------------------------------------------------------
+# Zoom-out (above) preserves the source and outpaints rings AROUND it. Zoom-in
+# is the opposite problem: if you just magnify the source you hit its resolution
+# wall and approach a fixed blurry thumbnail. So each inward level crops the
+# centre, scales it up, and runs img2img to PAINT new high-frequency detail into
+# it -- the camera keeps discovering fresh detail as it pushes in. Because every
+# level magnifies a fresh region and regenerates at full resolution (not a
+# downscaled re-encode like the old video chain), it sharpens rather than rots.
+
+def build_zoom_in_stack(
+    source_path: str,
+    n_levels: int,
+    prompt: str,
+    *,
+    negative_prompt: str = "blurry, low quality, watermark, text, soft, out of focus",
+    zoom_factor: float = 0.5,
+    steps: int = 24,
+    cfg_scale: float = 6.0,
+    denoise: float = 0.55,
+    sampler: str = "DPM++ 2M",
+    scheduler: str = "Karras",
+    seed: int = -1,
+    max_dim: int = 1024,
+    stop_check=None,
+    progress_fn=None,
+    log_fn=None,
+):
+    """Build a stack that dives INTO the source, inpainting new detail each level.
+
+    stack[0] = source; stack[k] = the magnified centre of stack[k-1] with fresh
+    detail painted in. Returns (stack, (W,H)) or (None, None) if Forge is down.
+    Render a zoom-in with: render_infinite_zoom(list(reversed(stack)), direction="in").
+    """
+    from PIL import Image
+    from services import forge_client
+
+    def _log(m):
+        log.info(m)
+        if log_fn:
+            log_fn(m)
+
+    if not forge_client.forge_alive():
+        _log("[inpaint] Forge is not running -- cannot build zoom-in stack")
+        return None, None
+
+    f = max(0.30, min(0.85, float(zoom_factor)))
+    src = Image.open(source_path).convert("RGB")
+    W, H = src.size
+    scale = min(1.0, max_dim / max(W, H))
+    W, H = max(64, int(round(W * scale)) // 8 * 8), max(64, int(round(H * scale)) // 8 * 8)
+    src = src.resize((W, H), Image.LANCZOS)
+
+    stack = [src]
+    iw, ih = max(8, round(W * f)), max(8, round(H * f))
+    ox, oy = (W - iw) // 2, (H - ih) // 2
+    for k in range(1, n_levels + 1):
+        if stop_check and stop_check():
+            return None, None
+        if progress_fn:
+            progress_fn(k, n_levels)
+        _log(f"[inpaint] diving + detailing level {k}/{n_levels}")
+        prev = stack[-1]
+        # magnify the centre region to full frame (soft), then paint detail in
+        magnified = prev.crop((ox, oy, ox + iw, oy + ih)).resize((W, H), Image.LANCZOS)
+        res = forge_client.img2img(
+            init_image_b64=_b64_png(magnified),
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            denoising_strength=denoise,
+            width=W, height=H, steps=steps,
+            sampler_name=sampler, scheduler=scheduler,
+            cfg_scale=cfg_scale, seed=seed, resize_mode=0,
+        )
+        if res.get("error") or not res.get("images"):
+            _log(f"[inpaint] Forge failed at level {k}: {res.get('error')} -- stopping")
+            break
+        stack.append(_from_b64(res["images"][0]).resize((W, H), Image.LANCZOS))
+
+    if len(stack) < 2:
+        return None, None
+    return stack, (W, H)
+
+
+# ---------------------------------------------------------------------------
 # Self-test: synthetic nested stack, no GPU -- proves the render engine
 # ---------------------------------------------------------------------------
 
