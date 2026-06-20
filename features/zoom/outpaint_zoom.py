@@ -161,6 +161,150 @@ def render_infinite_zoom(
 
 
 # ---------------------------------------------------------------------------
+# Build stage (Forge SD outpaint) -- generates the real nested stack
+# ---------------------------------------------------------------------------
+
+def _b64_png(img) -> str:
+    import base64, io
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _from_b64(s: str):
+    import base64, io
+    from PIL import Image
+    return Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB")
+
+
+def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
+                   steps, cfg_scale, denoise, sampler, scheduler, seed,
+                   mask_blur, inpainting_fill, feather_px, log_fn=None):
+    """One outpaint level: shrink prev into the centre, generate the ring around
+    it with Forge, then hard-composite the pristine centre back so the nesting
+    is EXACT (the render engine depends on centre f-region == prev exactly).
+
+    Returns a new WxH PIL.Image, or None on Forge failure.
+    """
+    from PIL import Image, ImageFilter
+    from services import forge_client
+
+    iw, ih = max(8, round(W * f)), max(8, round(H * f))
+    ox, oy = (W - iw) // 2, (H - ih) // 2
+    scaled = prev_img.resize((iw, ih), Image.LANCZOS)
+
+    # Backdrop: blurred full-frame copy of prev so the ring starts from matching
+    # colours instead of black (SD extends it into real content).
+    bg = prev_img.resize((W, H), Image.LANCZOS).filter(
+        ImageFilter.GaussianBlur(radius=max(8, W // 22)))
+    canvas = bg.copy()
+    canvas.paste(scaled, (ox, oy))
+
+    # Mask: white = generate (outer ring), black = keep (centre).
+    mask = Image.new("L", (W, H), 255)
+    mask.paste(Image.new("L", (iw, ih), 0), (ox, oy))
+
+    res = forge_client.img2img(
+        init_image_b64=_b64_png(canvas),
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        denoising_strength=denoise,
+        width=W, height=H, steps=steps,
+        sampler_name=sampler, scheduler=scheduler,
+        cfg_scale=cfg_scale, seed=seed, resize_mode=0,
+        mask=_b64_png(mask),
+        mask_blur=mask_blur,
+        inpainting_fill=inpainting_fill,   # 0 fill,1 original,2 latent noise,3 latent nothing
+        inpaint_full_res=False,            # whole-image context -> coherent ring
+        inpainting_mask_invert=0,
+    )
+    if res.get("error") or not res.get("images"):
+        if log_fn:
+            log_fn(f"[outpaint] Forge failed: {res.get('error')}")
+        return None
+    out = _from_b64(res["images"][0]).resize((W, H), Image.LANCZOS)
+
+    # Hard re-paste the pristine centre (feathered) so nesting is pixel-exact.
+    fmask = Image.new("L", (iw, ih), 255)
+    inset = min(feather_px, iw // 2 - 1, ih // 2 - 1)
+    if inset > 0:
+        fmask = Image.new("L", (iw, ih), 0)
+        fmask.paste(255, (inset, inset, iw - inset, ih - inset))
+        fmask = fmask.filter(ImageFilter.GaussianBlur(radius=inset / 2))
+    out.paste(scaled, (ox, oy), fmask)
+    return out
+
+
+def build_zoom_stack(
+    source_path: str,
+    n_levels: int,
+    prompt: str,
+    *,
+    negative_prompt: str = "blurry, low quality, watermark, text, frame, border, seam, duplicate",
+    zoom_factor: float = 0.5,
+    steps: int = 24,
+    cfg_scale: float = 6.0,
+    denoise: float = 1.0,
+    sampler: str = "DPM++ 2M",
+    scheduler: str = "Karras",
+    seed: int = -1,
+    mask_blur: int = 24,
+    inpainting_fill: int = 2,
+    feather_px: int = 12,
+    max_dim: int = 1024,
+    stop_check=None,
+    progress_fn=None,
+    log_fn=None,
+):
+    """Build a nested image stack by outpainting rings outward from the source.
+
+    Returns (stack, (W,H)) where stack[0] is the source and each stack[k] adds a
+    generated ring around stack[k-1]. Returns (None, None) if Forge is down.
+    """
+    from PIL import Image
+    from services import forge_client
+
+    def _log(m):
+        log.info(m)
+        if log_fn:
+            log_fn(m)
+
+    if not forge_client.forge_alive():
+        _log("[outpaint] Forge is not running -- cannot build stack")
+        return None, None
+
+    src = Image.open(source_path).convert("RGB")
+    W, H = src.size
+    # clamp to SD-friendly size, multiples of 8, longest edge <= max_dim
+    scale = min(1.0, max_dim / max(W, H))
+    W, H = int(round(W * scale)) // 8 * 8, int(round(H * scale)) // 8 * 8
+    W, H = max(64, W), max(64, H)
+    src = src.resize((W, H), Image.LANCZOS)
+
+    stack = [src]
+    for k in range(1, n_levels + 1):
+        if stop_check and stop_check():
+            return None, None
+        if progress_fn:
+            progress_fn(k, n_levels)
+        _log(f"[outpaint] generating ring {k}/{n_levels}")
+        nxt = _outpaint_ring(
+            stack[-1], prompt, negative_prompt=negative_prompt, W=W, H=H,
+            f=zoom_factor, steps=steps, cfg_scale=cfg_scale, denoise=denoise,
+            sampler=sampler, scheduler=scheduler, seed=seed, mask_blur=mask_blur,
+            inpainting_fill=inpainting_fill, feather_px=feather_px, log_fn=log_fn,
+        )
+        if nxt is None:
+            _log(f"[outpaint] ring {k} failed -- stopping with {len(stack)} levels")
+            break
+        stack.append(nxt)
+
+    if len(stack) < 2:
+        return None, None
+    return stack, (W, H)
+
+
+# ---------------------------------------------------------------------------
 # Self-test: synthetic nested stack, no GPU -- proves the render engine
 # ---------------------------------------------------------------------------
 
