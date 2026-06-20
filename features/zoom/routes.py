@@ -56,25 +56,24 @@ def _fit_zoom_model(requested: str) -> tuple[str, str | None]:
 
 @router.post("/api/zoom/make")
 async def zoom_make(request: Request):
-    """Submit a zoom-in or zoom-out generation job.
+    """Submit an outpaint/inpaint zoom-IN job (Forge SD detail dive).
+
+    Zoom-OUT was removed -- this feature is zoom-IN only. The source image is the
+    starting view; AI paints ever-finer detail in the centre as the camera dives,
+    and the levels are dissolved together so there are no visible clip joins.
 
     Body fields:
-      source_path    -- absolute path to photo OR video file
-      zoom_direction -- "in" or "out" (default "out")
-      n_clips        -- number of chained clips (default 5)
-      clip_duration  -- seconds per clip before trim (default 4.0)
-      model_name     -- WanGP model (default LTX-2 Dev19B Distilled)
-      steps          -- denoising steps (default from model)
-      idea           -- optional description of what the zoom reveals
-      skip_audio     -- bool (default false)
-      instrumental   -- bool (default false)
-      audio_first    -- bool: generate music before clips for sync (default false)
-      music_prompt   -- override music prompt
+      source_path  -- absolute path to a photo OR video file
+      idea         -- optional description of the detail to dive into
+      n_levels     -- detail levels / zoom depth (default 7)
+      skip_audio   -- bool (default false)
+      instrumental -- bool (default false)
+      music_prompt -- optional music override
     """
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
-    from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline, extract_frame_from_video
-    from features.fun_videos.video_generator import negative_prompt_for as _neg_for
+    from features.zoom.outpaint_zoom import run_oz_prep, run_oz_pipeline
+    from features.zoom.pipeline import extract_frame_from_video
 
     job_manager = get_job_manager()
 
@@ -87,80 +86,41 @@ async def zoom_make(request: Request):
     if not source_path or not os.path.isfile(source_path):
         return JSONResponse({"error": "source_path is required and must exist"}, status_code=400)
 
-    direction = body.get("zoom_direction", "out")
-    if direction not in ("in", "out"):
-        return JSONResponse({"error": "zoom_direction must be 'in' or 'out'"}, status_code=400)
-
-    n_clips = max(2, min(15, int(body.get("n_clips", 5))))
-    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
-    model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
-    if model_name not in _VG_MODELS:
-        model_name = "LTX-2 Dev19B Distilled"
-    # Substitute a VRAM-safe model if the requested one would deadlock here.
-    model_name, _vram_note = _fit_zoom_model(model_name)
-    if _vram_note:
-        log.info("[zoom] %s", _vram_note)
-
-    # Use the model's native resolution. The 832x480 shortcut was removed --
-    # lower resolution compounds artifacts through the chain anchor and produces
-    # visibly degraded output by clip 3-4. TeaCache + shorter clip duration
-    # already provide the speed improvement without this quality tradeoff.
-    _model_res = _VG_MODELS.get(model_name, {}).get("res", (1032, 580))
-    _zoom_res = body.get("zoom_res") or _model_res
-
-    # If source is a video, extract the appropriate frame first
+    # Video source -> dive into its first frame.
     _tmp_dir_to_clean: str | None = None
     ext = Path(source_path).suffix.lower()
     if ext in (".mp4", ".mov", ".avi", ".webm", ".mkv"):
-        frame_pos = "last" if direction == "out" else "first"
         _tmp_dir_to_clean = tempfile.mkdtemp(prefix="dcs_zoom_")
         frame_png = os.path.join(_tmp_dir_to_clean, "start_frame.png")
-        ok = extract_frame_from_video(source_path, frame_png, position=frame_pos)
-        if not ok:
+        if not extract_frame_from_video(source_path, frame_png, position="first"):
             return JSONResponse({"error": "Could not extract frame from video"}, status_code=422)
         source_path = frame_png
-        log.info("[zoom] Extracted %s frame from video -> %s", frame_pos, frame_png)
-
-    _model_info = _VG_MODELS.get(model_name, {})
-    _default_guidance = _model_info.get("guidance", 3.5)
-    _default_steps    = _model_info.get("steps", 25)
 
     settings = {
-        "zoom_direction": direction,
-        "n_clips": n_clips,
-        "clip_duration": clip_dur,
-        "model_name": model_name,
-        "zoom_res": list(_zoom_res),
-        "steps": int(body.get("steps", _default_steps)),
-        "guidance": float(body.get("guidance", _default_guidance)),
-        "idea": body.get("idea", "").strip(),
-        "skip_audio": bool(body.get("skip_audio", False)),
+        "zoom_direction": "in",
+        "idea":         body.get("idea", "").strip(),
+        "n_levels":     max(3, min(12, int(body.get("n_levels", 7)))),
+        "zoom_factor":  float(body.get("zoom_factor", 0.72)),
+        "sec_per_level": float(body.get("sec_per_level", 2.2)),
+        "denoise":      float(body.get("denoise", 0.40)),
+        "skip_audio":   bool(body.get("skip_audio", False)),
         "instrumental": bool(body.get("instrumental", False)),
         "music_prompt": body.get("music_prompt", ""),
         "audio_format": body.get("audio_format", "mp3"),
-        "audio_first": bool(body.get("audio_first", False)),
-        "upscale":        bool(body.get("upscale", True)),
-        "upscale_scale":  float(body.get("upscale_scale", 2.0)),
-        "upscale_method": body.get("upscale_method", "ai") if body.get("upscale_method") in ("ffmpeg", "ai") else "ai",
-        "_tmp_dir": _tmp_dir_to_clean,
+        "_tmp_dir":     _tmp_dir_to_clean,
     }
 
-    label = f"Zoom {direction}: {Path(source_path).stem[:20]}"
-    timeout = n_clips * _PER_CLIP_TIMEOUT_S + _AUDIO_BUFFER_S
-
+    label = f"Zoom in: {Path(source_path).stem[:20]}"
     try:
         job = job_manager.submit_with_prep(
-            JOB_FUN_MULTI_VIDEO,
-            run_zoom_prep, run_zoom_pipeline,
-            source_path, settings,
-            label=label,
-            timeout_seconds=timeout,
+            JOB_FUN_MULTI_VIDEO, run_oz_prep, run_oz_pipeline,
+            source_path, settings, label=label, timeout_seconds=600,
         )
     except RuntimeError as e:
         raise __import__("fastapi").HTTPException(429, str(e))
 
     job.meta["feature"] = "zoom"
-    job.meta["zoom_direction"] = direction
+    job.meta["zoom_direction"] = "in"
     return {"job_id": job.id, "label": label}
 
 
@@ -317,35 +277,18 @@ async def zoom_folder_loop_start(request: Request):
     if not files:
         return JSONResponse({"error": "No supported image or video files found in that folder"}, status_code=400)
 
-    n_clips  = max(2, min(15, int(body.get("n_clips", 5))))
-    clip_dur = max(3.0, min(15.0, float(body.get("clip_duration", 4.0))))
-    model_name = body.get("model_name", "LTX-2 Dev19B Distilled")
-    if model_name not in _VG_MODELS:
-        model_name = "LTX-2 Dev19B Distilled"
-    model_name, _vram_note = _fit_zoom_model(model_name)
-    if _vram_note:
-        log.info("[zoom] folder-loop: %s", _vram_note)
-    _model_info = _VG_MODELS.get(model_name, {})
-    _zoom_res = _model_info.get("res", (1032, 580))
-
     settings = {
-        "zoom_direction":  body.get("zoom_direction", "out"),
-        "n_clips":         n_clips,
-        "clip_duration":   clip_dur,
-        "model_name":      model_name,
-        "zoom_res":        list(_zoom_res),
-        "steps":           int(body.get("steps", _model_info.get("steps", 8))),
-        "guidance":        float(body.get("guidance", _model_info.get("guidance", 3.0))),
+        "zoom_direction":  "in",
         "idea":            body.get("idea", "").strip(),
+        "n_levels":        max(3, min(12, int(body.get("n_levels", 7)))),
+        "zoom_factor":     float(body.get("zoom_factor", 0.72)),
+        "sec_per_level":   float(body.get("sec_per_level", 2.2)),
+        "denoise":         float(body.get("denoise", 0.40)),
         "skip_audio":      bool(body.get("skip_audio", False)),
         "instrumental":    bool(body.get("instrumental", False)),
         "music_prompt":    body.get("music_prompt", ""),
         "audio_format":    body.get("audio_format", "mp3"),
-        "audio_steps":     int(body.get("audio_steps", 8)),
-        "audio_guidance":  float(body.get("audio_guidance", 7.0)),
-        "bpm":             body.get("bpm"),
-        "audio_first":     bool(body.get("audio_first", False)),
-        "_timeout_seconds": n_clips * _PER_CLIP_TIMEOUT_S + _AUDIO_BUFFER_S,
+        "_timeout_seconds": 600,
     }
 
     repeat = bool(body.get("repeat", False))

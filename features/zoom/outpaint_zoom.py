@@ -759,6 +759,193 @@ def build_zoom_in_stack(
 
 
 # ---------------------------------------------------------------------------
+# Job pipeline -- prep (LLM detail prompt, no GPU) + run (Forge build + render)
+# ---------------------------------------------------------------------------
+
+OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+
+_OZ_DETAIL_SYSTEM = """\
+You are directing an infinite zoom-IN into a single image. The camera dives
+toward the centre and AI paints ever-finer detail as it magnifies. Write ONE
+short prompt (12-25 words) describing the fine texture / micro-detail that should
+emerge as the camera pushes into the CENTRE of this image: name the material,
+surface, grain, structure. Concrete and physical. No camera words, no story.
+Return ONLY the prompt text.\
+"""
+
+
+def run_oz_prep(job, source_path: str, settings: dict) -> None:
+    """Phase 0 (no GPU): pick the detail prompt from the image + idea, and a
+    music direction if audio is wanted. Results written into settings for the
+    GPU phase."""
+    import os as _os
+    from app import get_llm_router
+    from core.llm_client import TIER_FAST, encode_image_b64
+
+    llm = get_llm_router()
+    idea = (settings.get("idea") or "").strip()
+    job.update(progress=4, message="Planning the zoom detail...")
+
+    b64 = None
+    if source_path and _os.path.isfile(source_path):
+        try:
+            b64 = encode_image_b64(source_path)
+        except Exception:
+            b64 = None
+
+    prompt = ""
+    try:
+        if b64:
+            msg = idea or "Describe the fine detail to reveal as we dive into the centre."
+            text = llm.route_vision(msg, [b64], tier=TIER_FAST,
+                                    system=_OZ_DETAIL_SYSTEM, max_tokens=80)
+            prompt = (text or "").strip().strip('"').strip()
+    except Exception as e:
+        log.warning("[oz] detail-prompt vision failed: %s", e)
+    if not prompt:
+        prompt = ((idea + ", ") if idea else "") + (
+            "extreme macro close-up, intricate fine surface detail, sharp texture, highly detailed")
+    settings["_oz_prompt"] = prompt
+    log.info("[oz] detail prompt: %s", prompt[:100])
+
+    if not settings.get("skip_audio") and not settings.get("music_prompt"):
+        try:
+            from features.fun_videos import analyzer
+            res = analyzer.generate_music_prompt(llm, [b64] if b64 else [], idea)
+            if res.get("music_prompt"):
+                settings["_oz_music"] = res["music_prompt"]
+        except Exception as e:
+            log.warning("[oz] music prep failed: %s", e)
+
+    job.update(progress=10, message="Detail ready, waiting for GPU...")
+
+
+def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
+    """GPU phase: Forge builds the detail stack, render the zoom-in, optional
+    ACE-Step music, write output + gallery + session."""
+    import os as _os
+    import time as _time
+    from app import gallery_push, get_llm_router
+    from core.gpu_orchestrator import gpu
+    from core.inbox import copy_to_inbox
+    from core.ffmpeg_utils import probe_duration
+    from services import forge_client
+    from features.fun_videos import audio_generator, video_generator
+
+    def _stopped() -> bool:
+        return job.stop_event.is_set()
+
+    n_levels = max(3, min(12, int(settings.get("n_levels", 7))))
+    zf = float(settings.get("zoom_factor", 0.72))
+    spl = float(settings.get("sec_per_level", 2.2))
+    fps = int(settings.get("fps", 30))
+    denoise = float(settings.get("denoise", 0.40))
+    skip_audio = bool(settings.get("skip_audio", False))
+    instrumental = bool(settings.get("instrumental", False))
+    prompt = settings.pop("_oz_prompt", "") or "extreme macro detail, sharp texture, highly detailed"
+    music_prompt = settings.pop("_oz_music", settings.get("music_prompt", ""))
+
+    ts = _time.strftime("%Y%m%d_%H%M%S")
+    job_dir = OUTPUT_DIR / _time.strftime("%Y-%m-%d") / f"zoomin_{Path(source_path).stem[:12]}_{ts}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- Forge build ----------------------------------------------------------
+    gpu.acquire("forge", reason="outpaint zoom-in")
+    if not forge_client.forge_alive():
+        job.update(status="error", message="Forge (Stable Diffusion) is not running -- it generates the zoom detail. Start it in Services.")
+        return
+
+    job.update(progress=12, message="Diving in + painting detail...")
+
+    def _bp(k, n):
+        job.update(progress=12 + int(48 * k / max(n, 1)),
+                   message=f"Painting detail level {k}/{n}...")
+
+    stack, _dims = build_zoom_in_stack(
+        source_path, n_levels, prompt,
+        zoom_factor=zf, denoise=denoise,
+        stop_check=_stopped, progress_fn=_bp, log_fn=lambda m: log.info(m),
+    )
+    if not stack:
+        job.update(status="error", message="Zoom build failed (Forge returned nothing)")
+        return
+    # source is fully read into the stack now -- drop any video-frame temp dir
+    _td = settings.get("_tmp_dir")
+    if _td:
+        import shutil as _sh
+        _sh.rmtree(_td, ignore_errors=True)
+    if _stopped():
+        return
+
+    # -- Render ---------------------------------------------------------------
+    job.update(progress=62, message="Rendering the zoom...")
+    silent = str(job_dir / f"zoomin_{ts}.mp4")
+    out = render_zoom_in(stack, silent, zoom_factor=zf, fps=fps,
+                         sec_per_level=spl, xfade=float(settings.get("xfade", 0.6)),
+                         log_fn=lambda m: log.info(m))
+    if not out:
+        job.update(status="error", message="Zoom render failed")
+        return
+    final = out
+    total_dur = probe_duration(out) or (n_levels * spl)
+
+    # -- Audio (optional) -----------------------------------------------------
+    if not skip_audio and not _stopped():
+        try:
+            gpu.acquire("acestep", reason="zoom-in music")
+            if not music_prompt:
+                music_prompt = "cinematic ambient, gentle build, a sense of descending into infinite detail"
+            lyrics = ""
+            if not instrumental:
+                try:
+                    from features.fun_videos import analyzer
+                    lyrics = analyzer.generate_lyrics(get_llm_router(), [], music_prompt, "")
+                except Exception:
+                    lyrics = ""
+            job.update(progress=80, message="Generating music...")
+            ap, aerr = audio_generator.generate_audio(
+                prompt=music_prompt, duration=min(total_dur + 2.0, 300.0),
+                output_dir=str(job_dir), audio_format=settings.get("audio_format", "mp3"),
+                steps=int(settings.get("audio_steps", 8)),
+                guidance=float(settings.get("audio_guidance", 7.0)),
+                seed=-1, lyrics=lyrics, instrumental=instrumental,
+                stop_event=job.stop_event,
+            )
+            if ap and _os.path.isfile(ap):
+                merged = str(job_dir / f"zoomin_{ts}_final.mp4")
+                m = video_generator.merge_video_audio(out, ap, merged)
+                if m:
+                    final = m
+            else:
+                log.warning("[oz] audio failed: %s -- video only", aerr)
+        except Exception as e:
+            log.warning("[oz] audio stage failed: %s -- video only", e)
+
+    # -- Output + gallery + session ------------------------------------------
+    job.output = final
+    try:
+        copy_to_inbox(final)
+    except Exception:
+        pass
+    job.message = "Zoom-in complete!"
+    job.meta.update({"final_path": final, "direction": "in", "detail_prompt": prompt})
+    try:
+        from core.session import get_current as _gs
+        _gs().add_file(Path(final).name, "video", "zoom", path=final)
+    except Exception:
+        pass
+    try:
+        norm = final.replace("\\", "/")
+        idx = norm.lower().find("/output/")
+        url = norm[idx:] if idx != -1 else f"/output/{Path(final).name}"
+        gallery_push(url, tab="zoom", prompt=prompt[:120], model="Outpaint Zoom-in (SD)",
+                     metadata={"path": final, "job_id": job.id, "direction": "in",
+                               "duration_sec": total_dur})
+    except Exception as e:
+        log.warning("[oz] gallery_push failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Self-test: synthetic nested stack, no GPU -- proves the render engine
 # ---------------------------------------------------------------------------
 

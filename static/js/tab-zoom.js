@@ -33,7 +33,7 @@ export function init(panel) {
   let _songDur      = 0;
   let _songAnalysis = null;
   let _lyricsTA     = null;
-  let _direction    = 'out';
+  let _direction    = 'in';   // zoom-out removed; outpaint zoom is in-only
   let _jobId        = null;
   let _modelData    = {};
   let _gpuVram      = 0;
@@ -334,8 +334,11 @@ export function init(panel) {
       sourceLabelEl.textContent = 'Source';
     }
 
-    // Direction (Zoom Out/In) is only relevant for zoom modes -- song-video pipeline does not use it
-    dirSection.style.display = mode === 'song' ? 'none' : '';
+    // Zoom-out was removed -- the outpaint zoom is in-only, so no direction picker.
+    dirSection.style.display = 'none';
+    // The WanGP model picker is irrelevant to the SD-based zoom; show it only for
+    // the song-video pipeline (which still uses WanGP).
+    modelCard.style.display = mode === 'song' ? 'block' : 'none';
 
     // Zoom controls (clip chips + folder batch) shown in non-song modes
     controlsGrid.style.display = mode === 'song' ? 'none' : 'grid';
@@ -514,10 +517,12 @@ export function init(panel) {
   [4, 5, 6, 8, 10, 12, 15].forEach((n, i) => { const b = _chip(`${n}s`, n, durRow, _updateEst); if (i === 0) b.click(); durRow.appendChild(b); });
   _updateEst();
 
-  const controlsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr 1fr; gap:16px;' });
+  const controlsGrid = el('div', { style: 'display:grid; grid-template-columns:1fr; gap:16px;' });
   const stepsGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
-  stepsGroup.append(LABEL('Clips in chain'), stepsRow);
-  const durGroup = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
+  stepsGroup.append(LABEL('Zoom depth (detail levels)'), stepsRow);
+  // "Seconds per clip" / model are not used by the outpaint zoom-in -- kept in the
+  // DOM (song mode still uses durRow) but hidden from the zoom controls.
+  const durGroup = el('div', { style: 'display:none; flex-direction:column; gap:8px;' });
   durGroup.append(
     el('div', { style: 'display:flex; justify-content:space-between; align-items:baseline;' }, [LABEL('Seconds per clip'), totalEstEl]),
     durRow,
@@ -616,6 +621,7 @@ export function init(panel) {
   const modelWarn = el('div', { style: 'font-size:11px; color:var(--red); display:none; padding-top:4px;' });
   const modelGroup = el('div');
   modelGroup.append(modelLabelRow, modelSel, modelWarn);
+  const modelCard = _card(modelGroup);   // toggled by _setAudioMode (song-only)
 
   apiFetch('/api/fun/models').then(data => {
     _modelData = data.models || {}; _gpuVram = data.gpu_vram_gb || 0;
@@ -787,8 +793,7 @@ export function init(panel) {
       _loopActive = false; _stopLoopPoll(); batchBtn.textContent = `Start Loop (${_folderFiles.length} files)`;
       folderStatus.textContent = 'Loop stopped.'; browseFolderBtn.disabled = false; return;
     }
-    const nClips = Number(_activeValue(stepsRow)) || 4, clipDur = Number(_activeValue(durRow)) || 5;
-    const body = { folder: _folderPath, zoom_direction: _direction, n_clips: nClips, clip_duration: clipDur, idea: ideaInput.value.trim(), model_name: modelSel.value, skip_audio: _audioMode === 'none', audio_first: (_audioMode === 'ai' && audioFirstCheck.checked), repeat: loopCheck.checked };
+    const body = { folder: _folderPath, idea: ideaInput.value.trim(), n_levels: Number(_activeValue(stepsRow)) || 7, skip_audio: _audioMode === 'none', instrumental: false, repeat: loopCheck.checked };
     if (loopCheck.checked) {
       batchBtn.disabled = true; browseFolderBtn.disabled = true;
       try {
@@ -831,7 +836,7 @@ export function init(panel) {
     controlsGrid,
     clipSummarySection,
     el('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [LABEL('What to explore (optional)'), ideaInput]),
-    _card(modelGroup),
+    modelCard,
     loopSection,
     generateBtn,
     progressArea,
@@ -915,8 +920,7 @@ export function init(panel) {
     if (_audioMode === 'song') { await _submitMusicVideo(); return; }
     if (!_sourcePath) return;
 
-    const nClips  = Number(_activeValue(stepsRow)) || 4;
-    const clipDur = Number(_activeValue(durRow))   || 5;
+    const nLevels = Number(_activeValue(stepsRow)) || 7;
     let queueDepth = 0;
     try { const qs = await apiFetch('/api/jobs'); queueDepth = (qs.running?.length || 0) + (qs.queued?.length || 0); } catch {}
 
@@ -926,14 +930,11 @@ export function init(panel) {
       const res = await apiFetch('/api/zoom/make', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source_path:    _sourcePath,
-          zoom_direction: _direction,
-          n_clips:        nClips,
-          clip_duration:  clipDur,
-          idea:           ideaInput.value.trim(),
-          model_name:     modelSel.value,
-          skip_audio:     _audioMode === 'none',
-          audio_first:    _audioMode === 'ai' && audioFirstCheck.checked,
+          source_path:  _sourcePath,
+          idea:         ideaInput.value.trim(),
+          n_levels:     nLevels,
+          skip_audio:   _audioMode === 'none',
+          instrumental: false,
         }),
       });
 
@@ -953,10 +954,9 @@ export function init(panel) {
             outputArea.style.display = 'flex'; outputActions.innerHTML = '';
             outputActions.append(
               _actionBtn('Open in folder', () => apiFetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: out, action: 'explorer' }) }).catch(() => {})),
-              _actionBtn('Continue zoom...', () => _showExtendPanel(out, _direction)),
             );
           }
-          toast(`Zoom ${_direction} complete!`, 'success'); document.dispatchEvent(new CustomEvent('session-updated'));
+          toast('Zoom in complete!', 'success'); document.dispatchEvent(new CustomEvent('session-updated'));
         },
         msg => { _activePoller = null; _jobId = null; _decActive(); progressArea.style.display = 'none'; progressFill.style.width = '0%'; toast(`Zoom failed: ${msg}`, 'error'); },
       );

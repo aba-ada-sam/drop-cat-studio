@@ -145,16 +145,16 @@ def _run_loop(settings: dict) -> None:
 def _submit_one(file_path: str, name: str, settings: dict) -> str | None:
     try:
         from app import get_job_manager
-        from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline
+        from features.zoom.outpaint_zoom import run_oz_prep, run_oz_pipeline
         from core.job_manager import JOB_FUN_MULTI_VIDEO
 
         jm = get_job_manager()
         job_settings = dict(settings)
-        timeout = job_settings.pop("_timeout_seconds", None)
+        timeout = job_settings.pop("_timeout_seconds", None) or 600
         job = jm.submit_with_prep(
             JOB_FUN_MULTI_VIDEO,
-            run_zoom_prep,
-            run_zoom_pipeline,
+            run_oz_prep,
+            run_oz_pipeline,
             file_path,
             job_settings,
             label=f"Zoom loop: {name}",
@@ -162,7 +162,7 @@ def _submit_one(file_path: str, name: str, settings: dict) -> str | None:
         )
         if job:
             job.meta["feature"] = "zoom"
-            job.meta["zoom_direction"] = settings.get("zoom_direction", "out")
+            job.meta["zoom_direction"] = "in"
             return job.id
     except Exception as e:
         log.warning("[zoom-loop] Submit failed for %s: %s", name, e)

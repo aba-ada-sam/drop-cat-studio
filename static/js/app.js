@@ -9,7 +9,7 @@ import { init as initExpress, receiveHandoff as expressHandoff } from './tab-exp
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260620a';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260620a';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260620a';
-import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620a';
+import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620b';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260620a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260620a';
