@@ -893,6 +893,16 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
     music_ok = False
     if not skip_audio and not _stopped():
         try:
+            # The video is rendered and on disk -- Forge is done for this job. FULLY
+            # STOP the Forge process (not just unload its checkpoint) so ALL its VRAM
+            # frees for ACE-Step. On 16GB, unload-only left a CUDA context that
+            # squeezed ACE-Step's LLM and the music silently failed. Forge cold-starts
+            # again (headless) on the next zoom.
+            try:
+                from services import manager as _svc
+                _svc.stop_service("forge")
+            except Exception as _fe:
+                log.warning("[oz] could not stop Forge before music: %s", _fe)
             gpu.acquire("acestep", reason="zoom-in music")
             if not music_prompt:
                 music_prompt = "cinematic ambient, gentle build, a sense of descending into infinite detail"
@@ -924,6 +934,20 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
             log.warning("[oz] audio stage failed: %s -- video only", e)
 
     # -- Output + gallery + session ------------------------------------------
+    # Stamp the file with the build version + settings (embedded mp4 tag + sidecar
+    # .json) BEFORE copying to the inbox, so every copy carries its provenance.
+    try:
+        from core.provenance import stamp_video
+        stamp_video(final, {
+            "feature": "zoom-in",
+            "source": Path(source_path).name,
+            "detail_prompt": prompt,
+            "n_levels": n_levels, "zoom_factor": zf, "sec_per_level": spl,
+            "music": bool(music_ok), "duration_sec": round(total_dur, 2),
+        })
+    except Exception as e:
+        log.warning("[oz] provenance stamp failed: %s", e)
+
     job.output = final
     try:
         copy_to_inbox(final)
