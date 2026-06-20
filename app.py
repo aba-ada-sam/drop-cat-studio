@@ -752,7 +752,7 @@ def _build_restore_registry(jm):
     from features.fun_videos.pipeline import run_prep, run_pipeline
     from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
     from features.video_bridges.routes import _bridges_worker
-    from features.zoom.pipeline import run_zoom_prep, run_zoom_pipeline
+    from features.zoom.outpaint_zoom import run_oz_prep, run_oz_pipeline
     from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE
 
     def _make_fun_video(args, label, timeout_seconds):
@@ -783,12 +783,12 @@ def _build_restore_registry(jm):
     def _make_zoom(args, label, timeout_seconds):
         source_path = args[0] if args else None
         settings    = dict(args[1]) if len(args) > 1 else {}
-        job = jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_zoom_prep, run_zoom_pipeline,
+        job = jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_oz_prep, run_oz_pipeline,
                                   source_path, settings, label=label,
-                                  timeout_seconds=timeout_seconds)
+                                  timeout_seconds=timeout_seconds or 600)
         if job:
             job.meta["feature"] = "zoom"
-            job.meta["zoom_direction"] = settings.get("zoom_direction", "out")
+            job.meta["zoom_direction"] = "in"
         return job
 
     return {
