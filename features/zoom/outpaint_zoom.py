@@ -44,7 +44,7 @@ def render_infinite_zoom(
     zoom_factor: float = 0.5,
     fps: int = 30,
     sec_per_level: float = 2.5,
-    feather_px: int = 24,
+    feather_frac: float = 0.38,
     log_fn=None,
 ) -> str | None:
     """Render a smooth infinite-zoom video from a nested image stack.
@@ -107,18 +107,29 @@ def render_infinite_zoom(
                 iw = min(W, max(2, round(W * f / s)))
                 ih = min(H, max(2, round(H * f / s)))
                 crisp = inner.resize((iw, ih), Image.LANCZOS)
-                if feather_px > 0 and iw < W and ih < H:
-                    mask = Image.new("L", (iw, ih), 255)
-                    # soft border so the upscaled ring blends into the crisp centre
-                    m = ImageFilter.GaussianBlur(radius=feather_px)
-                    border = Image.new("L", (iw, ih), 0)
-                    inset = min(feather_px * 2, iw // 2 - 1, ih // 2 - 1)
+                if iw < W and ih < H:
+                    # WIDE feather: the crisp inner must DISSOLVE into the ring,
+                    # not sit as a sharp rectangle. inset is a large fraction of
+                    # the inner size so the alpha ramps over a big band -- since
+                    # the ring's centre is (approximately) this same content, the
+                    # blend is invisible and there is no "postage stamp" edge.
+                    inset = max(2, int(min(iw, ih) * feather_frac))
+                    inset = min(inset, iw // 2 - 1, ih // 2 - 1)
+                    mask = Image.new("L", (iw, ih), 0)
                     if inset > 0:
-                        border.paste(255, (inset, inset, iw - inset, ih - inset))
-                        mask = border.filter(m)
+                        mask.paste(255, (inset, inset, iw - inset, ih - inset))
+                        mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, inset * 0.6)))
+                    else:
+                        mask = Image.new("L", (iw, ih), 255)
                     base.paste(crisp, ((W - iw) // 2, (H - ih) // 2), mask)
                 else:
-                    base.paste(crisp, ((W - iw) // 2, (H - ih) // 2))
+                    # inner fills the frame (segment boundary): feather only the
+                    # outermost edge so it blends with the wider level's content.
+                    edge = max(2, int(min(W, H) * feather_frac * 0.4))
+                    mask = Image.new("L", (W, H), 0)
+                    mask.paste(255, (edge, edge, W - edge, H - edge))
+                    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, edge * 0.6)))
+                    base.paste(crisp, (0, 0), mask)
 
                 fp = str(tmp_dir / f"f{idx:06d}.png")
                 base.save(fp)
