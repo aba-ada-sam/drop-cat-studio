@@ -890,6 +890,7 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
     total_dur = probe_duration(out) or (n_levels * spl)
 
     # -- Audio (optional) -----------------------------------------------------
+    music_ok = False
     if not skip_audio and not _stopped():
         try:
             gpu.acquire("acestep", reason="zoom-in music")
@@ -916,6 +917,7 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
                 m = video_generator.merge_video_audio(out, ap, merged)
                 if m:
                     final = m
+                    music_ok = True
             else:
                 log.warning("[oz] audio failed: %s -- video only", aerr)
         except Exception as e:
@@ -927,8 +929,9 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
         copy_to_inbox(final)
     except Exception:
         pass
-    job.message = "Zoom-in complete!"
-    job.meta.update({"final_path": final, "direction": "in", "detail_prompt": prompt})
+    job.message = "Zoom-in complete!" if (skip_audio or music_ok) else \
+        "Zoom-in done (music unavailable -- not enough VRAM for ACE-Step after Forge; video saved)"
+    job.meta.update({"final_path": final, "direction": "in", "detail_prompt": prompt, "music_ok": music_ok})
     try:
         from core.session import get_current as _gs
         _gs().add_file(Path(final).name, "video", "zoom", path=final)
