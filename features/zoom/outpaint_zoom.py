@@ -161,6 +161,110 @@ def render_infinite_zoom(
 
 
 # ---------------------------------------------------------------------------
+# Crossfade renderer -- seamless level blending, no hard centre square
+# ---------------------------------------------------------------------------
+
+def render_zoom_crossfade(
+    stack,
+    out_path: str,
+    *,
+    direction: str = "out",
+    zoom_factor: float = 0.6,
+    fps: int = 30,
+    sec_per_level: float = 2.5,
+    feather_frac: float = 0.45,
+    log_fn=None,
+) -> str | None:
+    """Continuous zoom that CROSSFADES consecutive levels so junctions are
+    seamless and the inner level dissolves into the outer one (no hard 'postage
+    stamp' square). Tolerates non-pixel-exact nesting.
+
+    stack[k]'s centre f-region must approximately equal stack[k-1] (stack[k] is
+    the wider view). Renders source -> widest (pull out); reverse for "in".
+      zoom-out:  stack = build_zoom_stack() result,                direction="out"
+      zoom-in:   stack = list(reversed(build_zoom_in_stack())),    direction="in"
+    """
+    from PIL import Image, ImageFilter
+
+    def _log(m):
+        log.info(m)
+        if log_fn:
+            log_fn(m)
+
+    if not stack or len(stack) < 2:
+        return None
+    f = max(0.30, min(0.85, float(zoom_factor)))
+    W, H = stack[0].size
+    stack = [im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS) for im in stack]
+    nfr = max(2, int(round(fps * sec_per_level)))
+
+    tmp = Path(tempfile.mkdtemp(prefix="dcs_opzx_"))
+    paths: list[str] = []
+    idx = 0
+
+    def _save(img):
+        nonlocal idx
+        p = str(tmp / f"f{idx:06d}.png")
+        img.save(p)
+        paths.append(p)
+        idx += 1
+
+    try:
+        hold = int(fps * 0.4)
+        for _ in range(hold):
+            _save(stack[0])
+        # segments: A=stack[k-1] (inner) dissolves into B=stack[k] (wider) as we pull out
+        for k in range(1, len(stack)):
+            A, B = stack[k - 1], stack[k]
+            for i in range(nfr):
+                p = i / nfr
+                s = f ** (1.0 - p)                 # B crop scale: f -> 1
+                cw, ch = max(2, round(W * s)), max(2, round(H * s))
+                x0, y0 = (W - cw) // 2, (H - ch) // 2
+                base = B.crop((x0, y0, x0 + cw, y0 + ch)).resize((W, H), Image.LANCZOS)
+                # A occupies the centre (f/s) of base; crossfade it in (crisp) over B
+                iw = min(W, max(2, round(W * f / s)))
+                ih = min(H, max(2, round(H * f / s)))
+                Ar = A.resize((iw, ih), Image.LANCZOS)
+                aA = 1.0 - p                       # inner fades out as we reach the wider view
+                band = max(1, int(min(iw, ih) * feather_frac * 0.5))
+                m = Image.new("L", (iw, ih), 0)
+                if iw > 2 * band and ih > 2 * band:
+                    m.paste(int(255 * aA), (band, band, iw - band, ih - band))
+                    m = m.filter(ImageFilter.GaussianBlur(radius=band * 0.7))
+                else:
+                    m = Image.new("L", (iw, ih), int(255 * aA))
+                base.paste(Ar, ((W - iw) // 2, (H - ih) // 2), m)
+                _save(base)
+        for _ in range(hold):
+            _save(stack[-1])
+
+        if direction == "in":
+            paths = list(reversed(paths))
+
+        seq = Path(tempfile.mkdtemp(prefix="dcs_opzx_seq_"))
+        for j, src in enumerate(paths):
+            os.replace(src, str(seq / f"s{j:06d}.png"))
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(seq / "s%06d.png"),
+             "-c:v", "libx264", "-crf", "16", "-preset", "medium",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=300,
+        )
+        import shutil
+        shutil.rmtree(seq, ignore_errors=True)
+        if r.returncode != 0 or not os.path.isfile(out_path):
+            _log(f"[outpaint] crossfade ffmpeg failed: {r.stderr.decode(errors='replace')[-200:]}")
+            return None
+        _log(f"[outpaint] crossfade rendered {idx} frames -> {out_path}")
+        return out_path
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Build stage (Forge SD outpaint) -- generates the real nested stack
 # ---------------------------------------------------------------------------
 
@@ -200,9 +304,15 @@ def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
     canvas = bg.copy()
     canvas.paste(scaled, (ox, oy))
 
-    # Mask: white = generate (outer ring), black = keep (centre).
+    # Mask: white = generate. Keep only a core SMALLER than the pasted source
+    # (kc) so SD repaints and BLENDS the source's outer edge into the new ring --
+    # this is what stops the source reading as a hard pasted square. Heavy blur
+    # turns the keep->generate boundary into a wide gradient.
+    kc = 0.78
+    kw, kh = max(4, round(iw * kc)), max(4, round(ih * kc))
     mask = Image.new("L", (W, H), 255)
-    mask.paste(Image.new("L", (iw, ih), 0), (ox, oy))
+    mask.paste(Image.new("L", (kw, kh), 0), ((W - kw) // 2, (H - kh) // 2))
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(8, iw // 12)))
 
     res = forge_client.img2img(
         init_image_b64=_b64_png(canvas),
@@ -223,15 +333,9 @@ def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
             log_fn(f"[outpaint] Forge failed: {res.get('error')}")
         return None
     out = _from_b64(res["images"][0]).resize((W, H), Image.LANCZOS)
-
-    # Hard re-paste the pristine centre (feathered) so nesting is pixel-exact.
-    fmask = Image.new("L", (iw, ih), 255)
-    inset = min(feather_px, iw // 2 - 1, ih // 2 - 1)
-    if inset > 0:
-        fmask = Image.new("L", (iw, ih), 0)
-        fmask.paste(255, (inset, inset, iw - inset, ih - inset))
-        fmask = fmask.filter(ImageFilter.GaussianBlur(radius=inset / 2))
-    out.paste(scaled, (ox, oy), fmask)
+    # No hard re-paste: SD preserved the masked core and blended the source edge
+    # into the ring, so the source is not a pasted square. The crossfade renderer
+    # tolerates the (now non-pixel-exact) nesting.
     return out
 
 
