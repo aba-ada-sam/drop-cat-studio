@@ -2,10 +2,10 @@
  * Drop Cat Go Studio -- Music Video tab.
  * Drop a song -> AI analyzes BPM/key/energy -> generates a full-length music video.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260505e';
-import { el, pathToUrl } from './components.js?v=20260507a';
-import { toast, apiFetch } from './shell/toast.js?v=20260518a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260509a';
+import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260620a';
+import { toast, apiFetch } from './shell/toast.js?v=20260620a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260620a';
 export function receiveHandoff(data) {
   // no-op -- this tab doesn't currently receive handoffs
 }
@@ -754,7 +754,7 @@ export function init(panel) {
   // Keep applier minimal: the high-value fields are the story idea (text
   // prompt) and the slider controls. Audio/image stay as whatever the user
   // currently has loaded -- branching is meant for "redo with a tweak".
-  import('./shell/ai-intent.js?v=20260503h').then(({ registerTabAI }) => {
+  import('./shell/ai-intent.js?v=20260620a').then(({ registerTabAI }) => {
     registerTabAI('song-video', {
       getContext: () => ({
         prompt:        ideaInput.value,

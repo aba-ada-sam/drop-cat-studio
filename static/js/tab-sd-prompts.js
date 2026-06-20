@@ -4,12 +4,12 @@
  * Unified tab: direct Forge interface + AI prompt composition + wildcard workshop.
  * Wildcard tokens (__token__) are expanded server-side before sending to Forge.
  */
-import { api } from './api.js?v=20260505e';
-import { createSlider, el, escHtml } from './components.js?v=20260507a';
-import { toast, apiFetch } from './shell/toast.js?v=20260518a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260509a';
-import { handoff } from './handoff.js?v=20260422a';
-import { RegionEditor } from './components/region-editor.js?v=20260619a';
+import { api } from './api.js?v=20260620a';
+import { createSlider, el, escHtml } from './components.js?v=20260620a';
+import { toast, apiFetch } from './shell/toast.js?v=20260620a';
+import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260620a';
+import { handoff } from './handoff.js?v=20260620a';
+import { RegionEditor } from './components/region-editor.js?v=20260620a';
 
 // -- Module state -------------------------------------------------------------
 let forgeStatus    = null;

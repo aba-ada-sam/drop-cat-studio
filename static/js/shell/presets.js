@@ -4,8 +4,8 @@
  * Presets persisted to /api/presets (disk-backed SQLite on server).
  */
 
-import { apiFetch, toast } from './toast.js?v=20260518a';
-import { registerItems } from './command-palette.js?v=20260421c';
+import { apiFetch, toast } from './toast.js?v=20260620a';
+import { registerItems } from './command-palette.js?v=20260620a';
 
 // Tab settings providers: { getSettings(), applySettings(s) }
 const _providers = {};

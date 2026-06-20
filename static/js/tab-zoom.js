@@ -9,10 +9,10 @@
  * Source can be a photo or a video (first/last frame extracted based on direction).
  * Folder batch processing available in none/ai modes.
  */
-import { pollJob, stopJob, apiUpload } from './api.js?v=20260505e';
-import { el, pathToUrl } from './components.js?v=20260507a';
-import { toast, apiFetch } from './shell/toast.js?v=20260518a';
-import { handoff } from './handoff.js?v=20260422a';
+import { pollJob, stopJob, apiUpload } from './api.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260620a';
+import { toast, apiFetch } from './shell/toast.js?v=20260620a';
+import { handoff } from './handoff.js?v=20260620a';
 
 export function receiveHandoff(data) {
   // no-op

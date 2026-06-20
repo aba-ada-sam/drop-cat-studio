@@ -3,8 +3,8 @@
  * The front door: concept input + numbered pipeline walkthrough + recent work.
  * Routes the user's raw idea to sd-prompts via handoff.
  */
-import { el } from './components.js?v=20260507a';
-import { handoff } from './handoff.js?v=20260422a';
+import { el } from './components.js?v=20260620a';
+import { handoff } from './handoff.js?v=20260620a';
 
 // -- Module state (reset on each init) --------------------------------------
 let _svcInterval = null;

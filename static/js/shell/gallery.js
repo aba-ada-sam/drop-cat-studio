@@ -3,12 +3,12 @@
  * Renders in #split-gallery. Pulls from /api/gallery and listens for new items.
  */
 
-import { apiFetch, toast } from './toast.js?v=20260518a';
-import { applySettingsToTab } from './ai-intent.js?v=20260503h';
-import { handoff } from '../handoff.js?v=20260422a';
-import { pathToUrl } from '../components.js?v=20260507a';
-import { VideoStretchTool } from '../components/video-stretch.js?v=20260528b';
-import { mountLipSyncTool } from '../components/lipsync-tool.js?v=20260528b';
+import { apiFetch, toast } from './toast.js?v=20260620a';
+import { applySettingsToTab } from './ai-intent.js?v=20260620a';
+import { handoff } from '../handoff.js?v=20260620a';
+import { pathToUrl } from '../components.js?v=20260620a';
+import { VideoStretchTool } from '../components/video-stretch.js?v=20260620a';
+import { mountLipSyncTool } from '../components/lipsync-tool.js?v=20260620a';
 
 let _items = [];
 let _totalItems = 0;

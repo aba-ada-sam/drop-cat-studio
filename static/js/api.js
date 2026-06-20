@@ -42,16 +42,12 @@ export async function apiUpload(path, files) {
 export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 2400) {
   let timer = null;
   let stopped = false;
-  let polls = 0;
+  let activePolls = 0;  // counts ONLY ticks where the job is running/preparing
 
   let _netErrors = 0;
 
   async function tick() {
     if (stopped) return;
-    if (++polls > maxPolls) {
-      onError(`Job timed out after ${Math.round(maxPolls * interval / 60000)} minutes of polling.`);
-      return;
-    }
     try {
       const job = await api(`/api/jobs/${jobId}`);
       if (stopped) return;
@@ -66,10 +62,22 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
         onError(job.error || job.message || `Job ${job.status}`);
         return;
       }
-      // Guard against null/unknown status -- avoids 10-minute poll loop on server errors
+      // Guard against null/unknown status -- avoids endless poll loop on server errors
       if (job.status && job.status !== 'running' && job.status !== 'queued' && job.status !== 'preparing') {
         onError(`Unexpected job status: ${job.status}`);
         return;
+      }
+      // The timeout applies ONLY while the job is actively running/preparing.
+      // A 'queued' job can legitimately wait hours behind others (e.g. a folder
+      // batch of 40+ clips); counting that wait would falsely report the job as
+      // "timed out / failed" while it is simply standing in line. Queued ticks
+      // never count, so a queued job keeps polling (and reporting its position)
+      // until it actually starts.
+      if (job.status === 'running' || job.status === 'preparing') {
+        if (++activePolls > maxPolls) {
+          onError(`Job ran over ${Math.round(maxPolls * interval / 60000)} minutes without finishing -- treating as stuck.`);
+          return;
+        }
       }
       onProgress(job);
       timer = setTimeout(tick, interval);
