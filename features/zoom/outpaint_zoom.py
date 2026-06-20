@@ -929,20 +929,7 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
             log.warning("[oz] audio stage failed: %s -- video only", e)
 
     # -- Output + gallery + session ------------------------------------------
-    # Stamp the file with the build version + settings (embedded mp4 tag + sidecar
-    # .json) BEFORE copying to the inbox, so every copy carries its provenance.
-    try:
-        from core.provenance import stamp_video
-        stamp_video(final, {
-            "feature": "zoom-in",
-            "source": Path(source_path).name,
-            "detail_prompt": prompt,
-            "n_levels": n_levels, "zoom_factor": zf, "sec_per_level": spl,
-            "music": bool(music_ok), "duration_sec": round(total_dur, 2),
-        })
-    except Exception as e:
-        log.warning("[oz] provenance stamp failed: %s", e)
-
+    # (Provenance is stamped centrally in gallery_push from the metadata below.)
     job.output = final
     try:
         copy_to_inbox(final)
@@ -962,7 +949,9 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
         url = norm[idx:] if idx != -1 else f"/output/{Path(final).name}"
         gallery_push(url, tab="zoom", prompt=prompt[:120], model="Outpaint Zoom-in (SD)",
                      metadata={"path": final, "job_id": job.id, "direction": "in",
-                               "duration_sec": total_dur})
+                               "detail_prompt": prompt, "source": Path(source_path).name,
+                               "n_levels": n_levels, "zoom_factor": zf, "sec_per_level": spl,
+                               "music": bool(music_ok), "duration_sec": round(total_dur, 2)})
     except Exception as e:
         log.warning("[oz] gallery_push failed: %s", e)
 

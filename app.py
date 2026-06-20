@@ -1494,6 +1494,20 @@ def gallery_push(url: str, tab: str = "", prompt: str = "", model: str = "", met
     """
     import uuid as _uuid
     meta = metadata or {}
+    # Central provenance stamp -- every feature routes its finished output through
+    # gallery_push with metadata["path"], so stamping here covers them all: embeds
+    # the build version + settings as an mp4 tag and writes a sidecar .json.
+    try:
+        _p = meta.get("path")
+        if _p and os.path.isfile(_p):
+            from core.provenance import stamp_video
+            _fields = {"feature": tab,
+                       "prompt": (prompt or meta.get("prompt", ""))[:300],
+                       "model": model or meta.get("model", "")}
+            _fields.update({k: v for k, v in meta.items() if k != "path"})
+            stamp_video(_p, _fields)
+    except Exception as _se:
+        logging.getLogger(__name__).debug("provenance stamp skipped: %s", _se)
     try:
         conn = _gallery_db()
         existing = conn.execute("SELECT id FROM gallery WHERE url=?", (url,)).fetchone()
