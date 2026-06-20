@@ -13,45 +13,23 @@ log = logging.getLogger("zoom")
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
-from features.fun_videos.video_generator import MODELS as _VG_MODELS
 
-# Timeout per clip (seconds) -- Wan I2V 14B at 25 steps can take ~10 min each
-_PER_CLIP_TIMEOUT_S = 900
-_AUDIO_BUFFER_S = 300
-
-# Best full-resolution chained-zoom model that fits a 16 GB card. LTX-2 Dev19B
-# Distilled is the ONLY model confirmed to run full-res chained clips on the
-# RTX 5080 (15.9 GB) without a step-0 deadlock.
-_ZOOM_SAFE_MODEL = "LTX-2 Dev19B Distilled"
-
-
-def _fit_zoom_model(requested: str) -> tuple[str, str | None]:
-    """Pick the best zoom model that actually runs on the detected GPU.
-
-    Returns (model_name, note). On cards below a model's vram_min_gb, the
-    request is substituted with _ZOOM_SAFE_MODEL so the zoom produces the best
-    expected outcome for this machine instead of silently deadlocking:
-      * LTX-2 Dev13B (40 steps) and Wan I2V deadlock at step 0 on 16 GB cards --
-        WanGP caps its budget at 80% VRAM (~13 GB) and their first denoising
-        step exceeds that.
-      * The 360P Dev13B variant fits but is rejected for zoom because low
-        resolution compounds artifacts through the chain anchor.
-    On a >=20 GB card the requested model is honored unchanged.
-    """
-    if requested not in _VG_MODELS:
-        return _ZOOM_SAFE_MODEL, None
+def extract_frame_from_video(video_path: str, out_png: str, position: str = "last") -> bool:
+    """Extract a frame from a video file to PNG. position: "first" (0.1s) or
+    "last" (0.5s before EOF). Returns True on success. (Relocated here from the
+    retired features/zoom/pipeline.py.)"""
     try:
-        from app import _g as _app_g
-        vram = _app_g.get("gpu_vram_gb") or 0
-    except Exception:
-        vram = 0
-    need = _VG_MODELS.get(requested, {}).get("vram_min_gb", 0)
-    if vram and need and need > vram and requested != _ZOOM_SAFE_MODEL:
-        return _ZOOM_SAFE_MODEL, (
-            f"{requested} needs {need} GB VRAM but {vram:.0f} GB detected -- "
-            f"using {_ZOOM_SAFE_MODEL} for a stable full-resolution zoom"
-        )
-    return requested, None
+        if position == "last":
+            cmd = ["ffmpeg", "-y", "-sseof", "-0.5", "-i", video_path,
+                   "-frames:v", "1", "-q:v", "1", out_png]
+        else:
+            cmd = ["ffmpeg", "-y", "-ss", "0.1", "-i", video_path,
+                   "-frames:v", "1", "-q:v", "1", out_png]
+        r = subprocess.run(cmd, capture_output=True, timeout=30)
+        return r.returncode == 0 and os.path.isfile(out_png)
+    except Exception as e:
+        log.warning("[zoom] Frame extraction failed: %s", e)
+        return False
 
 
 @router.post("/api/zoom/make")
@@ -73,7 +51,6 @@ async def zoom_make(request: Request):
     from app import get_job_manager
     from core.job_manager import JOB_FUN_MULTI_VIDEO
     from features.zoom.outpaint_zoom import run_oz_prep, run_oz_pipeline
-    from features.zoom.pipeline import extract_frame_from_video
 
     job_manager = get_job_manager()
 
@@ -237,7 +214,6 @@ async def zoom_extract_frame(request: Request):
     tmp_dir = tempfile.mkdtemp(prefix="dcs_zoomframe_")
     frame_png = os.path.join(tmp_dir, "frame.png")
 
-    from features.zoom.pipeline import extract_frame_from_video
     if time_sec < 0:
         ok = extract_frame_from_video(video_path, frame_png, position="last")
     else:

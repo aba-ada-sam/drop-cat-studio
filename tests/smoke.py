@@ -79,7 +79,7 @@ def main() -> int:
         from features.image2video import routes as _d  # noqa: F401
         from features.video_tools import routes as _e  # noqa: F401
         from features.zoom import routes as _f  # noqa: F401
-        from features.zoom import pipeline as _g  # noqa: F401
+        from features.zoom import outpaint_zoom as _g  # noqa: F401
     _test("import feature routes", import_features)
 
     def import_core():
