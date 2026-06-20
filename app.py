@@ -1508,6 +1508,23 @@ def gallery_push(url: str, tab: str = "", prompt: str = "", model: str = "", met
             stamp_video(_p, _fields)
     except Exception as _se:
         logging.getLogger(__name__).debug("provenance stamp skipped: %s", _se)
+    # Mirror finished videos into the review folder (Desktop\DCG by default) so
+    # Andrew can browse every output without digging through dated subfolders.
+    try:
+        _rp = meta.get("path")
+        _review_dir = cfg.get("review_copy_dir") or ""
+        if (_rp and _review_dir and os.path.isfile(_rp)
+                and _rp.lower().endswith((".mp4", ".mov", ".webm", ".mkv"))):
+            os.makedirs(_review_dir, exist_ok=True)
+            import shutil as _shutil
+            _base = os.path.basename(_rp)
+            _dest = os.path.join(_review_dir, _base)
+            if os.path.exists(_dest):
+                _stem, _ext = os.path.splitext(_base)
+                _dest = os.path.join(_review_dir, f"{_stem}_{_uuid.uuid4().hex[:4]}{_ext}")
+            _shutil.copy2(_rp, _dest)
+    except Exception as _ce:
+        logging.getLogger(__name__).debug("review-folder copy skipped: %s", _ce)
     try:
         conn = _gallery_db()
         existing = conn.execute("SELECT id FROM gallery WHERE url=?", (url,)).fetchone()

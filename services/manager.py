@@ -1149,8 +1149,13 @@ def _watchdog_loop():
                     _set_status("forge", state="not_running",
                                 message="Forge not running -- use Services tab to start")
 
-            # Ensure Ollama stays up (lightweight check)
-            if not ollama_alive():
+            # Ollama is backup-only: only keep it alive if the user opted in
+            # (provider == "ollama" or fallback enabled). Forcing it up otherwise
+            # wastes VRAM the GPU orchestrator needs for video/music gen -- that
+            # contention made the 5080 offload to CPU and run slower than an old
+            # card. With cloud LLM configured, leave Ollama down.
+            _ollama_optin = (cfg.get("llm_provider") == "ollama") or bool(cfg.get("allow_ollama_fallback"))
+            if _ollama_optin and not ollama_alive():
                 start_ollama()
 
         except Exception as e:

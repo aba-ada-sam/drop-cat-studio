@@ -120,6 +120,11 @@ DEFAULTS: dict = {
     "tools_out_format": "mp4",
     "tools_out_dir": "",
 
+    # -- Review mirror -----------------------------------------------------
+    # Every finished video is also copied here so outputs are easy to review
+    # without digging through dated output/ subfolders. Set to "" to disable.
+    "review_copy_dir": "C:\\Users\\andre\\Desktop\\DCG",
+
     # -- Ollama (local AI -- no API keys required) -------------------------
     # qwen3-vl supports vision (images) and text; swap for any installed model.
     "ollama_host":           "http://localhost:11434",
