@@ -184,6 +184,7 @@ def render_pyramid(
     fps: int = 30,
     sec_per_level: float = 2.5,
     feather_frac: float = 0.32,
+    min_inner_scale: float = 0.20,
     log_fn=None,
 ) -> str | None:
     """Render a continuous infinite zoom by compositing the WHOLE pyramid every
@@ -245,9 +246,14 @@ def render_pyramid(
             base = _fill(stack[topk], max(1.0, f ** (z - topk)))
             for k in range(topk - 1, -1, -1):
                 sc = f ** (z - k)
-                if sc >= 1.0 or min(W * sc, H * sc) < 4:
-                    if sc >= 1.0:
-                        base = _fill(stack[k], sc)
+                if sc >= 1.0:
+                    base = _fill(stack[k], sc)
+                    continue
+                # Skip levels that are too small to add visible detail. Crucially
+                # this stops the pristine source from being composited as a sharp
+                # little dot when it shrinks -- the "thumbnail in the centre". The
+                # blended version baked into the surrounding level shows instead.
+                if sc < min_inner_scale or min(W * sc, H * sc) < 4:
                     continue
                 r, m = _inner(stack[k], sc)
                 base.paste(r, ((W - r.width) // 2, (H - r.height) // 2), m)
@@ -581,7 +587,7 @@ def build_zoom_in_stack(
     zoom_factor: float = 0.5,
     steps: int = 24,
     cfg_scale: float = 6.0,
-    denoise: float = 0.55,
+    denoise: float = 0.40,
     sampler: str = "DPM++ 2M",
     scheduler: str = "Karras",
     seed: int = -1,
