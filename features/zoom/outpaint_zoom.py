@@ -465,15 +465,15 @@ def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
     canvas = bg.copy()
     canvas.paste(scaled, (ox, oy))
 
-    # Mask: white = generate. Keep only a core SMALLER than the pasted source
-    # (kc) so SD repaints and BLENDS the source's outer edge into the new ring --
-    # this is what stops the source reading as a hard pasted square. Heavy blur
-    # turns the keep->generate boundary into a wide gradient.
-    kc = 0.78
-    kw, kh = max(4, round(iw * kc)), max(4, round(ih * kc))
+    # Mask: white = generate the ring, black = KEEP the full source centre. We
+    # keep the WHOLE source (not a smaller core) so that after we re-paste the
+    # exact source below, each level's centre is pixel-identical to the level
+    # beneath it. That exactness is what makes the renderer's composite invisible
+    # -- mismatched centres are exactly what produced the nested "picture-in-a-
+    # picture" rectangle. A modest blur softens only the keep->generate seam.
     mask = Image.new("L", (W, H), 255)
-    mask.paste(Image.new("L", (kw, kh), 0), ((W - kw) // 2, (H - kh) // 2))
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(8, iw // 12)))
+    mask.paste(Image.new("L", (iw, ih), 0), (ox, oy))
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(6, iw // 20)))
 
     res = forge_client.img2img(
         init_image_b64=_b64_png(canvas),
@@ -494,9 +494,20 @@ def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
             log_fn(f"[outpaint] Forge failed: {res.get('error')}")
         return None
     out = _from_b64(res["images"][0]).resize((W, H), Image.LANCZOS)
-    # No hard re-paste: SD preserved the masked core and blended the source edge
-    # into the ring, so the source is not a pasted square. The crossfade renderer
-    # tolerates the (now non-pixel-exact) nesting.
+    # Match the generated ring's exposure/colour to the source so levels don't
+    # step in brightness, THEN re-paste the EXACT scaled source into the centre
+    # (feathered) so the centre is pixel-identical to the level beneath. With the
+    # centre exact, the renderer composites identical content -> the level
+    # boundary is invisible (no nested rectangle); the feather only blends the
+    # source edge into the SD ring, which SD already continued.
+    out = _match_color(out, prev_img)
+    fmask = Image.new("L", (iw, ih), 255)
+    band = min(max(2, int(min(iw, ih) * 0.10)), iw // 2 - 1, ih // 2 - 1)
+    if band > 0:
+        fmask = Image.new("L", (iw, ih), 0)
+        fmask.paste(255, (band, band, iw - band, ih - band))
+        fmask = fmask.filter(ImageFilter.GaussianBlur(radius=max(2, band * 0.6)))
+    out.paste(scaled, (ox, oy), fmask)
     return out
 
 
@@ -558,8 +569,9 @@ def build_zoom_stack(
         if nxt is None:
             _log(f"[outpaint] ring {k} failed -- stopping with {len(stack)} levels")
             break
-        # Match exposure/colour to the previous level so the boundary doesn't cut.
-        nxt = _match_color(nxt, stack[-1])
+        # _outpaint_ring already colour-matched the ring and re-pasted the exact
+        # source centre (pixel-exact nesting), so do NOT match again here -- that
+        # would shift the exact centre and reintroduce the boundary.
         stack.append(nxt)
 
     if len(stack) < 2:
