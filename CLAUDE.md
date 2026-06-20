@@ -182,15 +182,20 @@ The multi-clip pipeline has three internal phases within `run_multi_pipeline`:
 
 ### Infinite Zoom (`features/zoom/`)
 
-New tab (2026-05-20). Chains N WanGP clips with continuous zoom-in or zoom-out camera motion. Two phases via `submit_with_prep`: `run_zoom_prep` (LLM plans per-clip zoom level descriptions from the source image) + `run_zoom_pipeline` (WanGP chain, audio, merge).
+**Rebuilt 2026-06-20 to outpaint-based zoom-IN (`features/zoom/outpaint_zoom.py`).** The original WanGP-chain approach (chaining N video clips, each regenerated from the previous clip's last frame) compounded texture decay into garbage and is retired. Zoom-OUT is removed entirely — this feature is **zoom-in only**, and uses Forge Stable Diffusion (no video model).
 
-Key design rules that must not be violated:
-- `reanchor_every=0` always — resetting to the source frame breaks the parallax motion and produces visible jump cuts
-- Chain frame PNGs deleted in a `finally:` block after all clips are done
-- Output always written to `OUTPUT_DIR / YYYY-MM-DD / zoom_*` (never relative to source_path)
-- Source can be a photo or a video; videos are frame-extracted before pipeline starts (`zoom-out` → last frame, `zoom-in` → first frame)
-- Upload endpoint: `/api/fun/upload` for images, `/api/fun/upload-video` for videos (NOT a generic `/api/upload`)
-- Open-in-folder uses `/api/reveal` with `action: "explorer"` (NOT `/api/open-folder`)
+How it works now:
+- `build_zoom_in_stack()` — dives INTO the source: each level crops the centre, scales it up, and runs Forge img2img (denoise ~0.40) to paint NEW detail in. Low denoise keeps levels structurally aligned so they blend. Generates at ~1MP (`_gen_size`, SDXL sweet spot).
+- `render_zoom_in()` — continuous crop-zoom that TEMPORALLY CROSSFADES each sharper level in as the camera reaches it (`xfade`). This is the key to invisible joins: detail *emerges* rather than switching at a hard boundary. (The `render_pyramid`/`render_infinite_zoom` composite renderers and `build_zoom_stack` outpaint/zoom-out path remain in the module but are not wired in.)
+- Job: `run_oz_prep` (LLM picks the macro-detail prompt from image+idea, no GPU) + `run_oz_pipeline` (Forge build via `gpu.acquire("forge")`, render, optional ACE-Step music+merge, output+gallery+session). Wired through `JOB_FUN_MULTI_VIDEO` + `submit_with_prep`; `/api/zoom/make` and the folder-loop both use it.
+
+Hard-won lessons from the 10-round rebuild (do not reintroduce these failures):
+- A compositing renderer needs EXACT-nested levels, else the centre reads as a "picture-in-a-picture" rectangle. `render_zoom_in` (temporal crossfade) sidesteps spatial compositing entirely — prefer it.
+- Each SD level has its own exposure; `_match_color` (per-channel mean/std) every new level onto the previous or boundaries show a brightness "cut".
+- Generating below ~1MP makes each exposure soft.
+- Requires Forge running (`gpu.acquire("forge")` starts/reloads it). No WanGP, no chain anchors.
+
+Unchanged plumbing: output to `OUTPUT_DIR / YYYY-MM-DD / zoomin_*`; source can be photo or video (video → first frame); upload via `/api/fun/upload`; open-in-folder via `/api/reveal` `action: "explorer"`.
 
 ### Audio analyzer (`features/fun_videos/audio_analyzer.py`)
 
