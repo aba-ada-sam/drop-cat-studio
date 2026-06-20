@@ -186,7 +186,7 @@ The multi-clip pipeline has three internal phases within `run_multi_pipeline`:
 
 How it works now:
 - `build_zoom_in_stack()` — dives INTO the source: each level crops the centre, scales it up, and runs Forge img2img (denoise ~0.40) to paint NEW detail in. Low denoise keeps levels structurally aligned so they blend. Generates at ~1MP (`_gen_size`, SDXL sweet spot).
-- `render_zoom_in()` — continuous crop-zoom that TEMPORALLY CROSSFADES each sharper level in as the camera reaches it (`xfade`). This is the key to invisible joins: detail *emerges* rather than switching at a hard boundary. (The `render_pyramid`/`render_infinite_zoom` composite renderers and `build_zoom_stack` outpaint/zoom-out path remain in the module but are not wired in.)
+- `render_zoom_in()` — continuous crop-zoom that TEMPORALLY CROSSFADES each sharper level in as the camera reaches it (`xfade`). This is the key to invisible joins: detail *emerges* rather than switching at a hard boundary. (The failed-approach renderers — `render_pyramid`/`render_infinite_zoom`/crossfade composite — and the outpaint zoom-OUT build were deleted in the v1.12 cleanup; `render_zoom_in` is the only renderer.)
 - Job: `run_oz_prep` (LLM picks the macro-detail prompt from image+idea, no GPU) + `run_oz_pipeline` (Forge build via `gpu.acquire("forge")`, render, optional ACE-Step music+merge, output+gallery+session). Wired through `JOB_FUN_MULTI_VIDEO` + `submit_with_prep`; `/api/zoom/make` and the folder-loop both use it.
 
 Hard-won lessons from the 10-round rebuild (do not reintroduce these failures):
