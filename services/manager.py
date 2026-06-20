@@ -357,7 +357,7 @@ def start_acestep() -> tuple[bool, str | None]:
 
             # Phase 1: wait for uvicorn to bind the port (~5s)
             while time.time() < deadline:
-                if check_port(ACESTEP_HOST, ACESTEP_PORT, timeout=2):
+                if check_port(_acestep_host(), ACESTEP_PORT, timeout=2):
                     break
                 if proc.poll() is not None:
                     msg = "ACE-Step process exited before port opened"
@@ -378,7 +378,7 @@ def start_acestep() -> tuple[bool, str | None]:
             while time.time() < deadline:
                 remaining = max(10, int(deadline - time.time()))
                 result = http_get(
-                    f"http://{ACESTEP_HOST}:{ACESTEP_PORT}/health",
+                    f"http://{_acestep_host()}:{ACESTEP_PORT}/health",
                     timeout=remaining,
                 )
                 if result is not None:

@@ -893,16 +893,11 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
     music_ok = False
     if not skip_audio and not _stopped():
         try:
-            # The video is rendered and on disk -- Forge is done for this job. FULLY
-            # STOP the Forge process (not just unload its checkpoint) so ALL its VRAM
-            # frees for ACE-Step. On 16GB, unload-only left a CUDA context that
-            # squeezed ACE-Step's LLM and the music silently failed. Forge cold-starts
-            # again (headless) on the next zoom.
-            try:
-                from services import manager as _svc
-                _svc.stop_service("forge")
-            except Exception as _fe:
-                log.warning("[oz] could not stop Forge before music: %s", _fe)
+            # acquire("acestep") evicts Forge (unloads its checkpoint) and starts
+            # ACE-Step. ACE-Step fits alongside the unloaded Forge process and
+            # adapts its LLM memory to what's free, so a full Forge stop isn't
+            # needed -- the earlier "music failed" was a NameError in start_acestep
+            # (ACESTEP_HOST), now fixed, not a VRAM problem.
             gpu.acquire("acestep", reason="zoom-in music")
             if not music_prompt:
                 music_prompt = "cinematic ambient, gentle build, a sense of descending into infinite detail"
@@ -954,7 +949,7 @@ def run_oz_pipeline(job, source_path: str, settings: dict) -> None:
     except Exception:
         pass
     job.message = "Zoom-in complete!" if (skip_audio or music_ok) else \
-        "Zoom-in done (music unavailable -- not enough VRAM for ACE-Step after Forge; video saved)"
+        "Zoom-in done (music generation failed -- video saved; see logs)"
     job.meta.update({"final_path": final, "direction": "in", "detail_prompt": prompt, "music_ok": music_ok})
     try:
         from core.session import get_current as _gs
