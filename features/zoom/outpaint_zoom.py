@@ -292,6 +292,41 @@ def _from_b64(s: str):
     return Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB")
 
 
+def _match_color(img, ref):
+    """Per-channel mean/std (Reinhard) transfer: pull img's exposure and colour
+    onto ref's. Consecutive zoom levels are separate SD generations with their
+    own brightness/contrast/tint; without this they step against each other and
+    the zoom reads as a harsh cut every time it crosses a level boundary."""
+    try:
+        import numpy as np
+        from PIL import Image
+        a = np.asarray(img.convert("RGB"), dtype=np.float32)
+        r = np.asarray(ref.convert("RGB").resize(img.size), dtype=np.float32)
+        out = a.copy()
+        for c in range(3):
+            am, asd = a[..., c].mean(), a[..., c].std() + 1e-5
+            rm, rsd = r[..., c].mean(), r[..., c].std() + 1e-5
+            out[..., c] = (a[..., c] - am) * (rsd / asd) + rm
+        return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+    except Exception:
+        return img
+
+
+def _gen_size(W: int, H: int, area_target: int = 1024 * 1024, max_edge: int = 1536):
+    """SD-friendly canvas size (~1MP, multiples of 8) preserving aspect. SDXL
+    quality drops well below ~0.8MP, so we generate near 1MP even if the source
+    is smaller (SD invents the extra detail), then the chain works at that res."""
+    ar = W / H
+    th = (area_target / ar) ** 0.5
+    tw = th * ar
+    if max(tw, th) > max_edge:
+        s = max_edge / max(tw, th)
+        tw, th = tw * s, th * s
+    W2 = max(64, int(round(tw)) // 8 * 8)
+    H2 = max(64, int(round(th)) // 8 * 8)
+    return W2, H2
+
+
 def _outpaint_ring(prev_img, prompt, *, negative_prompt, W, H, f,
                    steps, cfg_scale, denoise, sampler, scheduler, seed,
                    mask_blur, inpainting_fill, feather_px, log_fn=None):
@@ -389,11 +424,7 @@ def build_zoom_stack(
         return None, None
 
     src = Image.open(source_path).convert("RGB")
-    W, H = src.size
-    # clamp to SD-friendly size, multiples of 8, longest edge <= max_dim
-    scale = min(1.0, max_dim / max(W, H))
-    W, H = int(round(W * scale)) // 8 * 8, int(round(H * scale)) // 8 * 8
-    W, H = max(64, W), max(64, H)
+    W, H = _gen_size(*src.size)
     src = src.resize((W, H), Image.LANCZOS)
 
     stack = [src]
@@ -412,6 +443,8 @@ def build_zoom_stack(
         if nxt is None:
             _log(f"[outpaint] ring {k} failed -- stopping with {len(stack)} levels")
             break
+        # Match exposure/colour to the previous level so the boundary doesn't cut.
+        nxt = _match_color(nxt, stack[-1])
         stack.append(nxt)
 
     if len(stack) < 2:
@@ -468,9 +501,7 @@ def build_zoom_in_stack(
 
     f = max(0.30, min(0.85, float(zoom_factor)))
     src = Image.open(source_path).convert("RGB")
-    W, H = src.size
-    scale = min(1.0, max_dim / max(W, H))
-    W, H = max(64, int(round(W * scale)) // 8 * 8), max(64, int(round(H * scale)) // 8 * 8)
+    W, H = _gen_size(*src.size)
     src = src.resize((W, H), Image.LANCZOS)
 
     stack = [src]
@@ -497,7 +528,9 @@ def build_zoom_in_stack(
         if res.get("error") or not res.get("images"):
             _log(f"[inpaint] Forge failed at level {k}: {res.get('error')} -- stopping")
             break
-        stack.append(_from_b64(res["images"][0]).resize((W, H), Image.LANCZOS))
+        new = _from_b64(res["images"][0]).resize((W, H), Image.LANCZOS)
+        new = _match_color(new, stack[-1])   # keep exposure consistent across levels
+        stack.append(new)
 
     if len(stack) < 2:
         return None, None
