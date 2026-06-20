@@ -573,7 +573,7 @@ def quick_detect():
         from services.forge_client import forge_alive as _fa, FORGE_PORT
         if _fa():
             _set_status("forge", state="running",
-                        message="Forge WebUI running (SD image generation ready)",
+                        message="Forge API running (SD image generation ready)",
                         port=FORGE_PORT)
         else:
             _set_status("forge", state="not_running",
@@ -892,7 +892,7 @@ def start_forge() -> tuple[bool, str | None]:
 
     if forge_alive():
         _set_status("forge", state="running",
-                    message="Forge WebUI running (SD image generation ready)",
+                    message="Forge API running (SD image generation ready)",
                     port=FORGE_PORT)
         _forge_proc = None
         return True, None
@@ -929,12 +929,15 @@ def start_forge() -> tuple[bool, str | None]:
             # (the PID in those rows is the client side = us), so running it would
             # taskkill the Drop Cat Go Studio server itself -- the "exit code 1" crash.
             # Start-Process still detaches Forge so it survives app restarts.
-            # WEBUI_LAUNCH_LIVE_PREVIEW=0 suppresses Forge opening its own browser.
+            # --nowebui runs Forge as a HEADLESS API ONLY (no Gradio web UI) -- DCS
+            # only ever talks to /sdapi/v1, so there is no reason to serve (or pop
+            # up) the Stable Diffusion GUI, and a headless server can't be closed
+            # by accident. WEBUI_LAUNCH_LIVE_PREVIEW=0 also stops any browser open.
             forge_py = Path(forge_root) / "venv" / "Scripts" / "python.exe"
             entry = "launch.py" if (Path(forge_root) / "launch.py").exists() else "webui.py"
             if forge_py.exists():
                 target = str(forge_py)
-                arglist = f"'{entry}','--cuda-malloc','--api','--port','{FORGE_PORT}'"
+                arglist = f"'{entry}','--cuda-malloc','--api','--nowebui','--port','{FORGE_PORT}'"
             else:
                 # venv Python missing -- last-resort fallback to the .bat
                 target = "cmd.exe"
@@ -960,7 +963,7 @@ def start_forge() -> tuple[bool, str | None]:
         while time.time() < deadline:
             if forge_alive():
                 _set_status("forge", state="running",
-                            message="Forge WebUI running (SD image generation ready)",
+                            message="Forge API running (SD image generation ready)",
                             port=FORGE_PORT)
                 log.info("Forge ready on port %d", FORGE_PORT)
                 return True, None
@@ -1139,7 +1142,7 @@ def _watchdog_loop():
             if forge_state in ("not_running", "unknown", "error", "ready"):
                 if _forge_alive():
                     _set_status("forge", state="running",
-                                message="Forge WebUI running (SD image generation ready)",
+                                message="Forge API running (SD image generation ready)",
                                 port=7861)
             elif forge_state == "running":
                 if not _forge_alive():
