@@ -172,6 +172,115 @@ def render_infinite_zoom(
 
 
 # ---------------------------------------------------------------------------
+# Pyramid renderer -- composite ALL visible levels per frame (truly continuous)
+# ---------------------------------------------------------------------------
+
+def render_pyramid(
+    stack,
+    out_path: str,
+    *,
+    direction: str = "out",
+    zoom_factor: float = 0.6,
+    fps: int = 30,
+    sec_per_level: float = 2.5,
+    feather_frac: float = 0.32,
+    log_fn=None,
+) -> str | None:
+    """Render a continuous infinite zoom by compositing the WHOLE pyramid every
+    frame instead of one level at a time.
+
+    At a continuous zoom position z in [0, N], each level k is drawn at its exact
+    geometric scale f**(z-k) and centred; the outermost visible level fills the
+    frame, every inner level is composited on top (feathered). Because each level
+    sits at its own precise scale, there is no per-segment reset and no soft
+    "ring" that pulses -- the only mildly-upscaled part is a thin outer sliver, so
+    the frame is sharp and the motion is genuinely continuous (no cuts).
+
+    stack[0] = innermost (source); stack[-1] = widest. Renders z:0->N (pull out);
+    direction="in" reverses to dive in.
+    """
+    from PIL import Image, ImageFilter
+
+    def _log(m):
+        log.info(m)
+        if log_fn:
+            log_fn(m)
+
+    if not stack or len(stack) < 2:
+        return None
+    f = max(0.30, min(0.85, float(zoom_factor)))
+    W, H = stack[0].size
+    stack = [im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS) for im in stack]
+    N = len(stack) - 1
+    total = max(2, int(round(N * fps * sec_per_level)))
+
+    def _fill(img, sc):
+        # sc >= 1: crop the centre (W/sc x H/sc) and upscale to fill the frame.
+        cw = min(W, max(2, round(W / sc)))
+        ch = min(H, max(2, round(H / sc)))
+        x0, y0 = (W - cw) // 2, (H - ch) // 2
+        return img.crop((x0, y0, x0 + cw, y0 + ch)).resize((W, H), Image.LANCZOS)
+
+    def _inner(img, sc):
+        # sc < 1: shrink to (W*sc x H*sc) with a feathered alpha for compositing.
+        iw, ih = max(2, round(W * sc)), max(2, round(H * sc))
+        r = img.resize((iw, ih), Image.LANCZOS)
+        inset = min(max(1, int(min(iw, ih) * feather_frac)), iw // 2 - 1, ih // 2 - 1)
+        if inset > 0:
+            m = Image.new("L", (iw, ih), 0)
+            m.paste(255, (inset, inset, iw - inset, ih - inset))
+            m = m.filter(ImageFilter.GaussianBlur(radius=max(1, inset * 0.6)))
+        else:
+            m = Image.new("L", (iw, ih), 255)
+        return r, m
+
+    tmp = Path(tempfile.mkdtemp(prefix="dcs_pyr_"))
+    paths: list[str] = []
+    idx = 0
+    try:
+        for fi in range(total + 1):
+            z = N * fi / total
+            ti = int(z)
+            topk = min(N, ti if z == ti else ti + 1)
+            base = _fill(stack[topk], max(1.0, f ** (z - topk)))
+            for k in range(topk - 1, -1, -1):
+                sc = f ** (z - k)
+                if sc >= 1.0 or min(W * sc, H * sc) < 4:
+                    if sc >= 1.0:
+                        base = _fill(stack[k], sc)
+                    continue
+                r, m = _inner(stack[k], sc)
+                base.paste(r, ((W - r.width) // 2, (H - r.height) // 2), m)
+            p = str(tmp / f"f{idx:06d}.png")
+            base.save(p)
+            paths.append(p)
+            idx += 1
+
+        if direction == "in":
+            paths = list(reversed(paths))
+        seq = Path(tempfile.mkdtemp(prefix="dcs_pyr_seq_"))
+        for j, src in enumerate(paths):
+            os.replace(src, str(seq / f"s{j:06d}.png"))
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(seq / "s%06d.png"),
+             "-c:v", "libx264", "-crf", "16", "-preset", "medium",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=300,
+        )
+        import shutil
+        shutil.rmtree(seq, ignore_errors=True)
+        if r.returncode != 0 or not os.path.isfile(out_path):
+            _log(f"[pyramid] ffmpeg failed: {r.stderr.decode(errors='replace')[-200:]}")
+            return None
+        _log(f"[pyramid] rendered {idx} frames -> {out_path}")
+        return out_path
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Crossfade renderer -- seamless level blending, no hard centre square
 # ---------------------------------------------------------------------------
 
