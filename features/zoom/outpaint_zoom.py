@@ -172,6 +172,100 @@ def render_infinite_zoom(
 
 
 # ---------------------------------------------------------------------------
+# Zoom-IN renderer -- temporal crossfade so detail emerges, never switches
+# ---------------------------------------------------------------------------
+
+def render_zoom_in(
+    stack,
+    out_path: str,
+    *,
+    zoom_factor: float = 0.72,
+    fps: int = 30,
+    sec_per_level: float = 2.5,
+    xfade: float = 0.55,
+    log_fn=None,
+) -> str | None:
+    """Seamless zoom-IN. stack[0] = source; stack[k] = detailed magnification of
+    stack[k-1]'s centre (structurally aligned, just sharper). Renders source ->
+    deepest, and as the camera reaches each level it CROSSFADES the sharper level
+    in over time -- so new detail materialises gradually instead of popping in at
+    a spatial boundary. That temporal dissolve is what makes the joins invisible.
+    """
+    from PIL import Image
+
+    def _log(m):
+        log.info(m)
+        if log_fn:
+            log_fn(m)
+
+    if not stack or len(stack) < 2:
+        return None
+    f = max(0.30, min(0.90, float(zoom_factor)))
+    W, H = stack[0].size
+    stack = [im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS) for im in stack]
+    N = len(stack) - 1
+    per = max(2, int(round(fps * sec_per_level)))
+    total = N * per
+    xf = max(0.05, min(0.95, float(xfade)))
+
+    def _cs(img, s):
+        s = min(1.0, max(1e-3, s))
+        cw, ch = max(2, round(W * s)), max(2, round(H * s))
+        x0, y0 = (W - cw) // 2, (H - ch) // 2
+        return img.crop((x0, y0, x0 + cw, y0 + ch)).resize((W, H), Image.LANCZOS)
+
+    tmp = Path(tempfile.mkdtemp(prefix="dcs_zin_"))
+    paths: list[str] = []
+    idx = 0
+
+    def _save(im):
+        nonlocal idx
+        p = str(tmp / f"f{idx:06d}.png")
+        im.save(p)
+        paths.append(p)
+        idx += 1
+
+    try:
+        for _ in range(int(fps * 0.4)):
+            _save(stack[0])
+        for fi in range(total + 1):
+            d = N * fi / total            # continuous depth 0 -> N
+            b = min(N, int(d))            # level we're zooming into
+            fb = d - b
+            base = _cs(stack[b], f ** fb)  # zoom into level b's centre
+            # As we enter level b, dissolve it in over the previous (over-magnified)
+            # level so its added detail appears gradually, not as a hard ring.
+            if b > 0 and fb < xf:
+                a = fb / xf                # 0 -> show prev (soft), 1 -> show level b
+                prev = _cs(stack[b - 1], f ** (fb + 1.0))
+                base = Image.blend(prev, base, a)
+            _save(base)
+        for _ in range(int(fps * 0.4)):
+            _save(stack[-1])
+
+        seq = Path(tempfile.mkdtemp(prefix="dcs_zin_seq_"))
+        for j, src in enumerate(paths):
+            os.replace(src, str(seq / f"s{j:06d}.png"))
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(seq / "s%06d.png"),
+             "-c:v", "libx264", "-crf", "16", "-preset", "medium",
+             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=300,
+        )
+        import shutil
+        shutil.rmtree(seq, ignore_errors=True)
+        if r.returncode != 0 or not os.path.isfile(out_path):
+            _log(f"[zoom-in] ffmpeg failed: {r.stderr.decode(errors='replace')[-200:]}")
+            return None
+        _log(f"[zoom-in] rendered {idx} frames -> {out_path}")
+        return out_path
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Pyramid renderer -- composite ALL visible levels per frame (truly continuous)
 # ---------------------------------------------------------------------------
 
