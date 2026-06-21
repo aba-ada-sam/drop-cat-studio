@@ -629,6 +629,15 @@ class JobManager:
                         except IndexError:
                             pass
 
+                    # Keep the crash-recovery snapshot current: persist the
+                    # still-pending queue after each job finishes so an overnight
+                    # crash resumes from the right place and never re-runs jobs
+                    # that already completed.
+                    try:
+                        self.save_queue()
+                    except Exception as _sq:
+                        log.debug("[queue-save] post-job save failed (non-fatal): %s", _sq)
+
                     # VRAM cleanup between GPU jobs
                     import gc
                     gc.collect()
