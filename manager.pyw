@@ -407,14 +407,6 @@ class ServerManager:
         self._ready_event = threading.Event()
         self._port: int | None = None
         self._on_crash = on_crash  # callable(exit_code) -- shown to user on unexpected exit
-        # Unattended crash auto-recovery: respawn on an unexpected exit so an
-        # overnight batch self-heals (app.py then auto-restores the saved queue).
-        # The budget stops a tight crash-loop -- after too many crashes in the
-        # window we stop auto-respawning and surface the crash dialog instead.
-        self._crash_times: list[float] = []
-        self.MAX_AUTO_RESTARTS = 5
-        self.CRASH_WINDOW_S = 600          # 10-minute sliding window
-        self.CRASH_RESPAWN_DELAY_S = 5
 
     @property
     def port(self) -> int | None:
@@ -542,27 +534,12 @@ class ServerManager:
                     self._proc = None
                 self._spawn()
                 continue
-            # Unexpected exit (crash). For unattended/overnight runs, AUTO-RESPAWN
-            # so the app comes back without a human clicking a dialog -- app.py then
-            # auto-restores the saved queue and the batch continues. A budget guards
-            # against a tight crash-loop: too many crashes in the window -> give up
-            # and surface the crash dialog instead.
+            # Unexpected exit -- notify the user instead of silently restarting.
             log.warning("Server exited unexpectedly (code %s)", ret)
             self._ready_event.clear()
             self._port = None
             with self._lock:
                 self._proc = None
-            now = time.time()
-            self._crash_times = [t for t in self._crash_times if now - t < self.CRASH_WINDOW_S]
-            self._crash_times.append(now)
-            if len(self._crash_times) <= self.MAX_AUTO_RESTARTS:
-                log.warning("Auto-respawning after crash (%d/%d within %ds) -- unattended recovery",
-                            len(self._crash_times), self.MAX_AUTO_RESTARTS, self.CRASH_WINDOW_S)
-                time.sleep(self.CRASH_RESPAWN_DELAY_S)
-                self._spawn()
-                continue
-            log.error("Too many crashes (%d within %ds) -- stopping auto-respawn, showing crash dialog",
-                      len(self._crash_times), self.CRASH_WINDOW_S)
             if self._on_crash:
                 self._on_crash(ret)
             return

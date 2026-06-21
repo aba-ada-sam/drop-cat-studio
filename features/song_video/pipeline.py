@@ -602,20 +602,20 @@ def run_song_pipeline(job, photo_path, settings):
         bool(settings.get("lip_sync", True)) and
         bool(audio_wav)
     )
-    # Default resolution = 640x360 ("fast mode"). Render time scales with pixel
-    # count, so this ~halves it vs native 1032x580. Safe now that every clip
-    # re-anchors to the clean source (no chaining) -- low-res frames can no longer
-    # compound into mush the way they did under the old chain approach. 640x360
-    # also fits LTX-2's audio-token context. The output STAYS at 640x360 (the
-    # per-clip upscale below is disabled) -- upscaling soft 360p back to 580p was
-    # the old mush mistake and ate the time savings. Override with
-    # output_width/output_height for a sharper, slower render.
+    # Always generate at native model resolution. We previously dropped to
+    # 640x360 when lip sync was on "so audio tokens fit", but WanGP rejects the
+    # audio conditioning anyway (empty task queue -> no-audio fallback), so the
+    # downscale was pure quality loss: every clip rendered at 360p then upscaled
+    # ~2.5x to 928p = mush. Generating at native res and letting the audio
+    # attempt fall back to no-audio costs nothing and is far sharper.
     if ow and oh:
         tw, th = int(ow), int(oh)
     else:
-        ow, oh = 640, 360
-        tw, th = 640, 360
-        log.info("[song-video] Fast mode: generating at 640x360 (re-anchored clips, no chain degradation)")
+        _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
+        tw, th = _native
+    if _lip_sync_res_active:
+        log.info("[song-video] Lip sync requested -- audio conditioning attempted at native %dx%d "
+                 "(no downscale); falls back to no-audio if WanGP rejects the audio tokens", tw, th)
 
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
@@ -739,7 +739,7 @@ def _do_song_gpu_phase(
     if _use_keyframes:
         log.info("[song-video] Using %d Forge keyframes as start/end anchors", len(_kf))
     else:
-        log.info("[song-video] No Forge keyframes -- every clip re-anchors to the clean source (no chaining, no compounding)")
+        log.info("[song-video] No keyframes available -- using chain frame approach")
 
     _last_error: list[str | None] = [None]
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
@@ -827,17 +827,15 @@ def _do_song_gpu_phase(
             clip_end_image   = None
             _is_chained = i > 0
         else:
-            # Re-anchor EVERY clip to the clean source photo instead of chaining
-            # from the previous clip's last frame. Chaining compounded artifacts:
-            # each clip was generated FROM the previous (already-degraded) clip, so
-            # quality rotted clip-over-clip ("got shittier after each clip"). Start
-            # every clip from the pristine source -- end_image=None so the model
-            # still moves freely (start==end would force a Ken Burns zoom) -- which
-            # keeps the last clip as sharp as the first. Trade-off: clips no longer
-            # visually continue from one another; the xfade concat smooths the cuts.
-            clip_start_image = prepped_photo
-            clip_end_image   = None
-            _is_chained      = False
+            clip_start_image = _chain_frame if _chain_frame else prepped_photo
+            # For chained clips (1+), pull every clip toward the source photo
+            # at its END so identity is continuously anchored without a visible
+            # "reset" cut. Without this, 5 chain hops were enough for a
+            # stylized propaganda-poster cat to drift into a photoreal tabby in
+            # a leather jacket. Clip 0 keeps end_image=None because its start
+            # is already the source -- start=end would force a Ken Burns zoom.
+            clip_end_image   = prepped_photo if _chain_frame else None
+            _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
         # Strip explicit camera direction words (zoom, pan, dolly) but do NOT
@@ -1022,16 +1020,34 @@ def _do_song_gpu_phase(
             if tr.returncode == 0 and Path(trim_out).exists():
                 os.replace(trim_out, clip_path)
 
-        # (Chain-frame extraction removed: every clip now re-anchors to the clean
-        # source photo -- see the start_image block above -- so there is no chain to
-        # feed the next clip. That is exactly what eliminates the clip-over-clip
-        # "pox mark"/degradation compounding the old chain approach suffered from.)
+        # POX-MARK FIX (2026-06-19): extract the chain frame for the NEXT clip
+        # from the clip BEFORE the lossy per-clip upscale below. The boundary
+        # trims above are all `-c copy` (lossless), but the upscale re-encodes at
+        # libx264 CRF 18 and overwrites clip_path in place; reading the
+        # conditioning frame from that re-encoded file baked H.264/VAE compression
+        # into the next clip's seed, and the diffusion model re-synthesized +
+        # amplified it on every hop -> cumulative skin "pox marks" as the video
+        # progresses. Capture the clean (pre-upscale) frame first; the upscale then
+        # runs only on the copy used for the final concat, never fed into the chain.
+        # (This mirrors the documented contract in multi_pipeline._chain_anchor.)
+        if i < n_clips - 1:
+            _cframe_path = str(job_dir / f"chain_{i:02d}.png")
+            _chain_frame = _extract_last_frame(clip_path, _cframe_path)
+            if not _chain_frame:
+                log.info("[song-video] Frame extraction failed for clip %d -- next clip uses source", clip_num)
+            else:
+                log.info("[song-video] Clip %d chain frame (pre-upscale, clean): %s", clip_num, _cframe_path)
 
-        # Per-clip upscale DISABLED: 640x360 is the intended fast OUTPUT resolution.
-        # The old path generated 360p then upscaled ~1.6x to 580p -- that ate the
-        # speed savings AND produced soft "mush". Keep the clean low-res output.
-        # (Re-enable by restoring the original condition for an upscaled final.)
-        if False:  # was: lip_sync_res_active and th <= 360
+            if reanchor_every > 0 and (i + 1) % reanchor_every == 0:
+                log.info("[song-video] Re-anchoring clip %d to source photo (every %d)", i + 2, reanchor_every)
+                _chain_frame = None
+
+        # Per-clip upscale when lip sync forced 360p generation. This re-encodes
+        # (CRF) and overwrites clip_path; it now runs AFTER the chain frame is
+        # already captured above, so its compression can never enter the chain.
+        # Upscaling each clip individually (before concat) is cleaner than
+        # upscaling the final merged video, which can blur across boundaries.
+        if lip_sync_res_active and th <= 360:
             up_out = clip_path.replace(".mp4", "_up.mp4")
             try:
                 from core.upscaler import upscale_video

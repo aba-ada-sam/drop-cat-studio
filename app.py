@@ -167,29 +167,18 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] could not create runtime dirs (non-fatal): %s", _e)
 
-    # Auto-restore the queue on a PLANNED restart ("Save & Restart") OR after a
-    # CRASH mid-batch (the key to a reliable overnight run). save_queue() only ever
-    # persists status=="queued" jobs -- never the one that was running -- so the
-    # job that may have crashed the app is NOT re-run, which means no crash loop.
-    # A recent save file (<18h, covers an overnight session) is treated as an
-    # interrupted run to resume; an older one is stale and discarded.
-    from core.job_manager import QUEUE_SAVE_FILE as _QSF
+    # On a PLANNED restart (user clicked "Save & Restart") auto-restore the queue.
+    # On any other startup (fresh launch, crash) delete stale queue_save.json --
+    # zombie jobs from old sessions should not pollute a new session.
     _planned_restart = PLANNED_RESTART_MARKER.exists()
     if _planned_restart:
         PLANNED_RESTART_MARKER.unlink(missing_ok=True)
         log.info("[startup] planned restart -- queue will be auto-restored")
-    _restore_queue = _planned_restart
-    if not _planned_restart and _QSF.exists():
-        try:
-            _age_h = (time.time() - _QSF.stat().st_mtime) / 3600.0
-        except Exception:
-            _age_h = 999.0
-        if _age_h < 18:
-            _restore_queue = True
-            log.info("[startup] unclean shutdown + recent saved queue (%.1fh old) -- resuming batch", _age_h)
-        else:
+    else:
+        from core.job_manager import QUEUE_SAVE_FILE as _QSF
+        if _QSF.exists():
             _QSF.unlink(missing_ok=True)
-            log.info("[startup] deleted stale queue_save.json (%.1fh old)", _age_h)
+            log.info("[startup] deleted stale queue_save.json from previous session")
 
     # Migrate config from old apps on first run
     try:
@@ -200,9 +189,13 @@ async def lifespan(app: FastAPI):
     # Initialize job manager -- critical, re-raise on failure
     _g["job_manager"] = JobManager()
 
-    # NOTE: queue auto-restore happens near the END of startup (below) -- it MUST
-    # run after the LLM router is initialized, or restored song-video jobs fail
-    # prep instantly with "LLM router not initialized -- app not fully started".
+    # Auto-restore queue if this was a planned restart
+    if _planned_restart:
+        try:
+            _g["job_manager"].restore_queue(_build_restore_registry(_g["job_manager"]))
+            log.info("[startup] queue auto-restored from planned restart")
+        except Exception as _e:
+            log.warning("[startup] queue auto-restore failed (non-fatal): %s", _e)
 
     # Initialize LLM client + router
     try:
@@ -274,15 +267,6 @@ async def lifespan(app: FastAPI):
                 jm.cleanup(max_age_hours=0.25)
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
 
-    # Auto-restore the queue NOW -- LLM router + services are up, so restored jobs
-    # can prep successfully. Covers a planned restart AND a recent unclean
-    # shutdown / crash (the key to a reliable unattended overnight batch).
-    if _restore_queue:
-        try:
-            _n_restored, _n_failed = _g["job_manager"].restore_queue(_build_restore_registry(_g["job_manager"]))
-            log.info("[startup] queue auto-restored: %s job(s) resumed, %s failed", _n_restored, _n_failed)
-        except Exception as _e:
-            log.warning("[startup] queue auto-restore failed (non-fatal): %s", _e)
 
     _port = _g.get("port", 7860)
     log.info("Drop Cat Go Studio ready on http://127.0.0.1:%d", _port)
