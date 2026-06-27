@@ -3689,6 +3689,13 @@ input, textarea, select {
 .mgr-stop:hover { background: rgba(196,30,58,.14); }
 
 /* Transcript dropdown */
+/* CRITICAL: .mgr-panel/.mgr-ask set display:flex, which has the same specificity
+   as the UA [hidden] rule and comes later -- so without this guard the `hidden`
+   attribute is ignored and the panel renders on top of the GUI, intercepting
+   clicks (it "blocks the GUI"). Restore [hidden] semantics explicitly. */
+.mgr-panel[hidden],
+.mgr-ask[hidden] { display: none !important; }
+
 .mgr-panel {
   position: absolute;
   top: calc(100% + 8px);
