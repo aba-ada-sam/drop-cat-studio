@@ -224,14 +224,16 @@ async def generate(request: Request):
         "video_guidance":  body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":   bool(body.get("use_satellite", False)),
-        "lip_sync":        bool(body.get("lip_sync", True)),
-        # NOTE: lip_sync drives LTX-2's NATIVE audio conditioning (mouth moves
-        # during diffusion). MuseTalk post-pass (auto_lipsync) is intentionally
-        # NOT wired to this toggle: it force-crops the face to 256x256 and pastes
-        # it back, which on a small/stylized creature face is a glitchy rectangle
-        # uncorrelated to the music. Native audio conditioning is the right path
-        # (see DCMVS chain.py recipe). auto_lipsync stays opt-in/default-off.
-        "auto_lipsync":    bool(body.get("auto_lipsync", False)),
+        # lip_sync = LTX-2 NATIVE audio conditioning (mouth moves during diffusion
+        # toward the loudest audio = the beat -> "sings to the music"). OFF by
+        # default. Real WORD-level sync comes from the MuseTalk post-pass below.
+        "lip_sync":        bool(body.get("lip_sync", False)),
+        # auto_lipsync = MuseTalk post-pass driven by the isolated vocal stem, so
+        # the mouth tracks the WORDS. The earlier "glitchy rectangle on creature
+        # faces" worry was wrong -- the face-alignment patches handle fruit +
+        # animal faces cleanly (confirmed 2026-06-27). This is the right path; ON
+        # by default. Clips generate at full res, then MuseTalk owns the sync.
+        "auto_lipsync":    bool(body.get("auto_lipsync", True)),
         # Best-of-N seed selection for lip-sync clips: 1=Fast (single take),
         # 2=Balanced, 3=Best. Each clip generates N seeds and keeps the one whose
         # audio<->mouth sync score is highest. N>1 multiplies GPU time ~Nx.
@@ -388,6 +390,13 @@ async def batch_start(request: Request):
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":     body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":  bool(body.get("use_satellite", False)),
+        # Word-level lip sync = MuseTalk post-pass driven by the isolated vocal
+        # stem (mouth tracks the WORDS). Native LTX-2 audio conditioning
+        # (lip_sync) only nudges the mouth toward the loudest audio = the beat
+        # ("sings to the music"), so it is OFF here. Confirmed good on fruit +
+        # animal faces 2026-06-27. Generate clips at full res, then MuseTalk syncs.
+        "lip_sync":       bool(body.get("lip_sync", False)),
+        "auto_lipsync":   bool(body.get("auto_lipsync", True)),
     }
     # LTX Distilled sweet spot is 8 steps
     _mn = settings["model_name"]
