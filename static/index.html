@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/static/logo-192.png?v=20260620a">
   <link rel="apple-touch-icon" href="/static/logo-192.png?v=20260620a">
   <meta name="theme-color" content="#c41e3a">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260620a">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260625a">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260620a">
 </head>
 <body>
@@ -68,38 +68,27 @@
         </div>
 
         <div class="header-center">
-          <div class="ai-pills" id="ai-pills">
-            <div class="ai-pill" id="ap-text">
-              <button class="ai-pill-btn" title="Text AI provider -- click to switch">
-                <span class="dot unknown" id="ap-text-dot" aria-hidden="true"></span>
-                <span class="ap-label">Text</span>
-                <span class="ap-caret" aria-hidden="true">▾</span>
-              </button>
-              <div class="ap-menu" id="ap-text-menu" hidden></div>
+          <!-- AI Manager: type a goal in plain English; it drives the app for you. -->
+          <div id="manager" class="manager">
+            <div class="mgr-bar">
+              <button id="mgr-spark" class="mgr-spark" title="AI Manager -- type a goal in plain English and I'll do it. Click to show/hide the log." aria-label="Toggle Manager log">&#10022;</button>
+              <input id="mgr-input" class="mgr-input" type="text" autocomplete="off"
+                     aria-label="Tell the Manager what to do"
+                     placeholder="Tell the Manager what to do -- e.g. &ldquo;make a quick video from a beach photo&rdquo;">
+              <span id="mgr-status" class="mgr-status" aria-live="polite"></span>
+              <button id="mgr-send" class="mgr-send">Go</button>
+              <button id="mgr-stop" class="mgr-stop" hidden>Stop</button>
             </div>
-            <div class="ai-pill" id="ap-image">
-              <button class="ai-pill-btn" title="Image generation -- click to manage">
-                <span class="dot unknown" id="ap-image-dot" aria-hidden="true"></span>
-                <span class="ap-label">Image</span>
-                <span class="ap-caret" aria-hidden="true">▾</span>
-              </button>
-              <div class="ap-menu" id="ap-image-menu" hidden></div>
-            </div>
-            <div class="ai-pill" id="ap-video">
-              <button class="ai-pill-btn" title="Video generation model -- click to switch">
-                <span class="dot unknown" id="ap-video-dot" aria-hidden="true"></span>
-                <span class="ap-label">Video</span>
-                <span class="ap-caret" aria-hidden="true">▾</span>
-              </button>
-              <div class="ap-menu" id="ap-video-menu" hidden></div>
-            </div>
-            <div class="ai-pill" id="ap-sound">
-              <button class="ai-pill-btn" title="Sound / music generation -- click to manage">
-                <span class="dot unknown" id="ap-sound-dot" aria-hidden="true"></span>
-                <span class="ap-label">Sound</span>
-                <span class="ap-caret" aria-hidden="true">▾</span>
-              </button>
-              <div class="ap-menu" id="ap-sound-menu" hidden></div>
+            <div id="mgr-panel" class="mgr-panel" hidden>
+              <div class="mgr-panel-head">
+                <span class="mgr-panel-title">&#10022; Manager</span>
+                <button id="mgr-clear" class="mgr-clear" title="Clear conversation">clear</button>
+              </div>
+              <div id="mgr-log" class="mgr-log" aria-live="polite"></div>
+              <div id="mgr-ask" class="mgr-ask" hidden>
+                <input id="mgr-ask-input" class="mgr-ask-input" type="text" autocomplete="off" placeholder="Type your answer…">
+                <button id="mgr-ask-send" class="mgr-send">Reply</button>
+              </div>
             </div>
           </div>
         </div>
@@ -138,30 +127,49 @@
       <!-- Left rail: Creative Pipeline Navigator -->
       <nav id="app-rail" aria-label="Creative Pipeline">
 
-        <!-- Express -->
-        <button class="rail-tab active" data-tab="express" title="Quick Video -- drop image, describe idea, create video">
+        <!-- Studio Home -- unified entry point for every creation type -->
+        <button class="rail-tab active" data-tab="pipeline" title="Studio Home -- pick what you want to create and jump straight in">
+          <span>Studio Home</span>
+          <span class="rail-tab-hint">Start here</span>
+        </button>
+
+        <div class="rail-section-label">Create</div>
+
+        <button class="rail-tab" data-tab="express" title="Quick Video -- one photo plus an idea, straight to a short AI clip">
           <span>Quick Video</span>
-          <span class="rail-tab-hint">Quick start</span>
+          <span class="rail-tab-hint">Photo -> short clip</span>
         </button>
 
-        <button class="rail-tab" data-tab="sd-prompts" title="Generate images from prompts">
+        <button class="rail-tab" data-tab="sd-prompts" title="Generate Images -- turn a text idea or reference photo into AI images">
           <span>Generate Images</span>
-          <span class="rail-tab-hint">Prompts -> Images</span>
+          <span class="rail-tab-hint">Idea -> images</span>
         </button>
 
-        <button class="rail-tab" data-tab="create-videos" title="Create Videos -- images to video with AI music">
+        <button class="rail-tab" data-tab="create-videos" title="Create Videos -- animate your images into video and add AI music">
           <span>Create Videos</span>
-          <span class="rail-tab-hint">Video + Audio</span>
+          <span class="rail-tab-hint">Images -> video + music</span>
         </button>
 
-        <button class="rail-tab" data-tab="music-video" title="Music Video -- generate full-length music videos from a song and folder of images">
+        <button class="rail-tab" data-tab="music-video" title="Music Video -- a song plus a folder of photos becomes a full-length music video">
           <span>Music Video</span>
-          <span class="rail-tab-hint">Song + folder batch</span>
+          <span class="rail-tab-hint">Song + photos -> video</span>
         </button>
 
-        <button class="rail-tab" data-tab="zoom" title="Infinite Zoom -- spatial zoom video from a photo or video clip">
+        <button class="rail-tab" data-tab="zoom" title="Infinite Zoom -- endless spatial zoom video from a single photo or clip">
           <span>Infinite Zoom</span>
-          <span class="rail-tab-hint">Zoom from photo</span>
+          <span class="rail-tab-hint">Photo -> endless zoom</span>
+        </button>
+
+        <div class="rail-section-label">Tools</div>
+
+        <button class="rail-tab" data-tab="bridges" title="Video Bridges -- arrange 2+ clips and AI generates a transition between each pair">
+          <span>Video Bridges</span>
+          <span class="rail-tab-hint">AI transitions between clips</span>
+        </button>
+
+        <button class="rail-tab" data-tab="video-tools" title="Video Tools -- add AI music, trim, reverse, speed-ramp, upscale, smooth frames">
+          <span>Video Tools</span>
+          <span class="rail-tab-hint">Add music, edit, upscale</span>
         </button>
 
         <button class="rail-tab" data-tab="queue" title="Job queue -- running and pending generations">
@@ -170,9 +178,9 @@
         </button>
 
         <!-- Gallery -->
-        <button class="rail-tab" id="btn-gallery-rail" title="Toggle generation gallery">
+        <button class="rail-tab" id="btn-gallery-rail" title="Browse everything you've generated">
           <span>Gallery</span>
-          <span class="rail-tab-hint">View generations</span>
+          <span class="rail-tab-hint">Browse generations</span>
         </button>
 
       </nav>
@@ -193,11 +201,13 @@
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
+            <section class="tab-panel" id="panel-pipeline" aria-label="Studio Home"></section>
             <section class="tab-panel" id="panel-express" aria-label="Express"></section>
             <section class="tab-panel" id="panel-sd-prompts" aria-label="SD Prompts"></section>
             <section class="tab-panel" id="panel-create-videos" aria-label="Create Videos"></section>
             <section class="tab-panel" id="panel-music-video" aria-label="Music Video"></section>
             <section class="tab-panel" id="panel-zoom" aria-label="Infinite Zoom"></section>
+            <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
             <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
             <section class="tab-panel" id="panel-queue" aria-label="Job Queue"></section>
           </div>
@@ -206,6 +216,44 @@
 
       </div><!-- /#app-main -->
     </div><!-- /#app-body -->
+
+    <!-- AI status pills -- docked bottom-center (relocated from the header). -->
+    <div id="pills-dock" class="pills-dock" aria-label="AI service status">
+      <div class="ai-pills" id="ai-pills">
+        <div class="ai-pill" id="ap-text">
+          <button class="ai-pill-btn" title="Text AI provider -- click to switch">
+            <span class="dot unknown" id="ap-text-dot" aria-hidden="true"></span>
+            <span class="ap-label">Text</span>
+            <span class="ap-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="ap-menu" id="ap-text-menu" hidden></div>
+        </div>
+        <div class="ai-pill" id="ap-image">
+          <button class="ai-pill-btn" title="Image generation -- click to manage">
+            <span class="dot unknown" id="ap-image-dot" aria-hidden="true"></span>
+            <span class="ap-label">Image</span>
+            <span class="ap-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="ap-menu" id="ap-image-menu" hidden></div>
+        </div>
+        <div class="ai-pill" id="ap-video">
+          <button class="ai-pill-btn" title="Video generation model -- click to switch">
+            <span class="dot unknown" id="ap-video-dot" aria-hidden="true"></span>
+            <span class="ap-label">Video</span>
+            <span class="ap-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="ap-menu" id="ap-video-menu" hidden></div>
+        </div>
+        <div class="ai-pill" id="ap-sound">
+          <button class="ai-pill-btn" title="Sound / music generation -- click to manage">
+            <span class="dot unknown" id="ap-sound-dot" aria-hidden="true"></span>
+            <span class="ap-label">Sound</span>
+            <span class="ap-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="ap-menu" id="ap-sound-menu" hidden></div>
+        </div>
+      </div>
+    </div>
 
     <!-- Log panel footer -->
     <footer id="log-panel">
@@ -404,6 +452,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/app.js?v=20260620a"></script>
+  <script type="module" src="/static/js/app.js?v=20260625a"></script>
 </body>
 </html>

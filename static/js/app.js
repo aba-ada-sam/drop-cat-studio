@@ -10,9 +10,10 @@ import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from '.
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260620a';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260620a';
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620b';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260620a';
+import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260623a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260620a';
+import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260621a';
 import { consumeHandoff } from './handoff.js?v=20260620a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260620a';
 import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260620a';
@@ -20,6 +21,7 @@ import { open as openPalette, close as closePalette, registerItems } from './she
 import './shell/ai-intent.js?v=20260620a';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260620a';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260620a';
+import { initManager } from './shell/manager.js?v=20260625a';
 
 // -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {
@@ -29,6 +31,7 @@ const TAB_INIT = {
   'music-video':       initMusicVideo,
   'zoom':              initZoom,
   'sd-prompts':        initSdPrompts,
+  'bridges':           initBridges,
   'video-tools':       initVideoTools,
   'queue':             initQueue,
 };
@@ -38,6 +41,7 @@ const TAB_HANDOFF = {
   'music-video':       musicVideoHandoff,
   'zoom':              zoomHandoff,
   'sd-prompts':        sdPromptsHandoff,
+  'bridges':           bridgesHandoff,
   'video-tools':       null,
 };
 const _tabInitialized = new Set();
@@ -270,7 +274,7 @@ async function runSplash() {
 
 // -- State -------------------------------------------------------------------
 const state = {
-  activeTab:    'sd-prompts',
+  activeTab:    'pipeline',
   logOpen:      false,
   logSeq:       0,
   config:       {},
@@ -961,6 +965,10 @@ function initPaletteItems() {
     { label: 'Quick Video',      group: 'Tabs',   hint: 'Q', action: () => switchTab('express') },
     { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
     { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('create-videos') },
+    { label: 'Music Video',      group: 'Tabs',   action: () => switchTab('music-video') },
+    { label: 'Infinite Zoom',    group: 'Tabs',   action: () => switchTab('zoom') },
+    { label: 'Video Bridges',    group: 'Tabs',   action: () => switchTab('bridges') },
+    { label: 'Video Tools',      group: 'Tabs',   action: () => switchTab('video-tools') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
@@ -1061,6 +1069,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const galleryEl = document.getElementById('split-gallery');
   if (galleryEl) initGallery(galleryEl);
 
+  // AI Manager (header center) -- autonomous in-app agent
+  try { initManager(); } catch (e) { console.error('[manager] init failed:', e); }
+
   // Pulse Gallery button after a generation so user knows something's there
   window.addEventListener('gallery:preview-updated', () => {
     const btn = document.getElementById('btn-gallery-rail');
@@ -1158,8 +1169,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
-  // Boot default tab
-  switchTab('express');
+  // Boot default tab -- Studio Home (the unified "what do you want to create?" entry point)
+  switchTab('pipeline');
   loadConfig();
   pollServices();
   pollLogs();

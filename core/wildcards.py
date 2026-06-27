@@ -142,7 +142,9 @@ def expand(text: str, fs_root: str = "") -> str:
             return random.choice(values)
         return token  # leave unknown tokens as-is
 
-    return re.sub(r"__\w+__", _replace, text)
+    # [\w-] so hyphenated tokens expand too (color-palette, art-style, cat-scene...).
+    # Plain \w stops at the hyphen and leaves the token literal in the prompt.
+    return re.sub(r"__[\w-]+__", _replace, text)
 
 
 def invalidate_cache():

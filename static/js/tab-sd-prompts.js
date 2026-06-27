@@ -142,7 +142,7 @@ export function init(panel) {
   const suffixInput = el('input', {
     type: 'text', placeholder: 'Style suffix...',
     style: 'flex:1; font-size:.8rem',
-    value: '',
+    value: '(depth blur)',
   });
   const wildcardToggle = el('input', { type: 'checkbox', id: 'sd-smart-wc', checked: false, style: 'cursor:pointer' });
   const wcLabel = el('label', { for: 'sd-smart-wc', text: 'Smart wildcards', title: 'AI creates new wildcard tokens as needed', style: 'cursor:pointer; font-size:.78rem; color:var(--text-3)' });
@@ -464,13 +464,17 @@ export function init(panel) {
   mainArea.appendChild(thumbGrid);
 
   // -- Wildcard Workshop ----------------------------------------------------
-  const wcSection = el('div', { style: 'flex-shrink:0; margin-top:8px' });
-  root.appendChild(wcSection);
+  // Inserted right under the prompt card (before the Forge generation settings)
+  // so it's visible immediately -- NOT buried at the bottom below the results
+  // panel where nobody scrolls. Open by default for discoverability.
+  const wcSection = el('div', { class: 'card', style: 'flex-shrink:0; padding:0; overflow:hidden; border:1px solid var(--accent)' });
+  sidebar.insertBefore(wcSection, forgeSettings);
 
-  const wcDet  = el('details', { style: 'border-top:1px solid var(--border); padding-top:8px' });
+  const wcDet  = el('details', {});
+  wcDet.open = true;
   const wcSumm = el('summary', {
-    style: 'cursor:pointer; font-weight:600; font-size:.9rem; padding:8px 16px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none',
-    text: 'Wildcard Workshop',
+    style: 'cursor:pointer; font-weight:700; font-size:.95rem; padding:12px 16px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; background:var(--accent); color:#1a0d06',
+    text: 'WILDCARDS -- browse, edit, create, insert into prompt',
   });
   wcDet.appendChild(wcSumm);
   wcSection.appendChild(wcDet);
@@ -484,7 +488,9 @@ export function init(panel) {
   fileListCol.appendChild(el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-bottom:6px', text: 'Wildcard files' }));
   const fileList = el('div', { style: 'max-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:2px' });
   fileListCol.appendChild(fileList);
-  const refreshFilesBtn = el('button', { class: 'btn btn-sm', text: 'Refresh', style: 'margin-top:6px; width:100%; font-size:.78rem', onclick: loadWildcardFiles });
+  const newFileBtn = el('button', { class: 'btn btn-sm', text: '+ New file', style: 'margin-top:6px; width:100%; font-size:.78rem', onclick: startNewFile });
+  fileListCol.appendChild(newFileBtn);
+  const refreshFilesBtn = el('button', { class: 'btn btn-sm', text: 'Refresh', style: 'margin-top:4px; width:100%; font-size:.78rem', onclick: loadWildcardFiles });
   fileListCol.appendChild(refreshFilesBtn);
 
   let wcFiles = [];
@@ -497,15 +503,22 @@ export function init(panel) {
       return;
     }
     for (const f of wcFiles) {
-      const item = el('button', {
+      const selBtn = el('button', {
         class: 'btn btn-sm',
-        style: `width:100%; text-align:left; font-size:.78rem; justify-content:space-between; display:flex; gap:4px; ${selectedWcFile?.token === f.token ? 'border-color:var(--accent); color:var(--accent)' : ''}`,
-        onclick() { selectedWcFile = f; renderWildcardFiles(); updateWcOpsPanel(); },
+        style: `flex:1; min-width:0; text-align:left; font-size:.78rem; justify-content:space-between; display:flex; gap:4px; ${selectedWcFile?.token === f.token ? 'border-color:var(--accent); color:var(--accent)' : ''}`,
+        onclick() { selectedWcFile = f; renderWildcardFiles(); loadEditFor(f); },
       }, [
         el('span', { text: f.token.replace(/__/g, ''), style: 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap' }),
         el('span', { text: String(f.count), style: 'color:var(--text-3); flex-shrink:0' }),
       ]);
-      fileList.appendChild(item);
+      const insBtn = el('button', {
+        class: 'btn btn-sm',
+        text: '+',
+        title: `Insert ${f.token} into the prompt`,
+        style: 'flex-shrink:0; font-size:.85rem; padding:2px 8px',
+        onclick(e) { e.stopPropagation(); insertToken(f.token); },
+      });
+      fileList.appendChild(el('div', { style: 'display:flex; gap:3px; align-items:stretch' }, [selBtn, insBtn]));
     }
   }
 
@@ -528,9 +541,9 @@ export function init(panel) {
   const opContents = el('div');
   opsCol.appendChild(opContents);
 
-  const OPS = ['Grow', 'Expand', 'Prune', 'Audit'];
+  const OPS = ['Edit', 'Grow', 'Expand', 'Prune', 'Audit'];
   const opPanels = {};
-  let activeOp = 'Grow';
+  let activeOp = 'Edit';
 
   function switchOp(name) {
     activeOp = name;
@@ -542,10 +555,145 @@ export function init(panel) {
     const tb = el('button', { class: 'btn btn-sm wc-op-tab', text: op, style: 'font-size:.8rem', 'data-op': op });
     tb.addEventListener('click', () => switchOp(op));
     opTabBar.appendChild(tb);
-    const panel = el('div', { style: `display:${op === 'Grow' ? '' : 'none'}` });
+    const panel = el('div', { style: `display:${op === 'Edit' ? '' : 'none'}` });
     opPanels[op] = panel;
     opContents.appendChild(panel);
   }
+
+  // -- Edit panel (Forge-style: see & hand-edit a file's full entry list) ----
+  const editPanel = opPanels['Edit'];
+  let editMode = 'existing';  // 'existing' | 'new'
+
+  const editHeader = el('div', {
+    style: 'font-size:.82rem; color:var(--text-2); margin-bottom:6px',
+    text: 'Select a file on the left to edit it, or click "+ New file".',
+  });
+  editPanel.appendChild(editHeader);
+
+  const editNameInput = el('input', {
+    type: 'text',
+    placeholder: 'new_file_name  (becomes __new_file_name__)',
+    style: 'width:100%; font-size:.85rem; margin-bottom:6px; display:none',
+  });
+  editPanel.appendChild(editNameInput);
+
+  const editArea = el('textarea', {
+    rows: '12',
+    placeholder: 'One entry per line.\nEach line is one possible value the wildcard can expand to.',
+    style: 'width:100%; resize:vertical; font-size:.82rem; font-family:ui-monospace,Consolas,monospace; line-height:1.45',
+  });
+  editPanel.appendChild(editArea);
+
+  const editBtnRow = el('div', { style: 'display:flex; gap:6px; margin-top:8px; align-items:center; flex-wrap:wrap' });
+  editPanel.appendChild(editBtnRow);
+  const saveBtn   = el('button', { class: 'btn btn-primary', text: 'Save', style: 'font-size:.82rem' });
+  const insertBtn = el('button', { class: 'btn btn-sm', text: 'Insert token into prompt', style: 'font-size:.82rem' });
+  const deleteBtn = el('button', { class: 'btn btn-sm', text: 'Delete file', style: 'font-size:.82rem; color:var(--red); margin-left:auto' });
+  editBtnRow.append(saveBtn, insertBtn, deleteBtn);
+
+  const editStatus = el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:6px; min-height:1em' });
+  editPanel.appendChild(editStatus);
+
+  function setEditMode(mode) {
+    editMode = mode;
+    if (mode === 'new') {
+      editNameInput.style.display = '';
+      editNameInput.value = '';
+      editArea.value = '';
+      editHeader.textContent = 'New wildcard file -- name it, add one entry per line, then Save.';
+      insertBtn.style.display = 'none';
+      deleteBtn.style.display = 'none';
+      editStatus.textContent = '';
+      editNameInput.focus();
+    } else {
+      editNameInput.style.display = 'none';
+      insertBtn.style.display = '';
+      deleteBtn.style.display = '';
+    }
+  }
+
+  async function loadEditFor(f) {
+    setEditMode('existing');
+    editHeader.innerHTML = `Editing <strong>${escHtml(f.token)}</strong>`;
+    editArea.value = 'Loading...';
+    editStatus.textContent = '';
+    try {
+      const data = await api('/api/prompts/wildcards/content', {
+        method: 'POST', body: JSON.stringify({ path: f.path }),
+      });
+      editArea.value = (data.entries || []).join('\n');
+      editHeader.innerHTML = `Editing <strong>${escHtml(f.token)}</strong> &nbsp;<span style="color:var(--text-3)">${data.count} entries</span>`;
+    } catch (e) {
+      editArea.value = '';
+      toast(e.message, 'error');
+    }
+  }
+
+  function startNewFile() {
+    selectedWcFile = null;
+    renderWildcardFiles();
+    switchOp('Edit');
+    setEditMode('new');
+  }
+
+  function insertToken(token) {
+    const cur = promptArea.value;
+    const sep = cur && !/\s$/.test(cur) ? ' ' : '';
+    promptArea.value = cur + sep + token + ' ';
+    promptArea.focus();
+    promptArea.dispatchEvent(new Event('input', { bubbles: true }));
+    toast(`Inserted ${token}`, 'success');
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    const entries = editArea.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const payload = { entries };
+    if (editMode === 'new') {
+      const nm = editNameInput.value.trim();
+      if (!nm) { toast('Name the file first', 'error'); return; }
+      payload.name = nm;
+    } else {
+      if (!selectedWcFile?.path) { toast('Select a file first', 'error'); return; }
+      payload.path = selectedWcFile.path;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      const data = await api('/api/prompts/wildcards/save', {
+        method: 'POST', body: JSON.stringify(payload),
+      });
+      await loadWildcardFiles();
+      const saved = wcFiles.find(x => x.token === data.token);
+      if (saved) { selectedWcFile = saved; renderWildcardFiles(); }
+      setEditMode('existing');
+      editHeader.innerHTML = `Editing <strong>${escHtml(data.token)}</strong> &nbsp;<span style="color:var(--text-3)">${data.count} entries</span>`;
+      editStatus.textContent = `Saved ${data.count} entries to ${data.token}.`;
+      toast(`Saved ${data.token}`, 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+  });
+
+  insertBtn.addEventListener('click', () => {
+    if (!selectedWcFile?.token) { toast('Select a file first', 'error'); return; }
+    insertToken(selectedWcFile.token);
+  });
+
+  deleteBtn.addEventListener('click', async () => {
+    if (!selectedWcFile?.path) { toast('Select a file first', 'error'); return; }
+    if (!confirm(`Delete ${selectedWcFile.token}? This removes the .txt file from your Forge wildcards folder.`)) return;
+    try {
+      await api('/api/prompts/wildcards/delete', {
+        method: 'POST', body: JSON.stringify({ path: selectedWcFile.path }),
+      });
+      toast(`Deleted ${selectedWcFile.token}`, 'success');
+      selectedWcFile = null;
+      editArea.value = '';
+      editHeader.textContent = 'Select a file on the left to edit it, or click "+ New file".';
+      editStatus.textContent = '';
+      await loadWildcardFiles();
+    } catch (e) { toast(e.message, 'error'); }
+  });
 
   // -- Grow panel --
   const growPanel = opPanels['Grow'];
@@ -691,11 +839,7 @@ export function init(panel) {
     auditBtn.textContent = 'Audit Library';
   });
 
-  switchOp('Grow');
-
-  function updateWcOpsPanel() {
-    // nothing to update per-file beyond re-rendering the file list
-  }
+  switchOp('Edit');
 
   // -- Core functions -------------------------------------------------------
 
@@ -842,6 +986,9 @@ export function init(panel) {
         forgeDot.className   = 'dot running';
         forgeMsg.textContent = forgeStatus.current_model || 'Forge running';
         genBtn.disabled      = false;
+        // Forge is ready: clear any "warming up" state and restore the label.
+        genBtn.dataset.warm  = '';
+        genBtn.textContent   = 'Generate';
         modelSel.style.display = '';
 
         // Populate selects
@@ -870,6 +1017,10 @@ export function init(panel) {
 
       } else {
         if (_backend !== 'openai') genBtn.disabled = true;
+        if (_backend !== 'openai' && genBtn.dataset.warm !== '1') {
+          genBtn.dataset.warm = '1';
+          genBtn.innerHTML = '<span class="spinner"></span> Forge warming up (~60s)...';
+        }
         modelSel.style.display = 'none';
         if (!_forgeAutoStarted) {
           // First detection: kick off auto-start immediately, no user action needed
@@ -896,6 +1047,10 @@ export function init(panel) {
       }
     } catch (_) {
       if (_backend !== 'openai') genBtn.disabled = true;
+      if (_backend !== 'openai' && genBtn.dataset.warm !== '1') {
+        genBtn.dataset.warm = '1';
+        genBtn.innerHTML = '<span class="spinner"></span> Forge warming up (~60s)...';
+      }
       modelSel.style.display = 'none';
       if (!_forgeAutoStarted) {
         _forgeAutoStarted = true;
@@ -988,7 +1143,7 @@ export function init(panel) {
       return;
     }
 
-    if (!forgeStatus?.alive) { toast('Forge is not running', 'error'); return; }
+    if (!forgeStatus?.alive) { toast('Forge is still warming up -- it will be ready in a few seconds', 'info'); return; }
 
     genBtn.disabled          = true;
     genBtn.innerHTML         = '<span class="spinner"></span> Generating...';
@@ -1075,7 +1230,9 @@ export function init(panel) {
   }
 
   // Lazy-load wildcard files when workshop is first opened
-  wcDet.addEventListener('toggle', () => { if (wcDet.open && !wcFiles.length) loadWildcardFiles(); }, { once: true });
+  // Open by default -> load the file list now (toggle won't fire for a
+  // programmatically-open <details>).
+  loadWildcardFiles();
 
   loadDefaults();
   checkForge();

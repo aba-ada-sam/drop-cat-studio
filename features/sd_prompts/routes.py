@@ -63,6 +63,27 @@ def _get_wildcards_dir() -> str:
     return cfg.get("sd_wildcards_dir") or ""
 
 
+def _safe_wc_path(path_str: str) -> Path:
+    """Resolve a client-supplied wildcard path and confirm it lives inside the
+    configured wildcards directory and ends in .txt.
+
+    Guards the editor's content/save/delete endpoints against path traversal so
+    a crafted request can't read or destroy arbitrary files on disk.
+    """
+    wc_dir = _get_wildcards_dir()
+    if not wc_dir:
+        raise HTTPException(400, "Wildcards directory not configured in Settings")
+    root = Path(wc_dir).resolve()
+    p = Path(path_str).resolve()
+    try:
+        p.relative_to(root)
+    except ValueError:
+        raise HTTPException(400, "Path is outside the wildcards directory")
+    if p.suffix.lower() != ".txt":
+        raise HTTPException(400, "Wildcard files must be .txt")
+    return p
+
+
 def _build_entries_summary(wc_dir: str) -> str:
     """Build a summary of all wildcard files for AI operations."""
     wildcards = discover_filesystem_wildcards(wc_dir)
@@ -212,6 +233,58 @@ async def create_wildcard(request: Request):
     _write_entries(str(path), entries)
     invalidate_cache()
     return {"ok": True, "token": f"__{name}__", "path": str(path), "count": len(entries)}
+
+
+@router.post("/wildcards/content")
+async def wildcard_content(request: Request):
+    """Return the full entry list of one wildcard file, for hand-editing."""
+    body = await request.json()
+    p = _safe_wc_path(body.get("path", ""))
+    if not p.is_file():
+        raise HTTPException(404, "File not found")
+    entries = _read_file_lines(str(p))
+    return {"path": str(p), "token": f"__{p.stem}__", "entries": entries, "count": len(entries)}
+
+
+@router.post("/wildcards/save")
+async def wildcard_save(request: Request):
+    """Overwrite a wildcard file's entries (Forge-style hand edit).
+
+    Pass `path` to overwrite an existing file, or `name` to create a new one in
+    the configured wildcards directory. `entries` is the full new contents.
+    """
+    body = await request.json()
+    entries = [e.strip() for e in (body.get("entries") or []) if str(e).strip()]
+    path_str = (body.get("path") or "").strip()
+    name = (body.get("name") or "").strip()
+
+    if path_str:
+        p = _safe_wc_path(path_str)
+    elif name:
+        safe_name = name.lower().replace(" ", "_").strip("_")
+        safe_name = "".join(c for c in safe_name if c.isalnum() or c in "_-")
+        if not safe_name:
+            raise HTTPException(400, "Invalid file name")
+        p = _safe_wc_path(str(Path(_get_wildcards_dir()) / f"{safe_name}.txt"))
+    else:
+        raise HTTPException(400, "path or name required")
+
+    p.parent.mkdir(parents=True, exist_ok=True)
+    _write_entries(str(p), entries)
+    invalidate_cache()
+    return {"ok": True, "path": str(p), "token": f"__{p.stem}__", "count": len(entries)}
+
+
+@router.post("/wildcards/delete")
+async def wildcard_delete(request: Request):
+    """Delete a wildcard file from the configured wildcards directory."""
+    body = await request.json()
+    p = _safe_wc_path(body.get("path", ""))
+    if not p.is_file():
+        raise HTTPException(404, "File not found")
+    p.unlink()
+    invalidate_cache()
+    return {"ok": True, "path": str(p), "token": f"__{p.stem}__"}
 
 
 @router.post("/wildcards/grow")

@@ -161,10 +161,23 @@ Cross-cutting concerns owned by the shell, not per-tab:
 
 The header contains three zones:
 - **Left:** logo + app name
-- **Center:** service status pills (`#service-cluster-btn`) — green/red dots for Forge SD, WanGP, ACE-Step. Click opens service panel.
+- **Center:** the **AI Manager** bar (`#manager`) — see below. (The Text/Image/Sound/Video AI pills that used to live here were relocated to `#pills-dock`, a slim centered bar just above the activity-log footer. The pills are wired purely by element id, so they kept working after the move.)
 - **Right:** `#ai-badge` (shows effective AI provider: "✦ AI: Anthropic" / "✦ AI: Local" / "✦ AI") + Settings gear.
 
 **Do not add provider-switch controls to the header.** LLM provider selection lives in Settings only. The badge is read-only status + click-to-configure.
+
+### AI Manager (`static/js/shell/manager.js` + `features/manager/routes.py`)
+
+An autonomous in-app agent that operates the app FOR the user. Type a plain-English goal in the header bar; the Manager drives the **real UI** to accomplish it — navigating tabs, filling controls, clicking buttons, watching the queue — narrating as it goes. Default behaviour is fully autonomous (no per-step confirmation; a **Stop** button is the only brake), per Andrew's request.
+
+**The browser owns the agent loop; the server is a thin LLM proxy.** Each step `manager.js` snapshots the live screen (`readScreen()` — tags every visible interactable element with a transient `data-mgr-ref`, captures controls/buttons/visible-text), POSTs `{goal, screen, history, chat}` to `/api/manager/think`, and gets back the single next action. It executes that action against the DOM, re-snapshots, and loops (cap `MAX_STEPS = 48`; identical-action-3× guard).
+
+Action vocabulary (LLM emits `{"thought","action":{...}}`): `navigate` (clicks a rail button by `data-tab`, or `#btn-gallery-rail`), `read_screen`, `set_field` (ref + value; handles input/textarea/select/checkbox/radio/range; file pickers can't be set — it tells the user to drop the file), `click` (ref), `say` (narrate, loop continues), `ask` (pause for the user — resolved via a Promise wired to `#mgr-ask`), `done`.
+
+- **Brain:** `route(..., tier=TIER_BALANCED, force_provider="anthropic")` with graceful fallback to the configured provider if the Anthropic key is missing/fails. The system prompt embeds `APP_MAP` (tab ids + what each does) so the agent knows where to go; the live screen read supplies the actual controls.
+- **No DOM control on the server** — keeping clicks client-side means the user watches real navigation/clicks, and it works regardless of how a tab built its controls (custom chip `<button>`s are introspected like any other button).
+- Conversation persists to `localStorage['dropcat_manager_chat']` (last 24 msgs) for continuity across goals.
+- Route registered under `/api/manager/*`. Cache stamp for `manager.js` import bumps with the rest.
 
 ### Multi-clip pipeline (`features/fun_videos/multi_pipeline.py`)
 

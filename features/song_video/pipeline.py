@@ -602,20 +602,22 @@ def run_song_pipeline(job, photo_path, settings):
         bool(settings.get("lip_sync", True)) and
         bool(audio_wav)
     )
-    # Always generate at native model resolution. We previously dropped to
-    # 640x360 when lip sync was on "so audio tokens fit", but WanGP rejects the
-    # audio conditioning anyway (empty task queue -> no-audio fallback), so the
-    # downscale was pure quality loss: every clip rendered at 360p then upscaled
-    # ~2.5x to 928p = mush. Generating at native res and letting the audio
-    # attempt fall back to no-audio costs nothing and is far sharper.
+    # LIP SYNC REQUIRES 360p. At 580p the audio tokens overflow LTX-2's context
+    # window and WanGP silently DROPS the audio (= no lip sync at all). So when
+    # lip sync is on, generate at 640x360 (override) -- the audio conditioning
+    # actually applies -- and the per-clip upscale below brings each clip back to
+    # ~580p before concat. When lip sync is off (or no audio), use native res for
+    # maximum sharpness. (This restores the late-May "real lip sync" behavior that
+    # was traded away for sharpness when the pipeline switched to native 580p.)
     if ow and oh:
         tw, th = int(ow), int(oh)
+    elif _lip_sync_res_active:
+        ow, oh = 960, 544
+        tw, th = 640, 360
+        log.info("[song-video] Lip sync ON -- generating at 640x360 so audio conditioning fits (upscaled to ~580p after)")
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
-    if _lip_sync_res_active:
-        log.info("[song-video] Lip sync requested -- audio conditioning attempted at native %dx%d "
-                 "(no downscale); falls back to no-audio if WanGP rejects the audio tokens", tw, th)
 
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
@@ -704,6 +706,82 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
     return out_path
 
 
+def _isolate_guide_vocals(audio_wav, job_dir):
+    """Isolate vocals (+150Hz highpass) from the full mix so the conditioning
+    drives the mouth from WORDS, not the beat. Returns the vocals WAV path, or
+    None to fall back to the full mix. Never raises; reuses the MuseTalk venv's
+    Demucs (the DCS Python has no demucs)."""
+    try:
+        from features.lipsync.runner import _paths, _separate_vocals
+        _d, _py = _paths()
+        if not _py.is_file():
+            log.info("[song-video] MuseTalk venv not found -- conditioning on full mix")
+            return None
+        _voc = str(job_dir / "guide_vocals.wav")
+        if not _separate_vocals(_py, audio_wav, _voc) or not os.path.isfile(_voc):
+            log.warning("[song-video] Vocal isolation failed -- conditioning on full mix")
+            return None
+        _voc_hp = str(job_dir / "guide_vocals_hp.wav")
+        _hp = subprocess.run(
+            ["ffmpeg", "-y", "-i", _voc, "-af", "highpass=f=150", _voc_hp],
+            capture_output=True, timeout=180,
+        )
+        out = _voc_hp if (_hp.returncode == 0 and os.path.isfile(_voc_hp)) else _voc
+        log.info("[song-video] Lip sync: conditioning on isolated vocals (%s)", os.path.basename(out))
+        return out
+    except Exception as e:
+        log.warning("[song-video] Vocal isolation error (%s) -- conditioning on full mix", e)
+        return None
+
+
+def _build_face_crop(src_path, tw, th, out_path):
+    """Crop/zoom src so the face fills the frame with the mouth ~0.66 down. This
+    makes mouth motion visible AND puts the mouth where sync_qc expects it (so
+    best-of-N can actually rank takes). Returns out_path, or None (no face /
+    already a close-up / error) to keep the original framing. Uses OpenCV Haar."""
+    try:
+        import cv2
+        img = cv2.imread(src_path)
+        if img is None:
+            return None
+        ih, iw = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face = None
+        for _c in ("haarcascade_frontalface_alt2.xml",
+                   "haarcascade_frontalface_alt.xml",
+                   "haarcascade_frontalface_default.xml"):
+            det = cv2.CascadeClassifier(cv2.data.haarcascades + _c)
+            hits = det.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+                                        minSize=(int(iw * 0.05), int(ih * 0.05)))
+            if len(hits):
+                face = max(hits, key=lambda b: b[2] * b[3])
+                break
+        if face is None:
+            return None
+        fx, fy, fw, fh = [int(v) for v in face]
+        if fh >= 0.55 * ih:
+            return None
+        aspect = tw / float(th)
+        crop_h = min(ih, int(fh / 0.50))
+        crop_w = int(crop_h * aspect)
+        if crop_w > iw:
+            crop_w = iw
+            crop_h = int(crop_w / aspect)
+        face_cx = fx + fw / 2.0
+        mouth_y = fy + 0.88 * fh
+        left = max(0, min(int(round(face_cx - crop_w / 2.0)), iw - crop_w))
+        top = max(0, min(int(round(mouth_y - 0.66 * crop_h)), ih - crop_h))
+        crop = img[top:top + crop_h, left:left + crop_w]
+        if crop.size == 0:
+            return None
+        crop = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_LANCZOS4)
+        cv2.imwrite(out_path, crop)
+        return out_path if os.path.isfile(out_path) else None
+    except Exception as e:
+        log.warning("[song-video] face crop failed (%s) -- keeping framing", e)
+        return None
+
+
 def _do_song_gpu_phase(
     job, photo_path, settings, job_dir,
     n_clips, clip_durations, model_name,
@@ -752,6 +830,22 @@ def _do_song_gpu_phase(
     _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav) and len(_clip_start_times) == n_clips
     _audio_slices_dir = job_dir / "audio_slices"
 
+    # Lip-sync recipe (what actually produces mouth movement, per the DCMVS
+    # recipe): frame the source tight on the face (mouth ~0.66 down) and drive
+    # the conditioning from isolated VOCALS, not the full mix. Combined with 360p
+    # (audio fits) and best-of-N (best_of_n>1 ranks takes by mouth motion), this
+    # is what beats the seed lottery. Both pieces degrade gracefully.
+    _guide_audio = audio_wav
+    if _lip_sync:
+        if photo_path and os.path.isfile(photo_path):
+            _face = str(job_dir / "face_framed.png")
+            if _build_face_crop(photo_path, tw, th, _face):
+                prepped_photo = _face
+                log.info("[song-video] Lip sync: framed source on the face (mouth in lower third)")
+        _vg = _isolate_guide_vocals(audio_wav, job_dir)
+        if _vg:
+            _guide_audio = _vg
+
     # Pre-extract ALL audio slices before the clip generation loop starts.
     # This runs once upfront so WanGP never waits for an ffmpeg subprocess
     # between clips. Each slice: corrected start time + clip duration from WAV.
@@ -764,7 +858,7 @@ def _do_song_gpu_phase(
             _sp = str(_audio_slices_dir / f"slice_{_si:02d}.wav")
             _sr = subprocess.run(
                 ["ffmpeg", "-y", "-ss", f"{_st:.4f}", "-t", f"{_sdur:.4f}",
-                 "-i", audio_wav, "-c:a", "copy", _sp],
+                 "-i", _guide_audio, "-c:a", "copy", _sp],
                 capture_output=True, timeout=30,
             )
             if _sr.returncode == 0 and Path(_sp).exists():
@@ -838,11 +932,24 @@ def _do_song_gpu_phase(
             _is_chained = bool(_chain_frame)
 
         prompt_to_use = clip_prompt
-        # Strip explicit camera direction words (zoom, pan, dolly) but do NOT
-        # lock to "static shot" -- that suppresses all motion. The subject_anchor
-        # and start_image handle identity; the prompt should drive movement.
         from features.fun_videos.multi_pipeline import _strip_camera_moves
-        prompt_to_use = _strip_camera_moves(prompt_to_use)
+        if _lip_sync:
+            # PROVEN working lip-sync prompt, taken from the user's own
+            # .recipe.json files (DCMVS) that produced perfectly mouth-synced
+            # clips: the subject + a direct mouth-sync + STEADY-framing directive,
+            # with NO story-arc / motion / camera content. That story-arc content
+            # (added during the consolidation into Studio) is exactly what made the
+            # model move the CAMERA instead of the MOUTH. subject_anchor is
+            # prepended just below to keep the character identity.
+            prompt_to_use = ("centered and alone in the frame, facing the camera, "
+                             "mouth opening and closing in precise sync with the singing vocals, "
+                             "the only subject in the shot, no other people and no other faces, "
+                             "plain dark background, soft cinematic key light, "
+                             "shallow depth of field, steady framing")
+        else:
+            # Strip explicit camera direction words (zoom, pan, dolly) but do NOT
+            # lock to "static shot" -- that suppresses all motion.
+            prompt_to_use = _strip_camera_moves(prompt_to_use)
 
         # Prepend subject anchor so every clip is grounded to the actual photo.
         if subject_anchor and not prompt_to_use.lower().startswith(subject_anchor[:20].lower()):
@@ -853,7 +960,13 @@ def _do_song_gpu_phase(
 
         if not prompt_to_use.strip():
             prompt_to_use = subject_anchor or "Subject in atmospheric scene, natural movement, cinematic"
-        finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
+        if _lip_sync:
+            # Match the recipe exactly: NO quality/motion suffix -- those add
+            # "calm/subtle motion" or "dynamic" cues that fight the mouth-sync.
+            # Just the subject + mouth-sync + steady-framing directive.
+            finalized = prompt_to_use
+        else:
+            finalized = _finalize_prompt(prompt_to_use, model_name, motion_style="narrative")
         if not finalized.strip():
             finalized = "Cinematic scene, natural movement, photorealistic, high quality"
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
@@ -886,7 +999,7 @@ def _do_song_gpu_phase(
                 guidance=effective_guidance,
                 seed=_seed,
                 end_image_path=clip_end_image,
-                negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
+                negative_prompt=("blurry, distorted" if _lip_sync else video_generator.negative_prompt_for(model_name, motion_style="narrative")),
                 audio_source=_audio_slice,
                 stop_check=_stopped,
                 log_fn=_log,
@@ -952,7 +1065,7 @@ def _do_song_gpu_phase(
                         guidance=effective_guidance,
                         seed=seed,
                         end_image_path=clip_end_image,
-                        negative_prompt=video_generator.negative_prompt_for(model_name, motion_style="narrative"),
+                        negative_prompt=("blurry, distorted" if _lip_sync else video_generator.negative_prompt_for(model_name, motion_style="narrative")),
                         audio_source=_audio_slice,
                         stop_check=_stopped,
                         log_fn=_log,
