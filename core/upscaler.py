@@ -26,8 +26,34 @@ _VENV_PY = Path(__file__).resolve().parent.parent / "venv-upscale" / "Scripts" /
 _AI_WORKER = Path(__file__).resolve().parent.parent / "tools" / "ai_upscale_frames.py"
 
 
+# Temp dirs get this prefix so a startup sweep can reclaim them after a hard
+# kill (a 4-min 1080p AI job stages tens of GB of frames in %TEMP%).
+_TMP_PREFIX = "dcs-upscale-"
+
+
 def _nearest_even(n: int) -> int:
     return n if n % 2 == 0 else n + 1
+
+
+def cleanup_orphan_temp() -> int:
+    """Delete leftover dcs-upscale-* temp dirs from killed jobs.
+
+    Safe at app startup: single-instance means no upscale worker can be
+    alive before the server is. Returns bytes freed (best effort).
+    """
+    import shutil
+
+    freed = 0
+    for d in Path(tempfile.gettempdir()).glob(_TMP_PREFIX + "*"):
+        if not d.is_dir():
+            continue
+        try:
+            freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        except OSError:
+            pass
+        shutil.rmtree(d, ignore_errors=True)
+        log.info("[upscale] reclaimed orphan temp dir %s", d.name)
+    return freed
 
 
 def ai_available() -> bool:
@@ -148,7 +174,7 @@ def upscale_ai(
     try:
         w, h, fps_str = _probe_video(input_path)
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(prefix=_TMP_PREFIX) as tmp:
             frames_dir = Path(tmp) / "frames"
             up_dir = Path(tmp) / "up"
             frames_dir.mkdir(); up_dir.mkdir()

@@ -254,6 +254,16 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] orphan eviction failed (non-fatal): %s", _e)
 
+    # Reclaim frame-stack temp dirs orphaned by a hard kill mid-upscale --
+    # these can be tens of GB, so never leave them to Windows temp rot.
+    try:
+        from core.upscaler import cleanup_orphan_temp
+        _freed = cleanup_orphan_temp()
+        if _freed:
+            log.info("[startup] reclaimed %.1f GB of orphaned upscale temp", _freed / 1e9)
+    except Exception as _e:
+        log.warning("[startup] upscale temp cleanup failed (non-fatal): %s", _e)
+
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 
