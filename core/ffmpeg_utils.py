@@ -27,6 +27,53 @@ def ffmpeg_available() -> bool:
     return find_ffmpeg() is not None
 
 
+_nvenc_cache: bool | None = None
+
+
+def nvenc_available() -> bool:
+    """True if NVIDIA NVENC H.264 hardware encoding actually works here.
+
+    Functionally probed once (a tiny encode), then cached -- the encoder can be
+    listed but still fail to initialise if the driver/GPU is busy or absent.
+    """
+    global _nvenc_cache
+    if _nvenc_cache is None:
+        _nvenc_cache = _probe_nvenc()
+        log.info("NVENC hardware encoding %s", "available" if _nvenc_cache else "NOT available -- using CPU x264")
+    return _nvenc_cache
+
+
+def _probe_nvenc() -> bool:
+    ff = find_ffmpeg()
+    if not ff:
+        return False
+    try:
+        # 256x256 (not smaller -- NVENC rejects tiny frames with a min-size error).
+        r = subprocess.run(
+            [ff, "-hide_banner", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1",
+             "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p5", "-f", "null", "-"],
+            capture_output=True, timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def video_encode_args(crf: int = 18, fmt: str = "mp4", prefer_gpu: bool = True) -> list[str]:
+    """Video-codec ffmpeg args, preferring NVENC (GPU) over x264/x265 (CPU).
+
+    Returns only the -c:v ... portion; callers add their own audio/output args.
+    NVENC uses constant-quality VBR (-cq), which tracks x264's -crf closely, so
+    the same numeric quality knob works for both. WebM (VP9) has no NVENC path.
+    """
+    if fmt == "webm":
+        return ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0"]
+    if prefer_gpu and nvenc_available():
+        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
+                "-cq", str(crf), "-b:v", "0", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium", "-pix_fmt", "yuv420p"]
+
+
 def probe_file(path: str | Path) -> dict:
     """Extract video metadata via ffprobe.
 

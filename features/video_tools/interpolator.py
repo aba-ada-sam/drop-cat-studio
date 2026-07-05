@@ -106,10 +106,11 @@ def _run_ffmpeg_minterpolate(job, src: str, dst: str, fps: float, mode: str) -> 
     else:
         mi_filter = f"minterpolate=fps={fps}:mi_mode=blend"
 
+    from core.ffmpeg_utils import video_encode_args
     cmd = [
         "ffmpeg", "-y", "-i", src,
         "-vf", mi_filter,
-        "-c:v", "libx264", "-crf", "17", "-preset", "fast",
+        *video_encode_args(crf=17),
         "-c:a", "copy",
         dst,
     ]
@@ -173,27 +174,40 @@ def _run_rife(job, rife_exe: str, src: str, dst: str, src_fps: float, target_fps
         if job.stop_event.is_set():
             raise RuntimeError("Cancelled")
 
+        # rife-ncnn-vulkan's -n is the TOTAL target frame count (not a multiplier),
+        # and it names output frames by -f pattern (default %08d.png). Feed it the
+        # real target count and the same "frame%08d.png" naming the re-encode reads.
+        n_in = sum(1 for f in os.listdir(frames_in) if f.lower().endswith(".png"))
+        if n_in < 2:
+            raise RuntimeError("Video has too few frames to interpolate.")
+        target_count = n_in * multiplier
+
         job.update(progress=20, message=f"Running RIFE x{multiplier}...")
-        subprocess.run([
+        rife_res = subprocess.run([
             rife_exe,
             "-i", frames_in,
             "-o", frames_out,
             "-m", "rife-v4.6",
-            "-n", str(multiplier),
-        ], check=True, capture_output=True)
+            "-n", str(target_count),
+            "-f", "frame%08d.png",
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if rife_res.returncode != 0:
+            tail = (rife_res.stderr or rife_res.stdout or "").strip().splitlines()[-4:]
+            raise RuntimeError("RIFE failed: " + (" | ".join(tail) or "no output captured"))
 
         if job.stop_event.is_set():
             raise RuntimeError("Cancelled")
 
         job.update(progress=80, message="Re-encoding with RIFE frames...")
         out_fps = src_fps * multiplier
+        from core.ffmpeg_utils import video_encode_args
         subprocess.run([
             "ffmpeg", "-y",
             "-framerate", str(out_fps),
             "-i", os.path.join(frames_out, "frame%08d.png"),
             "-i", src,
             "-map", "0:v", "-map", "1:a?",
-            "-c:v", "libx264", "-crf", "17", "-preset", "fast",
+            *video_encode_args(crf=17),
             "-c:a", "copy",
             dst,
         ], check=True, capture_output=True)

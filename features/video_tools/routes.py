@@ -221,6 +221,61 @@ async def mix_music(request: Request):
     return {"job_id": job.id}
 
 
+@router.post("/pipeline")
+async def run_video_pipeline(request: Request):
+    """Apply an ordered list of edit steps to one or more videos in a single run.
+
+    Body:
+        video_path  -- absolute path to a source video (single), OR
+        video_paths -- list of source video paths (batch; 2 encode at once)
+        steps       -- ordered list of {op, ...params}; op in
+                       upscale | sharpen | crop | transform | smooth
+        out_dir     -- optional output directory override
+    """
+    from app import get_job_manager; job_manager = get_job_manager()
+    from features.video_tools.pipeline import VALID_OPS, run_pipeline, run_pipeline_batch
+
+    body = await request.json()
+    paths = body.get("video_paths")
+    if not paths:
+        single = body.get("video_path", "")
+        paths = [single] if single else []
+    steps = body.get("steps", [])
+    out_dir = body.get("out_dir", "")
+
+    if not isinstance(paths, list) or not paths:
+        raise HTTPException(400, "No video provided")
+    for p in paths:
+        if not p or not os.path.isfile(p):
+            raise HTTPException(400, f"Video file not found: {p}")
+    if not isinstance(steps, list) or not steps:
+        raise HTTPException(400, "Add at least one step")
+    for s in steps:
+        if not isinstance(s, dict) or s.get("op") not in VALID_OPS:
+            bad = s.get("op") if isinstance(s, dict) else s
+            raise HTTPException(400, f"Invalid step: {bad}")
+
+    n_steps = len(steps)
+    if len(paths) == 1:
+        def _worker(job, sp, st, od):
+            run_pipeline(job, sp[0], st, od)
+        label = f"Edit {Path(paths[0]).name} ({n_steps} step{'s' if n_steps != 1 else ''})"
+    else:
+        def _worker(job, sp, st, od):
+            run_pipeline_batch(job, sp, st, od)
+        label = f"Edit {len(paths)} videos ({n_steps} step{'s' if n_steps != 1 else ''})"
+
+    job = job_manager.submit(JOB_VIDEO_TOOL, _worker, paths, steps, out_dir, label=label)
+    return {"job_id": job.id}
+
+
+@router.get("/interpolate")
+async def interpolate_info():
+    """Report interpolation capabilities so the UI can adapt (no install nagging)."""
+    from features.video_tools.interpolator import _find_rife
+    return {"rife_available": _find_rife() is not None}
+
+
 @router.post("/interpolate")
 async def interpolate_frames(request: Request):
     """Smooth jerky footage by generating in-between frames.
@@ -345,7 +400,7 @@ async def start_crop(request: Request):
         keep_audio -- bool (default True)
     """
     from app import get_job_manager; job_manager = get_job_manager()
-    from core.ffmpeg_utils import probe_file, round_even
+    from core.ffmpeg_utils import probe_file, round_even, video_encode_args
     import datetime
     import subprocess
 
@@ -393,8 +448,7 @@ async def start_crop(request: Request):
         cmd = [
             "ffmpeg", "-y", "-i", src,
             "-vf", f"crop={cw}:{ch}:{cx}:{cy}",
-            "-c:v", "libx264", "-crf", str(crf_val), "-preset", "medium",
-            "-pix_fmt", "yuv420p",
+            *video_encode_args(crf=int(crf_val)),
         ]
         if keep_aud and has_audio:
             cmd += ["-c:a", "copy"]

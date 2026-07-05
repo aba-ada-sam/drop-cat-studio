@@ -8,7 +8,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from core.ffmpeg_utils import probe_file
+from core.ffmpeg_utils import probe_file, video_encode_args
 
 log = logging.getLogger(__name__)
 
@@ -118,16 +118,11 @@ def build_ffmpeg_cmd(src: str, dst: str, settings: dict) -> list[str]:
     if has_audio and afilters:
         cmd += ["-af", ",".join(afilters)]
 
-    if fmt == "webm":
-        cmd += ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0"]
-        if has_audio:
-            cmd += ["-c:a", "libopus", "-b:a", "192k"]
+    # GPU (NVENC) encode when available, else CPU x264 -- see video_encode_args.
+    cmd += video_encode_args(crf=crf, fmt=fmt)
+    if has_audio:
+        cmd += ["-c:a", "libopus", "-b:a", "192k"] if fmt == "webm" else ["-c:a", "aac", "-b:a", "256k"]
     else:
-        cmd += ["-c:v", "libx264", "-crf", str(crf), "-preset", "medium"]
-        if has_audio:
-            cmd += ["-c:a", "aac", "-b:a", "256k"]
-
-    if not has_audio:
         cmd += ["-an"]
 
     cmd.append(dst)

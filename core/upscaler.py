@@ -131,12 +131,12 @@ def upscale_ffmpeg(
         new_w = _nearest_even(int(w * scale))
         new_h = _nearest_even(int(h * scale))
 
+        from core.ffmpeg_utils import video_encode_args
         cmd = ["ffmpeg", "-y", "-i", input_path]
         if scale != 1.0:
             cmd += ["-vf", f"scale={new_w}:{new_h}:flags=lanczos"]
-        cmd += ["-c:v", "libx264", "-crf", str(int(crf)), "-preset", preset,
-                "-c:a", "copy",
-                output_path]
+        cmd += video_encode_args(crf=int(crf))
+        cmd += ["-c:a", "copy", output_path]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if r.returncode != 0:
             return None, f"ffmpeg upscale failed: {r.stderr[-400:]}"
@@ -231,6 +231,7 @@ def upscale_ai(
             # Re-encode preserving audio
             if progress_cb:
                 progress_cb(0.98, "Encoding output...")
+            from core.ffmpeg_utils import video_encode_args
             r = subprocess.run(
                 ["ffmpeg", "-y",
                  "-framerate", fps_str,
@@ -238,8 +239,7 @@ def upscale_ai(
                  "-i", input_path,
                  "-map", "0:v", "-map", "1:a?",
                  "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                 "-pix_fmt", "yuv420p",
-                 "-c:v", "libx264", "-crf", str(int(crf)), "-preset", "fast",
+                 *video_encode_args(crf=int(crf)),
                  "-c:a", "copy", "-shortest",
                  output_path],
                 capture_output=True, timeout=3600,
