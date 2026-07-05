@@ -406,17 +406,20 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
                           video_prompt: str = "", force_vision: bool = False) -> dict:
     """Suggest music direction for a video.
 
-    When frames are provided and Ollama is the active provider, sends them for
-    visual analysis.  When no frames are given (or a cloud provider is active),
-    falls back to text-only generation from user_direction + video_prompt.
+    When frames are provided and an uncensored provider (Featherless / KoboldCpp)
+    is active, sends them for visual analysis.  When no frames are given (or a
+    filtered cloud provider is active), falls back to text-only generation from
+    user_direction + video_prompt.
 
     force_vision: when True, send the provided image/frames to the configured
-    provider's vision model -- including cloud (Anthropic/OpenAI) -- instead of
-    restricting vision to Ollama. This backs the "generate audio from the image"
-    toggle so the score is derived from what is actually in the photo. Cloud APIs
-    may refuse explicit NSFW images; the except below falls back to text-only.
+    provider's vision model -- including Anthropic/OpenAI -- instead of restricting
+    vision to the uncensored providers. This backs the "generate audio from the
+    image" toggle so the score is derived from what is actually in the photo.
+    Anthropic/OpenAI may refuse explicit NSFW images; the except below falls back
+    to text-only.
     """
-    use_vision = bool(video_frames_b64) and (force_vision or router._provider() == "ollama")
+    from core.llm_router import is_uncensored
+    use_vision = bool(video_frames_b64) and (force_vision or is_uncensored(router._provider()))
 
     if use_vision:
         # One frame = a source image; many frames = sampled from a video.
@@ -426,9 +429,9 @@ def generate_music_prompt(router, video_frames_b64: list[str], user_direction: s
             prompt = "Analyze this image and suggest matching background music for a short video built from it."
         if user_direction:
             prompt += f'\nCreative direction: "{user_direction}"'
-        # Pin to Ollama only when it is the active provider; when force_vision is
-        # set on a cloud provider, route_vision must use that cloud provider.
-        _vp = "ollama" if router._provider() == "ollama" else None
+        # Pin to the uncensored provider when it is active; when force_vision is
+        # set on a filtered cloud provider, route_vision uses that provider.
+        _vp = router._provider() if is_uncensored(router._provider()) else None
         try:
             text = router.route_vision(
                 prompt, video_frames_b64,

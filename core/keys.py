@@ -51,65 +51,57 @@ def save_keys(**kwargs):
         cfg.save(updates)
 
 
-# -- Ollama helpers ------------------------------------------------
+# -- Uncensored backend helpers (Featherless cloud / KoboldCpp local) ---------
+# Ollama was removed 2026-07-05; the uncensored LLM/vision role is now served by
+# Featherless (default) or a local KoboldCpp. See core/llm_client.py.
 
-def _split_url(url: str) -> tuple[str, str, int, str]:
-    """Crude URL splitter: returns (scheme, host, port, path)."""
-    from urllib.parse import urlparse
-    p = urlparse(url)
-    scheme = p.scheme or "http"
-    host = p.hostname or "localhost"
-    port = p.port or (443 if scheme == "https" else 80)
-    return scheme, host, port, (p.path or "")
-
-
-def get_ollama_host() -> str:
-    """Return the Ollama base URL. Auto-discovers on LAN when the configured
-    host is remote and unreachable (only when auto_discover_satellite is True)."""
-    raw = cfg.get("ollama_host") or "http://localhost:11434"
+def get_featherless_key() -> str:
+    """Return the Featherless API key from config or the credentials key file."""
+    val = cfg.get("featherless_key") or ""
+    if val:
+        return val
+    key_file = cfg.get("featherless_key_file") or r"C:\JSON Credentials\featherless_api_key.txt"
     try:
-        scheme, host, port, _ = _split_url(raw)
-    except Exception:
-        return raw
-    if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0"):
-        return raw
-    if not cfg.get("auto_discover_satellite"):
-        return raw
-    try:
-        from core import satellite_discovery as _disc
-        found = _disc.discover(
-            port=port,
-            health_path="/api/tags",
-            cached_host=host,
-            hostname_hints=cfg.get("satellite_hostnames"),
-            log_label="ollama",
-        )
-    except Exception:
-        return raw
-    if not found or found == host:
-        return raw
-    new_url = f"{scheme}://{found}:{port}"
-    try:
-        cfg.set_val("ollama_host", new_url)
+        p = Path(key_file)
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
     except Exception:
         pass
-    return new_url
+    return ""
 
 
-def get_ollama_models() -> list[str]:
+def uncensored_provider() -> str:
+    """Which uncensored backend is preferred: 'featherless' (cloud) or 'kobold'."""
+    return cfg.get("uncensored_provider") or "featherless"
+
+
+def list_uncensored_models() -> list[str]:
+    """List models from the active uncensored backend.
+
+    For Featherless this catalog is thousands of entries, which is useless for a
+    picker and expensive to fetch -- the model is a free-text field, so we return
+    []. For a local KoboldCpp it's the single loaded model (cheap + useful).
+    """
+    if uncensored_provider() != "kobold":
+        return []
     try:
-        import ollama
-        client = ollama.Client(host=get_ollama_host())
-        return [m.model for m in client.list().models]
+        from core.llm_client import LLMClient
+        return LLMClient().list_models("kobold")
     except Exception:
         return []
 
 
 def status() -> dict:
+    """Availability of the uncensored LLM backend (for the settings/status UI).
+
+    Lightweight: does NOT enumerate the (huge) Featherless catalog -- /api/system
+    polls this every 15s, so availability is just "key present" / "server up".
+    """
+    prov = uncensored_provider()
     try:
-        import ollama
-        client = ollama.Client(host=get_ollama_host())
-        models = [m.model for m in client.list().models]
-        return {"available": True, "models": models}
+        from core.llm_client import LLMClient
+        available = LLMClient().is_available(prov)
     except Exception:
-        return {"available": False, "models": []}
+        available = False
+    return {"available": available, "provider": prov,
+            "models": list_uncensored_models() if (available and prov == "kobold") else []}

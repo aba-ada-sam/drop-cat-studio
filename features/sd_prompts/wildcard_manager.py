@@ -1,7 +1,8 @@
 """AI-powered wildcard file curation operations.
 
 Ported from DropCatGo-SD-Prompts/wildcard_manager.py (Gradio -> REST).
-Provides prune, expand, merge, audit, and auto-curator workflows via Ollama.
+Provides prune, expand, merge, audit, and auto-curator workflows via the LLM
+router (uncensored provider = Featherless / KoboldCpp).
 """
 import logging
 import os

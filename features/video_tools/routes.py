@@ -264,3 +264,181 @@ async def interpolate_frames(request: Request):
         label=f"Interpolate {src.name}",
     )
     return {"job_id": job.id}
+
+
+# -- Crop / Reframe -----------------------------------------------------------
+
+def _extract_crop_frame_b64(video_path: str, seek_sec: float, max_dim: int = 960) -> str | None:
+    """Extract one frame at an absolute timestamp as a base64 JPEG (no data: prefix)."""
+    import base64
+    import subprocess
+    try:
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", f"{max(0.0, seek_sec):.3f}",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-vf", f"scale='min({max_dim},iw)':'-2'",
+                "-f", "image2", "-c:v", "mjpeg", "-q:v", "3",
+                "pipe:1",
+            ],
+            capture_output=True, timeout=30,
+        )
+        if r.returncode == 0 and r.stdout:
+            return base64.b64encode(r.stdout).decode()
+    except Exception as e:
+        log.debug("_extract_crop_frame_b64(%s @ %.2fs) failed: %s", video_path, seek_sec, e)
+    return None
+
+
+@router.post("/crop-frames")
+async def crop_frames(request: Request):
+    """Return 3 preview frames sampled from the first 30s of a video, plus its
+    native dimensions, so the UI can draw a crop marquee against real footage.
+
+    Body: { video_path }
+    Returns: { width, height, duration, frames: [{ t, b64 }] }
+    """
+    from core.ffmpeg_utils import probe_file
+
+    body = await request.json()
+    video_path = body.get("video_path", "")
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, "Video file not found")
+
+    def _work():
+        info = probe_file(video_path)
+        w, h = info.get("width"), info.get("height")
+        dur = float(info.get("duration") or 0.0)
+        if not w or not h:
+            raise HTTPException(422, "Could not read video dimensions")
+
+        # Sample within the first 30s (or the whole clip if shorter), avoiding
+        # the very first/last frames which are often black or motion-blurred.
+        window = min(30.0, dur) if dur > 0 else 30.0
+        fracs = [0.12, 0.5, 0.88]
+        frames = []
+        for fr in fracs:
+            t = fr * window
+            if dur > 0:
+                t = max(0.1, min(t, dur - 0.05))
+            b64 = _extract_crop_frame_b64(video_path, t)
+            if b64:
+                frames.append({"t": round(t, 2), "b64": b64})
+        if not frames:
+            raise HTTPException(500, "Could not extract preview frames -- is ffmpeg installed?")
+        return {"width": int(w), "height": int(h), "duration": round(dur, 2), "frames": frames}
+
+    return await asyncio.to_thread(_work)
+
+
+@router.post("/crop")
+async def start_crop(request: Request):
+    """Crop a single video to a rectangle chosen in the UI, re-encoding the
+    whole clip. The rect is given in normalized 0..1 coordinates of the source
+    frame so it is resolution-independent.
+
+    Body:
+        video_path -- absolute path to the source video
+        rect       -- { x, y, w, h } as fractions (0..1) of source width/height
+        keep_audio -- bool (default True)
+    """
+    from app import get_job_manager; job_manager = get_job_manager()
+    from core.ffmpeg_utils import probe_file, round_even
+    import datetime
+    import subprocess
+
+    body = await request.json()
+    video_path = body.get("video_path", "")
+    rect = body.get("rect", {}) or {}
+    keep_audio = bool(body.get("keep_audio", True))
+
+    if not video_path or not os.path.isfile(video_path):
+        raise HTTPException(400, "Video file not found")
+    try:
+        rx = float(rect["x"]); ry = float(rect["y"])
+        rw = float(rect["w"]); rh = float(rect["h"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(422, "rect must have numeric x, y, w, h")
+    if not (rw > 0 and rh > 0):
+        raise HTTPException(422, "crop width/height must be positive")
+
+    config = cfg.load()
+    out_dir = body.get("out_dir", "") or config.get("tools_out_dir", "") or str(OUTPUT_DIR)
+    crf = int(config.get("tools_crf", 18))
+
+    def _worker(job, src, r, keep_aud, base_out_dir, crf_val):
+        info = probe_file(src)
+        W, H = info.get("width"), info.get("height")
+        has_audio = info.get("has_audio", False)
+        dur = float(info.get("duration") or 0.0)
+        if not W or not H:
+            raise RuntimeError("Could not read video dimensions")
+
+        # Normalized rect -> even source pixels, clamped inside the frame.
+        cw = max(2, min(round_even(r["w"] * W), W - (W % 2)))
+        ch = max(2, min(round_even(r["h"] * H), H - (H % 2)))
+        cx = int(round(r["x"] * W)); cy = int(round(r["y"] * H))
+        cx = max(0, min(cx, W - cw)); cy = max(0, min(cy, H - ch))
+
+        src_p = Path(src)
+        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        dest_dir = Path(base_out_dir) / date_str
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dst = dest_dir / f"{src_p.stem}_cropped_{cw}x{ch}.mp4"
+
+        job.update(progress=8, message=f"Cropping to {cw}x{ch}...")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", src,
+            "-vf", f"crop={cw}:{ch}:{cx}:{cy}",
+            "-c:v", "libx264", "-crf", str(crf_val), "-preset", "medium",
+            "-pix_fmt", "yuv420p",
+        ]
+        if keep_aud and has_audio:
+            cmd += ["-c:a", "copy"]
+        else:
+            cmd += ["-an"]
+        cmd += ["-progress", "pipe:1", "-nostats", str(dst)]
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        try:
+            for line in proc.stdout or []:
+                if job.stop_event.is_set():
+                    proc.kill()
+                    return
+                if line.startswith("out_time=") and dur > 0:
+                    ts = line.strip().split("=", 1)[1]
+                    try:
+                        hh, mm, ss = ts.split(":")
+                        secs = int(hh) * 3600 + int(mm) * 60 + float(ss)
+                        job.update(progress=min(95, 8 + int(secs / dur * 87)),
+                                   message=f"Cropping to {cw}x{ch}...")
+                    except (ValueError, ZeroDivisionError):
+                        pass
+        finally:
+            proc.wait()
+
+        if job.stop_event.is_set():
+            return
+        if proc.returncode != 0 or not dst.exists():
+            raise RuntimeError("ffmpeg crop failed")
+
+        job.output = str(dst)
+        job.meta["outputs"] = [str(dst)]
+        job.meta["crop"] = {"x": cx, "y": cy, "w": cw, "h": ch}
+        job.message = f"Cropped to {cw}x{ch}"
+        try:
+            from core.inbox import copy_to_inbox; copy_to_inbox(str(dst))
+        except Exception:
+            pass
+        from core.session import get_current as get_session
+        get_session().add_file(dst.name, "video", "video_tools", path=str(dst))
+
+    job = job_manager.submit(
+        JOB_VIDEO_TOOL, _worker, video_path,
+        {"x": rx, "y": ry, "w": rw, "h": rh}, keep_audio, out_dir, crf,
+        label=f"Crop {Path(video_path).name}",
+    )
+    return {"job_id": job.id}

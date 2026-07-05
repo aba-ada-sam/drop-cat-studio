@@ -99,7 +99,7 @@ def main() -> int:
             r = client.get("/api/system")
             assert r.status_code == 200, r.status_code
             data = r.json()
-            assert "services" in data and "ollama" in data, f"missing keys: {list(data)}"
+            assert "services" in data and "featherless" in data, f"missing keys: {list(data)}"
             assert "encoders" in data, "no encoders"
         _test("GET /api/system", system_info)
 
@@ -194,7 +194,7 @@ def main() -> int:
             assert "current" in data, "missing 'current' key"
             assert "history" in data, "missing 'history' key"
             assert isinstance(data["history"], list), "history must be list"
-            assert data["current"] is None or data["current"] in ("wangp", "acestep", "forge", "ollama"), \
+            assert data["current"] is None or data["current"] in ("wangp", "acestep", "forge"), \
                 f"unexpected current value: {data['current']!r}"
         _test("GET /api/gpu/status returns expected shape", gpu_status_shape)
 

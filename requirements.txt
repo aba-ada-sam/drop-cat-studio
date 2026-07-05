@@ -3,9 +3,9 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 Pillow>=10.0.0
-ollama>=0.4.0
 
-# Cloud AI providers (required if using Anthropic/OpenAI instead of Ollama)
+# AI providers. The OpenAI SDK also drives the uncensored backends (Featherless
+# cloud + local KoboldCpp), which are OpenAI-compatible. (Ollama removed 2026-07-05.)
 anthropic>=0.25.0
 openai>=1.20.0
 

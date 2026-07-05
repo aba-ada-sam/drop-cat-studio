@@ -386,42 +386,27 @@ async def video_frame(
 def _require_ai():
     """Raise HTTP 503 if no AI provider is available."""
     from core import config as cfg
-    from core.keys import get_key, status as ollama_status, get_ollama_models
-    provider = cfg.get("llm_provider") or "auto"
+    from core.keys import get_key, status as uncensored_status
+    from core.llm_router import is_uncensored, _PROVIDER_ALIASES
+    provider = _PROVIDER_ALIASES.get(cfg.get("llm_provider"), cfg.get("llm_provider")) or "auto"
     if provider in ("anthropic", "openai"):
         if not get_key(provider):
             raise HTTPException(503, f"{provider.title()} selected but no API key configured")
         return
-    if provider == "ollama":
-        # Soft check: if Ollama is reachable, verify the model is installed.
-        # If Ollama is temporarily unreachable (GPU pressure, etc.), don't
-        # pre-fail -- let the actual LLM call handle retries.
-        st = ollama_status()
-        if st.get("available"):
-            needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
-            installed = get_ollama_models()
-            if installed and not any(m.startswith(needed.split(":")[0]) for m in installed):
-                raise HTTPException(
-                    503,
-                    f"Vision model '{needed}' not found in Ollama. "
-                    f"Installed: {', '.join(installed)}. "
-                    f"Run: ollama pull {needed}"
-                )
+    if is_uncensored(provider):
+        # Uncensored backend (Featherless cloud / local KoboldCpp). Soft check:
+        # if it isn't reachable/configured right now, don't pre-fail -- let the
+        # actual LLM call handle retries and surface a precise error.
         return
     # auto mode: need at least one working provider
     if get_key("anthropic") or get_key("openai"):
         return
-    st = ollama_status()
+    st = uncensored_status()
     if not st.get("available"):
-        raise HTTPException(503, "No AI provider available -- add an Anthropic/OpenAI key or start Ollama")
-    needed = cfg.get("ollama_balanced_model") or "qwen3-vl:8b"
-    installed = get_ollama_models()
-    if installed and not any(m.startswith(needed.split(":")[0]) for m in installed):
         raise HTTPException(
             503,
-            f"Vision model '{needed}' not found in Ollama. "
-            f"Installed: {', '.join(installed)}. "
-            f"Run: ollama pull {needed}"
+            "No AI provider available -- add an Anthropic/OpenAI key, or configure "
+            "Featherless (or a local KoboldCpp) for the uncensored path.",
         )
 
 
@@ -1218,9 +1203,11 @@ async def brainstorm(request: Request):
             last_exc = exc
             msg = str(exc).lower()
             is_timeout = "timeout" in msg or "timed out" in msg
-            is_ollama  = (llm_router._provider() if not _force else _force) == "ollama"
-            if is_timeout and is_ollama and _cloud_force and _force is None:
-                log.info("[brainstorm] Ollama timeout -- retrying via %s", _cloud_force)
+            # Only a LOCAL KoboldCpp benefits from a cloud retry on timeout
+            # (cloud providers already retry internally).
+            is_local  = (llm_router._provider() if not _force else _force) == "kobold"
+            if is_timeout and is_local and _cloud_force and _force is None:
+                log.info("[brainstorm] local KoboldCpp timeout -- retrying via %s", _cloud_force)
                 continue
             break  # non-retryable error
 
@@ -1253,19 +1240,19 @@ async def brainstorm(request: Request):
         from core.llm_router import _looks_like_safety_refusal
         if _looks_like_safety_refusal(result):
             try:
-                from services.manager import ollama_alive
-                ollama_running = ollama_alive()
+                from core.keys import status as _unc_status
+                uncensored_ok = bool(_unc_status().get("available"))
             except Exception:
-                ollama_running = False
-            if ollama_running:
-                friendly = ("The cloud AI couldn't analyse this image and the local "
+                uncensored_ok = False
+            if uncensored_ok:
+                friendly = ("The cloud AI couldn't analyse this image and the uncensored "
                             "fallback didn't produce a useful description either. "
                             "Try a different image, or write the brief yourself.")
             else:
                 friendly = ("The cloud AI declined to analyse this image (content policy). "
-                            "Start Ollama (Services tab) so DCS can fall back to a local "
-                            "vision model that handles all images, or type the brief "
-                            "yourself in the textbox.")
+                            "Configure Featherless (or a local KoboldCpp) in Settings so DCS "
+                            "can fall back to an uncensored vision model that handles all "
+                            "images, or type the brief yourself in the textbox.")
             return {"idea": None, "lyric_direction": None, "reply": friendly}
     else:
         log.info("[brainstorm] mode=%s reply=%r idea=%r lyric=%r",

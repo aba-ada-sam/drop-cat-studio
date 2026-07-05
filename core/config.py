@@ -39,15 +39,17 @@ DEFAULTS: dict = {
     "satellite_hostnames": ["study", "study.local", "dcs-satellite", "dcs-satellite.local"],
 
     # -- LLM Provider -----------------------------------------------------
-    "llm_provider": "anthropic",      # anthropic | openai | ollama | auto
+    "llm_provider": "anthropic",      # anthropic | openai | featherless | kobold | auto
     "anthropic_key": "",
     "openai_key": "",
-    # Ollama is OFF by default. It's only used when the user explicitly opts in:
-    #   * llm_provider == "ollama" (explicit selection), OR
-    #   * allow_ollama_fallback == True AND no cloud key is configured
-    # Vision calls that historically defaulted to Ollama (NSFW-safe) now route to
-    # cloud unless this flag is on and Ollama is reachable.
-    "allow_ollama_fallback": False,
+    # The uncensored provider (Featherless cloud, or local KoboldCpp) is OFF by
+    # default. It's only used when the user explicitly opts in:
+    #   * llm_provider == "featherless" / "kobold" (explicit selection), OR
+    #   * allow_uncensored_fallback == True AND no Anthropic/OpenAI key is configured
+    # NSFW image analysis that Anthropic/OpenAI refuse transparently retries on the
+    # uncensored provider (see core/llm_router.py).  (Ollama removed 2026-07-05.)
+    "allow_uncensored_fallback": False,
+    "uncensored_provider": "featherless",   # featherless (cloud) | kobold (local)
 
     # -- Image Provider ----------------------------------------------------
     "image_provider": "forge",        # forge | openai
@@ -100,7 +102,7 @@ DEFAULTS: dict = {
 
     # -- SD Prompts (sd_) -------------------------------------------------
     "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
-    "sd_model": "ollama",  # uses ollama_power_model via llm_router
+    "sd_model": "featherless",  # legacy passthrough token; provider is chosen by llm_provider
     "forge_url": "http://127.0.0.1:7861",
     "forge_default_sampler": "DPM++ 3M SDE",
     "forge_default_scheduler": "Karras",
@@ -113,7 +115,7 @@ DEFAULTS: dict = {
     "sd_step1_default_shape":    "single",   # "single" | "regional"
     "sd_step1_default_source":   "vague",    # "vague" | "paste"
     "sd_step1_default_suffix":   "",
-    "sd_step1_default_provider": "local",    # "local" (Ollama) | "cloud" (Anthropic/OpenAI)
+    "sd_step1_default_provider": "local",    # "local" (uncensored: Featherless/KoboldCpp) | "cloud" (Anthropic/OpenAI)
 
     # -- Video Tools (tools_) ---------------------------------------------
     "tools_crf": 18,
@@ -125,18 +127,29 @@ DEFAULTS: dict = {
     # without digging through dated output/ subfolders. Set to "" to disable.
     "review_copy_dir": "C:\\Users\\andre\\Desktop\\DCG",
 
-    # -- Ollama (local AI -- no API keys required) -------------------------
-    # qwen3-vl supports vision (images) and text; swap for any installed model.
-    "ollama_host":           "http://localhost:11434",
-    "ollama_fast_model":     "qwen3-vl:8b",
-    "ollama_balanced_model": "qwen3-vl:8b",
-    "ollama_power_model":    "qwen3-vl:30b",
-    "ollama_vision_model":   "qwen3-vl:8b",
+    # -- Uncensored LLM: Featherless (cloud, default) ----------------------
+    # OpenAI-compatible; model-per-request; Qwen3-VL handles vision. Key is read
+    # from featherless_key (Settings) or the featherless_key_file below.
+    "featherless_base":          "https://api.featherless.ai/v1",
+    "featherless_key":           "",
+    "featherless_key_file":      r"C:\JSON Credentials\featherless_api_key.txt",
+    "featherless_text_model":    "Steelskull/L3.3-MS-Nevoria-70b",
+    "featherless_vision_model":  "Qwen/Qwen3-VL-32B-Instruct",
 
-    # -- AI model aliases (mapped to Ollama) -------------------------------
-    "ai_model_fast":     "qwen3-vl:8b",
-    "ai_model_balanced": "qwen3-vl:8b",
-    "ai_model_power":    "qwen3-vl:30b",
+    # -- Uncensored LLM: KoboldCpp (local, optional) -----------------------
+    # OpenAI-compatible endpoint of a local KoboldCpp (one loaded model at a
+    # time). Blank kobold_model = whatever model KoboldCpp currently has loaded.
+    "kobold_base":          "http://localhost:5001/v1",
+    "kobold_model":         "",
+    "kobold_vision_model":  "",
+
+    # -- AI model tier overrides (Anthropic/OpenAI) ------------------------
+    # Blank = use each provider's built-in per-tier default (see llm_router).
+    # (Must stay blank/provider-appropriate -- setting a local model name here
+    # would be sent verbatim to Anthropic/OpenAI and 404.)
+    "ai_model_fast":     "",
+    "ai_model_balanced": "",
+    "ai_model_power":    "",
 
 }
 

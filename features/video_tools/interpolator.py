@@ -9,6 +9,7 @@ Two modes:
 Typical use: footage that was time-stretched or squeezed in an NLE,
 leaving segments with very few real frames per second.
 """
+import collections
 import logging
 import os
 import shutil
@@ -24,6 +25,27 @@ RIFE_SEARCH_PATHS = [
     r"C:\rife-ncnn-vulkan\rife-ncnn-vulkan.exe",
     r"C:\tools\rife-ncnn-vulkan\rife-ncnn-vulkan.exe",
 ]
+
+
+def _describe_unreadable(path: str) -> str:
+    """Ask ffprobe why a file won't open and return a short, plain-English reason."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_streams", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        err = (r.stderr or "").strip()
+    except Exception as e:  # noqa: BLE001 -- best-effort diagnostic
+        err = str(e)
+    low = err.lower()
+    if "moov atom not found" in low:
+        return ("the file is incomplete or corrupt (no 'moov' index) -- it was most "
+                "likely never finished writing. Re-export it or pick an intact copy.")
+    if "invalid data found" in low:
+        return "the file is corrupt or not a valid video."
+    if err:
+        return err.splitlines()[-1]
+    return "ffprobe found no readable video stream in it."
 
 
 def _find_rife() -> str | None:
@@ -52,6 +74,11 @@ def interpolate_video(
     mode       -- "blend", "mci", or "rife"
     """
     info = probe_file(src)
+    if not info.get("width"):
+        # probe_file swallows failures and returns defaults, so a missing width
+        # means ffprobe could not actually read the file. Fail early with a reason
+        # the user can act on instead of letting ffmpeg die on it later.
+        raise RuntimeError(f"Can't read '{Path(src).name}': {_describe_unreadable(src)}")
     src_fps = float(info.get("fps", 24))
 
     if target_fps <= src_fps:
@@ -94,11 +121,14 @@ def _run_ffmpeg_minterpolate(job, src: str, dst: str, fps: float, mode: str) -> 
         text=True, encoding="utf-8", errors="replace",
     )
     duration_sec = None
+    tail = collections.deque(maxlen=12)  # keep last lines to explain a failure
     for line in proc.stdout:
         if job.stop_event.is_set():
             proc.terminate()
             raise RuntimeError("Cancelled")
         line = line.strip()
+        if line:
+            tail.append(line)
         if "Duration:" in line and duration_sec is None:
             try:
                 t = line.split("Duration:")[1].split(",")[0].strip()
@@ -118,7 +148,8 @@ def _run_ffmpeg_minterpolate(job, src: str, dst: str, fps: float, mode: str) -> 
 
     proc.wait()
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg minterpolate failed (exit {proc.returncode})")
+        detail = " | ".join(t for t in tail) or "no output captured"
+        raise RuntimeError(f"ffmpeg {mode} interpolation failed: {detail[-500:]}")
     job.update(progress=97, message="Interpolation complete")
 
 

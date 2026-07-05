@@ -1,22 +1,27 @@
-"""LLM client backed by local Ollama -- no API keys required.
+"""Uncensored LLM client -- OpenAI-compatible backends (Featherless / KoboldCpp).
 
-Replaces the Anthropic/OpenAI client. All AI calls route through the local
-Ollama daemon (http://localhost:11434 by default). Models are selected by
-tier; defaults match the qwen3-vl vision models already installed.
+Replaces the former local-Ollama client (Ollama was uninstalled 2026-07-05).
+The "uncensored" role -- a provider that analyses NSFW images and never refuses
+content -- is now served by:
+
+  * Featherless (cloud, default): https://api.featherless.ai/v1  -- OpenAI-compatible,
+    model-per-request, Qwen3-VL for vision. No local GPU use (no contention with
+    WanGP / ACE-Step / Forge).
+  * KoboldCpp (local, optional):  http://localhost:5001/v1        -- OpenAI-compatible,
+    one loaded model at a time. Runs on the local GPU.
+
+Both speak the OpenAI Chat Completions API, so a single client serves them; the
+`provider` argument ("featherless" | "kobold") selects base URL, key and models
+from config at call time (so Settings changes apply without a restart).
 """
 import base64
 import io
 import json
 import logging
 import re
-import threading
 from pathlib import Path
 
-# Serialises all Ollama calls to one at a time.
-# qwen3-vl is a large model; running two vision calls concurrently causes
-# VRAM thrashing and 3-minute timeouts. All callers (pipeline + UI routes)
-# share this lock so the GPU only ever runs one inference at a time.
-_ollama_lock = threading.Lock()
+from core import config as cfg
 
 log = logging.getLogger(__name__)
 
@@ -25,14 +30,9 @@ TIER_FAST     = "fast"      # quick responses, lighter model
 TIER_BALANCED = "balanced"  # all-round quality
 TIER_POWER    = "power"     # deep analysis, best model
 
-DEFAULT_OLLAMA_MODELS = {
-    TIER_FAST:     "gemma4:e4b",
-    TIER_BALANCED: "gemma4:e4b",
-    TIER_POWER:    "gemma4:26b",
-}
-
-# Phrases that indicate Ollama cannot load a model due to RAM/VRAM shortage.
-# These are permanent failures -- retrying the same model won't help.
+# Phrases that indicate a LOCAL backend (KoboldCpp) cannot load a model due to
+# RAM/VRAM shortage. These are permanent failures -- retrying won't help.
+# (Cloud Featherless never OOMs on our side.)
 _OOM_PHRASES = (
     "more system memory",
     "requires more system memory",
@@ -44,188 +44,145 @@ _OOM_PHRASES = (
 )
 
 
-def _is_ollama_oom(exc: Exception) -> bool:
+def _is_oom(exc: Exception) -> bool:
     s = str(exc).lower()
     return any(p in s for p in _OOM_PHRASES)
 
 
-def _disable_thinking(system: str, model: str) -> str:
-    """Append /no_think for qwen3 models to prevent thinking mode from
-    consuming the entire token budget on structured-output requests."""
-    if "qwen3" in model.lower():
-        return system.rstrip() + "\n\n/no_think"
-    return system
+def _strip_think(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks some served models emit."""
+    if not text:
+        return text
+    if "<think>" in text:
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+        # Unclosed <think> (truncated by max_tokens): drop the dangling opener.
+        if text.startswith("<think>"):
+            text = text[len("<think>"):].strip()
+    return text
 
 
-def _extract_content(resp) -> str:
-    """Pull text content from an Ollama response, handling qwen3 thinking edge cases."""
-    content = resp.message.content or ""
-    # Strip inline <think> blocks that some Ollama versions leave in content
-    if "<think>" in content:
-        content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
-    if content.strip():
-        return content
+def _read_key_file(path: str) -> str:
+    try:
+        p = Path(path)
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        log.debug("could not read key file %s: %s", path, e)
+    return ""
 
-    # Content empty -- fall back to thinking field (Ollama 0.9+ with thinking models).
-    # qwen3-vl sometimes puts the entire answer inside the thinking chain even when
-    # think=False is requested. The actual JSON is usually the last code-fenced block
-    # or the last balanced JSON object in the reasoning text.
-    thinking = getattr(resp.message, "thinking", None) or ""
-    if not thinking:
-        return content
 
-    log.warning("Response content empty, extracting from thinking field (len=%d)", len(thinking))
+def _backend_config(provider: str) -> dict:
+    """Resolve base_url / api_key / models for an uncensored provider from config.
 
-    # 1. Last ```json ... ``` fence in thinking
-    fences = list(re.finditer(r'```(?:json)?\s*([\s\S]+?)```', thinking))
-    if fences:
-        return fences[-1].group(1).strip()
-
-    # 2. Last syntactically valid JSON object/array
-    for m in reversed(list(re.finditer(r'[\[{][\s\S]*?[\]}]', thinking))):
-        try:
-            json.loads(m.group())
-            return m.group()
-        except Exception:
-            continue
-
-    # 3. Text following a conclusion marker (model often says "Here is the JSON:")
-    for marker in ("Here is the JSON:", "Final answer:", "Result:", "Therefore:"):
-        idx = thinking.rfind(marker)
-        if idx != -1:
-            rest = thinking[idx + len(marker):].strip()
-            if rest:
-                return rest
-
-    # 4. Return stripped thinking text (caller's salvage logic may still recover it).
-    # Also handle unclosed <think> (truncated by max_tokens): strip the opening tag
-    # so the caller sees the inner reasoning text rather than a literal "<think>".
-    result = re.sub(r"<think>[\s\S]*?</think>", "", thinking).strip()
-    if result.startswith("<think>"):
-        result = result[len("<think>"):].strip()
-    return result
+    Read fresh on every call so Settings edits take effect without a restart.
+    """
+    if provider == "kobold":
+        return {
+            "base_url": (cfg.get("kobold_base") or "http://localhost:5001/v1").rstrip("/"),
+            # KoboldCpp ignores the key but the OpenAI SDK requires a non-empty string.
+            "api_key": "sk-no-key-required",
+            "text_model":   cfg.get("kobold_model") or "koboldcpp",
+            "vision_model": cfg.get("kobold_vision_model") or cfg.get("kobold_model") or "koboldcpp",
+        }
+    # default: featherless (cloud)
+    key = cfg.get("featherless_key") or _read_key_file(
+        cfg.get("featherless_key_file") or r"C:\JSON Credentials\featherless_api_key.txt"
+    )
+    return {
+        "base_url": (cfg.get("featherless_base") or "https://api.featherless.ai/v1").rstrip("/"),
+        "api_key": key,
+        "text_model":   cfg.get("featherless_text_model")   or "Steelskull/L3.3-MS-Nevoria-70b",
+        "vision_model": cfg.get("featherless_vision_model") or "Qwen/Qwen3-VL-32B-Instruct",
+    }
 
 
 class LLMClient:
-    """Unified AI client backed by local Ollama with vision support.
+    """OpenAI-compatible client for the uncensored backends (Featherless / KoboldCpp).
 
     Usage:
-        client = LLMClient(host="http://localhost:11434")
-        text = client.chat("ollama", messages, tier=TIER_BALANCED)
-        text = client.chat_with_images("ollama", prompt, images_b64, tier=TIER_POWER)
+        client = LLMClient()
+        text = client.chat("featherless", messages, tier=TIER_BALANCED)
+        text = client.chat_with_images("featherless", prompt, images_b64, tier=TIER_POWER)
     """
 
-    def __init__(
-        self,
-        host: str = "http://localhost:11434",
-        fast_model: str = DEFAULT_OLLAMA_MODELS[TIER_FAST],
-        balanced_model: str = DEFAULT_OLLAMA_MODELS[TIER_BALANCED],
-        power_model: str = DEFAULT_OLLAMA_MODELS[TIER_POWER],
-        vision_model: str = "qwen3-vl:8b",   # always used for image analysis
-    ):
-        self._host = host
-        self._models = {
-            TIER_FAST:     fast_model,
-            TIER_BALANCED: balanced_model,
-            TIER_POWER:    power_model,
-        }
-        self._vision_model = vision_model
-        self._client = None
+    def __init__(self, *args, **kwargs):
+        # Positional/keyword args are accepted and ignored for backwards
+        # compatibility with the old Ollama constructor signature
+        # (host=, fast_model=, ...). All configuration now comes from config.py.
+        self._timeout = 180.0
 
-    def _get_client(self):
-        if self._client is None:
-            import httpx
-            import ollama
-            self._client = ollama.Client(
-                host=self._host,
-                timeout=httpx.Timeout(connect=10, read=45, write=30, pool=10),
+    def _client(self, provider: str):
+        from openai import OpenAI
+        conf = _backend_config(provider)
+        if not conf["api_key"]:
+            # Path kept out of the f-string expression: Python 3.10 forbids a
+            # backslash inside f-string {..} (only allowed from 3.12+).
+            key_file = cfg.get("featherless_key_file") or r"C:\JSON Credentials\featherless_api_key.txt"
+            raise RuntimeError(
+                "Featherless API key not found -- add it to "
+                f"{key_file} "
+                "or set featherless_key in Settings (or switch the LLM provider to a local KoboldCpp)."
             )
-        return self._client
+        return OpenAI(base_url=conf["base_url"], api_key=conf["api_key"], timeout=self._timeout), conf
 
-    def update_config(
-        self,
-        host: str = "",
-        fast_model: str = "",
-        balanced_model: str = "",
-        power_model: str = "",
-        vision_model: str = "",
-    ):
-        """Update Ollama host or model selections at runtime."""
-        if host and host != self._host:
-            self._host = host
-            self._client = None  # force reconnect
-        if fast_model:
-            self._models[TIER_FAST] = fast_model
-        if balanced_model:
-            self._models[TIER_BALANCED] = balanced_model
-        if power_model:
-            self._models[TIER_POWER] = power_model
-        if vision_model:
-            self._vision_model = vision_model
+    # -- old Ollama shims kept so callers/tests don't break -------------------
+
+    def update_config(self, *args, **kwargs):
+        """No-op: configuration is read from config.py on every call now."""
+        return
 
     def has_provider(self, provider: str) -> bool:
-        """Return True if Ollama is reachable (provider arg kept for compat)."""
+        return self.is_available(provider)
+
+    def is_available(self, provider: str = "featherless") -> bool:
+        """True if the given uncensored backend is usable."""
         try:
-            self._get_client().list()
-            return True
+            conf = _backend_config(provider)
+            if provider == "kobold":
+                # local: is the server up?
+                import urllib.request
+                base = conf["base_url"].rsplit("/v1", 1)[0]
+                urllib.request.urlopen(base + "/v1/models", timeout=3).read()
+                return True
+            return bool(conf["api_key"])  # featherless: key present
         except Exception:
             return False
 
-    def _model(self, tier: str) -> str:
-        return self._models.get(tier, self._models[TIER_BALANCED])
+    def list_models(self, provider: str = "featherless") -> list[str]:
+        try:
+            client, _ = self._client(provider)
+            return [m.id for m in client.models.list().data]
+        except Exception:
+            return []
+
+    # -- inference ------------------------------------------------------------
 
     def chat(
         self,
-        provider: str,          # kept for API compatibility, value ignored
+        provider: str,
         messages: list[dict],
         tier: str = TIER_BALANCED,
         max_tokens: int = 1024,
         system: str = "",
     ) -> str:
-        """Send a text chat to Ollama. Returns response text.
-
-        If the configured tier model is too large to load (OOM), automatically
-        retries with the vision model (smaller, always fits) so the job does not
-        fail with a confusing memory error.
-        """
-        model = self._model(tier)
+        """Send a text chat to the uncensored backend. Returns response text."""
+        client, conf = self._client(provider)
+        model = conf["text_model"]
         all_messages = []
         if system:
-            all_messages.append({"role": "system", "content": _disable_thinking(system, model)})
+            all_messages.append({"role": "system", "content": system})
         all_messages.extend(messages)
-
-        kwargs = dict(model=model, messages=all_messages,
-                      options={"num_predict": max_tokens})
-        if "qwen3" in model.lower():
-            kwargs["think"] = False
-        try:
-            with _ollama_lock:
-                resp = self._get_client().chat(**kwargs)
-            return _extract_content(resp)
-        except Exception as exc:
-            if _is_ollama_oom(exc) and model != self._vision_model:
-                log.warning(
-                    "Ollama OOM on %s -- falling back to %s: %s",
-                    model, self._vision_model, exc,
-                )
-                # Rebuild with the smaller vision model
-                fallback_msgs = []
-                if system:
-                    fallback_msgs.append({"role": "system",
-                                          "content": _disable_thinking(system, self._vision_model)})
-                fallback_msgs.extend(messages)
-                fb_kwargs = dict(model=self._vision_model, messages=fallback_msgs,
-                                 options={"num_predict": max_tokens})
-                if "qwen3" in self._vision_model.lower():
-                    fb_kwargs["think"] = False
-                with _ollama_lock:
-                    resp = self._get_client().chat(**fb_kwargs)
-                return _extract_content(resp)
-            raise
+        resp = client.chat.completions.create(
+            model=model, messages=all_messages, max_tokens=max_tokens,
+        )
+        if not resp.choices or resp.choices[0].message.content is None:
+            reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
+            raise ValueError(f"{provider} returned empty response (finish_reason={reason!r})")
+        return _strip_think(resp.choices[0].message.content)
 
     def chat_with_images(
         self,
-        provider: str,          # kept for API compatibility, value ignored
+        provider: str,
         prompt: str,
         images_b64: list[str],  # raw base64 strings (no data-URL prefix)
         tier: str = TIER_BALANCED,
@@ -233,69 +190,50 @@ class LLMClient:
         system: str = "",
         format_json: bool = False,
     ) -> str:
-        """Send a vision request to Ollama. Always uses the vision model (qwen3-vl),
-        not the text-tier models -- text-only models silently ignore images."""
+        """Send a vision request. Always uses the backend's vision model."""
         import time
-        model = self._vision_model
-        log.info("Ollama vision call: model=%s images=%d max_tokens=%d", model, len(images_b64), max_tokens)
-        messages = []
+        client, conf = self._client(provider)
+        model = conf["vision_model"]
+        log.info("%s vision call: model=%s images=%d max_tokens=%d",
+                 provider, model, len(images_b64), max_tokens)
+        content = [{"type": "text", "text": prompt}]
+        for img in images_b64[:5]:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img}"},
+            })
+        all_messages = []
         if system:
-            messages.append({"role": "system", "content": _disable_thinking(system, model)})
-        messages.append({
-            "role": "user",
-            "content": prompt,
-            "images": images_b64,
-        })
+            all_messages.append({"role": "system", "content": system})
+        all_messages.append({"role": "user", "content": content})
+
+        kwargs = dict(model=model, messages=all_messages, max_tokens=max_tokens)
+        if format_json:
+            kwargs["response_format"] = {"type": "json_object"}
 
         t0 = time.time()
-        kwargs = dict(model=model, messages=messages,
-                      options={"num_predict": max_tokens})
-        if "qwen3" in model.lower():
-            kwargs["think"] = False
-        if format_json:
-            kwargs["format"] = "json"
         try:
-            with _ollama_lock:
-                resp = self._get_client().chat(**kwargs)
+            resp = client.chat.completions.create(**kwargs)
         except Exception as exc:
-            if _is_ollama_oom(exc):
-                # Vision model is already the smallest configured model.
-                # Re-raise with a clear message the user can act on.
-                raise RuntimeError(
-                    f"Ollama vision model '{model}' requires more memory than available. "
-                    f"Go to Settings and set a smaller vision model (e.g. moondream:latest or llava:7b). "
-                    f"Original error: {exc}"
-                ) from exc
-            raise
-        elapsed = time.time() - t0
-        content = _extract_content(resp)
-        log.info("Ollama vision call done in %.1fs (response len=%d)", elapsed, len(content))
-        return content
-
-    def list_models(self) -> list[str]:
-        """Return names of all Ollama models installed locally."""
-        try:
-            return [m.model for m in self._get_client().list().models]
-        except Exception:
-            return []
-
-    def is_available(self) -> bool:
-        """Return True if Ollama daemon is reachable."""
-        try:
-            self._get_client().list()
-            return True
-        except Exception:
-            return False
+            if format_json and "response_format" in str(exc).lower():
+                # Backend doesn't support JSON mode -- retry without it.
+                kwargs.pop("response_format", None)
+                resp = client.chat.completions.create(**kwargs)
+            else:
+                raise
+        if not resp.choices or resp.choices[0].message.content is None:
+            reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
+            raise ValueError(f"{provider} vision returned empty response (finish_reason={reason!r})")
+        content_txt = _strip_think(resp.choices[0].message.content)
+        log.info("%s vision call done in %.1fs (response len=%d)",
+                 provider, time.time() - t0, len(content_txt))
+        return content_txt
 
 
 # -- Response parsing helpers -------------------------------------------------
 
 def parse_json_response(text: str) -> dict | list | None:
-    """Extract JSON from an LLM response that may contain markdown fences.
-
-    BUG-08: replaced fragile split-on-backtick with a regex that handles
-    ```json\\n{...}\\n``` and nested code fences correctly.
-    """
+    """Extract JSON from an LLM response that may contain markdown fences."""
     # 1. Try a fenced code block first (handles ```json ... ``` and ``` ... ```)
     fence_match = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
     if fence_match:
@@ -313,9 +251,6 @@ def parse_json_response(text: str) -> dict | list | None:
         pass
 
     # 3. Scan every { and [ position; use raw_decode so trailing text is ignored.
-    # The greedy-regex approach ([\[{][\s\S]*[\]}]) fails when the LLM's
-    # preamble contains any bracket before the JSON object, e.g. "[10 clips]" or
-    # "[verse]", causing the regex to anchor at the wrong position.
     _decoder = json.JSONDecoder()
     for i, ch in enumerate(text):
         if ch in '{[':

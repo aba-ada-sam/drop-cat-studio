@@ -12,7 +12,7 @@ import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './t
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620b';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260623a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
-import { init as initVideoTools } from './panel-video-tools.js?v=20260704b';
+import { init as initVideoTools } from './panel-video-tools.js?v=20260705a';
 import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260621a';
 import { consumeHandoff } from './handoff.js?v=20260620a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260620a';
@@ -193,7 +193,7 @@ async function runSplash() {
   setTimeout(() => { if (!settled) doExit(); }, 90000);
 
   try {
-    ['chk-server','chk-ffmpeg','chk-ollama','chk-forge','chk-wangp','chk-acestep'].forEach(id => {
+    ['chk-server','chk-ffmpeg','chk-featherless','chk-forge','chk-wangp','chk-acestep'].forEach(id => {
       const el = document.getElementById(id);
       const current = el?.querySelector('.chk-text')?.textContent || '';
       setCheck(id, 'loading', current);
@@ -210,13 +210,14 @@ async function runSplash() {
     setCheck('chk-ffmpeg', sys.ffmpeg ? 'ok' : 'warn', sys.ffmpeg ? 'ffmpeg ready' : 'ffmpeg not found');
     advanceHatOnce('ffmpeg');
 
-    const ol = sys.ollama || {};
+    const ol = sys.featherless || {};
     if (ol.available) {
-      setCheck('chk-ollama', 'ok', `Ollama ready -- ${(ol.models || []).join(', ') || 'models loaded'}`);
+      const _pl = ol.provider === 'kobold' ? 'KoboldCpp (local)' : 'Featherless';
+      setCheck('chk-featherless', 'ok', `Uncensored AI ready -- ${_pl}`);
     } else {
-      setCheck('chk-ollama', 'err', 'Ollama not running');
+      setCheck('chk-featherless', 'warn', 'Uncensored AI not configured (cloud keys still work)');
     }
-    advanceHatOnce('ollama');
+    advanceHatOnce('featherless');
 
     function updateServiceChecks(svcs) {
       const map = { forge: 'chk-forge', wangp: 'chk-wangp', acestep: 'chk-acestep' };
@@ -388,8 +389,8 @@ async function pollServices() {
         }
       }
 
-      // Text dot: update when ollama state changes
-      if (name === 'ollama') _updateTextDot(info.state);
+      // Text dot: update when the uncensored-backend state changes
+      if (name === 'featherless') _updateTextDot(info.state);
 
       // Service panel meta (IDs used by renderServicePanel)
       const svcId = name === 'forge' ? 'dot-forge-svc' : `dot-${name}`;
@@ -408,12 +409,12 @@ async function pollServices() {
   } catch (_) {}
 }
 
-function _updateTextDot(ollamaState) {
+function _updateTextDot(uncensoredState) {
   const dot = document.getElementById('ap-text-dot');
   if (!dot) return;
   const badge = document.getElementById('ai-badge');
   const isCloud = badge?.classList.contains('ai-cloud');
-  const ok = isCloud || ollamaState === 'running';
+  const ok = isCloud || uncensoredState === 'running';
   dot.className = `dot ${ok ? 'running' : 'unknown'}`;
 }
 
@@ -468,16 +469,16 @@ function renderServicePanel() {
   body.innerHTML = '';
 
   const SVC_NAMES = {
-    forge:   'Forge SD',
-    wangp:   'WanGP',
-    acestep: 'ACE-Step',
-    ollama:  'Ollama',
+    forge:       'Forge SD',
+    wangp:       'WanGP',
+    acestep:     'ACE-Step',
+    featherless: 'Uncensored AI',
   };
   const SVC_HINTS = {
-    forge:   'Stable Diffusion image generation',
-    wangp:   'AI video generation',
-    acestep: 'AI music generation',
-    ollama:  'Local LLM for prompt enhancement',
+    forge:       'Stable Diffusion image generation',
+    wangp:       'AI video generation',
+    acestep:     'AI music generation',
+    featherless: 'Uncensored LLM + vision (Featherless cloud / local KoboldCpp)',
   };
 
   for (const [name, label] of Object.entries(SVC_NAMES)) {
@@ -570,10 +571,10 @@ function _applyLLMState(llm) {
   const sel = document.getElementById('cfg-llm_provider');
   if (sel && sel.value !== provider) sel.value = provider;
 
-  // Ollama section: show when provider uses local AI
-  const showOllama = (provider === 'ollama' || provider === 'auto');
-  const ollamaSec = document.getElementById('llm-ollama-section');
-  if (ollamaSec) ollamaSec.style.display = showOllama ? '' : 'none';
+  // Uncensored section: show when the uncensored provider is in play
+  const showUncensored = (provider === 'featherless' || provider === 'kobold' || provider === 'auto');
+  const uncensoredSec = document.getElementById('llm-uncensored-section');
+  if (uncensoredSec) uncensoredSec.style.display = showUncensored ? '' : 'none';
 
   // Key hints
   const ah = document.getElementById('anthropic-key-hint');
@@ -592,41 +593,45 @@ function _applyLLMState(llm) {
   const hasAny  = llm.anthropic_key_set || llm.openai_key_set;
   if (badge) {
     badge.className = 'ai-badge ' + (isCloud ? 'ai-cloud' : hasAny ? 'ai-local' : 'ai-none');
-    badge.textContent = isCloud ? `* AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
-                                 : effective === 'ollama' ? '* AI: Local' : '* AI';
+    const _uncLabel = effective === 'kobold' ? '* AI: KoboldCpp' : effective === 'featherless' ? '* AI: Featherless' : '* AI';
+    badge.textContent = isCloud ? `* AI: ${effective.charAt(0).toUpperCase() + effective.slice(1)}` : _uncLabel;
   }
 
   // Text pill dot + label
   const textDot = document.getElementById('ap-text-dot');
   if (textDot) {
-    const ok = (isCloud && hasAny) || (_svcState.ollama?.state === 'running');
+    const ok = (isCloud && hasAny) || (_svcState.featherless?.state === 'running');
     textDot.className = `dot ${ok ? 'running' : 'unknown'}`;
   }
   const textLabel = document.querySelector('#ap-text .ap-label');
   if (textLabel) {
-    textLabel.textContent = isCloud ? `Text: ${effective.charAt(0).toUpperCase() + effective.slice(1)}`
-                                    : effective === 'ollama' ? 'Text: Local' : 'Text';
+    const _uncText = effective === 'kobold' ? 'Text: KoboldCpp' : effective === 'featherless' ? 'Text: Featherless' : 'Text';
+    textLabel.textContent = isCloud ? `Text: ${effective.charAt(0).toUpperCase() + effective.slice(1)}` : _uncText;
   }
 }
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir','ollama_host','ollama_fast_model','ollama_power_model'];
+    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
       if (el) body[key] = el.value;
     }
     // Boolean toggles (checkboxes)
-    for (const key of ['allow_ollama_fallback']) {
+    for (const key of ['allow_uncensored_fallback']) {
       const el = document.getElementById(`cfg-${key}`);
       if (el) body[key] = !!el.checked;
     }
     await apiFetch('/api/config', { method: 'POST', body: JSON.stringify(body), context: 'saveSettings' });
-    const ollamaBody = {};
-    for (const k of ['ollama_host','ollama_fast_model','ollama_power_model']) if (body[k] !== undefined) ollamaBody[k] = body[k];
-    if (Object.keys(ollamaBody).length) {
-      await apiFetch('/api/ollama/config', { method: 'POST', body: JSON.stringify(ollamaBody), context: 'saveOllama' });
+    // Uncensored backend (Featherless / KoboldCpp) settings
+    const uncensoredBody = {};
+    for (const k of ['uncensored_provider','featherless_key','featherless_text_model','featherless_vision_model','kobold_base']) {
+      const el = document.getElementById(`cfg-${k}`);
+      if (el && el.value !== '' && el.value !== undefined) uncensoredBody[k] = el.value;
+    }
+    if (Object.keys(uncensoredBody).length) {
+      await apiFetch('/api/uncensored/config', { method: 'POST', body: JSON.stringify(uncensoredBody), context: 'saveUncensored' });
     }
     const llmBody = { provider: document.getElementById('cfg-llm_provider')?.value || 'auto' };
     const anthropicKey = document.getElementById('cfg-anthropic_key')?.value;
@@ -640,17 +645,11 @@ async function saveSettings() {
   } catch (_) {}
 }
 
-async function loadOllamaModels() {
-  try {
-    const data = await apiFetch('/api/ollama/models', { context: 'loadModels' });
-    const models = data.models || [];
-    for (const selId of ['cfg-ollama_fast_model','cfg-ollama_power_model']) {
-      const sel = document.getElementById(selId);
-      if (!sel) continue;
-      const current = sel.value || state.config?.[selId.replace('cfg-', '')] || '';
-      sel.innerHTML = models.map(m => `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`).join('') || '<option value="">No models found</option>';
-    }
-  } catch (_) {}
+async function loadUncensoredModels() {
+  // The uncensored backends (Featherless / KoboldCpp) take a free-text model id,
+  // so there is no dropdown to populate. loadConfig() fills the text inputs from
+  // config. Kept as a no-op so existing call sites stay valid.
+  return;
 }
 
 async function validatePath(type) {
@@ -723,10 +722,11 @@ function initAIPills() {
     try { llm = await apiFetch('/api/llm/config', { context: 'pill.text' }); } catch (_) {}
     const current = llm.provider || 'auto';
     const PROVIDERS = [
-      { value: 'auto',      label: 'Auto',      hint: 'Best available' },
-      { value: 'anthropic', label: 'Anthropic', hint: 'Claude -- fast & smart' },
-      { value: 'openai',    label: 'OpenAI',    hint: 'GPT-4o' },
-      { value: 'ollama',    label: 'Ollama',    hint: 'Local / private' },
+      { value: 'auto',        label: 'Auto',        hint: 'Best available' },
+      { value: 'anthropic',   label: 'Anthropic',   hint: 'Claude -- fast & smart' },
+      { value: 'openai',      label: 'OpenAI',      hint: 'GPT-4o' },
+      { value: 'featherless', label: 'Featherless', hint: 'Uncensored cloud' },
+      { value: 'kobold',      label: 'KoboldCpp',   hint: 'Local / private' },
     ];
     menu.innerHTML = '<div class="ap-menu-title">Text AI</div>';
     for (const p of PROVIDERS) {
@@ -746,7 +746,7 @@ function initAIPills() {
     menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
     const link = document.createElement('button');
     link.className = 'ap-menu-link'; link.textContent = '⚙ Settings ->';
-    link.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); closeAllMenus(); });
+    link.addEventListener('click', () => { loadConfig(); loadUncensoredModels(); openModal('modal-settings'); closeAllMenus(); });
     menu.appendChild(link);
   }
 
@@ -969,7 +969,7 @@ function initPaletteItems() {
     { label: 'Infinite Zoom',    group: 'Tabs',   action: () => switchTab('zoom') },
     { label: 'Video Bridges',    group: 'Tabs',   action: () => switchTab('bridges') },
     { label: 'Video Tools',      group: 'Tabs',   action: () => switchTab('video-tools') },
-    { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); } },
+    { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadUncensoredModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
     { label: 'Start Forge SD',  group: 'Actions', action: () => svcAction('start', 'forge') },
@@ -1114,7 +1114,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Modals
-  document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadOllamaModels(); openModal('modal-settings'); });
+  document.getElementById('btn-settings')?.addEventListener('click', () => { loadConfig(); loadUncensoredModels(); openModal('modal-settings'); });
 
   // Global mute toggle -- silences every video element on the page
   let _globalMuted = false;
@@ -1138,9 +1138,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Settings
   document.getElementById('cfg-llm_provider')?.addEventListener('change', e => {
-    const showOllama = (e.target.value === 'ollama' || e.target.value === 'auto');
-    const sec = document.getElementById('llm-ollama-section');
-    if (sec) sec.style.display = showOllama ? '' : 'none';
+    const v = e.target.value;
+    const showUncensored = (v === 'featherless' || v === 'kobold' || v === 'auto');
+    const sec = document.getElementById('llm-uncensored-section');
+    if (sec) sec.style.display = showUncensored ? '' : 'none';
   });
   // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
@@ -1185,7 +1186,6 @@ document.addEventListener('DOMContentLoaded', () => {
     wangp:   { label: 'GPU: Video',  color: '#d4a017' },
     acestep: { label: 'GPU: Sound',  color: '#c41e3a' },
     forge:   { label: 'GPU: Image',  color: '#5fa8d3' },
-    ollama:  { label: 'GPU: LLM',    color: '#7eb86c' },
   };
   async function pollGpuIndicator() {
     try {

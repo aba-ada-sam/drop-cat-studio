@@ -26,12 +26,12 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 def _sample_music_frames(video_path: str, llm_router) -> list:
     """Sample video frames optimised for music/lyric analysis.
 
-    Cloud vision APIs (Anthropic, OpenAI) handle 8 frames at 256px cleanly.
-    Ollama context windows are tight -- cap at 3 frames so we don't blow them.
-    256px is plenty for mood, color, and motion analysis; fine detail wastes tokens.
+    Cloud vision APIs (Anthropic, OpenAI, Featherless) handle 8 frames at 256px
+    cleanly. A local KoboldCpp has a tighter context -- cap at 3 frames there so
+    we don't blow it. 256px is plenty for mood/color/motion; detail wastes tokens.
     """
-    is_ollama = llm_router._provider() == "ollama"
-    n = 3 if is_ollama else 8
+    is_local = llm_router._provider() == "kobold"
+    n = 3 if is_local else 8
     return sample_frames_temporal(video_path, max_frames=n, max_dim=256)
 
 # Quality suffixes appended to every video prompt before sending to WanGP.
@@ -185,9 +185,9 @@ def run_prep(job, photo_path, settings):
     if not needs_audio or (music_prompt and instrumental):
         return  # no audio prep needed -- video prompt is already set above
 
-    # VRAM guard: evict idle WanGP so Ollama's model fits.
-    # Returns False if WanGP is running a live job -- in that case skip vision.
-    from features.fun_videos.multi_pipeline import _free_vram_for_llm, _release_ollama_vram
+    # VRAM guard is a no-op now (LLM is off-GPU: Featherless cloud / unmanaged
+    # local KoboldCpp). _free_vram_for_llm always returns True -- vision is fine.
+    from features.fun_videos.multi_pipeline import _free_vram_for_llm, _release_llm_vram
     _vision_ok = _free_vram_for_llm(llm_router, "music direction")
 
     job.update(progress=5, message="Getting music direction...")
@@ -202,14 +202,16 @@ def run_prep(job, photo_path, settings):
                 continue  # already tried this provider
             try:
                 provider = llm_router._provider()
-                # Send image frames to Ollama (cloud historically refused NSFW),
-                # OR to any provider when the user asked to derive the audio from
-                # the image. Skip on the cloud-retry pass (_force) which is text-only.
+                # Send image frames to the uncensored provider (Anthropic/OpenAI
+                # historically refused NSFW), OR to any provider when the user asked
+                # to derive the audio from the image. Skip on the cloud-retry pass
+                # (_force) which is text-only.
+                from core.llm_router import is_uncensored
                 frames = []
                 if not _force and photo_path and os.path.isfile(photo_path):
                     if audio_from_image:
                         frames = [_img_b64] if _img_b64 else []
-                    elif provider == "ollama" and _vision_ok:
+                    elif is_uncensored(provider) and _vision_ok:
                         src_b64 = encode_image_b64(photo_path)
                         frames = [src_b64] if src_b64 else []
                 # generate_music_prompt has no force_provider param; call the underlying
@@ -296,8 +298,9 @@ def run_prep(job, photo_path, settings):
     if music_prompt:
         settings["_prepped_music_prompt"] = music_prompt
 
-    # Release Ollama's model now so WanGP has full VRAM when the GPU phase starts.
-    _release_ollama_vram()
+    # No-op now -- the LLM is off-GPU, so there is no model to release before
+    # WanGP takes the GPU.
+    _release_llm_vram()
 
     job.update(progress=9, message="Analysis complete, waiting for GPU...")
 

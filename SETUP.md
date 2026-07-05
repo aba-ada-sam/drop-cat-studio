@@ -40,24 +40,19 @@ If missing, install from https://ffmpeg.org or via package manager.
 
 ---
 
-## Model Installation
+## AI Provider Setup
 
-The first time you run Drop Cat Go Studio, you need to install the required Ollama models. This downloads them locally (~20-30 GB total).
+No local model download is required. Drop Cat Go Studio's AI runs on one of:
 
-**Run the installer:**
-```
-cd C:\DropCat-Studio
-install-ollama-models.bat
-```
+- **Anthropic / OpenAI** (cloud) — add a key in Settings.
+- **Featherless** (uncensored cloud, default for NSFW analysis) — put your key in
+  `C:\JSON Credentials\featherless_api_key.txt` (or paste it in Settings). Vision uses
+  `Qwen/Qwen3-VL-32B-Instruct`; text uses a large uncensored model.
+- **KoboldCpp** (local, optional) — run a local KoboldCpp OpenAI server on
+  `http://localhost:5001/v1`, then choose "KoboldCpp (local)" in Settings.
 
-This will:
-1. Check that Ollama is installed
-2. Download dolphin3:8b (2.6 GB, fast)
-3. Download impish-bloodmoon:12b (7.3 GB, balanced, NSFW-capable)
-4. Download heretic-gemma4:31b (17 GB, power)
-5. Verify all models are installed
-
-**This takes time** — depending on your internet speed, expect 30 minutes to 2 hours. The script will show progress.
+Anthropic/OpenAI images classified as NSFW are transparently retried on the uncensored
+provider, so explicit/artistic photos still get analysed. (Ollama was removed 2026-07-05.)
 
 ---
 

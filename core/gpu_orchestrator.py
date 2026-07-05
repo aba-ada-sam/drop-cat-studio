@@ -1,9 +1,12 @@
 """GPU/VRAM orchestrator -- one tool at a time, automatically.
 
-Andrew's GPU has 16GB VRAM. WanGP (8-13GB), ACE-Step (6-8GB), Forge (4-6GB),
-and Ollama (4-8GB) cannot coexist; loading two at once forces the loser into
-CPU offloading mode (model on system RAM, 30s/step instead of <1s -- the
-"never finishes" symptom).
+Andrew's GPU has 16GB VRAM. WanGP (8-13GB), ACE-Step (6-8GB), and Forge (4-6GB)
+cannot coexist; loading two at once forces the loser into CPU offloading mode
+(model on system RAM, 30s/step instead of <1s -- the "never finishes" symptom).
+
+The uncensored LLM is no longer a GPU service here: it runs on Featherless
+(cloud) by default, so it never competes for local VRAM. (A user-run local
+KoboldCpp is an external server this orchestrator does not manage.)
 
 This orchestrator enforces strict serialization. Pipelines say "I need WanGP"
 and the orchestrator evicts whatever else is on the GPU first. A service holds
@@ -32,8 +35,8 @@ from typing import Literal, Optional
 
 log = logging.getLogger("gpu_orchestrator")
 
-ServiceName = Literal["wangp", "acestep", "forge", "ollama"]
-_ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge", "ollama")
+ServiceName = Literal["wangp", "acestep", "forge"]
+_ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge")
 
 
 class GPUBusyError(RuntimeError):
@@ -52,9 +55,6 @@ def _is_remote(service: ServiceName) -> bool:
         if service == "acestep":
             h = (_cfg.get("acestep_host") or "localhost").strip().lower()
             return h not in ("localhost", "127.0.0.1", "")
-        if service == "ollama":
-            u = (_cfg.get("ollama_host") or "").lower()
-            return "localhost" not in u and "127.0.0.1" not in u and u != ""
         if service == "forge":
             u = (_cfg.get("forge_url") or "").lower()
             return "localhost" not in u and "127.0.0.1" not in u and u != ""
@@ -223,9 +223,6 @@ class GPUOrchestrator:
             if service == "forge":
                 from services.forge_client import forge_alive
                 return bool(forge_alive())
-            if service == "ollama":
-                from services.manager import ollama_alive
-                return ollama_alive()
         except Exception as e:
             log.debug("[gpu] alive check %s failed: %s", service, e)
         return False
@@ -258,9 +255,6 @@ class GPUOrchestrator:
                     except Exception as e:
                         log.debug("[gpu] forge reload skipped: %s", e)
                 return
-            if service == "ollama":
-                # Ollama auto-starts on first request; nothing to pre-warm.
-                return
         except Exception as e:
             log.warning("[gpu] start %s failed: %s", service, e)
 
@@ -279,38 +273,8 @@ class GPUOrchestrator:
                 from services.forge_client import unload_checkpoint
                 unload_checkpoint()
                 return
-            if service == "ollama":
-                self._ollama_unload()
-                return
         except Exception as e:
             log.warning("[gpu] stop %s failed: %s", service, e)
-
-    def _ollama_unload(self) -> None:
-        """Force Ollama to drop loaded models by issuing keep_alive=0 pings."""
-        try:
-            from core import config as _cfg
-            base = (_cfg.get("ollama_host") or "http://localhost:11434").rstrip("/")
-        except Exception:
-            base = "http://localhost:11434"
-        try:
-            with urllib.request.urlopen(f"{base}/api/ps", timeout=2) as r:
-                running = json.loads(r.read()).get("models", [])
-        except Exception as e:
-            log.debug("[gpu] ollama /api/ps failed: %s", e)
-            return
-        for m in running:
-            name = m.get("name") or m.get("model")
-            if not name:
-                continue
-            try:
-                body = json.dumps({"model": name, "keep_alive": 0}).encode()
-                req = urllib.request.Request(
-                    f"{base}/api/generate",
-                    data=body, headers={"Content-Type": "application/json"})
-                urllib.request.urlopen(req, timeout=3).read()
-                log.info("[gpu] ollama unload: %s", name)
-            except Exception as e:
-                log.debug("[gpu] ollama unload %s failed: %s", name, e)
 
 
 # Singleton

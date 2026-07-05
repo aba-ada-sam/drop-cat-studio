@@ -1,15 +1,31 @@
-"""LLM router -- dispatches AI calls to Ollama, Anthropic, or OpenAI.
+"""LLM router -- dispatches AI calls to Anthropic, OpenAI, or an uncensored backend.
 
 Provider is read from config at call time so it can be hot-switched in Settings.
-Default is Ollama (local, no API key needed).
+The "uncensored" role (analyses NSFW images, never refuses) is served by
+Featherless (cloud, default) or KoboldCpp (local) -- see core/llm_client.py.
+Ollama was removed 2026-07-05; a legacy "ollama" provider value is aliased to
+"featherless" so old configs keep working.
 """
 import logging
 import time
 
 from core import config as cfg
-from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER, _is_ollama_oom  # re-exported for features
+from core.llm_client import TIER_FAST, TIER_BALANCED, TIER_POWER, _is_oom  # re-exported for features
 
 log = logging.getLogger(__name__)
+
+# Providers that run uncensored and do their OWN vision (send images directly,
+# never refuse NSFW). Feature code imports this instead of hardcoding a name.
+UNCENSORED_PROVIDERS = ("featherless", "kobold")
+
+
+def is_uncensored(provider: str | None) -> bool:
+    """True if `provider` is a local/cloud uncensored backend (vision-capable)."""
+    return provider in UNCENSORED_PROVIDERS
+
+
+# Legacy alias: Ollama was the old uncensored provider. Map it to Featherless.
+_PROVIDER_ALIASES = {"ollama": "featherless"}
 
 # Default model selections per provider (overridable via config ai_model_fast/balanced/power)
 _ANTHROPIC_MODELS = {
@@ -83,22 +99,24 @@ class LLMRouter:
     """
 
     def __init__(self, client):
-        """client: LLMClient instance (Ollama) -- used when provider=ollama."""
+        """client: LLMClient instance -- used for the uncensored providers
+        (featherless / kobold)."""
         self._client = client
         self._stats = {"ok": 0, "errors": 0, "retries": 0}
 
     def _provider(self, force: str | None = None) -> str:
         """Resolve which LLM provider to use for this call.
 
-        Ollama is opt-in: callers may still pass force='ollama' (e.g. a privacy-
-        conscious path), but in auto-mode Ollama is only chosen when no cloud
-        key is configured AND the user has explicitly enabled the fallback in
-        Settings. Otherwise we surface a hard error so the user knows to
-        configure a cloud key or enable Ollama -- no silent local routing.
+        The uncensored provider (Featherless cloud, or KoboldCpp local) is opt-in:
+        callers may pass force='featherless'/'kobold' (e.g. an NSFW-safe path), but
+        in auto-mode it is only chosen when no cloud key is configured AND the user
+        has explicitly enabled the fallback in Settings. Otherwise we surface a hard
+        error so the user knows to configure a cloud key or enable the fallback.
         """
-        if force in ("anthropic", "openai", "ollama"):
+        force = _PROVIDER_ALIASES.get(force, force)
+        if force in ("anthropic", "openai", "featherless", "kobold"):
             return force
-        p = cfg.get("llm_provider") or "auto"
+        p = _PROVIDER_ALIASES.get(cfg.get("llm_provider"), cfg.get("llm_provider")) or "auto"
         if p != "auto":
             return p
         # Auto: cloud first, in preference order
@@ -107,13 +125,14 @@ class LLMRouter:
             return "anthropic"
         if get_key("openai"):
             return "openai"
-        # No cloud key. Only fall back to Ollama if user has opted in.
-        if cfg.get("allow_ollama_fallback"):
-            return "ollama"
+        # No Anthropic/OpenAI key. Fall back to the uncensored provider if the
+        # user opted in. Default fallback target is Featherless (cloud).
+        if cfg.get("allow_uncensored_fallback"):
+            return cfg.get("uncensored_provider") or "featherless"
         raise RuntimeError(
-            "No cloud LLM key configured and Ollama fallback is disabled. "
+            "No cloud LLM key configured and the uncensored fallback is disabled. "
             "Add an Anthropic or OpenAI key in Settings, or enable "
-            "'Allow Ollama fallback' to use local models."
+            "'Allow uncensored fallback' to use Featherless / local KoboldCpp."
         )
 
     def route(
@@ -130,8 +149,9 @@ class LLMRouter:
             return self._call_with_retry(lambda: self._anthropic_chat(messages, tier, max_tokens, system), provider=provider)
         if provider == "openai":
             return self._call_with_retry(lambda: self._openai_chat(messages, tier, max_tokens, system), provider=provider)
+        # uncensored backend (featherless / kobold)
         return self._call_with_retry(
-            lambda: self._client.chat("ollama", messages, tier=tier, max_tokens=max_tokens, system=system),
+            lambda: self._client.chat(provider, messages, tier=tier, max_tokens=max_tokens, system=system),
             provider=provider,
         )
 
@@ -158,8 +178,9 @@ class LLMRouter:
                 provider=provider,
             )
         else:
+            # uncensored backend (featherless / kobold) does its own vision
             return self._call_with_retry(
-                lambda: self._client.chat_with_images("ollama", prompt, images_b64, tier=tier,
+                lambda: self._client.chat_with_images(provider, prompt, images_b64, tier=tier,
                                                      max_tokens=max_tokens, system=system,
                                                      format_json=format_json),
                 provider=provider,
@@ -168,30 +189,30 @@ class LLMRouter:
         # Cloud safety-refusal fallback: Anthropic and OpenAI refuse images
         # they classify as containing nudity / sensitive content with a plain-
         # English refusal instead of a structured error. Detect that and
-        # transparently retry the SAME prompt against Ollama (local, no
-        # content filter). This restores the pre-Ollama-opt-in behaviour for
-        # NSFW/artistic photos without making Ollama the default for SFW
+        # transparently retry the SAME prompt against the uncensored backend
+        # (Featherless -- no content filter). This restores NSFW/artistic photo
+        # analysis without making the uncensored provider the default for SFW
         # calls. Caller never needs to know which provider answered.
         if _looks_like_safety_refusal(result):
+            fb = cfg.get("uncensored_provider") or "featherless"
             try:
-                from services.manager import ollama_alive
-                ollama_up = ollama_alive()
+                fb_up = self._client.is_available(fb)
             except Exception:
-                ollama_up = False
-            if ollama_up:
-                log.info("[router] %s refused the image as NSFW -- retrying via Ollama (local, no content filter)",
-                         provider)
+                fb_up = False
+            if fb_up:
+                log.info("[router] %s refused the image as NSFW -- retrying via %s (no content filter)",
+                         provider, fb)
                 try:
                     return self._client.chat_with_images(
-                        "ollama", prompt, images_b64, tier=tier,
+                        fb, prompt, images_b64, tier=tier,
                         max_tokens=max_tokens, system=system, format_json=format_json,
                     )
                 except Exception as e:
-                    log.warning("[router] Ollama fallback failed after %s refusal: %s", provider, e)
+                    log.warning("[router] %s fallback failed after %s refusal: %s", fb, provider, e)
                     # Return the original refusal so the caller's UI can show it
             else:
-                log.info("[router] %s refused the image and Ollama is not available -- "
-                         "user will see the refusal text", provider)
+                log.info("[router] %s refused the image and %s is not available -- "
+                         "user will see the refusal text", provider, fb)
         return result
 
     def stats(self) -> dict:
@@ -315,23 +336,20 @@ class LLMRouter:
                                                "BadRequestError")):
                     log.error("LLM permanent error (will not retry): %s", exc)
                     raise
-                # Never retry timeouts for Ollama -- the model is already running; a
-                # second queued call just adds to the backlog and makes things worse.
-                # (Cloud providers are different: they can accept parallel requests.)
-                # Use the *actual* provider for this call (force_provider-aware) rather
-                # than self._provider(), which only sees the auto-resolved value and
-                # wrongly let force_provider="ollama" calls retry through 3x backoff.
+                # Never retry timeouts for a LOCAL KoboldCpp -- the model is already
+                # running; a second queued call just adds to the backlog. (Cloud
+                # providers -- anthropic/openai/featherless -- can accept parallel
+                # requests, so they still retry.) Use the *actual* provider for this
+                # call (force_provider-aware) rather than self._provider().
                 is_timeout = ("timeout" in exc_str or "timed out" in exc_str
                               or "ReadTimeout" in exc_type or "ConnectTimeout" in exc_type)
-                if is_timeout and actual_provider == "ollama":
-                    log.warning("Ollama timeout (no retry -- Ollama is busy): %s", exc)
+                if is_timeout and actual_provider == "kobold":
+                    log.warning("KoboldCpp timeout (no retry -- it is busy): %s", exc)
                     raise
-                # Never retry OOM -- the model doesn't fit in RAM; retrying 3x just
-                # wastes ~15 seconds and makes the error message more confusing.
-                # LLMClient.chat() already attempted a vision-model fallback before
-                # this exception propagated up, so we are truly out of options.
-                if _is_ollama_oom(exc) or "requires more memory than available" in exc_str:
-                    log.error("Ollama OOM (no retry): %s", exc)
+                # Never retry OOM -- a local model doesn't fit in VRAM; retrying 3x
+                # just wastes time and makes the error message more confusing.
+                if _is_oom(exc) or "requires more memory than available" in exc_str:
+                    log.error("Local LLM OOM (no retry): %s", exc)
                     raise
                 if attempt < max_attempts - 1:
                     self._stats["retries"] += 1

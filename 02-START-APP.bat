@@ -1,6 +1,7 @@
 @echo off
 REM Quick launcher for Drop Cat Go Studio
-REM Models must be installed first (run 01-INSTALL-MODELS.bat)
+REM No local model install needed: the uncensored AI runs on Featherless cloud
+REM (key in C:\JSON Credentials\featherless_api_key.txt) or a local KoboldCpp.
 
 setlocal enabledelayedexpansion
 title Drop Cat Go Studio

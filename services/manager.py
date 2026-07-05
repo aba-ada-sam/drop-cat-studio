@@ -186,7 +186,10 @@ _service_status: dict = {
     "wangp":   {"state": "unknown", "message": "", "port": None, "pid": None},
     "acestep": {"state": "unknown", "message": "", "port": None, "pid": None},
     "forge":   {"state": "unknown", "message": "", "port": 7861, "pid": None},
-    "ollama":  {"state": "unknown", "message": "", "port": 11434, "pid": None},
+    # Uncensored LLM backend (Featherless cloud, or local KoboldCpp). Cloud has
+    # no local process/port -- this is a reachability/config pill, not a service
+    # we start or stop. (Ollama was removed 2026-07-05.)
+    "featherless": {"state": "unknown", "message": "", "port": None, "pid": None},
 }
 
 _wangp_worker_proc: subprocess.Popen | None = None
@@ -581,11 +584,7 @@ def quick_detect():
     except Exception:
         _set_status("forge", state="not_running", message="Forge not detected")
 
-    if ollama_alive():
-        _set_status("ollama", state="running",
-                    message="Ollama running on port 11434", port=11434)
-    else:
-        _set_status("ollama", state="not_running", message="Ollama not detected")
+    _set_uncensored_status()
 
     if acestep_alive():
         _set_status("acestep", state="running",
@@ -654,46 +653,16 @@ def startup_all():
             log.error("[Startup] %s failed to start: %s", name, e)
             _set_status(name.lower(), state="error", message=f"Startup failed: {e}")
 
-    def _ensure_ollama():
-        ollama_url = cfg.get("ollama_host") or "http://localhost:11434"
-        if _is_remote_host(ollama_url.replace("http://", "").split(":")[0]):
-            # Remote Ollama -- just verify it's reachable
-            import urllib.request
-            try:
-                urllib.request.urlopen(ollama_url.rstrip("/") + "/api/tags", timeout=3)
-                _set_status("ollama", state="running",
-                            message=f"Ollama (remote) running at {ollama_url}", port=11434)
-            except Exception:
-                _set_status("ollama", state="not_running",
-                            message=f"Ollama not reachable at {ollama_url}")
-            return
-        ok, err = start_ollama()
-        if ok:
-            _set_status("ollama", state="running",
-                        message="Ollama running on port 11434", port=11434)
-        else:
-            _set_status("ollama", state="not_running",
-                        message=err or "Ollama not available")
-
-    # Ollama is backup-only: do NOT auto-start the local process unless the user
-    # has explicitly opted in (provider == "ollama", or fallback enabled). A remote
-    # Ollama host is always just health-checked (_ensure_ollama never spawns it).
-    # When opted out, leave it stopped; start it on demand from the Services panel.
-    _ollama_host = cfg.get("ollama_host") or "http://localhost:11434"
-    _ollama_remote = _is_remote_host(_ollama_host.replace("http://", "").split(":")[0])
-    _ollama_optin = (cfg.get("llm_provider") == "ollama") or bool(cfg.get("allow_ollama_fallback"))
+    # The uncensored LLM backend (Featherless cloud / local KoboldCpp) is not a
+    # process we launch -- just reflect its reachability in the status pill.
+    _set_uncensored_status()
 
     _start_list = [("WanGP", _start_wan)]
-    if _ollama_remote or _ollama_optin:
-        _start_list.append(("Ollama", _ensure_ollama))
-    else:
-        _set_status("ollama", state="not_running",
-                    message="Ollama is backup-only (not auto-started); start it from Services when needed")
     for label, fn in _start_list:
         threading.Thread(target=_safe_run, args=(label, fn), daemon=True).start()
 
     # ACE-Step: deferred -- only started when music generation is needed.
-    # Keeps VRAM free for Ollama vision models during prompt generation.
+    # Keeps VRAM free for the video/image models during prompt generation.
     if _is_remote_host(_acestep_host()):
         if acestep_alive():
             _set_status("acestep", state="running",
@@ -836,12 +805,6 @@ def stop_service(name: str) -> tuple[bool, str | None]:
         _set_status("forge", state="not_running", message="Forge stopped")
         return True, None
 
-    if name == "ollama":
-        _kill_by_port(11434, "Ollama")
-        time.sleep(1)
-        _set_status("ollama", state="not_running", message="Ollama stopped")
-        return True, None
-
     return False, f"Unknown service: {name}"
 
 
@@ -856,8 +819,6 @@ def restart_service(name: str) -> tuple[bool, str | None]:
         return start_acestep()
     if name == "forge":
         return start_forge()
-    if name == "ollama":
-        return start_ollama()
     return False, f"Unknown service: {name}"
 
 
@@ -987,52 +948,45 @@ def start_forge() -> tuple[bool, str | None]:
         return False, msg
 
 
-# -- Ollama auto-start --------------------------------------------------------
+# -- Uncensored LLM backend (Featherless cloud / local KoboldCpp) -------------
+# Ollama was removed 2026-07-05. These are NOT services we launch: Featherless is
+# cloud (config/key reachability) and KoboldCpp is an external local server. We
+# only report reachability into the status pill.
 
-def _find_ollama() -> str | None:
-    import shutil
-    found = shutil.which("ollama") or shutil.which("ollama.exe")
-    if found:
-        return found
-    candidates = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe"),
-        r"C:\Program Files\Ollama\ollama.exe",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    return None
-
-
-def ollama_alive() -> bool:
-    return check_port("127.0.0.1", 11434, timeout=2)
-
-
-def start_ollama() -> tuple[bool, str | None]:
-    """Ensure Ollama is running. Start it if not."""
-    if ollama_alive():
-        return True, None
-
-    exe = _find_ollama()
-    if not exe:
-        return False, "Ollama executable not found"
-
-    log.info("Starting Ollama serve...")
+def kobold_alive() -> bool:
+    """True if a local KoboldCpp OpenAI endpoint is reachable."""
     try:
-        subprocess.Popen(
-            [exe, "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            **_popen_flags(),
-        )
-        deadline = time.time() + 15
-        while time.time() < deadline:
-            if ollama_alive():
-                log.info("Ollama is ready on port 11434")
-                return True, None
-            time.sleep(1)
-        return False, "Ollama did not start within 15s"
-    except Exception as e:
-        return False, f"Failed to start Ollama: {e}"
+        base = (cfg.get("kobold_base") or "http://localhost:5001/v1")
+        host_port = base.split("//", 1)[-1].split("/", 1)[0]
+        host, _, port = host_port.partition(":")
+        return check_port(host or "127.0.0.1", int(port or 5001), timeout=2)
+    except Exception:
+        return False
+
+
+def _set_uncensored_status() -> None:
+    """Update the status pill for the active uncensored LLM backend."""
+    prov = cfg.get("uncensored_provider") or "featherless"
+    if prov == "kobold":
+        if kobold_alive():
+            _set_status("featherless", state="running",
+                        message=f"Local KoboldCpp reachable at {cfg.get('kobold_base')}")
+        else:
+            _set_status("featherless", state="not_running",
+                        message="Local KoboldCpp not reachable -- start it, or switch to Featherless")
+        return
+    # featherless (cloud): available when a key is configured
+    try:
+        from core.keys import get_featherless_key
+        has_key = bool(get_featherless_key())
+    except Exception:
+        has_key = False
+    if has_key:
+        _set_status("featherless", state="running",
+                    message="Featherless cloud configured (uncensored LLM + vision ready)")
+    else:
+        _set_status("featherless", state="not_running",
+                    message="Featherless key not found -- add it in Settings for the uncensored path")
 
 
 # -- Health watchdog ----------------------------------------------------------
@@ -1149,14 +1103,10 @@ def _watchdog_loop():
                     _set_status("forge", state="not_running",
                                 message="Forge not running -- use Services tab to start")
 
-            # Ollama is backup-only: only keep it alive if the user opted in
-            # (provider == "ollama" or fallback enabled). Forcing it up otherwise
-            # wastes VRAM the GPU orchestrator needs for video/music gen -- that
-            # contention made the 5080 offload to CPU and run slower than an old
-            # card. With cloud LLM configured, leave Ollama down.
-            _ollama_optin = (cfg.get("llm_provider") == "ollama") or bool(cfg.get("allow_ollama_fallback"))
-            if _ollama_optin and not ollama_alive():
-                start_ollama()
+            # Refresh the uncensored-LLM status pill (Featherless cloud / local
+            # KoboldCpp). Nothing to start -- cloud needs no process, and a local
+            # KoboldCpp is an external server we don't manage.
+            _set_uncensored_status()
 
         except Exception as e:
             log.debug("[watchdog] Error: %s", e)

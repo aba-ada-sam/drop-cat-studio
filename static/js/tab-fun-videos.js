@@ -598,8 +598,9 @@ export function init(panel) {
   // force=true: regenerates even if prompt textarea already has content.
   async function _autoGeneratePrompt(imagePath, force = false) {
     if (!force && promptTA.value.trim()) return;
-    // Don't fire Ollama while a video job is running -- it competes for VRAM.
-    // The user can still click "Create Story" manually (force=true bypasses this).
+    // Don't auto-fire the vision LLM while a video job is running -- keep focus
+    // (and cloud cost) on the active render. The user can still click "Create
+    // Story" manually (force=true bypasses this).
     if (!force && _activeJobId) return;
     if (_autoPromptAbort) _autoPromptAbort.abort();
     _autoPromptAbort = new AbortController();
@@ -612,7 +613,7 @@ export function init(panel) {
     storyBtn.disabled = true;
     storyBtn.textContent = '...';
 
-    // Safety timeout -- Ollama vision cold-start can take 30s+; after 45s give up,
+    // Safety timeout -- a vision call can take 30s+; after 45s give up,
     // populate the textarea with the default prompt so the user has something
     // usable and Generate doesn't fail silently with an empty prompt.
     let _timedOut = false;

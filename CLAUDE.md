@@ -124,9 +124,12 @@ job_manager.submit_with_prep(
 ### LLM routing (`core/llm_router.py`)
 
 All AI calls go through `LLMRouter.route()` or `LLMRouter.route_vision()`. The provider is read from config on each call (hot-switchable via Settings UI):
-- **auto** (default): tries Anthropic key → OpenAI key → Ollama
+- Providers: `anthropic`, `openai`, `featherless` (uncensored cloud), `kobold` (uncensored local KoboldCpp), `auto`. Legacy `ollama` is aliased to `featherless` (Ollama was removed 2026-07-05).
+- **auto**: tries Anthropic key → OpenAI key → (if `allow_uncensored_fallback`) the uncensored provider
+- **Uncensored providers** (`featherless`/`kobold`) do their own vision and never refuse NSFW. `core/llm_router.UNCENSORED_PROVIDERS` + `is_uncensored(p)` are the canonical test — import them instead of hardcoding a provider name.
 - Three tiers: `TIER_FAST = "fast"`, `TIER_BALANCED = "balanced"`, `TIER_POWER = "power"` — always pass the constant, never its name as a string literal
 - Retry with exponential backoff; respects `Retry-After` on 429s; permanent errors fail immediately
+- The uncensored backend is **off the GPU orchestrator**: Featherless is cloud, and a local KoboldCpp is an external server DCS doesn't manage — so LLM calls never evict WanGP/Forge/ACE-Step.
 
 `core/llm_client.py` also exports `parse_json_response(text)` — strips markdown code fences and extracts the outermost JSON object/array from an LLM response. Use this instead of writing raw `re.search` for JSON extraction.
 
@@ -284,11 +287,11 @@ The pre-orchestrator pattern of scattered `unload_checkpoint()` + `stop_service(
 
 `/api/fun/make-it` and `/api/fun/make-it-multi` apply a server-side floor on `steps` AFTER auto-pick has chosen the actual model. The UI slider value was tuned for whatever model was visible in the dropdown, but auto-pick can swap models, so the floor protects against e.g. sending 4 steps to Wan I2V (which produces a blob below 20). See `_MODEL_MIN_STEPS_SINGLE` / `_MODEL_MIN_STEPS` in `features/fun_videos/routes.py`. Bumps are logged as `[make-it] step floor: ui=4 -> 20 for Wan2.1-I2V-14B-480P`.
 
-### Ollama is opt-in (not the auto fallback)
+### The uncensored provider is opt-in (not the auto fallback)
 
-`llm_router._provider()` in `auto` mode resolves Anthropic -> OpenAI -> error. Ollama is NEVER chosen automatically. The user must either explicitly set `llm_provider = "ollama"` in Settings, or check **Allow Ollama as a local fallback** (`allow_ollama_fallback = true` in config). The fallback flag only kicks in when no cloud key is configured.
+`llm_router._provider()` in `auto` mode resolves Anthropic -> OpenAI -> (opt-in) uncensored provider -> error. Featherless/KoboldCpp are NEVER chosen automatically. The user must either explicitly set `llm_provider = "featherless"`/`"kobold"` in Settings, or check **Allow the uncensored provider as a fallback** (`allow_uncensored_fallback = true`; target set by `uncensored_provider`). The fallback flag only kicks in when no Anthropic/OpenAI key is configured.
 
-Vision call sites that used to hard-code `force_provider="ollama"` (the NSFW-safe path) have been removed. Vision now follows the configured provider; cloud APIs refuse explicit NSFW but the failure is now user-visible instead of silently routing to a slow local model.
+NSFW-safe vision: `route_vision()` runs on the configured provider, but when Anthropic/OpenAI return a content-policy refusal on an image, the router transparently retries the SAME request on the uncensored provider (`uncensored_provider`, default Featherless) if it is available. So explicit/artistic photos still get analysed without making the uncensored provider the default for SFW work.
 
 ### `_resolve_path` caveat (`features/fun_videos/routes.py`)
 

@@ -115,7 +115,7 @@ REPLY: <one short sentence>
 <tags>"""
 
 # Populated dynamically at runtime via /api/prompts/models
-AVAILABLE_MODELS = ["ollama"]
+AVAILABLE_MODELS = ["featherless"]
 
 
 # -- Output sanitation ------------------------------------------------------

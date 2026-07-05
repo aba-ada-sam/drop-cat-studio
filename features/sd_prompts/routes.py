@@ -177,8 +177,8 @@ async def refine(request: Request):
 
 @router.get("/models")
 async def list_models():
-    from core.keys import get_ollama_models
-    models = get_ollama_models() or AVAILABLE_MODELS
+    from core.keys import list_uncensored_models
+    models = list_uncensored_models() or AVAILABLE_MODELS
     return {"models": models}
 
 
@@ -567,14 +567,17 @@ async def enhance_prompt(request: Request):
         elif get_key("openai"):
             force = "openai"
         elif provider == "auto":
-            force = "ollama"  # auto falls back to local when no cloud key configured
+            # auto falls back to the uncensored provider when no cloud key is set
+            from core import config as _cfg
+            force = _cfg.get("uncensored_provider") or "featherless"
         else:
             raise HTTPException(
                 400,
                 "Cloud provider requested but no Anthropic/OpenAI key configured -- set one in Settings or switch to Local.",
             )
     elif provider == "local":
-        force = "ollama"
+        from core import config as _cfg
+        force = _cfg.get("uncensored_provider") or "featherless"
     else:
         raise HTTPException(400, f"unknown provider: {provider!r}")
 

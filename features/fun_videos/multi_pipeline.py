@@ -1430,54 +1430,20 @@ def _normalize_video_for_concat(src: str, dst: str, width: int, height: int, fps
 # -- Prep phase (runs before GPU queue) ---------------------------------------
 
 def _free_vram_for_llm(llm_router, reason: str) -> bool:
-    """Evict WanGP from VRAM before an Ollama LLM/vision call.
+    """No-op since Ollama's removal (2026-07-05).
 
-    Only acts when:
-      - The configured provider is Ollama (local, needs VRAM headroom)
-      - WanGP is currently loaded (gpu.current == "wangp")
-      - No GPU job is actively running (safe to evict without killing a live gen)
-
-    Returns True if eviction happened (caller may proceed with vision),
-    False if WanGP is busy (caller should skip vision and use text-only fallback).
+    The uncensored LLM/vision provider is now Featherless (cloud) by default, or
+    an external local KoboldCpp -- neither is a GPU service this orchestrator
+    manages, so there is never a WanGP eviction to perform for an LLM call.
+    Always returns True (caller may proceed with vision).
     """
-    if llm_router._provider() != "ollama":
-        return True  # cloud providers don't load into local VRAM
-    from core.gpu_orchestrator import gpu as _gpu
-    if _gpu.current != "wangp":
-        return True  # WanGP not loaded, no VRAM conflict
-    # Check whether a GPU job is currently running
-    try:
-        from app import get_job_manager as _gjm
-        from core.job_manager import GPU_JOB_TYPES
-        _busy = any(
-            j.type in GPU_JOB_TYPES and j.status == "running"
-            for j in _gjm()._jobs.values()
-        )
-    except Exception:
-        _busy = True  # assume busy if we can't check
-    if _busy:
-        log.info("[prep] WanGP is running a job -- skipping Ollama vision for %s (will use text-only)", reason)
-        return False
-    log.info("[prep] Evicting idle WanGP to free VRAM for Ollama (%s)", reason)
-    _gpu.acquire("ollama", reason=f"prep-phase LLM: {reason}")
     return True
 
 
-def _release_ollama_vram():
-    """Send keep_alive=0 to Ollama after prep LLM calls so WanGP gets full VRAM.
-
-    The GPU orchestrator does this automatically when gpu.acquire('wangp') is
-    called, but that happens later in run_multi_pipeline. Doing it here too
-    means the VRAM is freed as soon as prep finishes rather than holding the
-    model for the duration of the GPU queue wait.
-    """
-    try:
-        from core.gpu_orchestrator import gpu as _gpu
-        if _gpu.current == "ollama":
-            _gpu._ollama_unload()
-            log.info("[prep] Ollama model unloaded after prep phase")
-    except Exception as e:
-        log.debug("[prep] Ollama unload skipped: %s", e)
+def _release_llm_vram():
+    """No-op since Ollama's removal. The LLM no longer holds local VRAM
+    (Featherless cloud default; a local KoboldCpp is unmanaged here)."""
+    return
 
 
 def run_multi_prep(job, photo_path, settings):
@@ -1682,8 +1648,10 @@ def run_multi_prep(job, photo_path, settings):
     # audio from the image. Cloud has no VRAM cost; Ollama needs free VRAM.
     audio_frames = []
     if photo_path and os.path.isfile(photo_path):
+        from core.llm_router import is_uncensored
         provider = llm_router._provider()
-        if provider == "ollama" or (audio_from_image and (provider != "ollama" or _vision_ok)):
+        _unc = is_uncensored(provider)
+        if _unc or (audio_from_image and (not _unc or _vision_ok)):
             _ab64 = encode_image_b64(photo_path)
             if _ab64:
                 audio_frames = [_ab64]
@@ -1725,11 +1693,10 @@ def run_multi_prep(job, photo_path, settings):
         except Exception as e:
             log.warning("[multi] Lyrics prep failed: %s", e)
 
-    # Release Ollama's model from VRAM now that prep is done.
-    # WanGP needs full VRAM when run_multi_pipeline starts.
-    # gpu.acquire("wangp") will also do this, but freeing it here
-    # means the queue wait time doesn't hold the model unnecessarily.
-    _release_ollama_vram()
+    # LLM prep is off-GPU now (Featherless cloud / unmanaged local KoboldCpp),
+    # so there is no LLM VRAM to release before WanGP takes the GPU. No-op kept
+    # for call-site stability.
+    _release_llm_vram()
 
     job.update(progress=10, message="Story arc ready, waiting for GPU...")
 

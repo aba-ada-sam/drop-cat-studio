@@ -36,7 +36,7 @@
       <div class="splash-checklist" id="splash-checks">
         <div class="splash-check loading" id="chk-server"><span class="chk-dot"></span><span class="chk-text">Connecting to server...</span></div>
         <div class="splash-check loading" id="chk-ffmpeg"><span class="chk-dot"></span><span class="chk-text">Checking ffmpeg...</span></div>
-        <div class="splash-check loading" id="chk-ollama"><span class="chk-dot"></span><span class="chk-text">Checking Ollama AI...</span></div>
+        <div class="splash-check loading" id="chk-featherless"><span class="chk-dot"></span><span class="chk-text">Checking uncensored AI...</span></div>
         <div class="splash-check loading" id="chk-forge"><span class="chk-dot"></span><span class="chk-text">Checking Forge SD...</span></div>
         <div class="splash-check loading" id="chk-wangp"><span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span></div>
         <div class="splash-check loading" id="chk-acestep"><span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span></div>
@@ -364,16 +364,17 @@
               <option value="auto">Auto -- Anthropic -> OpenAI (cloud only)</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
-              <option value="ollama">Ollama (Local)</option>
+              <option value="featherless">Featherless (uncensored cloud)</option>
+              <option value="kobold">KoboldCpp (local, uncensored)</option>
             </select>
             <span class="hint-text" id="ai-effective-hint"></span>
           </div>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="cfg-allow_ollama_fallback" style="width:auto">
-              <span>Allow Ollama as a local fallback when no cloud key is configured</span>
+              <input type="checkbox" id="cfg-allow_uncensored_fallback" style="width:auto">
+              <span>Allow the uncensored provider as a fallback when no cloud key is configured</span>
             </label>
-            <span class="hint-text">Off by default. When enabled, Auto mode falls back to local Ollama if no Anthropic/OpenAI key is set. Vision calls still prefer cloud unless this is on AND Ollama is the active provider.</span>
+            <span class="hint-text">Off by default. When enabled, Auto mode falls back to the uncensored provider (below) if no Anthropic/OpenAI key is set. NSFW images that Anthropic/OpenAI refuse are also retried on the uncensored provider.</span>
           </div>
           <div class="form-group">
             <label for="cfg-anthropic_key">Anthropic API Key</label>
@@ -385,18 +386,30 @@
             <input type="text" id="cfg-openai_key" class="masked-key" placeholder="sk-... (leave blank to keep existing)" autocomplete="off" data-1p-ignore data-lpignore="true">
             <span class="hint-text" id="openai-key-hint"></span>
           </div>
-          <div id="llm-ollama-section" style="margin-top:14px">
+          <div id="llm-uncensored-section" style="margin-top:14px">
             <div class="form-group">
-              <label for="cfg-ollama_host">Ollama URL <span class="hint-text">-- default http://localhost:11434</span></label>
-              <input type="text" id="cfg-ollama_host" placeholder="http://localhost:11434">
+              <label for="cfg-uncensored_provider">Uncensored backend <span class="hint-text">-- for NSFW analysis &amp; the local/fallback path</span></label>
+              <select id="cfg-uncensored_provider">
+                <option value="featherless">Featherless (cloud)</option>
+                <option value="kobold">KoboldCpp (local)</option>
+              </select>
             </div>
             <div class="form-group">
-              <label for="cfg-ollama_fast_model">Vision model <span class="hint-text">-- prompt generation &amp; photo analysis</span></label>
-              <select id="cfg-ollama_fast_model"><option value="">Loading...</option></select>
+              <label for="cfg-featherless_key">Featherless API Key <span class="hint-text">-- blank = read from C:\JSON Credentials\featherless_api_key.txt</span></label>
+              <input type="text" id="cfg-featherless_key" class="masked-key" placeholder="rc_... (leave blank to use the key file)" autocomplete="off" data-1p-ignore data-lpignore="true">
+              <span class="hint-text" id="featherless-key-hint"></span>
             </div>
             <div class="form-group">
-              <label for="cfg-ollama_power_model">Power model <span class="hint-text">-- deep analysis</span></label>
-              <select id="cfg-ollama_power_model"><option value="">Loading...</option></select>
+              <label for="cfg-featherless_text_model">Featherless text model</label>
+              <input type="text" id="cfg-featherless_text_model" placeholder="Steelskull/L3.3-MS-Nevoria-70b">
+            </div>
+            <div class="form-group">
+              <label for="cfg-featherless_vision_model">Featherless vision model <span class="hint-text">-- Qwen3-VL analyses photos</span></label>
+              <input type="text" id="cfg-featherless_vision_model" placeholder="Qwen/Qwen3-VL-32B-Instruct">
+            </div>
+            <div class="form-group">
+              <label for="cfg-kobold_base">KoboldCpp URL <span class="hint-text">-- only used when backend = KoboldCpp</span></label>
+              <input type="text" id="cfg-kobold_base" placeholder="http://localhost:5001/v1">
             </div>
           </div>
         </div>

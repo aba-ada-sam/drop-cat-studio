@@ -1086,7 +1086,8 @@ export function init(panel) {
     try {
       const fcOn = fcEnabled.checked;
       // Smart wildcards need precise JSON following -- prefer cloud AI when available.
-      // 'auto' picks Anthropic/OpenAI if a key is configured, falls back to Ollama.
+      // 'auto' picks Anthropic/OpenAI if a key is configured, falls back to the
+      // uncensored provider (Featherless / KoboldCpp).
       const enhanceProvider = wildcardToggle.checked ? 'auto' : 'local';
       const data = await api('/api/prompts/enhance', {
         method: 'POST',

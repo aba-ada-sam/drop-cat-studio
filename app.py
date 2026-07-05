@@ -197,15 +197,10 @@ async def lifespan(app: FastAPI):
         except Exception as _e:
             log.warning("[startup] queue auto-restore failed (non-fatal): %s", _e)
 
-    # Initialize LLM client + router
+    # Initialize LLM client + router. The client is config-driven (Featherless
+    # cloud / local KoboldCpp for the uncensored role) -- no constructor args.
     try:
-        _g["llm_client"] = LLMClient(
-            host=cfg.get("ollama_host") or "http://localhost:11434",
-            fast_model=cfg.get("ollama_fast_model") or "qwen3-vl:8b",
-            balanced_model=cfg.get("ollama_balanced_model") or "qwen3-vl:8b",
-            power_model=cfg.get("ollama_power_model") or "qwen3-vl:30b",
-            vision_model=cfg.get("ollama_vision_model") or "qwen3-vl:8b",
-        )
+        _g["llm_client"] = LLMClient()
         _g["llm_router"] = LLMRouter(_g["llm_client"])
     except Exception as _e:
         log.warning("[startup] LLM init failed (non-fatal, AI features disabled): %s", _e)
@@ -413,36 +408,32 @@ async def validate_acestep(request: Request):
     return {"ok": ok, "message": msg}
 
 
-# -- Ollama config -------------------------------------------------------------
+# -- Uncensored LLM backend config (Featherless / KoboldCpp) -------------------
 
-@app.get("/api/ollama/models")
-async def ollama_models():
-    """Return list of Ollama model names installed locally."""
-    return {"models": keys.get_ollama_models()}
+@app.get("/api/uncensored/models")
+async def uncensored_models():
+    """Return models available from the active uncensored backend (best-effort)."""
+    return {"models": keys.list_uncensored_models()}
 
 
-@app.post("/api/ollama/config")
-async def save_ollama_config(request: Request):
-    """Save Ollama host and model preferences, hot-reload client."""
+@app.post("/api/uncensored/config")
+async def save_uncensored_config(request: Request):
+    """Save uncensored-backend settings (Featherless / KoboldCpp). Config is
+    read live on each call, so no client rebuild is needed."""
     body = await request.json()
-    updates = {}
-    for key in ("ollama_host", "ollama_fast_model", "ollama_balanced_model", "ollama_power_model", "ollama_vision_model"):
-        if key in body:
-            updates[key] = body[key]
+    allowed = (
+        "uncensored_provider",
+        "featherless_base", "featherless_key", "featherless_key_file",
+        "featherless_text_model", "featherless_vision_model",
+        "kobold_base", "kobold_model", "kobold_vision_model",
+    )
+    updates = {k: body[k] for k in allowed if k in body}
     if updates:
         cfg.save(updates)
-        if _g["llm_client"]:
-            _g["llm_client"].update_config(
-                host=updates.get("ollama_host", ""),
-                fast_model=updates.get("ollama_fast_model", ""),
-                balanced_model=updates.get("ollama_balanced_model", ""),
-                power_model=updates.get("ollama_power_model", ""),
-                vision_model=updates.get("ollama_vision_model", ""),
-            )
     return keys.status()
 
 
-# Legacy key status endpoint (returns Ollama status now)
+# Legacy key status endpoint (returns the uncensored-backend status now)
 @app.get("/api/keys/status")
 async def keys_status():
     return keys.status()
@@ -459,7 +450,7 @@ async def get_llm_config():
     if provider == "auto":
         if anthropic_key:   effective = "anthropic"
         elif openai_key:    effective = "openai"
-        else:               effective = "ollama"
+        else:               effective = cfg.get("uncensored_provider") or "featherless"
     else:
         effective = provider
     return {
@@ -554,7 +545,7 @@ async def start_service(name: str, force: bool = False):
     # VRAM holder is evicted before the new service loads its model on top.
     # Without this, clicking 'Start Forge' while WanGP is in VRAM causes
     # two CUDA contexts to collide and crash app.py (observed 2026-05-11).
-    if name not in ("wangp", "acestep", "forge", "ollama"):
+    if name not in ("wangp", "acestep", "forge"):
         return JSONResponse({"error": f"Unknown service: {name}"}, 404)
 
     from core.gpu_orchestrator import gpu, GPUBusyError
@@ -582,7 +573,6 @@ async def start_service(name: str, force: bool = False):
                 "wangp": svc.start_wangp_worker,
                 "acestep": svc.start_acestep,
                 "forge": svc.start_forge,
-                "ollama": svc.start_ollama,
             }
             try: starters[name]()
             except Exception as e2: log.error("[services] direct fallback also failed: %s", e2)
@@ -1189,7 +1179,7 @@ async def windows_theme():
 
 @app.get("/api/system")
 async def system_info():
-    ollama_st = await asyncio.to_thread(keys.status)
+    uncensored_st = await asyncio.to_thread(keys.status)
     import json as _json
     import time as _time
     # Check if new commits have landed since this process started.
@@ -1218,7 +1208,7 @@ async def system_info():
         "encoders": [{"id": e[0], "label": e[1], "hw": e[2]} for e in _g["available_encoders"]],
         "best_encoder": best_encoder(_g["available_encoders"]),
         "gpu_vram_gb": _g.get("gpu_vram_gb"),
-        "ollama": ollama_st,
+        "featherless": uncensored_st,
         "services": svc.get_status(),
         "restart_needed": _restart_needed,
         "boot_git_hash": _boot_hash,
