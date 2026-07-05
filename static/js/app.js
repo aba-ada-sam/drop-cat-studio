@@ -12,7 +12,7 @@ import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './t
 import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620b';
 import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260623a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
-import { init as initVideoTools } from './panel-video-tools.js?v=20260620a';
+import { init as initVideoTools } from './panel-video-tools.js?v=20260704b';
 import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260621a';
 import { consumeHandoff } from './handoff.js?v=20260620a';
 import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260620a';

@@ -1,7 +1,9 @@
 /**
  * Drop Cat Go Studio -- Audio & Batch Processing
  * Section 1: Add ACE-Step AI music to session videos
- * Section 2: Batch video transforms (reverse, flip, speed, upscale...)
+ * Section 2: Upscale & Optimize (Lanczos or AI Real-ESRGAN)
+ * Section 3: Batch video transforms (reverse, flip, speed...)
+ * Section 4: Frame smoothing (motion interpolation)
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260620a';
 import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260620a';
@@ -15,12 +17,9 @@ export function init(panel) {
   const root = el('div', { style: 'display:flex; flex-direction:column; gap:28px; padding:16px; max-width:900px; margin:0 auto;' });
   panel.appendChild(root);
   _buildAudioSection(root);
-}
-
-export function initBatch(panel) {
-  panel.innerHTML = '';
-  const root = el('div', { style: 'display:flex; flex-direction:column; gap:28px; padding:16px; max-width:900px; margin:0 auto;' });
-  panel.appendChild(root);
+  _buildDivider(root, 'Upscale & Optimize');
+  _buildUpscaleSection(root);
+  _buildDivider(root, 'Batch Transforms');
   _buildBatchSection(root);
   _buildDivider(root, 'Frame Smoothing');
   _buildInterpolateSection(root);
@@ -221,7 +220,155 @@ function _buildDivider(root, label) {
   root.appendChild(div);
 }
 
-// -- Section 2: Batch Processing -----------------------------------------------
+// -- Section 2: Upscale & Optimize -----------------------------------------------
+
+function _buildUpscaleSection(root) {
+  let _files = [];
+
+  // -- File queue ----------------------------------------------------------
+  const queueCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(queueCard);
+
+  const queueHeader = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:10px;' });
+  queueCard.appendChild(queueHeader);
+  queueHeader.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Upscale & Optimize -- File Queue' }));
+
+  const upFileInput = el('input', { type: 'file', accept: 'video/*', multiple: 'true', style: 'display:none' });
+  queueCard.appendChild(upFileInput);
+  const addFilesBtn = el('button', { class: 'btn btn-sm', text: 'Add files...' });
+  queueHeader.appendChild(addFilesBtn);
+  addFilesBtn.addEventListener('click', () => upFileInput.click());
+
+  upFileInput.addEventListener('change', async () => {
+    if (!upFileInput.files?.length) return;
+    try {
+      const data = await apiUpload('/api/tools/upload', Array.from(upFileInput.files));
+      if (data.rejected?.length) toast(`Skipped non-video file${data.rejected.length > 1 ? 's' : ''}: ${data.rejected.join(', ')}`, 'error');
+      for (const f of data.files || []) _files.push(f);
+      _renderFiles();
+    } catch (e) { toast(e.message, 'error'); }
+    upFileInput.value = '';
+  });
+
+  // Session picker
+  const sessionBtn = el('button', { class: 'btn btn-sm', text: '+ From Session' });
+  queueHeader.appendChild(sessionBtn);
+  const sessionPicker = el('div', { style: 'display:none; margin-top:8px; border:1px solid var(--border); border-radius:6px; max-height:160px; overflow-y:auto;' });
+  queueCard.appendChild(sessionPicker);
+
+  sessionBtn.addEventListener('click', async () => {
+    const show = sessionPicker.style.display === 'none';
+    sessionPicker.style.display = show ? '' : 'none';
+    if (!show) return;
+    try {
+      const data = await api('/api/session/videos');
+      sessionPicker.innerHTML = '';
+      const vids = data.videos || [];
+      if (!vids.length) { sessionPicker.appendChild(el('div', { style: 'padding:10px; font-size:.8rem; color:var(--text-3);', text: 'No session videos.' })); return; }
+      for (const v of vids) {
+        const row = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; border-bottom:1px solid var(--border-2);',
+          onclick() {
+            if (!_files.find(f => f.path === v.path)) {
+              _files.push({ path: v.path, name: v.filename });
+              _renderFiles();
+            }
+            sessionPicker.style.display = 'none';
+          },
+        }, [
+          el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2);', text: v.filename }),
+          el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: formatDuration(v.duration) }),
+        ]);
+        sessionPicker.appendChild(row);
+      }
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  const fileList = el('div', { style: 'display:flex; flex-direction:column; gap:4px; margin-top:8px;' });
+  queueCard.appendChild(fileList);
+
+  function _renderFiles() {
+    fileList.innerHTML = '';
+    if (!_files.length) {
+      fileList.appendChild(el('div', { style: 'text-align:center; padding:16px 0; font-size:.8rem; color:var(--text-3);', text: 'No files added yet.' }));
+      return;
+    }
+    for (let i = 0; i < _files.length; i++) {
+      const f = _files[i];
+      const row = el('div', { style: 'display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; background:var(--bg-raised); border:1px solid var(--border-2);' }, [
+        el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: f.name || f.path.split(/[\\/]/).pop() }),
+        formatDuration(f.duration) ? el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: formatDuration(f.duration) }) : el('span'),
+        el('button', { class: 'btn-icon-xs remove', text: 'x', onclick() { _files.splice(i, 1); _renderFiles(); } }),
+      ]);
+      fileList.appendChild(row);
+    }
+  }
+  _renderFiles();
+
+  // -- Settings --------------------------------------------------------------
+  const setCard = el('div', { class: 'card', style: 'padding:14px;' });
+  root.appendChild(setCard);
+  setCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Settings' }));
+
+  const method = createSelect(setCard, { label: 'Method', options: ['AI (Real-ESRGAN)', 'Fast (Lanczos)'], value: 'AI (Real-ESRGAN)' });
+  const scaleSel = createSelect(setCard, { label: 'Scale', options: ['1x (optimize only)', '1.5x', '2x', '3x', '4x'], value: '2x' });
+  const crf = createSlider(setCard, { label: 'Quality (CRF -- lower = better)', min: 0, max: 51, step: 1, value: 18 });
+  setCard.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:8px; line-height:1.5;',
+    text: 'AI rebuilds real detail while enlarging -- much sharper, but works frame by frame, so long videos take a while. Fast is instant but only stretches pixels. 1x skips resizing and just re-encodes to shrink oversized files.' }));
+
+  // If the AI engine isn't present on this machine, quietly default to Fast.
+  api('/api/tools/upscale').then(d => {
+    if (d && d.ai_available === false) {
+      method.value = 'Fast (Lanczos)';
+      setCard.appendChild(el('div', { style: 'font-size:.72rem; color:var(--warning, #c90); margin-top:6px;',
+        text: 'AI engine not installed on this machine -- using Fast.' }));
+    }
+  }).catch(() => {});
+
+  // -- Process --------------------------------------------------------------
+  const upBtn = el('button', {
+    class: 'btn btn-primary',
+    text: '▶ Upscale / Optimize',
+    style: 'width:100%; font-size:1.05rem; padding:13px; font-weight:700;',
+  });
+  root.appendChild(upBtn);
+
+  const upProgWrap = el('div');
+  root.appendChild(upProgWrap);
+  const upProg = createProgressCard(upProgWrap);
+
+  upBtn.addEventListener('click', async () => {
+    if (!_files.length) { toast('Add video files first', 'error'); return; }
+    upBtn.disabled = true;
+    upProg.show();
+
+    try {
+      const data = await api('/api/tools/upscale', {
+        method: 'POST',
+        body: JSON.stringify({
+          files: _files.map(f => ({ path: f.path })),
+          settings: {
+            scale:  parseFloat(scaleSel.value),
+            method: scaleSel.value.startsWith('1x') ? 'ffmpeg' : (method.value.startsWith('AI') ? 'ai' : 'ffmpeg'),
+            crf:    crf.value,
+          },
+        }),
+      });
+
+      upProg.onCancel(async () => { await stopJob(data.job_id).catch(() => {}); upBtn.disabled = false; });
+      pollJob(data.job_id,
+        j => upProg.update(j.progress || 0, j.message || 'Processing...'),
+        j => {
+          upProg.hide(); upBtn.disabled = false;
+          toast(j.message || `Processed ${j.meta?.processed || _files.length} file(s)`, 'success');
+          if (j.output) pushToGallery('video-tools', j.output, 'Upscaled video', null, {});
+        },
+        err => { upProg.hide(); upBtn.disabled = false; toast(err, 'error'); },
+      );
+    } catch (e) { upProg.hide(); upBtn.disabled = false; toast(e.message, 'error'); }
+  });
+}
+
+// -- Section 3: Batch Processing -----------------------------------------------
 
 function _buildBatchSection(root) {
   let _files = [];
@@ -384,7 +531,7 @@ function _buildBatchSection(root) {
   });
 }
 
-// -- Section 3: Frame Smoothing ------------------------------------------------
+// -- Section 4: Frame Smoothing ------------------------------------------------
 
 function _buildInterpolateSection(root) {
   let _srcPath = null;

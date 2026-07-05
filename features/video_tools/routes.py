@@ -115,6 +115,68 @@ async def start_process(request: Request):
     return {"job_id": job.id}
 
 
+@router.get("/upscale")
+async def upscale_info():
+    """Report upscale capabilities so the UI can adapt (no install nagging)."""
+    from core.upscaler import ai_available
+    return {"ai_available": ai_available()}
+
+
+@router.post("/upscale")
+async def start_upscale(request: Request):
+    """Batch upscale/optimize videos -- Lanczos (fast) or Real-ESRGAN (AI).
+
+    Body:
+        files    -- list of paths (or dicts with "path")
+        settings -- scale (1.0/1.5/2.0/3.0/4.0), method ('ffmpeg'|'ai'),
+                    crf (0-51), out_dir (optional override)
+    """
+    from app import get_job_manager; job_manager = get_job_manager()
+    from features.video_tools.upscale_batch import process_upscale_batch
+
+    body = await request.json()
+    files = body.get("files", [])
+    settings = body.get("settings", {})
+
+    file_list = []
+    for item in files:
+        if isinstance(item, str):
+            file_list.append(item)
+        elif isinstance(item, dict) and "path" in item:
+            file_list.append(item["path"])
+
+    if not file_list:
+        raise HTTPException(400, "No files provided")
+    for path in file_list:
+        if not os.path.isfile(path):
+            raise HTTPException(400, f"File not found: {path}")
+
+    try:
+        scale = float(settings.get("scale", 2.0))
+        crf = int(settings.get("crf", 18))
+    except (ValueError, TypeError):
+        raise HTTPException(422, "scale must be a number, crf an integer")
+    if not 1.0 <= scale <= 4.0:
+        raise HTTPException(422, "scale must be between 1.0 and 4.0")
+    method = settings.get("method", "ffmpeg")
+    if method not in ("ffmpeg", "ai"):
+        raise HTTPException(422, "method must be 'ffmpeg' or 'ai'")
+
+    config = cfg.load()
+    merged = {
+        "scale": scale,
+        "method": method,
+        "crf": max(0, min(51, crf)),
+        "out_dir": settings.get("out_dir", "") or config.get("tools_out_dir", "") or str(OUTPUT_DIR),
+    }
+
+    job = job_manager.submit(
+        JOB_VIDEO_TOOL, process_upscale_batch, file_list, merged,
+        label=f"Upscale {len(file_list)} file(s)",
+    )
+    return {"job_id": job.id}
+
+
 @router.post("/mix-music")
 async def mix_music(request: Request):
     """Mix background music under a video."""

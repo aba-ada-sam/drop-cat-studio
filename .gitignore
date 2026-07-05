@@ -19,6 +19,7 @@ dist/
 build/
 .venv/
 env/
+venv-upscale/
 
 # IDE
 .vscode/

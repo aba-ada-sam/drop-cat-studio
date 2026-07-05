@@ -60,7 +60,15 @@ static/                 — Vanilla JS frontend (ES modules, no framework, no bu
 | Infinite Zoom | `/api/zoom/*` | Yes (WanGP) |
 | SD Prompts | `/api/prompts/*` | No |
 | Image-to-Video | `/api/i2v/*` | No |
-| Video Tools | `/api/tools/*` | No |
+| Video Tools | `/api/tools/*` | AI upscale only (venv-upscale) |
+
+### Video upscaling (`core/upscaler.py`)
+
+- `POST /api/tools/upscale` -- batch upscale/optimize (UI: Video Tools > Upscale & Optimize). `GET` on the same path reports `{ai_available}` so the UI adapts silently -- never put install instructions in GUI text.
+- Two methods: `ffmpeg` (lanczos, instant) and `ai` (Real-ESRGAN). `scale=1.0` = re-encode only (optimize file size).
+- The AI pass runs as a **subprocess in `venv-upscale/`** (`tools/ai_upscale_frames.py`), a dedicated venv with CUDA torch 2.11.0+cu128 (mirrors Forge's proven combo; the app's own Python stays CPU-torch). Rebuild it with `tools/INSTALL_REALESRGAN.bat` -- which also re-applies the required basicsr patch (`degradations.py`: `functional_tensor` -> `functional`); a basicsr reinstall reverts that patch and AI silently falls back to lanczos.
+- Perf reality (RTX 5080, 1080p -> 4K): ~0.8-1.0 s/frame; the bottleneck is PNG I/O, not the GPU (worker uses cv2 + PNG compression level 1 for this reason). AI mode suits short clips; a 4-min video is ~1.5 h and stages ~60-80 GB of frames in %TEMP%. Known future win: stream ffmpeg rawvideo pipes through the model instead of PNG round-trips.
+- Model weights auto-download on first AI run; pin local copies in `models/RealESRGAN_x{2,4}plus.pth`.
 
 ### Critical pattern: circular import avoidance
 
