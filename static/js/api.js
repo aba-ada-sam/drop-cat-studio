@@ -39,10 +39,9 @@ export async function apiUpload(path, files) {
  * @param {number} interval - Poll interval in ms (default 1500)
  * @returns {{ stop: () => void }} - Call stop() to cancel polling
  */
-export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, maxPolls = 2400) {
+export function pollJob(jobId, onProgress, onDone, onError, interval = 1500) {
   let timer = null;
   let stopped = false;
-  let activePolls = 0;  // counts ONLY ticks where the job is running/preparing
 
   let _netErrors = 0;
 
@@ -67,18 +66,11 @@ export function pollJob(jobId, onProgress, onDone, onError, interval = 1500, max
         onError(`Unexpected job status: ${job.status}`);
         return;
       }
-      // The timeout applies ONLY while the job is actively running/preparing.
-      // A 'queued' job can legitimately wait hours behind others (e.g. a folder
-      // batch of 40+ clips); counting that wait would falsely report the job as
-      // "timed out / failed" while it is simply standing in line. Queued ticks
-      // never count, so a queued job keeps polling (and reporting its position)
-      // until it actually starts.
-      if (job.status === 'running' || job.status === 'preparing') {
-        if (++activePolls > maxPolls) {
-          onError(`Job ran over ${Math.round(maxPolls * interval / 60000)} minutes without finishing -- treating as stuck.`);
-          return;
-        }
-      }
+      // No client-side wall-clock cutoff: multi-hour jobs (AI upscales, large
+      // folder batches) are normal, and the server's status is authoritative --
+      // when a job finishes, dies, or is stopped it flips to done/error/stopped
+      // (handled above), which is what ends the poll. A genuinely wedged job is
+      // the user's call to cancel, not something we time out from the browser.
       onProgress(job);
       timer = setTimeout(tick, interval);
     } catch (e) {

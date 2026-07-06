@@ -89,7 +89,7 @@ def _run_venv_worker(frames_dir: Path, up_dir: Path, scale: float, progress_cb) 
                 tail.append(line)
                 if len(tail) > 20:
                     tail.pop(0)
-        proc.wait(timeout=4 * 3600)
+        proc.wait(timeout=24 * 3600)   # AI upscale of a long video can run many hours
         if proc.returncode != 0:
             log.warning("[upscale] AI worker exited %s: %s",
                         proc.returncode, " | ".join(tail[-5:]))
@@ -137,7 +137,7 @@ def upscale_ffmpeg(
             cmd += ["-vf", f"scale={new_w}:{new_h}:flags=lanczos"]
         cmd += video_encode_args(crf=int(crf))
         cmd += ["-c:a", "copy", output_path]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=12 * 3600)
         if r.returncode != 0:
             return None, f"ffmpeg upscale failed: {r.stderr[-400:]}"
         if Path(output_path).exists() and Path(output_path).stat().st_size > 0:
@@ -184,7 +184,7 @@ def upscale_ai(
                 progress_cb(0.0, "Extracting frames...")
             ex = subprocess.run(
                 ["ffmpeg", "-y", "-i", input_path, str(frames_dir / "f%05d.png")],
-                capture_output=True, timeout=1800,
+                capture_output=True, timeout=6 * 3600,
             )
             if ex.returncode != 0:
                 log.warning("[upscale] Frame extract failed -- using ffmpeg")
@@ -242,7 +242,7 @@ def upscale_ai(
                  *video_encode_args(crf=int(crf)),
                  "-c:a", "copy", "-shortest",
                  output_path],
-                capture_output=True, timeout=3600,
+                capture_output=True, timeout=12 * 3600,
             )
             if r.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 0:
                 log.info("AI upscaled %s x%.1f Real-ESRGAN", Path(input_path).name, scale)

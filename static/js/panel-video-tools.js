@@ -10,6 +10,7 @@ import { toast } from './shell/toast.js?v=20260620a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260620a';
 
 let _sessionListener = null;
+let _pollHandle = null;   // module-level so panel re-mounts don't stack pollers
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -219,6 +220,41 @@ function _buildPipeline(root, source) {
   const player = createVideoPlayer(playerWrap);
   player.onStartOver(() => player.hide());
 
+  // Watch a job to completion -- keeps the progress card live and shows the
+  // result. Used both when you start a run and when re-attaching to one that's
+  // already running (so the panel never goes blank on a long job).
+  function _watch(jobId) {
+    if (_pollHandle) { _pollHandle.stop(); _pollHandle = null; }
+    runBtn.disabled = true;
+    prog.show();
+    prog.onCancel(async () => { await stopJob(jobId).catch(() => {}); _pollHandle?.stop(); _pollHandle = null; prog.hide(); runBtn.disabled = false; });
+    _pollHandle = pollJob(jobId,
+      j => prog.update(j.progress || 0, j.message || 'Working...'),
+      j => {
+        _pollHandle = null; prog.hide(); runBtn.disabled = false;
+        const outs = j.meta?.outputs || (j.output ? [j.output] : []);
+        if (outs.length) {
+          player.show(pathToUrl(outs[0]), outs[0]);
+          outs.forEach(o => pushToGallery('video-tools', o, 'Edited video', null, {}));
+          toast(outs.length > 1 ? `Edited ${outs.length} videos` : 'Done!', 'success');
+        } else {
+          toast('Finished but no output was produced', 'error');
+        }
+      },
+      err => { _pollHandle = null; prog.hide(); runBtn.disabled = false; toast(typeof err === 'string' ? err : (err?.message || 'Failed'), 'error'); },
+    );
+  }
+
+  // On open, reconnect to an edit job that's already running so its progress is
+  // always visible -- surviving page refreshes, tab switches, and hours-long jobs.
+  (async () => {
+    try {
+      const data = await api('/api/jobs');
+      const active = [...(data.running || []), ...(data.queued || [])].find(j => j.type === 'video_tool');
+      if (active) _watch(active.id);
+    } catch (_) { /* ignore -- nothing running */ }
+  })();
+
   runBtn.addEventListener('click', async () => {
     const files = source.getAll();
     if (!files.length) { toast('Choose a source video first', 'error'); return; }
@@ -237,22 +273,7 @@ function _buildPipeline(root, source) {
         method: 'POST',
         body: JSON.stringify({ video_paths: files.map(f => f.path), steps: payload }),
       });
-      prog.onCancel(async () => { await stopJob(job_id).catch(() => {}); runBtn.disabled = false; });
-      pollJob(job_id,
-        j => prog.update(j.progress || 0, j.message || 'Working...'),
-        j => {
-          prog.hide(); runBtn.disabled = false;
-          const outs = j.meta?.outputs || (j.output ? [j.output] : []);
-          if (outs.length) {
-            player.show(pathToUrl(outs[0]), outs[0]);
-            outs.forEach(o => pushToGallery('video-tools', o, 'Edited video', null, {}));
-            toast(outs.length > 1 ? `Edited ${outs.length} videos` : 'Done!', 'success');
-          } else {
-            toast('Finished but no output was produced', 'error');
-          }
-        },
-        err => { prog.hide(); runBtn.disabled = false; toast(typeof err === 'string' ? err : (err?.message || 'Failed'), 'error'); },
-      );
+      _watch(job_id);
     } catch (e) { prog.hide(); runBtn.disabled = false; toast(e.message, 'error'); }
   });
 }

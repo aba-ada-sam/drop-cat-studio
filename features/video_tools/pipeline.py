@@ -290,7 +290,7 @@ def _apply_crop(src: str, dst: str, step: dict, crf: int, cb) -> None:
     _run(cmd, cb)
 
 
-def _run(cmd: list[str], cb, timeout: int = 3600) -> None:
+def _run(cmd: list[str], cb, timeout: int = 12 * 3600) -> None:
     cb(0.1, "encoding...")
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:

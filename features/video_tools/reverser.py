@@ -158,7 +158,7 @@ def process_batch(job, file_list: list[str], settings: dict):
         log.info("cmd: %s...", " ".join(cmd[:8]))
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=12 * 3600)
             if result.returncode == 0:
                 results.append(dst)
                 log.info("Done: %s", os.path.basename(dst))
