@@ -121,7 +121,9 @@ def _pick_concurrency(steps: list[dict]) -> int:
     for s in steps:
         if s.get("op") == "upscale" and s.get("engine") == "ai":
             return 1
-        if s.get("op") == "smooth" and s.get("mode") == "rife":
+        # "auto" may resolve to rife per-file, so treat it as heavy too -- running
+        # two RIFE frame-explosions at once would thrash disk and VRAM.
+        if s.get("op") == "smooth" and s.get("mode") in ("rife", "auto"):
             return 1
     return 2
 

@@ -350,13 +350,14 @@ function _stepTransform(body) {
 
 function _stepSmooth(body) {
   const fps = createSlider(body, { label: 'Target FPS (0 = 2x source)', min: 0, max: 120, step: 1, value: 0, unit: 'fps' });
-  const modeSel = createSelect(body, { label: 'Mode', options: ['blend', 'mci', 'rife'], value: 'blend' });
+  const modeSel = createSelect(body, { label: 'Mode', options: ['auto', 'blend', 'mci', 'rife'], value: 'auto' });
   const desc = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:4px; line-height:1.5;' });
   body.appendChild(desc);
   const descriptions = {
+    auto: 'Recommended. Picks the best method for this clip automatically -- RIFE (GPU AI) for short clips, motion-compensated for long or high-res ones.',
     blend: 'Fast. Softens mild jitter by blending neighboring frames.',
     mci: 'Higher quality. Follows real motion between frames -- better for fast action, slower to render.',
-    rife: 'Best quality. GPU-accelerated AI that generates true in-between frames.',
+    rife: 'Best quality. GPU-accelerated AI that generates true in-between frames. Extracts every frame first (CPU/disk), then interpolates on the GPU.',
   };
   const updateDesc = () => { desc.textContent = descriptions[modeSel.value] || ''; };
   modeSel.el?.querySelector('select')?.addEventListener('change', updateDesc);

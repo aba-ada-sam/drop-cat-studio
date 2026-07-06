@@ -298,8 +298,8 @@ async def interpolate_frames(request: Request):
 
     if not video_path or not os.path.isfile(video_path):
         raise HTTPException(400, "Video file not found")
-    if mode not in ("blend", "mci", "rife"):
-        raise HTTPException(400, "mode must be blend, mci, or rife")
+    if mode not in ("auto", "blend", "mci", "rife"):
+        raise HTTPException(400, "mode must be auto, blend, mci, or rife")
 
     src = Path(video_path)
     date_str = datetime.date.today().strftime("%Y-%m-%d")
