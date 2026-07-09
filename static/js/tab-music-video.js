@@ -224,7 +224,7 @@ export function init(panel) {
   }
 
   const { wrap: loopWrap, input: loopCheck }    = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (audio drives subject mouth/face motion)', true);
+  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (mouth follows the sung words, not the beat)', true);
 
   // Clip duration slider
   function _numRow(labelText, min, max, step, def, unit) {
@@ -345,7 +345,12 @@ export function init(panel) {
         folder:        _folderPath,
         images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        loopCheck.checked,
-        lip_sync:      lipSyncCheck.checked,
+        // Word-level sync is the MuseTalk post-pass (auto_lipsync), driven by the
+        // isolated vocal stem. lip_sync is LTX-2's native audio conditioning,
+        // which only pulls the mouth toward the loudest audio -- i.e. the beat --
+        // so it stays off no matter what the toggle says.
+        auto_lipsync:  lipSyncCheck.checked,
+        lip_sync:      false,
         use_satellite: satCheck.checked,
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
@@ -491,7 +496,9 @@ export function init(panel) {
         photo_path:     shot.path || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
-        lip_sync:       lipSyncCheck.checked,
+        // See the batch body above: word sync = auto_lipsync, never lip_sync.
+        auto_lipsync:   lipSyncCheck.checked,
+        lip_sync:       false,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
         steps:          8,

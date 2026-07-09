@@ -27,6 +27,33 @@ def fast_check_ffmpeg():
     except:
         return False
 
+_MIN_BOX = 16
+
+def _sanitize_coords(coord_list, frame_list):
+    """Clamp every face box into its frame; placeholder-out anything unusable.
+
+    Guarantees `frame[y1:y2, x1:x2]` is a non-empty crop for every non-placeholder
+    box, which is what cv2.resize needs.
+    """
+    out = []
+    for bbox, frame in zip(coord_list, frame_list):
+        if bbox == coord_placeholder or frame is None:
+            out.append(coord_placeholder)
+            continue
+        try:
+            x1, y1, x2, y2 = (int(v) for v in bbox)
+        except Exception:
+            out.append(coord_placeholder)
+            continue
+        h, w = frame.shape[:2]
+        x1 = max(0, min(x1, w - 1)); y1 = max(0, min(y1, h - 1))
+        x2 = max(0, min(x2, w));     y2 = max(0, min(y2, h))
+        if x2 - x1 < _MIN_BOX or y2 - y1 < _MIN_BOX:
+            out.append(coord_placeholder)
+        else:
+            out.append((x1, y1, x2, y2))
+    return out
+
 @torch.no_grad()
 def main(args):
     # Configure ffmpeg path
@@ -161,6 +188,12 @@ def main(args):
             
             print(f"Number of frames: {len(frame_list)}")         
             
+            # A box that starts outside the frame, or is inverted, slices down to
+            # an EMPTY crop and blows up cv2.resize with "!ssize.empty()", losing
+            # the whole run. get_landmark_and_bbox clamps now, but a .pkl cached
+            # by an older build can still hold such a box -- normalize here too.
+            coord_list = _sanitize_coords(coord_list, frame_list)
+
             # Process each frame
             input_latent_list = []
             for bbox, frame in zip(coord_list, frame_list):
@@ -171,6 +204,8 @@ def main(args):
                     y2 = y2 + args.extra_margin
                     y2 = min(y2, frame.shape[0])
                 crop_frame = frame[y1:y2, x1:x2]
+                if crop_frame.size == 0:
+                    continue
                 crop_frame = cv2.resize(crop_frame, (256,256), interpolation=cv2.INTER_LANCZOS4)
                 latents = vae.get_latents_for_unet(crop_frame)
                 input_latent_list.append(latents)

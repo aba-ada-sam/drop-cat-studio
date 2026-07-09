@@ -640,6 +640,20 @@ def _isolate_guide_vocals(audio_wav, job_dir):
             capture_output=True, timeout=180,
         )
         out = _voc_hp if (_hp.returncode == 0 and os.path.isfile(_voc_hp)) else _voc
+
+        # Isolating the vocals is not enough: the stem still carries bleed through
+        # every instrumental bar, and the conditioning turns that bleed into mouth
+        # movement. Silence everything outside the sung phrases so an instrumental
+        # clip conditions on real silence and the mouth rests.
+        from features.lipsync.vocal_activity import gate_audio, voiced_intervals
+        _iv = voiced_intervals(out)
+        if _iv:
+            _gated = str(job_dir / "guide_vocals_gated.wav")
+            if gate_audio(out, _iv, _gated):
+                out = _gated
+        else:
+            log.info("[song-video] No singing detected -- conditioning on the (silent) stem anyway")
+
         log.info("[song-video] Lip sync: conditioning on isolated vocals (%s)", os.path.basename(out))
         return out
     except Exception as e:
@@ -1167,12 +1181,18 @@ def _do_song_gpu_phase(
         # audio" button on the Queue/Gallery detail still works case-by-case.
         if bool(settings.get("auto_lipsync", False)) and not _stopped():
             try:
-                from features.lipsync.runner import lipsync_available, lipsync_video
+                from features.lipsync.runner import NoVocalsError, lipsync_available, lipsync_video
                 if lipsync_available():
                     job.meta["stage"] = "lip-sync"
-                    job.update(progress=96, message="Lip-syncing to vocals (MuseTalk)...")
+                    job.update(progress=96, message="Lip-syncing to the words (MuseTalk)...")
                     ls_out = merged.replace(".mp4", "_ls.mp4")
-                    synced = lipsync_video(job, merged, audio_path, ls_out, isolate_vocals=True)
+                    try:
+                        synced = lipsync_video(job, merged, audio_path, ls_out, isolate_vocals=True)
+                    except NoVocalsError as _nv:
+                        # Not a failure: an instrumental track has nothing to sync.
+                        synced = None
+                        job.meta["lipsync_skipped"] = str(_nv)
+                        log.info("[song-video] Lip sync skipped -- %s", _nv)
                     if synced and os.path.isfile(synced):
                         if synced != merged:
                             try:
@@ -1182,14 +1202,22 @@ def _do_song_gpu_phase(
                         merged = synced
                         log.info("[song-video] Lip sync applied: %s", Path(synced).name)
                 else:
+                    job.meta["lipsync_error"] = "MuseTalk is not installed"
                     log.info("[song-video] Lip sync requested but MuseTalk not installed -- skipping")
             except Exception as _ls:
+                # The video is still usable, but it has NO word-level sync -- say so
+                # rather than shipping a beat-synced video that looks like a bug.
+                job.meta["lipsync_error"] = str(_ls)
                 log.warning("[song-video] Lip sync post-pass failed (keeping un-synced video): %s", _ls)
 
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
         job.message = f"Music video complete! ({len(clip_paths)} clips)"
+        if job.meta.get("lipsync_error"):
+            job.message += " -- but lip sync failed, so the mouth is not synced to the words"
+        elif job.meta.get("lipsync_skipped"):
+            job.message += " -- instrumental track, so no lip sync"
 
         # Auto-evaluate quality so regressions surface in the log without manual review.
         try:

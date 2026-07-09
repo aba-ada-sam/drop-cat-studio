@@ -34,8 +34,11 @@ def _get_face68(img_bgr):
 device = "cuda" if torch.cuda.is_available() else "cpu"
 fa = FaceAlignment(LandmarksType._2D, flip_input=False,device=device)
 
-# maker if the bbox is not sufficient 
+# maker if the bbox is not sufficient
 coord_placeholder = (0.0,0.0,0.0,0.0)
+
+# Smallest face box worth cropping; below this the 256x256 resize is all blur.
+_MIN_BOX = 16
 
 def resize_landmark(landmark, w, h, new_w, new_h):
     w_ratio = new_w / w
@@ -126,15 +129,24 @@ def get_landmark_and_bbox(img_list,upperbondrange =0):
         half_face_dist = np.max(face_land_mark[:, 1]) - half_face_coord[1]
         upper_bond = max(0, half_face_coord[1] - half_face_dist)
 
-        f_landmark = (
-            int(np.min(face_land_mark[:, 0])), int(upper_bond),
-            int(np.max(face_land_mark[:, 0])), int(np.max(face_land_mark[:, 1])),
-        )
-        x1, y1, x2, y2 = f_landmark
-        if y2 - y1 <= 0 or x2 - x1 <= 0 or x1 < 0:
+        x1 = int(np.min(face_land_mark[:, 0]))
+        y1 = int(upper_bond)
+        x2 = int(np.max(face_land_mark[:, 0]))
+        y2 = int(np.max(face_land_mark[:, 1]))
+
+        # face-alignment extrapolates landmarks past the frame edge, so the box
+        # can start outside the image (x1 >= w) or be inverted. Numpy slices
+        # such a box down to an EMPTY crop, and the cv2.resize that follows dies
+        # with "!ssize.empty()" -- killing the whole run partway through a long
+        # video. Clamp into the frame and reject anything too small to be a
+        # mouth, so those frames fall back to coord_placeholder (kept as-is).
+        h, w = np.asarray(fb)[0].shape[:2]
+        x1 = max(0, min(x1, w - 1)); y1 = max(0, min(y1, h - 1))
+        x2 = max(0, min(x2, w));     y2 = max(0, min(y2, h))
+        if x2 - x1 < _MIN_BOX or y2 - y1 < _MIN_BOX:
             coords_list += [coord_placeholder]   # degenerate box -> keep frame as-is
         else:
-            coords_list += [f_landmark]
+            coords_list += [(x1, y1, x2, y2)]
     
     print("********************************************bbox_shift parameter adjustment**********************************************************")
     print(f"Total frame:「{len(frames)}」 Manually adjust range : [ -{int(sum(average_range_minus) / len(average_range_minus))}~{int(sum(average_range_plus) / len(average_range_plus))} ] , the current value: {upperbondrange}")

@@ -18,6 +18,18 @@ For a song, the full mix is poor sync material for the speech-trained model, so
 Demucs isolates the vocal stem to drive the mouth and the original song is
 re-muxed for the final (see isolate_vocals).
 
+Isolating the vocals is not enough on its own. A 3:30 song is typically only
+~50% singing -- intro, solos, outro and the gaps between phrases are all
+instrumental -- and the Demucs stem still carries audible bleed (kick, cymbals,
+guitar) right through them. MuseTalk turns that bleed into mouth movement, which
+is what makes a character "sing to the background music". So we detect the
+intervals that actually contain singing and use them twice:
+
+  1. the driving audio is hard-gated to silence outside them, and
+  2. the ORIGINAL frames are composited back over those stretches,
+
+so between phrases the mouth is provably untouched rather than merely quiet.
+
 Limitation: mouth-sync needs a detectable frontal face. Abstract/non-face
 content (e.g. a skull sculpture) won't sync.
 """
@@ -29,9 +41,15 @@ import subprocess
 from pathlib import Path
 
 from core import config as cfg
-from core.ffmpeg_utils import probe_duration, run_ffmpeg
+from core.ffmpeg_utils import probe_duration, probe_file, run_ffmpeg, video_encode_args
+
+from .vocal_activity import enable_expr, gate_audio, voiced_intervals
 
 log = logging.getLogger(__name__)
+
+
+class NoVocalsError(RuntimeError):
+    """The driving track has no singing to sync to (fully instrumental)."""
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 _DEFAULT_DIR = r"C:\MuseTalk"
@@ -79,6 +97,41 @@ def _separate_vocals(musetalk_py: Path, in_audio: str, out_vocals: str) -> bool:
     except Exception as e:
         log.warning("[lipsync] demucs exception: %s", e)
         return False
+
+
+def _composite_voiced(base_video: str, synced_video: str,
+                      intervals: list[tuple[float, float]], out_path: str) -> bool:
+    """Show `synced_video` only while someone is singing, `base_video` otherwise.
+
+    MuseTalk re-renders the mouth for every frame it is given, including the
+    instrumental bars where the gated driving audio is silent. Overlaying its
+    output onto the original video, enabled only inside the vocal intervals,
+    makes the mouth exactly as still as the source between phrases.
+    """
+    info = probe_file(base_video)
+    w, h = info.get("width"), info.get("height")
+    if not w or not h:
+        log.warning("[lipsync] could not probe %s -- skipping composite", base_video)
+        return False
+
+    # eof_action=pass + repeatlast=0: if MuseTalk's track ends early, the base
+    # video plays on rather than freezing on its last synced frame.
+    graph = (
+        f"[0:v]setpts=PTS-STARTPTS[b];"
+        f"[1:v]setpts=PTS-STARTPTS,scale={w}:{h}[s];"
+        f"[b][s]overlay=eof_action=pass:repeatlast=0:enable='{enable_expr(intervals)}'[v]"
+    )
+    r = run_ffmpeg(
+        ["ffmpeg", "-y", "-i", base_video, "-i", synced_video,
+         "-filter_complex", graph, "-map", "[v]", "-an",
+         *video_encode_args(crf=18), "-movflags", "+faststart", out_path],
+        timeout=1800,
+    )
+    if r.returncode != 0 or not os.path.isfile(out_path):
+        err = (r.stderr or b"").decode("utf-8", "replace")[-800:]
+        log.warning("[lipsync] composite failed:\n%s", err)
+        return False
+    return True
 
 
 def _remux_audio(video_in: str, audio_in: str, out_path: str) -> bool:
@@ -132,12 +185,38 @@ def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str,
             raise RuntimeError("No audio provided and could not extract audio from the video")
 
     # What MuseTalk's mouth syncs to: isolated vocals (better) or the full audio.
+    # `intervals` stays None when we never got a clean stem to analyse, which
+    # also disables the composite below -- we only claim to know where the
+    # singing is when we actually looked at a vocal stem.
     drive_audio = original_audio
+    intervals: list[tuple[float, float]] | None = None
     if isolate_vocals:
         job.update(progress=10, message="Isolating vocals...")
         voc = str(work / "_vocals.wav")
         if _separate_vocals(py, original_audio, voc):
             drive_audio = voc
+
+            job.update(progress=14, message="Finding the sung phrases...")
+            intervals = voiced_intervals(voc)
+            if not intervals:
+                shutil.rmtree(work, ignore_errors=True)
+                raise NoVocalsError(
+                    "No singing found in this track -- it is instrumental, so there "
+                    "are no words to lip-sync to."
+                )
+            sung = sum(e - s for s, e in intervals)
+            total = probe_duration(voc) or 0.0
+            if total and sung < 0.98 * total:
+                gated = str(work / "_vocals_gated.wav")
+                if gate_audio(voc, intervals, gated):
+                    drive_audio = gated
+                    log.info(
+                        "[lipsync] driving on %d sung phrases (%.0fs of %.0fs); "
+                        "the other %.0fs is silenced so the mouth rests",
+                        len(intervals), sung, total, total - sung,
+                    )
+            else:
+                intervals = None      # sung end to end: nothing to composite back
         else:
             log.warning("[lipsync] vocal isolation failed -- driving with full audio")
 
@@ -182,24 +261,44 @@ def lipsync_video(job, video_path: str, audio_path: str | None, out_path: str,
     # video-only intermediate -- skip it).
     finals = [p for p in (work / "v15").glob("*.mp4") if not p.name.startswith("temp_")]
     if not finals:
-        log.error("[lipsync] no output mp4. stdout tail:\n%s", (proc.stdout or "")[-1500:])
+        tail = (proc.stdout or "")[-1500:]
+        log.error("[lipsync] no output mp4. stdout tail:\n%s", tail)
+        # MuseTalk swallows its own exceptions and exits 0, so the real cause is
+        # only ever in stdout. Quote it instead of guessing "no face detected".
+        why = next(
+            (ln.strip() for ln in reversed(tail.splitlines())
+             if "Error occurred during processing" in ln),
+            "",
+        )
         raise RuntimeError(
+            f"MuseTalk produced no synced video -- {why}" if why else
             "MuseTalk produced no synced video -- usually means no face was "
             "detected in the input. Lip-sync needs a clear frontal face."
         )
     src = max(finals, key=lambda p: p.stat().st_mtime)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    if drive_audio != original_audio:
-        # MuseTalk muxed the vocal stem; swap in the full song (same timeline,
-        # so the mouth still matches). Fall back to the vocals-audio output if
-        # the re-mux fails.
+
+    # Put the original frames back wherever nobody is singing.
+    video_src = str(src)
+    if intervals:
+        job.update(progress=84, message="Restoring the mouth between phrases...")
+        comp = str(work / "_composited.mp4")
+        if _composite_voiced(video_path, str(src), intervals, comp):
+            video_src = comp
+        else:
+            log.warning("[lipsync] composite failed -- mouth may move on instrumental bars")
+
+    if video_src != str(src) or drive_audio != original_audio:
+        # The composite is video-only, and MuseTalk muxed whatever we drove it
+        # with. Either way the final needs the full song back (same timeline, so
+        # the mouth still matches).
         job.update(progress=88, message="Restoring full song audio...")
-        if not _remux_audio(str(src), original_audio, out_path):
-            log.warning("[lipsync] re-mux failed -- keeping vocals-only audio")
-            shutil.move(str(src), out_path)
+        if not _remux_audio(video_src, original_audio, out_path):
+            log.warning("[lipsync] re-mux failed -- keeping the driving audio")
+            shutil.move(video_src, out_path)
     else:
-        shutil.move(str(src), out_path)
+        shutil.move(video_src, out_path)
 
     # Cleanup the MuseTalk work dir + temp config.
     try:
