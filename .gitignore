@@ -81,3 +81,22 @@ dcs-laptop-setup.zip
 /logsapp_restart.log
 /FIRST_PROMPT.txt
 /OVERNIGHT_NOTES_*.md
+
+# Local operator scripts. They carry this machine's absolute paths (and a LAN IP
+# in setup_satellite.py), so they stay on disk and out of the repo.
+/open_dcs.ps1
+/restart_dcs.ps1
+/overnight_art.ps1
+/overnight_orchestrator.ps1
+/tools/screenshot.ps1
+/tools/setup_satellite.py
+
+# dropcat_output.ico is the icon for the Desktop "DropCat Output" shortcut --
+# it lives here on purpose. Ignore it rather than committing a binary.
+/dropcat_output.ico
+
+# Generated artifacts: screenshot.ps1's output, icon previews, extracted QC frames.
+/tools/screenshot.png
+/tools/icon_*preview*.png
+/tools/review_frames/
+/tools/slop*/
