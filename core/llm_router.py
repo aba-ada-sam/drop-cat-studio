@@ -69,6 +69,16 @@ _SAFETY_REFUSAL_MARKERS = (
     "i won't be able to describe",
     "i won't describe",
     "i cannot describe",
+    # Contractions. The list above only had the expanded forms, so a real refusal
+    # ("I can't describe this image as it contains explicit sexual content")
+    # matched nothing: "explicit content" is not a substring of "explicit sexual
+    # content", and the model says "can't", not "cannot". The refusal then flowed
+    # through to the caller, which discarded it -- and every clip in that job
+    # rendered with no subject anchor.
+    "i can't describe",
+    "i can't provide",
+    "i cannot provide",
+    "explicit sexual content",
 )
 
 
