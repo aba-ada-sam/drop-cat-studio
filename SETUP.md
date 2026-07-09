@@ -106,8 +106,8 @@ After the initial model download, **Drop Cat Go Studio runs completely offline**
 ## Feature Activation
 
 Once running, features light up automatically:
-- **AI Director** — Talk to Ollama about creative ideas
-- **SD Prompts** — Generate Stable Diffusion prompts with regional prompting (Forge Couple)
+- **AI Director** — Talk to the AI about creative ideas and have it drive the app
+- **Create Videos / Music Video** — Turn photos into AI video with matching music
 - **Video Tools** — Transform video with local processing
 - **And more** — Each feature auto-detects its dependencies
 

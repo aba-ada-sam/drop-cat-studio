@@ -185,7 +185,6 @@ _status_lock = threading.Lock()
 _service_status: dict = {
     "wangp":   {"state": "unknown", "message": "", "port": None, "pid": None},
     "acestep": {"state": "unknown", "message": "", "port": None, "pid": None},
-    "forge":   {"state": "unknown", "message": "", "port": 7861, "pid": None},
     # Uncensored LLM backend (Featherless cloud, or local KoboldCpp). Cloud has
     # no local process/port -- this is a reachability/config pill, not a service
     # we start or stop. (Ollama was removed 2026-07-05.)
@@ -572,18 +571,6 @@ def quick_detect():
             _set_status("wangp", state="not_configured",
                         message="WanGP path not configured")
 
-    try:
-        from services.forge_client import forge_alive as _fa, FORGE_PORT
-        if _fa():
-            _set_status("forge", state="running",
-                        message="Forge API running (SD image generation ready)",
-                        port=FORGE_PORT)
-        else:
-            _set_status("forge", state="not_running",
-                        message="Forge not running -- use Services tab to start")
-    except Exception:
-        _set_status("forge", state="not_running", message="Forge not detected")
-
     _set_uncensored_status()
 
     if acestep_alive():
@@ -795,16 +782,6 @@ def stop_service(name: str) -> tuple[bool, str | None]:
                         message="ACE-Step stopped -- set path in Settings", pid=None)
         return True, None
 
-    if name == "forge":
-        _kill_by_port(7861, "Forge")
-        time.sleep(1)
-        from services.forge_client import forge_alive
-        if forge_alive():
-            _set_status("forge", state="running", message="Forge still running (external)")
-            return False, "Could not kill Forge -- it may be running externally"
-        _set_status("forge", state="not_running", message="Forge stopped")
-        return True, None
-
     return False, f"Unknown service: {name}"
 
 
@@ -817,135 +794,7 @@ def restart_service(name: str) -> tuple[bool, str | None]:
         return start_wangp_worker()
     if name == "acestep":
         return start_acestep()
-    if name == "forge":
-        return start_forge()
     return False, f"Unknown service: {name}"
-
-
-# -- Forge auto-start ---------------------------------------------------------
-
-_forge_proc: subprocess.Popen | None = None
-
-def _forge_port_open(port: int = 7861) -> bool:
-    """True if something is already listening on the Forge port (even mid-startup)."""
-    import socket
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(1)
-        s.connect(("127.0.0.1", port))
-        s.close()
-        return True
-    except Exception:
-        return False
-
-
-def start_forge() -> tuple[bool, str | None]:
-    """Start Forge SD WebUI as a fully detached process.
-
-    Forge is launched via PowerShell Start-Process so it runs independently
-    of Drop Cat Go Studio -- it survives app restarts and closing the app.
-
-    If Forge's port is already open (model still loading), we skip the launch
-    and just wait for the API to become ready -- prevents killing a loading Forge.
-    """
-    global _forge_proc
-    from services.forge_client import forge_alive, FORGE_PORT
-
-    if forge_alive():
-        _set_status("forge", state="running",
-                    message="Forge API running (SD image generation ready)",
-                    port=FORGE_PORT)
-        _forge_proc = None
-        return True, None
-
-    # Port open but API not yet ready = Forge is mid-startup; don't kill it
-    if _forge_port_open(FORGE_PORT):
-        log.info("Forge port %d is open -- model still loading, waiting...", FORGE_PORT)
-        _set_status("forge", state="starting",
-                    message="Forge loading model, please wait (~90s)...")
-        # Fall through to the poll loop below without launching a new process
-        forge_root = cfg.get("forge_root") or r"C:\forge"
-        webui_bat = None   # signal: skip the launch step
-    else:
-        forge_root = cfg.get("forge_root") or r"C:\forge"
-        webui_bat = Path(forge_root) / "webui-user.bat"
-        if not webui_bat.exists():
-            webui_bat = Path(forge_root) / "webui.bat"
-        if not webui_bat.exists():
-            msg = f"Forge launch script not found in {forge_root}"
-            _set_status("forge", state="error", message=msg)
-            return False, msg
-
-    try:
-        if webui_bat is not None:
-            # Fresh launch -- Forge isn't running at all
-            _set_status("forge", state="starting",
-                        message="Starting Forge SD -- loading model, please wait (~90s)...")
-            log.info("Starting Forge SD from %s (detached)...", forge_root)
-
-            # IMPORTANT (2026-06-18): launch Forge's entry point DIRECTLY with its
-            # venv Python -- do NOT run webui-user.bat. That .bat frees port 7861 via
-            #   netstat -ano | findstr ":7861 "  ->  taskkill /F /PID <col 5>
-            # which also matches THIS app's own outbound polling connections to 7861
-            # (the PID in those rows is the client side = us), so running it would
-            # taskkill the Drop Cat Go Studio server itself -- the "exit code 1" crash.
-            # Start-Process still detaches Forge so it survives app restarts.
-            # --nowebui runs Forge as a HEADLESS API ONLY (no Gradio web UI) -- DCS
-            # only ever talks to /sdapi/v1, so there is no reason to serve (or pop
-            # up) the Stable Diffusion GUI, and a headless server can't be closed
-            # by accident. WEBUI_LAUNCH_LIVE_PREVIEW=0 also stops any browser open.
-            forge_py = Path(forge_root) / "venv" / "Scripts" / "python.exe"
-            entry = "launch.py" if (Path(forge_root) / "launch.py").exists() else "webui.py"
-            if forge_py.exists():
-                target = str(forge_py)
-                arglist = f"'{entry}','--cuda-malloc','--api','--nowebui','--port','{FORGE_PORT}'"
-            else:
-                # venv Python missing -- last-resort fallback to the .bat
-                target = "cmd.exe"
-                arglist = f"'/c','\"{webui_bat}\"'"
-            ps_args = (
-                f"$env:WEBUI_LAUNCH_LIVE_PREVIEW='0'; "
-                f"Start-Process -FilePath '{target}'"
-                f" -ArgumentList {arglist}"
-                f" -WorkingDirectory '{forge_root}'"
-                f" -WindowStyle Hidden"
-            )
-            subprocess.Popen(
-                ["powershell", "-WindowStyle", "Hidden", "-NonInteractive",
-                 "-Command", ps_args],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            log.info("Forge launch command sent -- polling for API...")
-        _forge_proc = None  # detached -- no handle to track
-
-        # Poll until Forge API responds (up to 5 minutes for large models)
-        deadline = time.time() + 300
-        last_log = time.time()
-        while time.time() < deadline:
-            if forge_alive():
-                _set_status("forge", state="running",
-                            message="Forge API running (SD image generation ready)",
-                            port=FORGE_PORT)
-                log.info("Forge ready on port %d", FORGE_PORT)
-                return True, None
-            if time.time() - last_log >= 15:
-                elapsed = int(time.time() - (deadline - 300))
-                _set_status("forge", state="starting",
-                            message=f"Forge loading... ({elapsed}s elapsed, up to 5min for large models)")
-                log.info("Forge still loading... (%ds elapsed)", elapsed)
-                last_log = time.time()
-            time.sleep(5)
-
-        msg = "Forge did not respond within 5 minutes -- check C:\\forge\\webui-user.bat"
-        _set_status("forge", state="error", message=msg)
-        log.error(msg)
-        return False, msg
-
-    except Exception as e:
-        msg = f"Failed to launch Forge: {e}"
-        _set_status("forge", state="error", message=msg)
-        log.error(msg)
-        return False, msg
 
 
 # -- Uncensored LLM backend (Featherless cloud / local KoboldCpp) -------------
@@ -1089,20 +938,6 @@ def _watchdog_loop():
                               "falling back to direct start", e)
                     start_acestep()
 
-            # Forge is user-managed (image gen is separate from video gen).
-            # Just passively detect its state -- never auto-restart it.
-            from services.forge_client import forge_alive as _forge_alive
-            forge_state = status.get("forge", {}).get("state", "unknown")
-            if forge_state in ("not_running", "unknown", "error", "ready"):
-                if _forge_alive():
-                    _set_status("forge", state="running",
-                                message="Forge API running (SD image generation ready)",
-                                port=7861)
-            elif forge_state == "running":
-                if not _forge_alive():
-                    _set_status("forge", state="not_running",
-                                message="Forge not running -- use Services tab to start")
-
             # Refresh the uncensored-LLM status pill (Featherless cloud / local
             # KoboldCpp). Nothing to start -- cloud needs no process, and a local
             # KoboldCpp is an external server we don't manage.
@@ -1122,7 +957,7 @@ def start_watchdog():
 
 def shutdown_all():
     """Cleanly shut down managed services."""
-    global _wangp_worker_proc, _acestep_proc, _forge_proc
+    global _wangp_worker_proc, _acestep_proc
 
     # Stop the watchdog first so it cannot respawn a service we are about to
     # kill. Without this there is a race: the watchdog wakes, sees a dead proc,
@@ -1164,8 +999,7 @@ def shutdown_all():
     except Exception:
         pass   # worker not running or already dead -- fall through to force-kill
 
-    for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc),
-                        ("Forge", _forge_proc)]:
+    for label, proc in [("WanGP", _wangp_worker_proc), ("ACE-Step", _acestep_proc)]:
         _kill_proc(proc, label)
     # Belt+suspenders: kill by port for processes we didn't spawn (or lost the handle to)
     _kill_by_port(WANGP_WORKER_PORT, "WanGP")
@@ -1173,4 +1007,3 @@ def shutdown_all():
     _kill_stale_gpu_processes()
     _wangp_worker_proc = None
     _acestep_proc = None
-    _forge_proc = None

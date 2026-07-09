@@ -106,7 +106,7 @@ export async function importPresets(file, tabId) {
       if (!item.name || !item.settings) continue;
       await apiFetch('/api/presets', {
         method: 'POST',
-        body: JSON.stringify({ tab: tabId || item.tab || 'sd-prompts', name: item.name, settings: item.settings }),
+        body: JSON.stringify({ tab: tabId || item.tab || 'create-videos', name: item.name, settings: item.settings }),
         context: 'presets.import',
       });
       count++;

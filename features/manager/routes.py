@@ -27,10 +27,8 @@ APP_MAP = """\
 Drop Cat Go Studio turns photos into AI videos with music. Tabs (navigate by id):
 - pipeline      "Studio Home"    -- launcher; pick what to create. Start here when unsure.
 - express       "Quick Video"    -- one photo + an idea -> a short AI video clip. Fastest path.
-- sd-prompts    "Generate Images"-- text idea or reference photo -> AI images (Forge SD).
 - create-videos "Create Videos"  -- animate images into video + add AI music.
 - music-video   "Music Video"    -- a song + a folder of photos -> full-length music video.
-- zoom          "Infinite Zoom"  -- one photo -> endless spatial zoom-in video.
 - bridges       "Video Bridges"  -- 2+ clips -> AI transition clips between them.
 - video-tools   "Video Tools"    -- add music, trim, reverse, speed, upscale, smooth.
 - queue         "Queue"          -- running/pending generations. Go here to watch progress.

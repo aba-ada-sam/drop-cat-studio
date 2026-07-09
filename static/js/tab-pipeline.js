@@ -1,7 +1,7 @@
 /**
  * Drop Cat Go Studio -- Studio Home
  * The front door: concept input + numbered pipeline walkthrough + recent work.
- * Routes the user's raw idea to sd-prompts via handoff.
+ * Routes the user's raw idea to the Quick Video (express) tab via handoff.
  */
 import { el } from './components.js?v=20260620a';
 import { handoff } from './handoff.js?v=20260620a';
@@ -13,20 +13,8 @@ let _stepCards   = [];   // [{step, dot, msg}]
 // -- Pipeline step definitions ---------------------------------------------
 const STEPS = [
   {
-    num: '01', icon: '', label: 'Generate Images',
-    hint: 'Turn any text idea into AI images with Stable Diffusion',
-    tab: 'sd-prompts', svc: 'forge',
-    svcLabels: {
-      running:        'Forge SD ready',
-      not_running:    'Forge offline',
-      starting:       'Forge starting...',
-      not_configured: 'Not configured',
-      unknown:        'Checking...',
-    },
-  },
-  {
-    num: '02', icon: '', label: 'Create Videos',
-    hint: 'Animate images with AI motion. Add AI-generated music with a single prompt.',
+    num: '01', icon: '', label: 'Create Videos',
+    hint: 'Animate your photos with AI motion. Add AI-generated music with a single prompt.',
     tab: 'create-videos', svc: 'wangp',
     svcLabels: {
       running:        'WanGP ready',
@@ -37,7 +25,7 @@ const STEPS = [
     },
   },
   {
-    num: '03', icon: '', label: 'Audio',
+    num: '02', icon: '', label: 'Audio',
     hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
     tab: 'video-tools', svc: 'acestep',
     svcLabels: {
@@ -100,7 +88,7 @@ function _buildHero(root) {
 
   const goBtn = el('button', {
     class: 'btn btn-primary pipeline-concept-go',
-    text: 'Generate Images from this Idea',
+    text: 'Start a Quick Video from this Idea',
     onclick() { _launchConcept(conceptTA.value.trim()); },
   });
   btnRow.appendChild(goBtn);
@@ -126,8 +114,8 @@ function _buildHero(root) {
 
 function _launchConcept(text) {
   if (!text) return;
-  handoff('sd-prompts', { type: 'concept', text });
-  document.querySelector('[data-tab="sd-prompts"]')?.click();
+  handoff('express', { type: 'concept', text });
+  document.querySelector('[data-tab="express"]')?.click();
 }
 
 // -- Pipeline steps --------------------------------------------------------

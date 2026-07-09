@@ -73,13 +73,11 @@ def main() -> int:
     _test("import app", import_app)
 
     def import_features():
-        from features.sd_prompts import routes as _a  # noqa: F401
         from features.fun_videos import routes as _b  # noqa: F401
         from features.video_bridges import routes as _c  # noqa: F401
         from features.image2video import routes as _d  # noqa: F401
         from features.video_tools import routes as _e  # noqa: F401
-        from features.zoom import routes as _f  # noqa: F401
-        from features.zoom import outpaint_zoom as _g  # noqa: F401
+        from features.song_video import routes as _f  # noqa: F401
     _test("import feature routes", import_features)
 
     def import_core():
@@ -117,7 +115,7 @@ def main() -> int:
 
         # -- AI intent validation (no LLM call -- 400 paths) ----------------
         def ai_intent_empty_query():
-            r = client.post("/api/ai-intent", json={"tab": "sd-prompts", "query": ""})
+            r = client.post("/api/ai-intent", json={"tab": "fun-videos", "query": ""})
             assert r.status_code == 400, r.status_code
         _test("POST /api/ai-intent empty query -> 400", ai_intent_empty_query)
 
@@ -168,23 +166,6 @@ def main() -> int:
             assert r.status_code == 200, r.status_code
         _test("presets POST/GET/DELETE round-trip", presets_roundtrip)
 
-        # -- Prompt enhance validation -------------------------------------
-        def enhance_empty_idea():
-            r = client.post("/api/prompts/enhance", json={"idea": "", "provider": "local"})
-            assert r.status_code == 400, r.status_code
-        _test("POST /api/prompts/enhance empty idea -> 400", enhance_empty_idea)
-
-        # -- Wildcards endpoint --------------------------------------------
-        def wildcards_list():
-            r = client.get("/api/prompts/wildcards")
-            assert r.status_code == 200, r.status_code
-            data = r.json()
-            assert isinstance(data, dict), f"expected dict, got {type(data).__name__}"
-            # Inline wildcards should always be discoverable (the ones in core/wildcards.py)
-            payload_s = str(data).lower()
-            assert "camera" in payload_s or "mood" in payload_s, "no inline wildcards surfaced"
-        _test("GET /api/prompts/wildcards", wildcards_list)
-
         # -- GPU orchestrator status endpoint ------------------------------
         def gpu_status_shape():
             r = client.get("/api/gpu/status")
@@ -194,7 +175,7 @@ def main() -> int:
             assert "current" in data, "missing 'current' key"
             assert "history" in data, "missing 'history' key"
             assert isinstance(data["history"], list), "history must be list"
-            assert data["current"] is None or data["current"] in ("wangp", "acestep", "forge"), \
+            assert data["current"] is None or data["current"] in ("wangp", "acestep"), \
                 f"unexpected current value: {data['current']!r}"
         _test("GET /api/gpu/status returns expected shape", gpu_status_shape)
 
@@ -241,33 +222,8 @@ def main() -> int:
             assert r.status_code == 400, r.status_code
         _test("POST /api/fun/folder-loop/start validates input", folder_loop_start_validates)
 
-        # -- Zoom route validation -----------------------------------------
-        print("\n[zoom]")
-
-        def zoom_make_no_source():
-            r = client.post("/api/zoom/make", json={})
-            assert r.status_code == 400, f"expected 400, got {r.status_code}"
-        _test("POST /api/zoom/make no source -> 400", zoom_make_no_source)
-
-        def zoom_make_bad_direction():
-            r = client.post("/api/zoom/make", json={
-                "source_path": "/tmp/fake.jpg",
-                "zoom_direction": "sideways",
-            })
-            assert r.status_code == 400, f"expected 400, got {r.status_code}"
-        _test("POST /api/zoom/make bad direction -> 400", zoom_make_bad_direction)
-
-        def zoom_extract_frame_no_path():
-            r = client.post("/api/zoom/extract-frame", json={})
-            assert r.status_code == 400, f"expected 400, got {r.status_code}"
-        _test("POST /api/zoom/extract-frame no path -> 400", zoom_extract_frame_no_path)
-
-        def zoom_extract_frame_missing_file():
-            r = client.post("/api/zoom/extract-frame",
-                            json={"video_path": "/no/such/video.mp4"})
-            assert r.status_code == 400, f"expected 400, got {r.status_code}"
-        _test("POST /api/zoom/extract-frame missing file -> 400", zoom_extract_frame_missing_file)
-
+        # -- Image upload round-trip ---------------------------------------
+        print("\n[upload]")
 
         def zoom_upload_image():
             import io

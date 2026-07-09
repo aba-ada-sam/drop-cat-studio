@@ -201,8 +201,9 @@ export function init(panel) {
     _folderFiles = [];
     _updateButtons();
     try {
-      const r = await apiFetch('/api/zoom/scan-folder', { method: 'POST', body: JSON.stringify({ folder }) });
-      const imgs = (r.files || []).filter(f => !f.is_video);
+      // Image-only folder scan (was /api/zoom/scan-folder before Forge/zoom removal).
+      const r = await apiFetch('/api/i2v/scan_folder', { method: 'POST', body: JSON.stringify({ folder }) });
+      const imgs = r.images || [];
       _folderFiles = imgs;
       folderStatus.textContent = !imgs.length
         ? 'No images found'

@@ -1,12 +1,12 @@
 """GPU/VRAM orchestrator -- one tool at a time, automatically.
 
-Andrew's GPU has 16GB VRAM. WanGP (8-13GB), ACE-Step (6-8GB), and Forge (4-6GB)
-cannot coexist; loading two at once forces the loser into CPU offloading mode
-(model on system RAM, 30s/step instead of <1s -- the "never finishes" symptom).
+Andrew's GPU has 16GB VRAM. WanGP (8-13GB) and ACE-Step (6-8GB) cannot coexist;
+loading two at once forces the loser into CPU offloading mode (model on system
+RAM, 30s/step instead of <1s -- the "never finishes" symptom).
 
-The uncensored LLM is no longer a GPU service here: it runs on Featherless
-(cloud) by default, so it never competes for local VRAM. (A user-run local
-KoboldCpp is an external server this orchestrator does not manage.)
+Neither the uncensored LLM (Featherless cloud / external KoboldCpp) nor image
+generation (Forge, removed 2026-07-05 -- done in Forge's own GUI now) is a GPU
+service here, so only the video/music workers contend for local VRAM.
 
 This orchestrator enforces strict serialization. Pipelines say "I need WanGP"
 and the orchestrator evicts whatever else is on the GPU first. A service holds
@@ -35,8 +35,8 @@ from typing import Literal, Optional
 
 log = logging.getLogger("gpu_orchestrator")
 
-ServiceName = Literal["wangp", "acestep", "forge"]
-_ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep", "forge")
+ServiceName = Literal["wangp", "acestep"]
+_ALL_SERVICES: tuple[ServiceName, ...] = ("wangp", "acestep")
 
 
 class GPUBusyError(RuntimeError):
@@ -55,9 +55,6 @@ def _is_remote(service: ServiceName) -> bool:
         if service == "acestep":
             h = (_cfg.get("acestep_host") or "localhost").strip().lower()
             return h not in ("localhost", "127.0.0.1", "")
-        if service == "forge":
-            u = (_cfg.get("forge_url") or "").lower()
-            return "localhost" not in u and "127.0.0.1" not in u and u != ""
     except Exception:
         pass
     return False
@@ -220,9 +217,6 @@ class GPUOrchestrator:
             if service == "acestep":
                 from services.manager import acestep_alive
                 return acestep_alive()
-            if service == "forge":
-                from services.forge_client import forge_alive
-                return bool(forge_alive())
         except Exception as e:
             log.debug("[gpu] alive check %s failed: %s", service, e)
         return False
@@ -239,22 +233,6 @@ class GPUOrchestrator:
                 if not acestep_alive():
                     start_acestep()
                 return
-            if service == "forge":
-                from services.forge_client import forge_alive, reload_checkpoint
-                if not forge_alive():
-                    # Auto-start Forge -- same deferred pattern as ACE-Step.
-                    # start_forge() blocks until the API is ready (up to 5 min).
-                    # Called from a thread via asyncio.to_thread in the route
-                    # handler so it doesn't stall the event loop.
-                    from services.manager import start_forge
-                    log.info("[gpu] Forge not running -- auto-starting...")
-                    start_forge()
-                else:
-                    try:
-                        reload_checkpoint()
-                    except Exception as e:
-                        log.debug("[gpu] forge reload skipped: %s", e)
-                return
         except Exception as e:
             log.warning("[gpu] start %s failed: %s", service, e)
 
@@ -267,11 +245,6 @@ class GPUOrchestrator:
             if service == "acestep":
                 from services.manager import stop_service
                 stop_service("acestep")
-                return
-            if service == "forge":
-                # Don't kill Forge (external process); just unload its model.
-                from services.forge_client import unload_checkpoint
-                unload_checkpoint()
                 return
         except Exception as e:
             log.warning("[gpu] stop %s failed: %s", service, e)

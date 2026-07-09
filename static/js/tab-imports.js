@@ -52,7 +52,7 @@ export function init(panel) {
   }));
 
   newProjCard.appendChild(el('p', {
-    text: 'Begin a new creative project from scratch. Go to "Generate Images" to start with prompts, or import assets first.',
+    text: 'Begin a new creative project from scratch. Go to "Create Videos" to animate a photo, or import assets first.',
     style: 'color:var(--text-2); font-size:.9rem; margin-bottom:12px; line-height:1.5;'
   }));
 
@@ -60,7 +60,7 @@ export function init(panel) {
     class: 'btn btn-primary',
     text: 'Create New Project',
     style: 'padding:10px 20px;',
-    onclick() { toast('New project ready -- go to "Generate Images" tab to begin', 'info'); }
+    onclick() { toast('New project ready -- go to "Create Videos" tab to begin', 'info'); }
   });
   newProjCard.appendChild(newProjBtn);
 
@@ -133,8 +133,7 @@ export function init(panel) {
   }));
 
   const stages = [
-    { icon: '🎨', name: 'Generate Images', desc: 'Create images from prompts using AI (Forge SD)', next: '->' },
-    { icon: '🎬', name: 'Create Videos', desc: 'Turn images into video with AI music', next: '->' },
+    { icon: '🎬', name: 'Create Videos', desc: 'Turn photos into video with AI music', next: '->' },
     { icon: '🌉', name: 'Add Transitions', desc: 'Create transitions between video clips', next: '->' },
     { icon: '🎵', name: 'Audio & Export', desc: 'Mix audio and export final video', next: '' },
   ];

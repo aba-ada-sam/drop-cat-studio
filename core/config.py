@@ -51,9 +51,6 @@ DEFAULTS: dict = {
     "allow_uncensored_fallback": False,
     "uncensored_provider": "featherless",   # featherless (cloud) | kobold (local)
 
-    # -- Image Provider ----------------------------------------------------
-    "image_provider": "forge",        # forge | openai
-
     # -- Audio Provider ----------------------------------------------------
     "audio_provider": "acestep",      # acestep | ltx_native (LTX-2 MMAudio)
 
@@ -100,22 +97,6 @@ DEFAULTS: dict = {
     "bridge_allow_fallback": True,
     "bridge_auto_analyze": True,
 
-    # -- SD Prompts (sd_) -------------------------------------------------
-    "sd_wildcards_dir": "",  # FLW-01: blank default; configure path in Settings
-    "sd_model": "featherless",  # legacy passthrough token; provider is chosen by llm_provider
-    "forge_url": "http://127.0.0.1:7861",
-    "forge_default_sampler": "DPM++ 3M SDE",
-    "forge_default_scheduler": "Karras",
-    "forge_default_steps": 30,
-    "forge_default_cfg": 2.5,
-    "forge_default_width": 1440,
-    "forge_default_height": 810,
-
-    # Step 1 front-door defaults (SD Prompts tab)
-    "sd_step1_default_shape":    "single",   # "single" | "regional"
-    "sd_step1_default_source":   "vague",    # "vague" | "paste"
-    "sd_step1_default_suffix":   "",
-    "sd_step1_default_provider": "local",    # "local" (uncensored: Featherless/KoboldCpp) | "cloud" (Anthropic/OpenAI)
 
     # -- Video Tools (tools_) ---------------------------------------------
     "tools_crf": 18,

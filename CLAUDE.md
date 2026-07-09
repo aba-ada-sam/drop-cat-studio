@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Run it:** `launch.bat` (or `python app.py` directly) → http://127.0.0.1:7860 (or whichever port was free)
 
-**Design philosophy:** simpleton path first. The Express tab ("Create") is the zero-friction entry — drop image, describe idea, get video with AI music + lyrics. Advanced users can go deeper through the per-step tabs (Generate Images → Create Videos → Audio). Never add infrastructure complexity (service names, LLM provider controls) to the header or primary UI.
+**Design philosophy:** simpleton path first. The Express tab ("Create") is the zero-friction entry — drop image, describe idea, get video with AI music + lyrics. Advanced users can go deeper through the per-step tabs (Create Videos → Audio). Never add infrastructure complexity (service names, LLM provider controls) to the header or primary UI.
 
 ---
 
@@ -23,7 +23,7 @@ python tests/smoke.py
 
 # Check JS for silent syntax errors (ES module SyntaxErrors kill all JS silently)
 node --check static/js/app.js
-node --check static/js/tab-sd-prompts.js   # or any other module
+node --check static/js/tab-fun-videos.js   # or any other module
 
 # Check Python syntax
 python -m py_compile features/fun_videos/routes.py
@@ -38,16 +38,14 @@ python -m py_compile features/fun_videos/routes.py
 ```
 app.py                  — FastAPI entry, lifespan, global routes, feature router registration
 core/                   — Shared infrastructure (config, keys, logging, LLM, jobs, session, nsfw sanitizer, wildcards)
-services/               — External service lifecycle (WanGP, ACE-Step, Forge, Ollama)
+services/               — External service lifecycle (WanGP, ACE-Step)
 features/               — Feature modules, each with routes.py + domain logic
   fun_videos/           — Photo → AI video + music (WanGP + ACE-Step)
   video_bridges/        — AI transition clips between videos (WanGP, OpenCV fallback)
-  sd_prompts/           — SD prompt generation + Forge integration + wildcard manager
   image2video/          — Ken Burns slideshow (pure ffmpeg, no AI)
   video_tools/          — Batch transforms + music mixer
 static/                 — Vanilla JS frontend (ES modules, no framework, no build)
   js/shell/             — Cross-tab shell: gallery, presets, palette, shortcuts, toast, ai-intent
-  js/components/        — Reusable components (region-editor for Forge Couple)
   js/tab-*.js           — Per-tab controllers, lazy-inited on first visit
 ```
 
@@ -57,8 +55,6 @@ static/                 — Vanilla JS frontend (ES modules, no framework, no bu
 |---------|-------------|------|
 | Fun Videos | `/api/fun/*` | Yes (WanGP) |
 | Video Bridges | `/api/bridges/*` | Yes (WanGP) |
-| Infinite Zoom | `/api/zoom/*` | Yes (WanGP) |
-| SD Prompts | `/api/prompts/*` | No |
 | Image-to-Video | `/api/i2v/*` | No |
 | Video Tools | `/api/tools/*` | AI upscale only (venv-upscale) |
 
@@ -204,22 +200,8 @@ The multi-clip pipeline has three internal phases within `run_multi_pipeline`:
 
 **Phase 3 — Audio:** If Phase 0 already produced audio, uses it directly. Otherwise calls `gpu.acquire("acestep")` to evict WanGP and generate post-clip. Always computes `total_dur = probe_duration(concat_path)` before both branches so gallery metadata has the correct duration.
 
-### Infinite Zoom (`features/zoom/`)
-
-**Rebuilt 2026-06-20 to outpaint-based zoom-IN (`features/zoom/outpaint_zoom.py`).** The original WanGP-chain approach (chaining N video clips, each regenerated from the previous clip's last frame) compounded texture decay into garbage and is retired. Zoom-OUT is removed entirely — this feature is **zoom-in only**, and uses Forge Stable Diffusion (no video model).
-
-How it works now:
-- `build_zoom_in_stack()` — dives INTO the source: each level crops the centre, scales it up, and runs Forge img2img (denoise ~0.40) to paint NEW detail in. Low denoise keeps levels structurally aligned so they blend. Generates at ~1MP (`_gen_size`, SDXL sweet spot).
-- `render_zoom_in()` — continuous crop-zoom that TEMPORALLY CROSSFADES each sharper level in as the camera reaches it (`xfade`). This is the key to invisible joins: detail *emerges* rather than switching at a hard boundary. (The failed-approach renderers — `render_pyramid`/`render_infinite_zoom`/crossfade composite — and the outpaint zoom-OUT build were deleted in the v1.12 cleanup; `render_zoom_in` is the only renderer.)
-- Job: `run_oz_prep` (LLM picks the macro-detail prompt from image+idea, no GPU) + `run_oz_pipeline` (Forge build via `gpu.acquire("forge")`, render, optional ACE-Step music+merge, output+gallery+session). Wired through `JOB_FUN_MULTI_VIDEO` + `submit_with_prep`; `/api/zoom/make` and the folder-loop both use it.
-
-Hard-won lessons from the 10-round rebuild (do not reintroduce these failures):
-- A compositing renderer needs EXACT-nested levels, else the centre reads as a "picture-in-a-picture" rectangle. `render_zoom_in` (temporal crossfade) sidesteps spatial compositing entirely — prefer it.
-- Each SD level has its own exposure; `_match_color` (per-channel mean/std) every new level onto the previous or boundaries show a brightness "cut".
-- Generating below ~1MP makes each exposure soft.
-- Requires Forge running (`gpu.acquire("forge")` starts/reloads it). No WanGP, no chain anchors.
-
-Unchanged plumbing: output to `OUTPUT_DIR / YYYY-MM-DD / zoomin_*`; source can be photo or video (video → first frame); upload via `/api/fun/upload`; open-in-folder via `/api/reveal` `action: "explorer"`.
+<!-- Infinite Zoom feature removed 2026-07-05 along with Forge (it depended on
+Forge img2img). Image generation is done in Forge's own GUI now, outside DCS. -->
 
 ### Audio analyzer (`features/fun_videos/audio_analyzer.py`)
 
@@ -230,22 +212,14 @@ Audio analysis for lyric/energy context (NOT timing). Key functions:
 
 Beat-sync was removed entirely (2026-05-28): no clip-timing warping, no boundary snapping, no post-generation retime UI/`/api/sync`. Clips generate at their natural timing. Lip sync is independent (audio WAV passed to LTX-2 as conditioning) and unaffected. Do not reintroduce beat-snapping or speed-ramp-to-beat code.
 
-### Smart wildcards (sd-prompts)
-
-`/api/prompts/enhance` accepts `smart_wildcards: bool`. When true, the server passes the current wildcard catalog (inline + `sd_wildcards_dir/*.txt`) to the LLM so it can embed `__tokens__` in the composed prompt and optionally emit a `create_wildcards` JSON array to invent new ones when the user's idea explicitly asks. New wildcards are persisted flat to `sd_wildcards_dir/{name}.txt` with append+dedupe. System prompt enforces a STRICT TOKEN RULE — every emitted `__token__` must be in the catalog or in `create_wildcards`, because `wc_expand` leaves unknown tokens as literal text.
-
----
-
 ## External Services
 
 | Service | Port | Purpose | Startup |
 |---------|------|---------|---------|
 | WanGP | 7899 | AI video generation | Set path in Settings → auto-starts |
-| ACE-Step | 8020 | Music generation | Deferred — only starts when music is needed (keeps VRAM free for Ollama) |
-| Forge SD | 7861 | Stable Diffusion images | Must start separately with `--api` flag |
-| Ollama | 11434 | Local LLM (prompt gen, vision) | Auto-started if `ollama` is on PATH |
+| ACE-Step | 8020 | Music generation | Deferred — only starts when music is needed (keeps VRAM free) |
 
-Forge is at `C:\forge`. The app detects and attempts to auto-start it (injects `--api` flag). Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging. ACE-Step is intentionally deferred to avoid VRAM contention with Ollama.
+Services start in background daemon threads via `services/manager.py:startup_all()`, each wrapped in try/except with error logging. ACE-Step is deferred to avoid VRAM contention with WanGP. (Image generation — Forge — and the LLM/vision backend — Featherless/KoboldCpp — are **not** DCS-managed services: Forge was removed 2026-07-05 and is used via its own GUI; the uncensored LLM is cloud or an external local KoboldCpp.)
 
 ### WanGP worker (`services/wangp_worker.py`)
 
@@ -261,7 +235,7 @@ The worker runs as a persistent subprocess on port 7899. DCS communicates via HT
 
 ### GPU orchestrator (`core/gpu_orchestrator.py`)
 
-Single coordinator for which service owns the GPU at any moment. WanGP (8-13GB), ACE-Step (6-8GB), Forge (4-6GB), and Ollama (4-8GB) cannot coexist on 16GB VRAM; loading two at once forces one into CPU offloading mode (catastrophic slowdown).
+Single coordinator for which service owns the GPU at any moment. WanGP (8-13GB) and ACE-Step (6-8GB) cannot coexist on 16GB VRAM; loading two at once forces one into CPU offloading mode (catastrophic slowdown). (Image gen and the LLM are no longer GPU services here — see the services note above.)
 
 Usage from pipelines:
 ```python
@@ -271,7 +245,7 @@ gpu.acquire("wangp", reason="multi-clip 5 clips")    # evicts anything else, ens
 gpu.acquire("acestep", reason="music gen")           # evicts wangp, starts acestep
 ```
 
-The orchestrator owns eviction policy: WanGP/ACE-Step are killed via `stop_service`; Forge is "unloaded" (checkpoint dropped, server stays alive); Ollama gets `keep_alive=0` pings to free its models. A held service stays loaded across same-service calls -- only different-service `acquire` triggers eviction.
+The orchestrator owns eviction policy: WanGP/ACE-Step are killed via `stop_service`. A held service stays loaded across same-service calls -- only different-service `acquire` triggers eviction.
 
 Endpoints: `GET /api/gpu/status` returns `{current, history[]}`. `POST /api/gpu/release` force-evicts everything.
 
@@ -332,9 +306,8 @@ Schemas live inline in `app.py` via `CREATE TABLE IF NOT EXISTS`. No migration s
 ## Known Issues
 
 1. **ffmpeg** must be on PATH — nearly all video features require it. The splash screen warns if missing.
-2. **Forge** must be started separately with `--api` flag before SD Prompts image generation works. The watchdog in `services/manager.py` re-checks externally-launched Forge every 30s.
-3. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
-4. **First AI intent call** takes ~14s because Ollama cold-loads the model. Subsequent calls are ~3s. The palette shows a "Thinking…" spinner for the duration.
+2. **WanGP first run** — model loading takes 2-3 minutes; splash screen shows "not running" until load completes. This is normal.
+3. **First AI intent call** may take a few seconds while the uncensored/cloud LLM responds. The palette shows a "Thinking…" spinner for the duration.
 5. **`launch.bat` `%~dp0` trailing backslash** — `%~dp0` expands to `C:\DropCat-Studio\` (trailing `\`). Wrapping it in quotes as `"%~dp0"` makes `\"` an escaped quote, breaking the argument. Strip it: `set "_X=%~dp0"` then `if "%_X:~-1%"=="\" set "_X=%_X:~0,-1%"` before using in commands like `git -C`.
 
 ---

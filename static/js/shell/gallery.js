@@ -112,8 +112,6 @@ function _render() {
         <input type="search" id="gallery-search" placeholder="Search generations..." style="flex:1;min-width:120px;font-size:.82rem">
         <select id="gallery-tab-filter" style="font-size:.82rem">
           <option value="">All tabs</option>
-          <option value="sd-prompts">SD Prompts</option>
-          <option value="image-gen">Image Gen</option>
           <option value="create-videos">Videos</option>
         </select>
       </div>

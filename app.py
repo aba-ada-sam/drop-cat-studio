@@ -543,9 +543,9 @@ async def gpu_release_all():
 async def start_service(name: str, force: bool = False):
     # GPU-using services MUST go through the orchestrator so the current
     # VRAM holder is evicted before the new service loads its model on top.
-    # Without this, clicking 'Start Forge' while WanGP is in VRAM causes
-    # two CUDA contexts to collide and crash app.py (observed 2026-05-11).
-    if name not in ("wangp", "acestep", "forge"):
+    # (Forge was removed 2026-07-05 -- image generation is now done in Forge's
+    # own GUI, outside this app.)
+    if name not in ("wangp", "acestep"):
         return JSONResponse({"error": f"Unknown service: {name}"}, 404)
 
     from core.gpu_orchestrator import gpu, GPUBusyError
@@ -572,7 +572,6 @@ async def start_service(name: str, force: bool = False):
             starters = {
                 "wangp": svc.start_wangp_worker,
                 "acestep": svc.start_acestep,
-                "forge": svc.start_forge,
             }
             try: starters[name]()
             except Exception as e2: log.error("[services] direct fallback also failed: %s", e2)
@@ -752,7 +751,6 @@ def _build_restore_registry(jm):
     from features.fun_videos.pipeline import run_prep, run_pipeline
     from features.fun_videos.multi_pipeline import run_multi_prep, run_multi_pipeline
     from features.video_bridges.routes import _bridges_worker
-    from features.zoom.outpaint_zoom import run_oz_prep, run_oz_pipeline
     from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE
 
     def _make_fun_video(args, label, timeout_seconds):
@@ -780,23 +778,11 @@ def _build_restore_registry(jm):
         settings = dict(args[1]) if len(args) > 1 else {}
         return jm.submit(JOB_BRIDGE, _bridges_worker, items, settings, label=label)
 
-    def _make_zoom(args, label, timeout_seconds):
-        source_path = args[0] if args else None
-        settings    = dict(args[1]) if len(args) > 1 else {}
-        job = jm.submit_with_prep(JOB_FUN_MULTI_VIDEO, run_oz_prep, run_oz_pipeline,
-                                  source_path, settings, label=label,
-                                  timeout_seconds=timeout_seconds or 600)
-        if job:
-            job.meta["feature"] = "zoom"
-            job.meta["zoom_direction"] = "in"
-        return job
-
     return {
         "fun_video":       _make_fun_video,
         "fun_multi_video": _make_fun_multi,
         "song_video":      _make_song_video,
         "bridge":          _make_bridge,
-        "zoom":            _make_zoom,
     }
 
 
@@ -1219,21 +1205,6 @@ async def system_info():
 # -- AI intent (palette-driven) -----------------------------------------------
 
 _AI_INTENT_TABS: dict[str, dict] = {
-    "sd-prompts": {
-        "schema": "steps (4-60), cfg (1-20), width/height (512-2048), sampler (str), scheduler (str), seed (int, -1 for random), prompt_append (str: extra tags to append), negative_append (str), smart_wildcards (bool), regional (bool), regions_n (1-4)",
-        "system": (
-            "You are a studio-control assistant. The user is on the SD Prompts tab. "
-            "Convert their free-text request into a JSON mutation of the current settings. "
-            "Output ONE json fenced block, nothing else. "
-            "Keys allowed: steps, cfg, width, height, sampler, scheduler, seed, prompt_append, negative_append, smart_wildcards, regional, regions_n. "
-            "Only include keys that need to change. "
-            "prompt_append is comma-separated tags (no sentences) to add to the current prompt; "
-            "negative_append same for the negative. "
-            "If the user asks for more variety, turn smart_wildcards on. "
-            "If the user asks for regional/Forge Couple, set regional:true and optionally regions_n. "
-            "Output: ```json\\n{\"reply\": \"<one short sentence>\", \"settings\": {...}}\\n```"
-        ),
-    },
     "fun-videos": {
         "schema": "prompt_append (str, comma tags), steps (integer 4-50), guidance (1-20), duration_sec (seconds 2-20; 'slower' means LONGER duration, not shorter)",
         "system": (
@@ -1260,10 +1231,6 @@ _AI_INTENT_TABS: dict[str, dict] = {
 
 
 _AI_INTENT_ALLOWED: dict[str, set[str]] = {
-    "sd-prompts": {
-        "steps", "cfg", "width", "height", "sampler", "scheduler", "seed",
-        "prompt_append", "negative_append", "smart_wildcards", "regional", "regions_n",
-    },
     "fun-videos": {"prompt_append", "steps", "guidance", "duration_sec"},
     "bridges":    {"transition_mode", "creativity", "bridge_length", "steps"},
 }
@@ -1361,10 +1328,8 @@ async def ai_intent(request: Request):
 from features.image2video.routes import router as i2v_router
 from features.fun_videos.routes import router as fun_router
 from features.video_bridges.routes import router as bridges_router
-from features.sd_prompts.routes import router as prompts_router
 from features.video_tools.routes import router as tools_router
 from features.song_video.routes import router as song_router
-from features.zoom.routes import router as zoom_router
 from features.adobe_agent.routes import router as adobe_router
 from features.retime.routes import router as retime_router
 from features.lipsync.routes import router as lipsync_router
@@ -1373,10 +1338,8 @@ from features.manager.routes import router as manager_router
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Create Videos"])
 app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"])
-app.include_router(prompts_router, prefix="/api/prompts", tags=["SD Prompts"])
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
 app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
-app.include_router(zoom_router, tags=["Infinite Zoom"])
 app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 app.include_router(retime_router, prefix="/api/retime", tags=["Retime"])
 app.include_router(lipsync_router, prefix="/api/lipsync", tags=["Lip Sync"])
@@ -1676,7 +1639,6 @@ class _NoiseFilter(logging.Filter):
         "/api/gallery?limit=",
         "/api/fun/models",
         "/api/llm/config",
-        "/api/prompts/forge/status",
         "/api/version",
         "/api/system",
         "/manifest.json",

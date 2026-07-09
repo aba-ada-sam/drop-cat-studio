@@ -37,7 +37,6 @@
         <div class="splash-check loading" id="chk-server"><span class="chk-dot"></span><span class="chk-text">Connecting to server...</span></div>
         <div class="splash-check loading" id="chk-ffmpeg"><span class="chk-dot"></span><span class="chk-text">Checking ffmpeg...</span></div>
         <div class="splash-check loading" id="chk-featherless"><span class="chk-dot"></span><span class="chk-text">Checking uncensored AI...</span></div>
-        <div class="splash-check loading" id="chk-forge"><span class="chk-dot"></span><span class="chk-text">Checking Forge SD...</span></div>
         <div class="splash-check loading" id="chk-wangp"><span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span></div>
         <div class="splash-check loading" id="chk-acestep"><span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span></div>
       </div>
@@ -140,11 +139,6 @@
           <span class="rail-tab-hint">Photo -> short clip</span>
         </button>
 
-        <button class="rail-tab" data-tab="sd-prompts" title="Generate Images -- turn a text idea or reference photo into AI images">
-          <span>Generate Images</span>
-          <span class="rail-tab-hint">Idea -> images</span>
-        </button>
-
         <button class="rail-tab" data-tab="create-videos" title="Create Videos -- animate your images into video and add AI music">
           <span>Create Videos</span>
           <span class="rail-tab-hint">Images -> video + music</span>
@@ -153,11 +147,6 @@
         <button class="rail-tab" data-tab="music-video" title="Music Video -- a song plus a folder of photos becomes a full-length music video">
           <span>Music Video</span>
           <span class="rail-tab-hint">Song + photos -> video</span>
-        </button>
-
-        <button class="rail-tab" data-tab="zoom" title="Infinite Zoom -- endless spatial zoom video from a single photo or clip">
-          <span>Infinite Zoom</span>
-          <span class="rail-tab-hint">Photo -> endless zoom</span>
         </button>
 
         <div class="rail-section-label">Tools</div>
@@ -203,10 +192,8 @@
             <!-- Tab panels -->
             <section class="tab-panel" id="panel-pipeline" aria-label="Studio Home"></section>
             <section class="tab-panel" id="panel-express" aria-label="Express"></section>
-            <section class="tab-panel" id="panel-sd-prompts" aria-label="SD Prompts"></section>
             <section class="tab-panel" id="panel-create-videos" aria-label="Create Videos"></section>
             <section class="tab-panel" id="panel-music-video" aria-label="Music Video"></section>
-            <section class="tab-panel" id="panel-zoom" aria-label="Infinite Zoom"></section>
             <section class="tab-panel" id="panel-bridges" aria-label="Video Bridges"></section>
             <section class="tab-panel" id="panel-video-tools" aria-label="Video Tools"></section>
             <section class="tab-panel" id="panel-queue" aria-label="Job Queue"></section>
@@ -227,14 +214,6 @@
             <span class="ap-caret" aria-hidden="true">▾</span>
           </button>
           <div class="ap-menu" id="ap-text-menu" hidden></div>
-        </div>
-        <div class="ai-pill" id="ap-image">
-          <button class="ai-pill-btn" title="Image generation -- click to manage">
-            <span class="dot unknown" id="ap-image-dot" aria-hidden="true"></span>
-            <span class="ap-label">Image</span>
-            <span class="ap-caret" aria-hidden="true">▾</span>
-          </button>
-          <div class="ap-menu" id="ap-image-menu" hidden></div>
         </div>
         <div class="ai-pill" id="ap-video">
           <button class="ai-pill-btn" title="Video generation model -- click to switch">
@@ -350,13 +329,6 @@
           </div>
         </div>
         <div class="settings-section">
-          <h4 class="settings-section-label">Stable Diffusion Wildcards</h4>
-          <div class="form-group">
-            <label for="cfg-sd_wildcards_dir">Wildcards Directory <span class="hint-text">-- your sd-dynamic-prompts wildcards folder</span></label>
-            <input type="text" id="cfg-sd_wildcards_dir" placeholder="(blank = inline wildcards only)" autocomplete="off">
-          </div>
-        </div>
-        <div class="settings-section">
           <h4 class="settings-section-label">AI Prompt Engine</h4>
           <div class="form-group">
             <label for="cfg-llm_provider">Provider</label>
@@ -433,13 +405,8 @@
         <h3 style="margin:18px 0 10px;font-size:.85rem">Quick Start</h3>
         <div class="help-flow">
           <div class="help-step">
-            <img src="/static/icon-sd-prompts.png" alt="" class="help-icon">
-            <div><strong>SD Prompts</strong> -- Drop a reference image, generate AI prompts, toggle Forge Couple for regional prompting, generate images.</div>
-          </div>
-          <div class="help-arrow">&#8595; images flow to Make Videos</div>
-          <div class="help-step">
             <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
-            <div><strong>Make Videos</strong> -- Drop a photo or use a generated image, let AI create a video with matching music.</div>
+            <div><strong>Make Videos</strong> -- Drop a photo, let AI create a video with matching music.</div>
           </div>
           <div class="help-arrow">&#8595; clips flow to Video Bridges</div>
           <div class="help-step">

@@ -9,8 +9,6 @@ import { init as initExpress, receiveHandoff as expressHandoff } from './tab-exp
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260620a';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260620a';
 import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260620a';
-import { init as initZoom, receiveHandoff as zoomHandoff } from './tab-zoom.js?v=20260620b';
-import { init as initSdPrompts, receiveHandoff as sdPromptsHandoff } from './tab-sd-prompts.js?v=20260623a';
 import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
 import { init as initVideoTools } from './panel-video-tools.js?v=20260705a';
 import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260621a';
@@ -29,8 +27,6 @@ const TAB_INIT = {
   'pipeline':          initPipeline,
   'create-videos':     initFunVideos,
   'music-video':       initMusicVideo,
-  'zoom':              initZoom,
-  'sd-prompts':        initSdPrompts,
   'bridges':           initBridges,
   'video-tools':       initVideoTools,
   'queue':             initQueue,
@@ -39,19 +35,14 @@ const TAB_HANDOFF = {
   'express':           expressHandoff,
   'create-videos':     funHandoff,
   'music-video':       musicVideoHandoff,
-  'zoom':              zoomHandoff,
-  'sd-prompts':        sdPromptsHandoff,
   'bridges':           bridgesHandoff,
   'video-tools':       null,
 };
 const _tabInitialized = new Set();
 
 // -- Pipeline breadcrumb -------------------------------------------------------
-// Injected into Generate Images and Create Videos panels.
-// Audio lives inside Create Videos.
 const PIPELINE_STEPS = [
-  { id: 'sd-prompts', num: '01', label: 'Generate Images' },
-  { id: 'create-videos', num: '02', label: 'Create Videos'   },
+  { id: 'create-videos', num: '01', label: 'Create Videos'   },
 ];
 
 function _buildPipelineBar(activeTabId) {
@@ -111,7 +102,6 @@ function svcStateToCheck(state) {
 }
 
 const SVC_SPLASH_TEXT = {
-  forge:   { running: 'Forge SD running', starting: 'Forge SD starting...', not_running: 'Forge SD not detected', not_configured: 'Forge not configured', unknown: 'Checking Forge SD...' },
   wangp:   { running: 'WanGP ready', starting: 'WanGP loading model...', ready: 'WanGP configured', not_configured: 'WanGP not configured', not_running: 'WanGP not running', error: 'WanGP error', unknown: 'Checking WanGP...' },
   acestep: { running: 'ACE-Step running', ready: 'ACE-Step ready', starting: 'ACE-Step starting...', not_configured: 'ACE-Step not configured', not_running: 'ACE-Step not running', error: 'ACE-Step error', unknown: 'Checking ACE-Step...' },
 };
@@ -193,7 +183,7 @@ async function runSplash() {
   setTimeout(() => { if (!settled) doExit(); }, 90000);
 
   try {
-    ['chk-server','chk-ffmpeg','chk-featherless','chk-forge','chk-wangp','chk-acestep'].forEach(id => {
+    ['chk-server','chk-ffmpeg','chk-featherless','chk-wangp','chk-acestep'].forEach(id => {
       const el = document.getElementById(id);
       const current = el?.querySelector('.chk-text')?.textContent || '';
       setCheck(id, 'loading', current);
@@ -220,7 +210,7 @@ async function runSplash() {
     advanceHatOnce('featherless');
 
     function updateServiceChecks(svcs) {
-      const map = { forge: 'chk-forge', wangp: 'chk-wangp', acestep: 'chk-acestep' };
+      const map = { wangp: 'chk-wangp', acestep: 'chk-acestep' };
       for (const [name, id] of Object.entries(map)) {
         const info  = svcs[name] || {};
         const state = info.state || 'unknown';
@@ -231,7 +221,7 @@ async function runSplash() {
     }
 
     function allSettled(svcs) {
-      return ['forge','wangp','acestep'].every(n => !SPLASH_BLOCKING_STATES.has((svcs[n] || {}).state || 'unknown'));
+      return ['wangp','acestep'].every(n => !SPLASH_BLOCKING_STATES.has((svcs[n] || {}).state || 'unknown'));
     }
 
     updateServiceChecks(sys.services || {});
@@ -336,7 +326,7 @@ function switchTab(tabId) {
   if (tabId === 'queue') resumeQueue(); else pauseQueue();
 
   // Video pill: let the incoming tab announce its model; clear override for non-video tabs
-  const VIDEO_TABS = new Set(['express', 'create-videos', 'zoom']);
+  const VIDEO_TABS = new Set(['express', 'create-videos']);
   if (!VIDEO_TABS.has(tabId)) {
     _tabVideoModel = null;
     _applyVideoPillState(_configVideoModel);
@@ -351,16 +341,13 @@ function switchTab(tabId) {
 // -- Service polling ---------------------------------------------------------
 const SERVICE_MESSAGES = {
   acestep: { not_configured: 'Not configured -- set ACE-Step path in Settings', not_running: 'Not running -- click Start to load music model' },
-  forge:   { not_running: 'Not detected -- start Forge with --api flag', starting: 'Starting (~60s)...', not_configured: 'Not configured' },
   wangp:   { not_configured: 'Not configured -- set WanGP path in Settings', ready: 'Configured -- worker starts on first use' },
 };
 
 // Latest service state for service panel
 const _svcState = {};
 
-let _imageProvider = 'forge'; // synced from config; controls Image pill dot + label
-
-const _SVC_TO_TYPE = { forge: 'image', wangp: 'video', acestep: 'sound' };
+const _SVC_TO_TYPE = { wangp: 'video', acestep: 'sound' };
 
 async function _checkRestartNeeded() {
   try {
@@ -380,26 +367,19 @@ async function pollServices() {
       // New AI-type pill dots
       const typeKey = _SVC_TO_TYPE[name];
       if (typeKey) {
-        // Don't let forge state overwrite the image dot when OpenAI is selected
-        if (typeKey === 'image' && _imageProvider === 'openai') {
-          // dot managed by _applyImagePillState instead
-        } else {
-          const d = document.getElementById(`ap-${typeKey}-dot`);
-          if (d) { d.className = `dot ${dotClass}`; }
-        }
+        const d = document.getElementById(`ap-${typeKey}-dot`);
+        if (d) { d.className = `dot ${dotClass}`; }
       }
 
       // Text dot: update when the uncensored-backend state changes
       if (name === 'featherless') _updateTextDot(info.state);
 
       // Service panel meta (IDs used by renderServicePanel)
-      const svcId = name === 'forge' ? 'dot-forge-svc' : `dot-${name}`;
-      const svcDot = document.getElementById(svcId);
+      const svcDot = document.getElementById(`dot-${name}`);
       if (svcDot) { svcDot.className = 'dot'; svcDot.classList.add(dotClass); }
       const override = SERVICE_MESSAGES[name]?.[info.state];
       const displayMsg = override || info.message || info.state;
-      const msgId = name === 'forge' ? 'msg-forge-svc' : `msg-${name}`;
-      const msgEl = document.getElementById(msgId);
+      const msgEl = document.getElementById(`msg-${name}`);
       if (msgEl) msgEl.textContent = displayMsg;
     }
 
@@ -440,19 +420,6 @@ function _applySoundPillState(audioProvider) {
   label.textContent = (audioProvider === 'ltx_native') ? 'Sound: LTX-2' : 'Sound: ACE-Step';
 }
 
-function _applyImagePillState(provider, hasOpenAI) {
-  _imageProvider = provider || 'forge';
-  const label = document.querySelector('#ap-image .ap-label');
-  if (label) label.textContent = _imageProvider === 'openai' ? 'Image: OpenAI' : 'Image: Forge';
-  const dot = document.getElementById('ap-image-dot');
-  if (!dot) return;
-  if (_imageProvider === 'openai') {
-    dot.className = `dot ${hasOpenAI ? 'running' : 'unknown'}`;
-  } else {
-    dot.className = `dot ${_svcState.forge?.state || 'unknown'}`;
-  }
-}
-
 // -- Service panel -----------------------------------------------------------
 function openServicePanel() {
   document.getElementById('service-panel-overlay')?.classList.add('open');
@@ -469,13 +436,11 @@ function renderServicePanel() {
   body.innerHTML = '';
 
   const SVC_NAMES = {
-    forge:       'Forge SD',
     wangp:       'WanGP',
     acestep:     'ACE-Step',
     featherless: 'Uncensored AI',
   };
   const SVC_HINTS = {
-    forge:       'Stable Diffusion image generation',
     wangp:       'AI video generation',
     acestep:     'AI music generation',
     featherless: 'Uncensored LLM + vision (Featherless cloud / local KoboldCpp)',
@@ -556,7 +521,6 @@ async function loadConfig() {
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
     _applyLLMState(llm);
-    _applyImagePillState(state.config.image_provider || 'forge', !!llm.openai_key_set);
     _configVideoModel = state.config.wan_model || '';
     _applyVideoPillState(_tabVideoModel || _configVideoModel);
     _applySoundPillState(state.config.audio_provider || 'acestep');
@@ -712,7 +676,6 @@ function initAIPills() {
     menu.innerHTML = `<div style="padding:12px;color:var(--text-3);font-size:.8rem;">Loading...</div>`;
 
     if (type === 'text')  { await _renderTextMenu(menu); }
-    if (type === 'image') { await _renderImageMenu(menu); }
     if (type === 'video') { await _renderVideoMenu(menu); }
     if (type === 'sound') { await _renderSoundMenu(menu); }
   }
@@ -748,53 +711,6 @@ function initAIPills() {
     link.className = 'ap-menu-link'; link.textContent = '⚙ Settings ->';
     link.addEventListener('click', () => { loadConfig(); loadUncensoredModels(); openModal('modal-settings'); closeAllMenus(); });
     menu.appendChild(link);
-  }
-
-  async function _renderImageMenu(menu) {
-    let configData = {}, llm = {};
-    try { configData = await apiFetch('/api/config', { context: 'pill.image.cfg' }); } catch (_) {}
-    try { llm = await apiFetch('/api/llm/config', { context: 'pill.image.llm' }); } catch (_) {}
-    const current = configData.image_provider || 'forge';
-    const hasOpenAI = !!llm.openai_key_set;
-    const forgeSvc = _svcState.forge || {};
-
-    const PROVIDERS = [
-      { value: 'forge',  label: 'Forge SD',      hint: 'Local Stable Diffusion' },
-      { value: 'openai', label: 'OpenAI DALL-E',  hint: hasOpenAI ? 'DALL-E 3 -- key ready' : 'Needs OpenAI key in Settings' },
-    ];
-    menu.innerHTML = '<div class="ap-menu-title">Image</div>';
-    for (const p of PROVIDERS) {
-      const row = document.createElement('label');
-      row.className = 'ap-menu-option';
-      row.innerHTML = `<input type="radio" name="ap-image-p" value="${p.value}"${p.value === current ? ' checked' : ''}>
-        <span class="ap-opt-label">${p.label}</span><span class="ap-opt-hint">${p.hint}</span>`;
-      row.querySelector('input').addEventListener('change', async () => {
-        await apiFetch('/api/config', { method: 'POST', body: JSON.stringify({ image_provider: p.value }), context: 'pill.image.save' }).catch(() => {});
-        _applyImagePillState(p.value, hasOpenAI);
-        closeAllMenus();
-        toast(`Image -> ${p.label}`, 'success');
-      });
-      menu.appendChild(row);
-    }
-    menu.insertAdjacentHTML('beforeend', '<div class="ap-menu-sep"></div>');
-    if (current === 'forge') {
-      const msg = SERVICE_MESSAGES.forge?.[forgeSvc.state] || forgeSvc.message || forgeSvc.state || '--';
-      menu.insertAdjacentHTML('beforeend', `<div style="font-size:.75rem;color:var(--text-2);padding:0 12px 8px;line-height:1.4;">${escHtml(msg)}</div>`);
-      const acts = document.createElement('div'); acts.className = 'ap-menu-actions';
-      acts.innerHTML = `<button class="btn btn-sm ap-ss" data-svc="forge" data-act="start">Start</button>
-        <button class="btn btn-sm ap-ss" data-svc="forge" data-act="stop">Stop</button>
-        ${forgeSvc.url ? `<a href="${escHtml(forgeSvc.url)}" target="_blank" class="btn btn-sm">Open UI ↗</a>` : ''}
-        <button class="ap-menu-link" style="margin-left:auto">Details -></button>`;
-      acts.querySelectorAll('.ap-ss').forEach(b => b.addEventListener('click', () => svcAction(b.dataset.act, b.dataset.svc)));
-      acts.querySelector('.ap-menu-link').addEventListener('click', () => { openServicePanel(); closeAllMenus(); });
-      menu.appendChild(acts);
-    } else {
-      const link = document.createElement('button');
-      link.className = 'ap-menu-link'; link.style.cssText = 'padding:6px 12px;display:block;';
-      link.textContent = '⚙ Configure OpenAI key in Settings ->';
-      link.addEventListener('click', () => { loadConfig(); openModal('modal-settings'); closeAllMenus(); });
-      menu.appendChild(link);
-    }
   }
 
   async function _renderVideoMenu(menu) {
@@ -936,8 +852,7 @@ function initShortcuts() {
       document.getElementById('error-log-overlay')?.classList.remove('open');
     }, description: 'Close / cancel' },
     { key: '0', action: () => switchTab('pipeline'),          description: 'Studio Home' },
-    { key: '1', action: () => switchTab('sd-prompts'),         description: 'Generate Images' },
-    { key: '2', action: () => switchTab('create-videos'),      description: 'Create Videos' },
+    { key: '1', action: () => switchTab('create-videos'),      description: 'Create Videos' },
     { key: 'E', ctrl: true, shift: true, global: true, action: openErrorLog, description: 'Error log' },
     { key: 's', ctrl: true, global: true, action: () => savePreset(state.activeTab), description: 'Save preset' },
   ];
@@ -963,16 +878,13 @@ function initPaletteItems() {
   registerItems([
     { label: 'Studio Home',      group: 'Tabs',   hint: '0', action: () => switchTab('pipeline') },
     { label: 'Quick Video',      group: 'Tabs',   hint: 'Q', action: () => switchTab('express') },
-    { label: 'Generate Images',  group: 'Tabs',   hint: '1', action: () => switchTab('sd-prompts') },
-    { label: 'Create Videos',    group: 'Tabs',   hint: '2', action: () => switchTab('create-videos') },
+    { label: 'Create Videos',    group: 'Tabs',   hint: '1', action: () => switchTab('create-videos') },
     { label: 'Music Video',      group: 'Tabs',   action: () => switchTab('music-video') },
-    { label: 'Infinite Zoom',    group: 'Tabs',   action: () => switchTab('zoom') },
     { label: 'Video Bridges',    group: 'Tabs',   action: () => switchTab('bridges') },
     { label: 'Video Tools',      group: 'Tabs',   action: () => switchTab('video-tools') },
     { label: 'Settings',        group: 'Actions', hint: 'Ctrl+,', action: () => { loadConfig(); loadUncensoredModels(); openModal('modal-settings'); } },
     { label: 'Error Log',       group: 'Actions', hint: 'Ctrl+Shift+E', action: openErrorLog },
     { label: 'Service Health',  group: 'Actions', action: openServicePanel },
-    { label: 'Start Forge SD',  group: 'Actions', action: () => svcAction('start', 'forge') },
     { label: 'Start WanGP',     group: 'Actions', action: () => svcAction('start', 'wangp') },
     { label: 'Start ACE-Step',  group: 'Actions', action: () => svcAction('start', 'acestep') },
     { label: 'Refresh Gallery', group: 'Actions', action: refreshGallery },
@@ -1011,7 +923,6 @@ async function _runStartupFetches() {
   const vEl = document.getElementById('app-version');
   if (vEl && d.version) vEl.textContent = d.version;
   _applyLLMState(llm);
-  _applyImagePillState(cfg.image_provider || 'forge', !!llm.openai_key_set);
   _configVideoModel = cfg.wan_model || '';
   _applyVideoPillState(_tabVideoModel || _configVideoModel);
   _applySoundPillState(cfg.audio_provider || 'acestep');
@@ -1185,7 +1096,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const _gpuLabelMap = {
     wangp:   { label: 'GPU: Video',  color: '#d4a017' },
     acestep: { label: 'GPU: Sound',  color: '#c41e3a' },
-    forge:   { label: 'GPU: Image',  color: '#5fa8d3' },
   };
   async function pollGpuIndicator() {
     try {
