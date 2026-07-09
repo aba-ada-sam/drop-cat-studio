@@ -53,3 +53,31 @@ UI_REFACTOR_SUMMARY.md
 UX_PLAN.md
 OPEN_CLAW_MACHINE_CAPABILITIES.md
 dcs-laptop-setup.zip
+
+# Session scratch + diagnostics, repo root only.
+# Anchored with a leading slash so tracked files like features/*/__init__.py
+# and features/lipsync/_demucs_separate.py are never matched.
+/_*.png
+/_*.py
+/_*.sh
+/_*.patch
+/_*.log
+/_*.txt
+/_*.md
+/_cdp_profile*/
+/.chrome_profile/
+/.claude/worktrees/
+/.claude/scheduled_tasks.lock
+/stdout.txt
+/stderr.txt
+/dcs-stdout.log
+/dcs-stderr.log
+/manager_diag.txt
+/manager_stdout.txt
+/manager_stderr.txt
+/mutex_test*.txt
+/status_check.txt
+/null
+/logsapp_restart.log
+/FIRST_PROMPT.txt
+/OVERNIGHT_NOTES_*.md

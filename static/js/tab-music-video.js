@@ -367,13 +367,16 @@ export function init(panel) {
 
   // ── Single-image generation ────────────────────────────────────────────────
 
-  const singleImagePath = { value: null };
+  const DROP_HINT = 'Drop images here (optional — one video queued per image)';
+
+  const singleImages = { list: [] };   // [{ path, url, name }] — one queued job each
   const singleDrop = el('div', {
     style: 'border:1px dashed var(--border-2); border-radius:var(--r-md); padding:16px; text-align:center; cursor:pointer; font-size:13px; color:var(--text-3); background:var(--surface-2); transition:border-color .12s, background .12s;',
-    text: 'Drop image here (optional — locks visual style)',
+    text: DROP_HINT,
   });
-  const singleImgPreview = el('img', { style: 'display:none; max-height:80px; border-radius:4px; margin-top:6px;' });
+  const singleImgPreview = el('div', { style: 'display:none; flex-wrap:wrap; gap:4px; margin-top:6px; max-width:220px;' });
   const singleImgInput   = el('input', { type: 'file', accept: 'image/*' });
+  singleImgInput.multiple = true;
   singleImgInput.style.display = 'none';
   panel.appendChild(singleImgInput);
 
@@ -381,23 +384,53 @@ export function init(panel) {
   singleDrop.addEventListener('dragleave', () => { singleDrop.style.borderColor = 'var(--border-2)'; singleDrop.style.background = 'var(--surface-2)'; });
   singleDrop.addEventListener('drop', e => {
     e.preventDefault(); singleDrop.style.borderColor = 'var(--border-2)'; singleDrop.style.background = 'var(--surface-2)';
-    const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
-    if (f) _uploadSingleImage(f);
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    if (files.length) _uploadSingleImages(files);
   });
   singleDrop.addEventListener('click', () => singleImgInput.click());
-  singleImgInput.addEventListener('change', () => { if (singleImgInput.files[0]) _uploadSingleImage(singleImgInput.files[0]); singleImgInput.value = ''; });
+  singleImgInput.addEventListener('change', () => {
+    const files = Array.from(singleImgInput.files);
+    if (files.length) _uploadSingleImages(files);
+    singleImgInput.value = '';
+  });
 
-  async function _uploadSingleImage(file) {
-    singleDrop.textContent = 'Uploading...';
+  function _renderSingleImages() {
+    singleImgPreview.textContent = '';
+    const imgs = singleImages.list;
+    if (!imgs.length) {
+      singleImgPreview.style.display = 'none';
+      singleDrop.textContent = DROP_HINT;
+      _updateSingleBtn();
+      return;
+    }
+    imgs.forEach((f, i) => {
+      const thumb = el('img', {
+        title: `${f.name} — click to remove`,
+        style: 'height:44px; width:44px; object-fit:cover; border-radius:4px; cursor:pointer;',
+      });
+      thumb.src = f.url;
+      thumb.addEventListener('click', () => { singleImages.list.splice(i, 1); _renderSingleImages(); });
+      singleImgPreview.appendChild(thumb);
+    });
+    singleImgPreview.style.display = 'flex';
+    singleDrop.textContent = imgs.length === 1
+      ? (imgs[0].name || '1 image ready')
+      : `${imgs.length} images ready`;
+    _updateSingleBtn();
+  }
+
+  async function _uploadSingleImages(files) {
+    singleDrop.textContent = `Uploading ${files.length} image${files.length > 1 ? 's' : ''}...`;
     try {
-      const resp = await apiUpload('/api/song-video/upload-image', [file]);
-      const f = resp?.files?.[0];
-      if (!f?.path) throw new Error('No path');
-      singleImagePath.value = f.path;
-      singleImgPreview.src = f.url;
-      singleImgPreview.style.display = 'block';
-      singleDrop.textContent = f.name || 'Image ready';
-    } catch (e) { toast('Image upload failed: ' + e.message, 'error'); singleDrop.textContent = 'Drop image here (optional)'; }
+      const resp = await apiUpload('/api/song-video/upload-image', files);
+      const added = (resp?.files || []).filter(f => f?.path);
+      if (!added.length) throw new Error('No usable images in that selection');
+      singleImages.list.push(...added);
+      _renderSingleImages();
+    } catch (e) {
+      toast('Image upload failed: ' + e.message, 'error');
+      _renderSingleImages();
+    }
   }
 
   const ideaInput = el('textarea', {
@@ -416,11 +449,17 @@ export function init(panel) {
   const singleResult = el('video', { style: 'display:none; width:100%; border-radius:var(--r-md); margin-top:6px; max-height:260px;' });
   singleResult.controls = true;
 
+  let _submitting = false;
+
   function _updateSingleBtn() {
-    const ready = !!_songPath;
+    const n = singleImages.list.length;
+    const ready = !!_songPath && !_submitting;
     singleBtn.disabled = !ready;
     singleBtn.style.opacity = ready ? '1' : '.45';
     singleBtn.style.cursor  = ready ? 'pointer' : 'not-allowed';
+    if (!_submitting) {
+      singleBtn.textContent = n > 1 ? `Queue ${n} Videos` : 'Generate One Video';
+    }
   }
 
   let _singleJobId = null;
@@ -428,15 +467,28 @@ export function init(panel) {
 
   singleBtn.onclick = async () => {
     if (!_songPath) { toast('Upload a song first', 'error'); return; }
-    singleBtn.disabled = true;
-    singleStatus.textContent = 'Submitting...';
+
+    // One job per starter image, same song. No image at all -> a single
+    // job with no anchor, which is what the server does with photo_path ''.
+    const shots = singleImages.list.length ? singleImages.list : [{ path: '' }];
+
+    _submitting = true;
+    _updateSingleBtn();
     singleProgress.style.display = 'block'; singleProgress.value = 5;
     singleResult.style.display = 'none';
 
-    try {
+    let queued = 0;
+    let failure = null;
+
+    for (const [i, shot] of shots.entries()) {
+      singleBtn.textContent = shots.length > 1 ? `Queueing ${i + 1}/${shots.length}...` : 'Submitting...';
+      singleStatus.textContent = shots.length > 1
+        ? `Queueing ${i + 1} of ${shots.length}: ${shot.name || 'no anchor image'}`
+        : 'Submitting...';
+
       const body = {
         audio_path:     _songPath,
-        photo_path:     singleImagePath.value || '',
+        photo_path:     shot.path || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
         lip_sync:       lipSyncCheck.checked,
@@ -447,24 +499,40 @@ export function init(panel) {
         pad_before:     parseInt(padBeforeSlider.value),
         pad_after:      parseInt(padAfterSlider.value),
       };
-      const resp = await apiFetch('/api/song-video/generate', { method: 'POST', body: JSON.stringify(body) });
-      if (_singlePoll) {
-        // A job is already being tracked in this panel. The new job is queued
-        // on the server -- direct the user to the rail job feed to see both.
-        toast(`Video queued (${resp.n_clips} clips). Watch the job feed in the rail for its progress.`, 'success');
-        singleBtn.disabled = false; _updateSingleBtn();
-      } else {
+
+      let resp;
+      try {
+        resp = await apiFetch('/api/song-video/generate', { method: 'POST', body: JSON.stringify(body) });
+      } catch (e) {
+        failure = e;
+        break;   // queue full or server error -- stop, keep what we already queued
+      }
+      queued++;
+
+      // Track the first job in-panel; the rest are visible in the rail job feed.
+      if (!_singlePoll) {
         _singleJobId = resp.job_id;
-        singleStatus.textContent = `Generating ${resp.n_clips} clips...`;
         singleProgress.value = 10;
         _singlePoll = setInterval(_pollSingle, 2000);
-        singleBtn.disabled = false; _updateSingleBtn();
       }
-    } catch (e) {
-      singleStatus.textContent = 'Error: ' + e.message;
-      singleProgress.style.display = 'none';
-      singleBtn.disabled = false;
-      _updateSingleBtn();
+    }
+
+    _submitting = false;
+    _updateSingleBtn();
+
+    if (failure) {
+      const partial = queued ? ` (${queued} of ${shots.length} made it into the queue)` : '';
+      singleStatus.textContent = `Error: ${failure.message}${partial}`;
+      if (!queued) singleProgress.style.display = 'none';
+      toast(`Queue failed after ${queued}: ${failure.message}`, 'error');
+      return;
+    }
+
+    if (queued > 1) {
+      singleStatus.textContent = `${queued} videos queued — watch the job feed in the rail.`;
+      toast(`${queued} videos queued from one song.`, 'success');
+    } else {
+      singleStatus.textContent = 'Generating...';
     }
   };
 
