@@ -498,7 +498,10 @@ class ServerManager:
                 return
             for offset in range(PORT_TRIES):
                 p = PORT_START + offset
-                if server_responds(p, timeout=0.5):
+                # A bare TCP connect is not proof of DCS -- Forge SD sits on 7861
+                # and answers instantly while app.py is still binding. Confirm via
+                # /api/version before latching, or we open Chrome pointing at Forge.
+                if server_responds(p, timeout=0.5) and is_dcs_server(p):
                     self._port = p
                     self._ready_event.set()
                     log.info("Server ready on port %d (sweep)", p)
@@ -660,10 +663,17 @@ def _show_opening_splash() -> None:
     _done = threading.Event()
 
     def _bg():
-        existing = find_running_server()
-        if existing:
-            open_app_window(existing)
-        _done.set()
+        # open_app_window() calls sys.exit(0) when it focuses an existing window.
+        # In a thread that only unwinds this thread, so _done must be set in a
+        # finally -- otherwise the splash hangs until the 8s failsafe.
+        try:
+            existing = find_running_server()
+            if existing:
+                open_app_window(existing)
+        except SystemExit:
+            pass
+        finally:
+            _done.set()
 
     threading.Thread(target=_bg, daemon=True).start()
 
@@ -892,16 +902,16 @@ def _shutdown(srv: "ServerManager") -> None:
     """Kill all DCS-related processes, then exit."""
     log.info("Shutting down")
 
-    # 1. Kill GPU workers + Forge by port (fast -- catches LISTENING processes)
+    # 1. Kill GPU workers by port (fast -- catches LISTENING processes).
+    #    Forge (7861) is NOT ours to kill: in-app image gen was removed 2026-07-05
+    #    and Forge is now a standalone app the user runs from its own GUI.
     _kill_procs_on_port(7899, "WanGP")
     _kill_procs_on_port(8020, "ACE-Step")
-    _kill_procs_on_port(7861, "Forge")
 
     # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
     #    orphans that port kill misses, e.g. second worker that lost the port race)
     _kill_by_cmdline("wangp_worker.py", "WanGP")
     _kill_by_cmdline("api_server.py", "ACE-Step")
-    _kill_by_cmdline("webui.py", "Forge")
 
     # 3. Also try via services module (uses tracked Popen handles -- most reliable
     #    when app.py spawned the workers through the normal path)
@@ -967,19 +977,24 @@ def main() -> None:
 
         existing_alive = find_running_server()
 
-        if existing_alive and not other_pid:
-            # Mutex held by an undetectable process and server is alive -- just open.
-            log.info("Server on port %d alive, no trackable manager -- opening window", existing_alive)
+        if existing_alive:
+            # A healthy server is already up. Never kill the manager that owns it:
+            # its Job Object is KILL_ON_JOB_CLOSE, so killing the manager also kills
+            # app.py -- restarting the app and cancelling any running generation.
+            # Just surface the window and exit. (Same path whether or not we could
+            # identify the owning manager's PID.)
+            log.info("Server on port %d alive (owner manager PID %s) -- opening window",
+                     existing_alive, other_pid or "unknown")
             _show_opening_splash()
             sys.exit(0)
         else:
-            # Kill any stuck manager so WE take over Chrome tracking and shutdown.
+            # Server is dead. Any manager still holding the mutex is a zombie --
+            # kill it so WE take over Chrome tracking and shutdown.
             if other_pid:
                 log.info("Replacing stuck manager PID %d -- taking over Chrome tracking", other_pid)
                 kill_pid(other_pid)
                 time.sleep(0.5)
-            if not existing_alive:
-                clear_port_file()
+            clear_port_file()
             # Release and re-acquire the mutex under our PID
             _k32.ReleaseMutex(_MUTEX_HANDLE)
             _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
