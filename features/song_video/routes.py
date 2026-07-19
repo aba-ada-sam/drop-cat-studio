@@ -55,6 +55,52 @@ async def upload_audio(files: list[UploadFile] = File(...)):
     return {"files": saved}
 
 
+@router.post("/youtube")
+async def youtube_audio(request: Request):
+    """Ingest a YouTube (or any yt-dlp-supported) URL: download the best audio, extract to mp3
+    into uploads/. Returns the SAME shape as /upload-audio, so /analyze and /generate work
+    unchanged -- this is path 4a (youtube -> lyrics -> video -> lipsync)."""
+    import re
+    import sys
+    import shutil
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        raise HTTPException(422, "Provide a valid http(s) URL (e.g. a YouTube link)")
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    stem = uuid.uuid4().hex[:8]
+    outtmpl = str(UPLOADS_DIR / f"{stem}_%(title).60s.%(ext)s")
+    cmd = [sys.executable, "-m", "yt_dlp",
+           "-x", "--audio-format", "mp3", "--audio-quality", "0",
+           "--no-playlist", "--restrict-filenames", "--no-progress"]
+    ff = shutil.which("ffmpeg")
+    if ff:
+        cmd += ["--ffmpeg-location", str(Path(ff).parent)]
+    cmd += ["-o", outtmpl, url]
+
+    def _run():
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+    proc = await asyncio.to_thread(_run)
+    if proc.returncode != 0:
+        raise HTTPException(502, f"Download failed: {(proc.stderr or proc.stdout or '')[-300:]}")
+    produced = sorted(UPLOADS_DIR.glob(f"{stem}_*.mp3"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+    if not produced:
+        raise HTTPException(502, "Download produced no audio file")
+    dest = produced[0]
+    from core.ffmpeg_utils import probe_duration
+    dur = probe_duration(str(dest))
+    mins, secs = divmod(int(dur), 60)
+    return {"files": [{
+        "path":             str(dest),
+        "url":              f"/uploads/{dest.name}",
+        "name":             dest.stem,
+        "duration":         dur,
+        "duration_display": f"{mins}:{secs:02d}",
+    }]}
+
+
 @router.post("/upload-image")
 async def upload_image(files: list[UploadFile] = File(...)):
     """Upload an anchor image for visual consistency across clips."""

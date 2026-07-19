@@ -277,6 +277,38 @@ export function init(panel) {
   });
   root.appendChild(audioInput);
 
+  // -- YouTube / URL ingestion (path 4a): paste a link -> download audio -> same flow --------
+  const ytRow = el('div', { style: 'display:flex; gap:6px; margin:8px 0 2px;' });
+  const ytInput = el('input', {
+    type: 'text',
+    placeholder: 'or paste a YouTube link...',
+    style: 'flex:1; padding:7px 9px; border-radius:6px; border:1px solid var(--border,#333); background:var(--bg-2,#1a1a1a); color:var(--text-1,#eee); font-size:.85rem;',
+  });
+  const ytBtn = el('button', {
+    text: 'Fetch',
+    style: 'padding:7px 14px; white-space:nowrap; border-radius:6px; border:none; background:var(--accent,#5b8def); color:#fff; cursor:pointer; font-size:.85rem;',
+  });
+  const _fetchYouTube = async () => {
+    const url = ytInput.value.trim();
+    if (!url) return;
+    const _old = ytBtn.textContent;
+    ytBtn.disabled = true; ytBtn.textContent = 'Fetching...';
+    try {
+      const resp = await fetch('/api/song-video/youtube', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Download failed');
+      const f = data.files?.[0];
+      if (f) { _applyAudio(f.path, f.url, f.duration); ytInput.value = ''; toast('Song downloaded', 'success'); }
+    } catch (err) { toast(err.message || 'Download failed', 'error'); }
+    finally { ytBtn.disabled = false; ytBtn.textContent = _old; }
+  };
+  ytBtn.addEventListener('click', _fetchYouTube);
+  ytInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _fetchYouTube(); } });
+  ytRow.appendChild(ytInput); ytRow.appendChild(ytBtn);
+  root.appendChild(ytRow);
+
   // -- Anchor image (optional) -----------------------------------------------
   const imgInput    = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
   const imgPreview  = el('img', { style: 'display:none; max-height:140px; object-fit:contain; border-radius:6px;' });
