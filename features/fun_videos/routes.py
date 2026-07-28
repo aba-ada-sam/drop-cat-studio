@@ -5,6 +5,7 @@ Photo -> AI video + audio pipeline with wildcard support.
 import asyncio
 import io
 import logging
+import math
 import os
 import uuid
 from pathlib import Path
@@ -908,16 +909,26 @@ async def make_it_multi(request: Request):
         raise HTTPException(400, "Provide either a photo or a video prompt")
 
     config = cfg.load()
-    # Hard cap at 5.0s per clip: 5s * 25fps = 125 frames, below WanGP's 129-frame
-    # sliding window threshold. Anything >= 5.17s triggers a 2-window split which
-    # roughly doubles per-clip generation time. n_clips grows instead -- a 30s
-    # story becomes 6 fast clips instead of 5 slow ones.
-    clip_dur = max(4.0, min(5.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 5.0)))))
+    # Cap at 6.0s per clip. Default 6.0 -> a 2-clip story is 12s (Andrew's target).
+    # Note: for WanGP models, >= 5.17s (>129 frames at 25fps) crosses the sliding-
+    # window threshold and roughly doubles per-clip gen time; LTX (the default
+    # engine) handles 6s clips fine. To keep long stories fast, grow n_clips
+    # instead of clip length.
+    clip_dur = max(4.0, min(6.0, float(body.get("clip_duration", config.get("fun_multi_clip_duration", 6.0)))))
     # If target_story_length is given, derive n_clips from it; otherwise use num_clips directly
     target_secs = body.get("target_story_length")
     if target_secs is not None:
         target_secs = float(target_secs)
-        n_clips = max(2, min(10, round(target_secs / clip_dur)))
+        # Half-up, NOT round(): Python's round() is banker's rounding, so a 15s
+        # target at 6s clips gave 2 while the JS UI's Math.round said 3. The UI
+        # now sends exact multiples, but any other caller gets the intuitive
+        # answer -- and the two languages agree on the .5 case.
+        n_clips = max(2, min(10, int(math.floor(target_secs / clip_dur + 0.5))))
+        # target_secs is also passed to the story-arc LLM as target_total_seconds
+        # and used to size the music, so correct it to what will actually render
+        # rather than letting the arc be written (and a song be paid for) at a
+        # length the clip planner cannot produce.
+        target_secs = n_clips * clip_dur
     else:
         n_clips = max(2, min(10, int(body.get("num_clips", config.get("fun_multi_num_clips", 2)))))
 

@@ -600,6 +600,10 @@ export function init(panel) {
       _duration = Math.min(duration, tierMax);
       durSlider.value = String(_duration);
       durLabel.textContent = `${_duration}s`;
+      // A model default can move the effective clip length, which changes the
+      // story total. Guarded because this runs once before the multi-clip UI
+      // exists (_clipUiReady is a hoisted var, so this is safe either way).
+      if (_clipUiReady) _refreshClipInfo();
     }
     _updateExpressHint(modelName);
   }
@@ -713,12 +717,35 @@ export function init(panel) {
   // 'extend one shot into a longer atmospheric video', not 'narrative arc'.
   // The narrative arc path drifts on 16GB and is reserved for Wan I2V (24GB+).
   let _multiVideo      = true;
-  let _targetSecs      = 10;  // 10s default -> 2 clips -> ~2-3 min vs 5-7 min at 24s
   // Quick Video is built around music + lyrics. Default ON; user can untick
   // to ship a silent clip when iterating on the visuals alone.
   let _addMusic        = true;
   // motion_style driven by auto-pick: Distilled->calm, Dev13B->dynamic. No toggle needed.
-  let _numClips        = Math.max(2, Math.round(_targetSecs / _duration));
+
+  // -- Story-length planning: mirror the server exactly ----------------------
+  // features/fun_videos/routes.py clamps clip_duration to 4-6s and the clip
+  // count to 2-10, and it prefers target_story_length over num_clips. So the
+  // only achievable totals are n * clipDur for n in [2,10]. The slider now
+  // picks the CLIP COUNT and reports the exact resulting length, which makes
+  // the label true by construction instead of by rounding luck.
+  //
+  // The old free 10-120s slider was wrong three ways:
+  //   1. JS Math.round is half-up, Python's round() is banker's -- at the
+  //      default 6s clip, "15s" showed "~3 clips" (18s) in the UI while the
+  //      server actually built 2 (12s).
+  //   2. Above 60s the server's 10-clip cap silently swallowed the request,
+  //      but the music was still generated at the slider length (up to 120s),
+  //      so you paid for 60s of song that could never appear.
+  //   3. target_story_length is also handed to the story-arc LLM as
+  //      target_total_seconds, so a wrong number mis-paced the writing too.
+  const CLIP_DUR_MIN = 4, CLIP_DUR_MAX = 6, MIN_CLIPS = 2, MAX_CLIPS = 10;
+  const _clipDurEff = () => Math.max(CLIP_DUR_MIN, Math.min(CLIP_DUR_MAX, _duration));
+  const _storySecs  = () => _numClips * _clipDurEff();
+  // var (not let) so the early _applyModelDefaults() call at init can test it
+  // without hitting a temporal-dead-zone error.
+  var _clipUiReady     = false;
+  let _numClips        = 2;   // 2 clips -> ~2-3 min render; 10 clips is ~5x that
+  let _targetSecs      = _storySecs();
   let _upscaleOn       = false;
   let _upscaleMethod   = 'ffmpeg';
   let _upscaleScale    = 2.0;
@@ -726,10 +753,11 @@ export function init(panel) {
 
   const multiChk = el('input', { type: 'checkbox', id: 'express-multi-video', checked: 'checked', style: 'cursor:pointer; width:15px; height:15px; flex-shrink:0;' });
 
-  // Story length: free slider, 10-120s in 5s steps
+  // Story length: the slider selects the CLIP COUNT (2-10). The gold label
+  // shows the exact video length that produces, so slider and result agree.
   const lenSlider = el('input', {
-    type: 'range', min: '10', max: '120', step: '5',
-    value: String(_targetSecs),
+    type: 'range', min: String(MIN_CLIPS), max: String(MAX_CLIPS), step: '1',
+    value: String(_numClips),
     style: 'flex:1; max-width:240px; cursor:pointer;',
   });
   const lenLabel = el('span', {
@@ -737,19 +765,26 @@ export function init(panel) {
     text: `${_targetSecs}s`,
   });
   lenSlider.addEventListener('input', () => {
-    _targetSecs = Number(lenSlider.value);
-    lenLabel.textContent = `${_targetSecs}s`;
+    _numClips = Number(lenSlider.value);
     _refreshClipInfo();
   });
 
   const clipInfoLabel = el('span', {
     style: 'font-size:.75rem; color:var(--text-3);',
-    text: `~${_numClips} clips at ${_duration}s each - AI adjusts pacing`,
+    text: `${_numClips} clips at ${_clipDurEff()}s each - AI adjusts pacing`,
   });
 
   function _refreshClipInfo() {
-    _numClips = Math.max(2, Math.round(_targetSecs / _duration));
-    clipInfoLabel.textContent = `~${_numClips} clips at ${_duration}s each - AI adjusts pacing`;
+    _numClips   = Math.max(MIN_CLIPS, Math.min(MAX_CLIPS, _numClips));
+    _targetSecs = _storySecs();          // exact -- no rounding anywhere
+    const d     = _clipDurEff();
+    lenSlider.value      = String(_numClips);
+    lenLabel.textContent = `${_targetSecs}s`;
+    // If the per-clip slider is outside the server's 4-6s window, say so rather
+    // than quietly reporting a clip length that will not be used.
+    clipInfoLabel.textContent = (d !== _duration)
+      ? `${_numClips} clips at ${d}s each - AI adjusts pacing (clips cap at ${CLIP_DUR_MAX}s when extending)`
+      : `${_numClips} clips at ${d}s each - AI adjusts pacing`;
     _syncAudioLenDisplay();
   }
   durSlider.addEventListener('input', _refreshClipInfo);
@@ -760,34 +795,37 @@ export function init(panel) {
   // length knob -- Story length when extending the scene, Per-clip duration
   // otherwise -- so there is a single source of truth. Audio is sized to match
   // the video; ACE-Step caps it at 120s.
+  // Ceiling is the server's real one (10 clips), not the old flat 120s. Asking
+  // for more song than the video can ever be is what produced the frozen /
+  // looped tails -- and billed a music generation for footage that never exists.
   function _effLenMax() {
-    return _multiVideo ? 120 : (QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20);
+    return _multiVideo ? MAX_CLIPS * _clipDurEff() : (QUALITIES.find(q => q.id === _qualityId)?.maxSec || 20);
   }
   function _syncAudioLenDisplay() {
     const eff = _multiVideo ? _targetSecs : _duration;
-    audioLenSlider.min   = _multiVideo ? '10' : '1';
+    audioLenSlider.min   = _multiVideo ? String(MIN_CLIPS * _clipDurEff()) : '1';
     audioLenSlider.max   = String(_effLenMax());
     audioLenSlider.value = String(eff);
     audioLenLabel.textContent = `${eff}s`;
     audioLenHint.textContent = _multiVideo
-      ? 'Length of the whole video -- audio matches it (max 120s).'
+      ? `Length of the whole video -- audio matches it (max ${_effLenMax()}s).`
       : 'Single-clip length -- audio matches it (turn on Extend scene for longer).';
   }
   function _applyAudioLength(secs) {
     const v = Math.max(1, Math.min(Number(secs), _effLenMax()));
     if (_multiVideo) {
-      _targetSecs = Math.max(10, Math.round(v / 5) * 5);  // story slider: 10-120 step 5
-      lenSlider.value = String(_targetSecs);
-      lenLabel.textContent = `${_targetSecs}s`;
+      // Snap the requested length to the nearest whole number of clips.
+      _numClips = Math.max(MIN_CLIPS, Math.min(MAX_CLIPS, Math.round(v / _clipDurEff())));
     } else {
       _duration = Math.round(v);
       durSlider.value = String(_duration);
       durLabel.textContent = `${_duration}s`;
     }
-    _refreshClipInfo();  // recomputes clip count + re-syncs the audio-len display
+    _refreshClipInfo();  // recomputes total + re-syncs the audio-len display
   }
   audioLenSlider.addEventListener('input', () => _applyAudioLength(audioLenSlider.value));
-  _syncAudioLenDisplay();
+  _refreshClipInfo();      // seed slider/labels/audio from the real plan
+  _clipUiReady = true;     // from here on, model/quality changes may refresh
 
   const upscaleChk = el('input', { type: 'checkbox', id: 'express-upscale', style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;' });
 
