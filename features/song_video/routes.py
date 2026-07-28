@@ -237,10 +237,15 @@ async def generate(request: Request):
                  n_clips, n_clips_aligned, bars_covered, bpm)
         n_clips = n_clips_aligned
 
-    # Feasibility: the clip planner uses clip_dur as its per-clip floor, so a
-    # song can hold at most floor(audio_dur / clip_dur) clips. Requesting more
-    # collapses the trailing clip to a degenerate sliver (e.g. 0.2s) and
-    # over-generates clips that the final trim throws away. Clamp here.
+    # Feasibility: the clip planner uses clip_dur as its per-clip FLOOR (clips
+    # tile the song's timeline 1:1 for lip-sync, each in [clip_dur, ~10s]), so a
+    # song holds at most floor(audio_dur / clip_dur) clips. Requesting MORE does
+    # NOT lengthen the video -- it walks the trailing clips' audio slices off the
+    # end of the song (conditioning them on silence) and collapses their planned
+    # duration to a 4s sliver. The video coming up ~1s short of the song is a
+    # per-clip GENERATION shortfall (frame rounding + xfade overlap), handled at
+    # merge time by holding the final frame -- NOT by adding clips. So keep the
+    # floor clamp; it is what keeps the clips tiling the song correctly.
     _max_feasible = max(1, int(audio_dur // clip_dur))
     if n_clips > _max_feasible:
         log.info("[song-video] Clamp n_clips %d->%d for feasibility (song %.1fs / clip_dur %ds)",
@@ -270,15 +275,18 @@ async def generate(request: Request):
         "video_guidance":  body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":      body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":   bool(body.get("use_satellite", False)),
-        # lip_sync = LTX-2 NATIVE audio conditioning (mouth moves during diffusion
-        # toward the loudest audio = the beat -> "sings to the music"). OFF by
-        # default. Real WORD-level sync comes from the MuseTalk post-pass below.
-        "lip_sync":        bool(body.get("lip_sync", False)),
+        # lip_sync = LTX-2 NATIVE audio conditioning (mouth moves DURING diffusion,
+        # driven by the isolated vocal stem sliced per clip -> "sings to the music").
+        # ON by default: this is the proven "richer audio" recipe behind the good
+        # DropCatGo music videos (LTX-2 Distilled @ 960x544, audio_scale 0.6,
+        # audio_cfg_scale = video guidance 3.0 -- worker defaults already match).
+        # The pipeline itself already defaults this True; the route now agrees.
+        "lip_sync":        bool(body.get("lip_sync", True)),
         # auto_lipsync = MuseTalk post-pass driven by the isolated vocal stem, so
-        # the mouth tracks the WORDS. The earlier "glitchy rectangle on creature
-        # faces" worry was wrong -- the face-alignment patches handle fruit +
-        # animal faces cleanly (confirmed 2026-06-27). This is the right path; ON
-        # by default. Clips generate at full res, then MuseTalk owns the sync.
+        # the mouth tracks the WORDS. Runs AFTER native conditioning -- the two
+        # stack (Andrew: "Native + MuseTalk both"). face-alignment patches handle
+        # fruit + animal faces; on a no-face clip MuseTalk skips and keeps the
+        # natively-conditioned video. ON by default.
         "auto_lipsync":    bool(body.get("auto_lipsync", True)),
         # Best-of-N seed selection for lip-sync clips: 1=Fast (single take),
         # 2=Balanced, 3=Best. Each clip generates N seeds and keeps the one whose
@@ -407,8 +415,10 @@ async def batch_start(request: Request):
         log.info("[song-batch] Snap n_clips %d->%d to bar boundary (bpm=%d)", n_clips, _n2, _bpm2)
         n_clips = _n2
 
-    # Feasibility clamp: at most floor(audio_dur / clip_dur) clips, else the
-    # trailing clip collapses to a degenerate sliver and clips are wasted.
+    # Feasibility clamp: at most floor(audio_dur / clip_dur) clips so the clips
+    # tile the song's timeline 1:1 (more clips walk trailing audio slices off the
+    # end of the song). A short video is filled by holding the final frame at
+    # merge time, not by adding clips. See the /generate route for the rationale.
     _max_feasible = max(1, int(audio_dur // clip_dur))
     if n_clips > _max_feasible:
         log.info("[song-batch] Clamp n_clips %d->%d for feasibility (song %.1fs / clip_dur %ds)",
@@ -436,12 +446,11 @@ async def batch_start(request: Request):
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":     body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":  bool(body.get("use_satellite", False)),
-        # Word-level lip sync = MuseTalk post-pass driven by the isolated vocal
-        # stem (mouth tracks the WORDS). Native LTX-2 audio conditioning
-        # (lip_sync) only nudges the mouth toward the loudest audio = the beat
-        # ("sings to the music"), so it is OFF here. Confirmed good on fruit +
-        # animal faces 2026-06-27. Generate clips at full res, then MuseTalk syncs.
-        "lip_sync":       bool(body.get("lip_sync", False)),
+        # Both sync mechanisms ON (matches /generate): lip_sync = LTX-2 native
+        # audio conditioning during diffusion (the proven "richer audio" recipe);
+        # auto_lipsync = MuseTalk word-level post-pass on top. The pipeline
+        # already defaults lip_sync True; the batch route now agrees.
+        "lip_sync":       bool(body.get("lip_sync", True)),
         "auto_lipsync":   bool(body.get("auto_lipsync", True)),
     }
     # LTX Distilled sweet spot is 8 steps

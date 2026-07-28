@@ -124,7 +124,7 @@ def _composite_voiced(base_video: str, synced_video: str,
     r = run_ffmpeg(
         ["ffmpeg", "-y", "-i", base_video, "-i", synced_video,
          "-filter_complex", graph, "-map", "[v]", "-an",
-         *video_encode_args(crf=18), "-movflags", "+faststart", out_path],
+         *video_encode_args(crf=14), "-movflags", "+faststart", out_path],
         timeout=1800,
     )
     if r.returncode != 0 or not os.path.isfile(out_path):

@@ -276,31 +276,36 @@ def _merge_video_audio_trim(
     true_audio_dur = probe_duration(audio_path) or audio_duration
     target_dur = max(true_audio_dur + pad_before, audio_duration)
 
-    need_loop = video_dur > 0 and video_dur < target_dur * 0.98
-    log.info("[song-video] merge: video=%.2fs song=%.2fs target=%.2fs loop=%s "
-             "(full song must play; video loops/holds to fit, audio is never trimmed below the song)",
-             video_dur, true_audio_dur, target_dur, need_loop)
+    gap = target_dur - video_dur
+    # Three fill modes, in preference order:
+    #   none   -- video already covers the song: trim the surplus down (invisible).
+    #   freeze -- video is modestly short: HOLD the last frame to fill the gap.
+    #             A held final frame reads as an intentional ending shot; the old
+    #             behaviour (-stream_loop, restart from clip 1) put a second, un-
+    #             synced copy of the mouth over the song's back half. With the
+    #             route now over-covering the song, the gap should be small.
+    #   loop   -- video is drastically short (< ~half the song): something upstream
+    #             under-generated. A multi-second freeze would look broken, so fall
+    #             back to looping and flag it loudly.
+    if video_dur <= 0 or gap <= 0.05:
+        fill = "none"
+    elif gap <= max(2.0, video_dur * 0.5):
+        fill = "freeze"
+    else:
+        fill = "loop"
+        log.warning("[song-video] merge: video %.2fs is drastically short of target %.2fs "
+                    "(gap %.2fs) -- upstream under-generated; looping as a last resort",
+                    video_dur, target_dur, gap)
+    log.info("[song-video] merge: video=%.2fs song=%.2fs target=%.2fs gap=%.2fs fill=%s "
+             "(full song always plays; audio is never trimmed below the song)",
+             video_dur, true_audio_dur, target_dur, gap, fill)
 
     # Build audio filter: delay by pad_before ms if requested. apad pads with
     # silence AFTER the song so the output can reach target_dur without ever
     # truncating the song itself.
     audio_filter = f"adelay={int(pad_before * 1000)}|{int(pad_before * 1000)},apad" if pad_before > 0 else "apad"
 
-    if need_loop:
-        cmd = [
-            "ffmpeg", "-y",
-            "-stream_loop", "-1", "-i", video_path,
-            "-i", audio_path,
-            "-map", "0:v",
-            "-filter_complex", f"[1:a]{audio_filter}[a]",
-            "-map", "[a]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "15",
-            "-c:a", "aac", "-b:a", "192k",
-            "-t", f"{target_dur:.3f}",
-            "-movflags", "+faststart",
-            out_path,
-        ]
-    else:
+    if fill == "none":
         cmd = [
             "ffmpeg", "-y",
             "-i", video_path,
@@ -309,6 +314,35 @@ def _merge_video_audio_trim(
             "-filter_complex", f"[1:a]{audio_filter}[a]",
             "-map", "[a]",
             "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{target_dur:.3f}",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+    elif fill == "freeze":
+        # tpad clones the last frame for the gap (+0.5s slack; -t trims exact).
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-filter_complex",
+            f"[0:v]tpad=stop_mode=clone:stop_duration={gap + 0.5:.3f}[v];[1:a]{audio_filter}[a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "15",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{target_dur:.3f}",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+    else:  # loop
+        cmd = [
+            "ffmpeg", "-y",
+            "-stream_loop", "-1", "-i", video_path,
+            "-i", audio_path,
+            "-map", "0:v",
+            "-filter_complex", f"[1:a]{audio_filter}[a]",
+            "-map", "[a]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "15",
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{target_dur:.3f}",
             "-movflags", "+faststart",
@@ -1148,7 +1182,7 @@ def _do_song_gpu_phase(
 
     # -- Phase 3: Loop to fill song + merge audio -----------------------------
     job.meta["stage"] = "merging"
-    job.update(progress=92, message="Looping clips to fill song duration...")
+    job.update(progress=92, message="Fitting video to song and merging audio...")
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
