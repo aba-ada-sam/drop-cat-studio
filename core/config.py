@@ -241,6 +241,11 @@ def find_wan_python(wan_root: str) -> str:
     """Try to find the Python executable inside a Wan2GP/Pinokio install."""
     root = Path(wan_root)
     candidates = [
+        # venv/ first: a plain `python -m venv venv` install is the layout the
+        # warehouse laptop actually has, and it was the one name not checked --
+        # so that machine reported Wan2GP as having no Python at all.
+        root / "venv" / "Scripts" / "python.exe",
+        root / "venv" / "bin" / "python",
         root / "env" / "Scripts" / "python.exe",
         root / "env" / "bin" / "python",
         root / ".venv" / "Scripts" / "python.exe",
