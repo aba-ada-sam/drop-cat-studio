@@ -139,6 +139,13 @@ async def lifespan(app: FastAPI):
         cfg.save({"anthropic_key": keys.get_key("anthropic")})
         log.info("Auto-loaded Anthropic key from credentials file")
 
+    # Detect GPU and write optimal wgp_config.json BEFORE starting workers
+    from core import gpu_profile as _gpu_profile
+    _wan_root = cfg.get("wan2gp_root") or ""
+    _wgp_cfg = Path(_wan_root) / "wgp_config.json" if _wan_root else None
+    _gpu_profile.detect(wgp_config_path=_wgp_cfg)
+    _g["gpu_profile"] = _gpu_profile.info()
+
     # Detect GPU encoders
     _g["available_encoders"] = detect_encoders()
     if _g["available_encoders"]:

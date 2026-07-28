@@ -476,13 +476,9 @@ async def refine_prompt(request: Request):
 # them via its calm denoising character. Even prompts that read as
 # action (sprint, leap) render as atmospheric motion -- not the
 # spastic AI slop we saw when LTX was in 'dynamic' mode.
-_PICK_TO_MODEL = {
-    "calm":         ("LTX-2 Dev19B Distilled", "calm"),
-    "action":       ("LTX-2 Dev19B Distilled", "calm"),
-    "action_hd":    ("LTX-2 Dev19B Distilled", "calm"),
-    "story_action": ("LTX-2 Dev19B Distilled", "calm"),
-    "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
-}
+def _PICK_TO_MODEL() -> dict:
+    from core import gpu_profile
+    return gpu_profile.pick_table()
 # Hardware reality on 16GB VRAM cards (RTX 5080):
 #   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step,
 #                                              CALM motion only (atmospheric).
@@ -577,7 +573,9 @@ def _auto_pick_model(
     idea_clean = (idea or "").strip()
     if not idea_clean and not photo_b64:
         # No idea, no photo -- can't classify. Ship motion-by-default.
-        return ("LTX-2 Dev19B Distilled", "calm", "no idea -- LTX safe default (Wan I2V won't fit 16GB)")
+        from core import gpu_profile as _gp
+        default_model, default_motion = _gp.pick_table().get("calm", ("LTX-2 Dev19B Distilled", "calm"))
+        return (default_model, default_motion, f"no idea -- {_gp.tier} tier default")
 
     user_msg = (
         f"User idea: {idea_clean or '(no explicit idea given)'}\n"
@@ -591,7 +589,7 @@ def _auto_pick_model(
         data = parse_json_response(text)
         pick = (data or {}).get("pick", "").strip().lower() if isinstance(data, dict) else ""
         reason = (data or {}).get("reason", "") if isinstance(data, dict) else ""
-        if pick in _PICK_TO_MODEL:
+        if pick in _PICK_TO_MODEL():
             return (pick, reason or pick)
         return None
 
@@ -620,7 +618,7 @@ def _auto_pick_model(
             if parsed:
                 pick, reason = parsed
                 pick, reason = _apply_clip_guard(pick, reason)
-                model, motion = _PICK_TO_MODEL[pick]
+                model, motion = _PICK_TO_MODEL()[pick]
                 log.info("[auto-pick] '%s' -> %s (%s) -- %s", idea_clean[:60], model, motion, reason)
                 return (model, motion, reason)
             log.warning("[auto-pick] ollama vision returned no usable pick -- trying text-only cloud")
@@ -648,8 +646,10 @@ def _auto_pick_model(
     except Exception as e:
         log.warning("[auto-pick] text fallback failed (%s) -- defaulting to action", e)
 
-    # Step 3: hard fallback -- Wan I2V 480P works on all supported hardware.
-    return ("LTX-2 Dev19B Distilled", "calm", "fallback-LTX (Wan I2V blocked on 16GB)")
+    # Step 3: hard fallback -- use tier-appropriate default
+    from core import gpu_profile as _gp
+    fb_model, fb_motion = _gp.pick_table().get("calm", ("LTX-2 Dev19B Distilled", "calm"))
+    return (fb_model, fb_motion, f"classifier failed -- {_gp.tier} tier fallback")
 
 
 @router.post("/make-it")
@@ -1232,7 +1232,11 @@ async def add_music(request: Request):
         if job.stop_event.is_set():
             return
         if not audio_path:
-            raise RuntimeError(f"Audio generation failed: {audio_err}")
+            log.warning("[make-it] audio failed (%s) -- delivering video without audio", audio_err)
+            job.output = vpath
+            from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
+            job.message = f"Done (no audio: {audio_err})"
+            return
 
         job.update(progress=85, message="Mixing audio into video...")
 
