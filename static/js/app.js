@@ -1078,6 +1078,59 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.disabled = false;
     }
   });
+  document.getElementById('btn-restart-banner')?.addEventListener('click', async () => {
+    const btn    = document.getElementById('btn-restart-banner');
+    const textEl = document.getElementById('restart-banner-text');
+
+    // Guard: /api/app/restart itself does not check for an active GPU job --
+    // it will happily kill a render in progress. Warn before doing that.
+    try {
+      const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
+      if (gpu.rendering) {
+        const proceed = confirm(
+          'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
+        );
+        if (!proceed) return;
+      }
+    } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
+
+    btn.disabled = true;
+    btn.textContent = 'Restarting...';
+
+    let preHash = null;
+    try {
+      const sys = await fetch('/api/system', { cache: 'no-store' }).then(r => r.json());
+      preHash = sys.boot_git_hash;
+    } catch (_) { /* if we can't read it, fall back to "server answers again" below */ }
+
+    try {
+      await apiFetch('/api/app/restart', { method: 'POST' });
+    } catch (_) {
+      // The connection can drop mid-response while app.py is exiting -- that's
+      // expected, not a failure. Keep polling regardless.
+    }
+
+    const deadline = Date.now() + 90000;
+    const poll = setInterval(async () => {
+      if (Date.now() > deadline) {
+        clearInterval(poll);
+        if (textEl) textEl.textContent = 'Restart did not come back -- check the DCS tray/manager.';
+        btn.textContent = 'Restart now';
+        btn.disabled = false;
+        return;
+      }
+      try {
+        const ctrl = new AbortController();
+        const tid  = setTimeout(() => ctrl.abort(), 1500);
+        const sys  = await fetch('/api/system', { cache: 'no-store', signal: ctrl.signal }).then(r => r.json());
+        clearTimeout(tid);
+        if (sys.boot_git_hash && sys.boot_git_hash !== preHash) {
+          clearInterval(poll);
+          location.reload();
+        }
+      } catch (_) { /* still down -- keep polling */ }
+    }, 2000);
+  });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
 
