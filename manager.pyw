@@ -229,11 +229,27 @@ def _do_git_pull(on_status=None) -> None:
     except Exception:
         sha_before = ""
 
+    # Use Popen + taskkill /T to kill the full git process tree on timeout.
+    # subprocess.run(timeout=N) only kills git.exe; orphaned git-remote-https.exe
+    # keeps the pipe open and communicate() hangs forever on Windows.
     try:
-        subprocess.run(
+        proc = subprocess.Popen(
             ["git", "-C", str(ROOT), "pull", "--ff-only", "origin", "master"],
-            capture_output=True, timeout=30, **_NW,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_NW,
         )
+        try:
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=5, **_NW,
+            )
+            try:
+                proc.communicate(timeout=3)
+            except Exception:
+                pass
+            log.warning("git pull timed out -- skipping update")
+            return
     except Exception as exc:
         log.warning("git pull skipped: %s", exc)
         return
@@ -763,7 +779,13 @@ def show_splash(srv: ServerManager) -> None:
         root.after(260, _tick)
 
     def _bg():
-        _do_git_pull(on_status=lambda s: root.after(0, lambda: status.set(s)))
+        # Fire git pull in its own thread -- never block server startup on network I/O.
+        threading.Thread(
+            target=_do_git_pull,
+            kwargs={"on_status": lambda s: root.after(0, lambda: status.set(s))},
+            daemon=True,
+            name="git-pull",
+        ).start()
         root.after(0, lambda: status.set("Starting server..."))
         srv.start()
         deadline = time.time() + 120
@@ -1027,6 +1049,25 @@ def main() -> None:
         log.info("Starting fresh -- splash will handle git pull + server start")
         show_splash(srv)
         _diag(f"show_splash returned -- srv.port={srv.port}")
+
+        # Splash may close before the server is ready (user pressed Skip, or the
+        # splash timed out). Give the background server thread up to 60 more seconds
+        # so Chrome still opens instead of silently doing nothing.
+        if not srv.port:
+            log.info("Splash closed before server ready -- rescue poll (60s)")
+            _diag("rescue poll started")
+            rescue_deadline = time.time() + 60
+            while time.time() < rescue_deadline:
+                if srv.ready:
+                    break
+                ext = find_running_server()
+                if ext:
+                    srv._port = ext
+                    log.info("Server found on port %d (rescue poll)", ext)
+                    break
+                time.sleep(2)
+            _diag(f"rescue poll done -- srv.port={srv.port}")
+
         if srv.port:
             chrome_proc = open_app_window(srv.port, is_owner=True)
         else:
