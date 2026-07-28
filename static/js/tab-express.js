@@ -1116,6 +1116,7 @@ export function init(panel) {
       if (_jobId) stopJob(_jobId).catch(() => {});
       toast('Loop stopped', 'info');
     } else {
+      if (_uploadInFlight) await _uploadInFlight;
       if (!_imagePath && !ideaInput.value.trim()) { toast('Drop an image or type a video idea first', 'error'); return; }
       _looping = true;
       _loopCount = 0;
@@ -1364,6 +1365,7 @@ export function init(panel) {
 
   // -- Create (single run or multi-video) -----------------------------------
   createBtn.addEventListener('click', async () => {
+    if (_uploadInFlight) await _uploadInFlight;
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);

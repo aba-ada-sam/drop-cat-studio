@@ -51,3 +51,8 @@ REVIEW.md
 UI_REFACTOR_SUMMARY.md
 UX_PLAN.md
 OPEN_CLAW_MACHINE_CAPABILITIES.md
+
+# Runtime scratch written by the app / by tooling on this machine (2026-07-28)
+.chrome_profile/
+.playwright-mcp/
+manager_diag.txt

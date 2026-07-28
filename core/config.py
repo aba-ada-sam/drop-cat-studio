@@ -117,10 +117,12 @@ DEFAULTS: dict = {
     "ollama_power_model":    "qwen2.5:14b",
     "ollama_vision_model":   "gemma3:4b",
 
-    # -- AI model aliases (mapped to Ollama) -------------------------------
-    "ai_model_fast":     "gemma3:4b",
-    "ai_model_balanced": "gemma3:4b",
-    "ai_model_power":    "qwen2.5:14b",
+    # -- AI model aliases (provider-specific, typically left blank for auto-selection) ---
+    # When blank, router uses provider defaults (Anthropic/OpenAI/Ollama models).
+    # Only override if you want to force a specific model per tier.
+    "ai_model_fast":     "",
+    "ai_model_balanced": "",
+    "ai_model_power":    "",
 
 }
 
@@ -217,6 +219,8 @@ def find_wan_python(wan_root: str) -> str:
     """Try to find the Python executable inside a Wan2GP/Pinokio install."""
     root = Path(wan_root)
     candidates = [
+        root / "venv" / "Scripts" / "python.exe",
+        root / "venv" / "bin" / "python",
         root / "env" / "Scripts" / "python.exe",
         root / "env" / "bin" / "python",
         root / ".venv" / "Scripts" / "python.exe",
