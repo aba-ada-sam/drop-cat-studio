@@ -96,6 +96,22 @@ def _backend_config(provider: str) -> dict:
     }
 
 
+def _pool_lease(conf):
+    """Desktop Featherless concurrency-pool lease (Hub broker :7910) -- ONLY for the Featherless
+    cloud, not local KoboldCpp. Fail-open: a no-op context if the broker/import is unavailable."""
+    try:
+        if "featherless.ai" in (conf.get("base_url") or ""):
+            import sys as _sys
+            if r"C:\Users\andre\DropCat-Hub" not in _sys.path:
+                _sys.path.insert(0, r"C:\Users\andre\DropCat-Hub")
+            from feather_client import lease as _lease
+            return _lease("dropcat-video")
+    except Exception:
+        pass
+    from contextlib import nullcontext
+    return nullcontext()
+
+
 class LLMClient:
     """OpenAI-compatible client for the uncensored backends (Featherless / KoboldCpp).
 
@@ -172,9 +188,10 @@ class LLMClient:
         if system:
             all_messages.append({"role": "system", "content": system})
         all_messages.extend(messages)
-        resp = client.chat.completions.create(
-            model=model, messages=all_messages, max_tokens=max_tokens,
-        )
+        with _pool_lease(conf):
+            resp = client.chat.completions.create(
+                model=model, messages=all_messages, max_tokens=max_tokens,
+            )
         if not resp.choices or resp.choices[0].message.content is None:
             reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
             raise ValueError(f"{provider} returned empty response (finish_reason={reason!r})")
@@ -212,15 +229,16 @@ class LLMClient:
             kwargs["response_format"] = {"type": "json_object"}
 
         t0 = time.time()
-        try:
-            resp = client.chat.completions.create(**kwargs)
-        except Exception as exc:
-            if format_json and "response_format" in str(exc).lower():
-                # Backend doesn't support JSON mode -- retry without it.
-                kwargs.pop("response_format", None)
+        with _pool_lease(conf):
+            try:
                 resp = client.chat.completions.create(**kwargs)
-            else:
-                raise
+            except Exception as exc:
+                if format_json and "response_format" in str(exc).lower():
+                    # Backend doesn't support JSON mode -- retry without it.
+                    kwargs.pop("response_format", None)
+                    resp = client.chat.completions.create(**kwargs)
+                else:
+                    raise
         if not resp.choices or resp.choices[0].message.content is None:
             reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
             raise ValueError(f"{provider} vision returned empty response (finish_reason={reason!r})")

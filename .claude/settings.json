@@ -1,5 +1,8 @@
 {
   "permissions": {
     "defaultMode": "bypassPermissions"
+  },
+  "env": {
+    "CLAUDETEAM_WORLD": "dropcat"
   }
 }
