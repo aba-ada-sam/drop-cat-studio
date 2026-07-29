@@ -132,6 +132,13 @@ DEFAULTS: dict = {
     "ai_model_balanced": "",
     "ai_model_power":    "",
 
+    # -- Chat Studio (chat_) ------------------------------------------------
+    # Defaults for the Chat tab's Forge txt2img calls -- SDXL native resolution.
+    "chat_image_width":  1024,
+    "chat_image_height": 1024,
+    "chat_image_steps":  25,
+    "chat_image_cfg":    5.0,
+
 }
 
 _lock = threading.RLock()  # BUG-05: RLock so load() inside save() doesn't deadlock

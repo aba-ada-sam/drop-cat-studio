@@ -130,6 +130,12 @@
       <!-- Left rail: Creative Pipeline Navigator -->
       <nav id="app-rail" aria-label="Creative Pipeline">
 
+        <!-- Chat -- conversational image + video creation loop -->
+        <button class="rail-tab" data-tab="chat" title="Chat -- talk it through, review the prompt, generate, refine, animate">
+          <span>Chat</span>
+          <span class="rail-tab-hint">Talk your way to a video</span>
+        </button>
+
         <!-- Studio Home -- unified entry point for every creation type -->
         <button class="rail-tab active" data-tab="pipeline" title="Studio Home -- pick what you want to create and jump straight in">
           <span>Studio Home</span>
@@ -194,6 +200,7 @@
         <div id="split-pane">
           <div id="split-controls" role="main">
             <!-- Tab panels -->
+            <section class="tab-panel" id="panel-chat" aria-label="Chat"></section>
             <section class="tab-panel" id="panel-pipeline" aria-label="Studio Home"></section>
             <section class="tab-panel" id="panel-express" aria-label="Express"></section>
             <section class="tab-panel" id="panel-create-videos" aria-label="Create Videos"></section>
@@ -436,6 +443,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/app.js?v=20260728d"></script>
+  <script type="module" src="/static/js/app.js?v=20260729b"></script>
 </body>
 </html>
