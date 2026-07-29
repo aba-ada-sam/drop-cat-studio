@@ -332,20 +332,36 @@ def _focus_existing_dcs_window() -> bool:
 
     Returns True if a window was found and focused, False if none exists.
     Called before launching a new Chrome window to avoid duplicates.
+
+    Enumerates ALL top-level windows by title, not Get-Process MainWindowTitle:
+    one Chrome process owns many windows and MainWindowTitle exposes only one
+    of them, which is how a duplicate Studio window slipped past this check
+    (2026-07-29). Extra matching windows beyond the first are closed.
     """
     try:
         ps = (
             "Add-Type -TypeDefinition '"
-            "using System; using System.Runtime.InteropServices; "
+            "using System; using System.Text; using System.Runtime.InteropServices; "
+            "using System.Collections.Generic; "
             "public class WF { "
             "[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h); "
             "[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int n); "
+            "[DllImport(\"user32.dll\")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); "
+            "public delegate bool EWP(IntPtr h, IntPtr l); "
+            "[DllImport(\"user32.dll\")] public static extern bool EnumWindows(EWP cb, IntPtr l); "
+            "[DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder sb, int max); "
+            "[DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h); "
+            "public static List<IntPtr> Find(string t) { var r = new List<IntPtr>(); "
+            "EnumWindows((h, l) => { if (!IsWindowVisible(h)) return true; "
+            "var sb = new StringBuilder(256); GetWindowText(h, sb, 256); "
+            "if (sb.ToString().Contains(t)) r.Add(h); return true; }, IntPtr.Zero); return r; } "
             "}'; "
-            "$p = Get-Process -Name chrome -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.MainWindowTitle -like '*Drop Cat Go Studio*' } | "
-            "Select-Object -First 1; "
-            "if ($p) { [WF]::ShowWindow($p.MainWindowHandle, 9); "
-            "[WF]::SetForegroundWindow($p.MainWindowHandle); exit 0 } else { exit 1 }"
+            "$ws = [WF]::Find('Drop Cat Go Studio'); "
+            "if ($ws.Count -eq 0) { exit 1 } "
+            "[WF]::ShowWindow($ws[0], 9); [WF]::SetForegroundWindow($ws[0]) | Out-Null; "
+            "for ($i = 1; $i -lt $ws.Count; $i++) { "
+            "[WF]::PostMessage($ws[$i], 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null } "
+            "exit 0"
         )
         r = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
@@ -445,6 +461,10 @@ class ServerManager:
         return self._ready_event.wait(timeout)
 
     def start(self) -> None:
+        # A human-initiated (re)start earns a fresh crash allowance -- without
+        # this, the crash dialog's own Restart button re-trips on the very next
+        # crash instead of granting another round of auto-respawns.
+        self._consec_crashes = 0
         self._stop_event.clear()
         self._spawn()
         threading.Thread(target=self._watch, daemon=True, name="srv-watch").start()
@@ -456,6 +476,7 @@ class ServerManager:
 
     def restart(self) -> None:
         log.info("Manual restart requested")
+        self._consec_crashes = 0
         self._ready_event.clear()
         self._port = None
         with self._lock:
@@ -585,7 +606,7 @@ class ServerManager:
             self._port = None
             with self._lock:
                 self._proc = None
-            if self._consec_crashes <= self.MAX_CONSEC_CRASHES:
+            if self._consec_crashes < self.MAX_CONSEC_CRASHES:
                 log.warning("Server exited unexpectedly (code %s) after %.0fs up -- "
                             "auto-respawning (consecutive crash %d/%d)",
                             ret, uptime, self._consec_crashes, self.MAX_CONSEC_CRASHES)
