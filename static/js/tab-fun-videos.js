@@ -574,12 +574,11 @@ export function init(panel) {
     enhanceBtn.disabled = true;
     enhanceBtn.textContent = '...';
     try {
-      const r = await apiFetch('/api/fun/enhance-prompt', {
+      const data = await apiFetch('/api/fun/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: raw, model: modelSel.value, motion: _motionStyle }),
       });
-      const data = await r.json();
       if (data.prompt) {
         promptTA.value = data.prompt;
         promptTA.dispatchEvent(new Event('input'));
