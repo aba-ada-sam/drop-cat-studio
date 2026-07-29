@@ -19,7 +19,7 @@ import { open as openPalette, close as closePalette, registerItems } from './she
 import './shell/ai-intent.js?v=20260620a';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260620a';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260620a';
-import { initManager } from './shell/manager.js?v=20260625a';
+import { initManager } from './shell/manager.js?v=20260728c';
 
 // -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {

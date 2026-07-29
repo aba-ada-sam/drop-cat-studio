@@ -3725,6 +3725,23 @@ input, textarea, select {
 }
 .mgr-clear:hover { color: var(--text-2); }
 
+.mgr-head-btns { display: flex; align-items: center; gap: 2px; }
+.mgr-head-btn {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 5px;
+  color: var(--text-3); font-size: .95rem; line-height: 1;
+  cursor: pointer; font-family: inherit; padding: 0;
+}
+.mgr-head-btn:hover { color: var(--text-2); background: rgba(255,255,255,.07); }
+/* Chevron points up while expanded (click = fold up), down while collapsed. */
+#mgr-collapse { transition: transform .15s; transform: rotate(180deg); }
+.mgr-panel.mgr-collapsed #mgr-collapse { transform: none; }
+/* Collapsed: only the head remains, a slim grab-bar over the workspace */
+.mgr-panel.mgr-collapsed .mgr-log,
+.mgr-panel.mgr-collapsed .mgr-ask { display: none !important; }
+.mgr-panel.mgr-collapsed .mgr-panel-head { border-bottom: none; }
+
 .mgr-log {
   flex: 1 1 auto;
   overflow-y: auto;

@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/static/logo-192.png?v=20260620a">
   <link rel="apple-touch-icon" href="/static/logo-192.png?v=20260620a">
   <meta name="theme-color" content="#c41e3a">
-  <link rel="stylesheet" href="/static/css/design-system.css?v=20260626a">
+  <link rel="stylesheet" href="/static/css/design-system.css?v=20260728c">
   <link rel="stylesheet" href="/static/css/tabs.css?v=20260620a">
 </head>
 <body>
@@ -81,7 +81,11 @@
             <div id="mgr-panel" class="mgr-panel" hidden>
               <div class="mgr-panel-head">
                 <span class="mgr-panel-title">&#10022; Manager</span>
-                <button id="mgr-clear" class="mgr-clear" title="Clear conversation">clear</button>
+                <span class="mgr-head-btns">
+                  <button id="mgr-clear" class="mgr-clear" title="Clear conversation">clear</button>
+                  <button id="mgr-collapse" class="mgr-head-btn" title="Collapse to a slim bar" aria-label="Collapse Manager panel" aria-expanded="true">&#9662;</button>
+                  <button id="mgr-close" class="mgr-head-btn" title="Hide the Manager panel -- reopen with the &#10022; spark" aria-label="Hide Manager panel">&#215;</button>
+                </span>
               </div>
               <div id="mgr-log" class="mgr-log" aria-live="polite"></div>
               <div id="mgr-ask" class="mgr-ask" hidden>
@@ -432,6 +436,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/app.js?v=20260728b"></script>
+  <script type="module" src="/static/js/app.js?v=20260728d"></script>
 </body>
 </html>

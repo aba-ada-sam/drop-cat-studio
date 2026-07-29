@@ -17,6 +17,7 @@ const MAX_STEPS = 48;          // hard cap per task -- prevents runaway loops
 const SETTLE_MS = 700;         // wait for lazy tab init / async renders after a UI change
 const CHAT_KEY = 'dropcat_manager_chat';
 const CHAT_MAX = 24;
+const COLLAPSE_KEY = 'dropcat_manager_collapsed';
 
 let _running = false;
 let _stop = false;
@@ -272,6 +273,21 @@ function _showPanel(show) {
   if (p) p.hidden = !show;
 }
 
+function _setCollapsed(on, save = true) {
+  const p = $('mgr-panel');
+  if (!p) return;
+  p.classList.toggle('mgr-collapsed', on);
+  const btn = $('mgr-collapse');
+  if (btn) {
+    btn.setAttribute('aria-expanded', on ? 'false' : 'true');
+    btn.setAttribute('aria-label', on ? 'Expand Manager panel' : 'Collapse Manager panel');
+    btn.title = on ? 'Expand the panel' : 'Collapse to a slim bar';
+  }
+  if (save) {
+    try { localStorage.setItem(COLLAPSE_KEY, on ? '1' : '0'); } catch (_) {}
+  }
+}
+
 function _setRunning(on) {
   _running = on;
   const send = $('mgr-send'), stop = $('mgr-stop'), input = $('mgr-input');
@@ -287,7 +303,13 @@ function _waitForReply() { return new Promise(res => { _askResolver = res; }); }
 function _showAsk(show) {
   const a = $('mgr-ask');
   if (a) a.hidden = !show;
-  if (show) setTimeout(() => $('mgr-ask-input')?.focus(), 30);
+  // A question needs an answer box -- pop the panel open even if the user
+  // hid or collapsed it, but don't overwrite their saved preference.
+  if (show) {
+    _showPanel(true);
+    _setCollapsed(false, false);
+    setTimeout(() => $('mgr-ask-input')?.focus(), 30);
+  }
 }
 function _submitAsk() {
   const inp = $('mgr-ask-input');
@@ -435,4 +457,11 @@ export function initManager() {
   $('mgr-clear')?.addEventListener('click', () => {
     _chat = []; _saveChat(); _renderChat();
   });
+  // Panel-header dismissal: chevron collapses to the slim head bar (sticky
+  // across reloads), X hides the panel outright; the spark re-opens it.
+  $('mgr-collapse')?.addEventListener('click', () => {
+    _setCollapsed(!$('mgr-panel')?.classList.contains('mgr-collapsed'));
+  });
+  $('mgr-close')?.addEventListener('click', () => _showPanel(false));
+  try { _setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1', false); } catch (_) {}
 }
