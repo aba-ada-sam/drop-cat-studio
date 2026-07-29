@@ -1100,11 +1100,19 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'Restarting...';
 
     let preHash = null, prePid = null, sawDown = false;
-    try {
-      const sys = await fetch('/api/system', { cache: 'no-store' }).then(r => r.json());
-      preHash = sys.boot_git_hash;
-      prePid  = sys.pid || null;
-    } catch (_) {
+    // Baseline identity read, retried once: a single blip here must NOT count
+    // as "server was down" -- combined with a no-op restart it would fake a
+    // down-then-up success and reload with nothing restarted.
+    let baselineOk = false;
+    for (let attempt = 0; attempt < 2 && !baselineOk; attempt++) {
+      try {
+        const sys = await fetch('/api/system', { cache: 'no-store' }).then(r => r.json());
+        preHash = sys.boot_git_hash || null;
+        prePid  = sys.pid || null;
+        baselineOk = true;
+      } catch (_) { /* retry once, then treat as already dead below */ }
+    }
+    if (!baselineOk) {
       // Server already dead (e.g. clicked after a crash) -- any successful
       // poll below means it came back.
       sawDown = true;
@@ -1118,6 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const deadline = Date.now() + 90000;
+    let pollFails = 0;
     const poll = setInterval(async () => {
       if (Date.now() > deadline) {
         clearInterval(poll);
@@ -1141,8 +1150,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (restarted) {
           clearInterval(poll);
           location.reload();
+          return;
         }
-      } catch (_) { sawDown = true; /* down now -- next success means it came back */ }
+        pollFails = 0;
+      } catch (_) {
+        // A real restart is down for many consecutive 2s ticks; require two
+        // in a row so one slow/aborted response can't fake a down-then-up.
+        pollFails += 1;
+        if (pollFails >= 2) sawDown = true;
+      }
     }, 2000);
   });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));

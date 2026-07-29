@@ -415,6 +415,8 @@ def open_app_window(port: int, is_owner: bool = False) -> "subprocess.Popen | No
 
 class ServerManager:
     READY_TIMEOUT = 120
+    STABLE_UPTIME = 300   # seconds up before a later crash is no longer "consecutive"
+    MAX_CONSEC_CRASHES = 5
 
     def __init__(self, on_crash=None) -> None:
         self._proc: subprocess.Popen | None = None
@@ -423,7 +425,13 @@ class ServerManager:
         self._ready_event = threading.Event()
         self._port: int | None = None
         self._on_crash = on_crash  # callable(exit_code) -- shown to user on unexpected exit
-        self._crash_times: list[float] = []  # monotonic stamps of recent auto-respawns
+        # Crash-loop guard state. A sliding time window does NOT work here:
+        # one full respawn cycle on this box is ~35s (orphan sweep + VRAM probe
+        # + model load), so "5 exits in 60s" could never trip on a loop that
+        # crashes after boot completes. Count CONSECUTIVE crashes instead, and
+        # call the server stable (counter reset) once it survives STABLE_UPTIME.
+        self._consec_crashes = 0
+        self._last_spawn_ts = 0.0
 
     @property
     def port(self) -> int | None:
@@ -470,7 +478,9 @@ class ServerManager:
                 log.warning("Error terminating server: %s", exc)
         self._proc = None
 
-    def _spawn(self) -> None:
+    def _spawn(self) -> bool:
+        """Launch app.py. Returns False if the process could not even start --
+        callers in the watchdog loop must escalate, not spin silently."""
         _, old_pid = read_port_file()
         if old_pid:
             kill_pid(old_pid)
@@ -493,14 +503,16 @@ class ServerManager:
         except Exception as exc:
             log.error("Failed to spawn app.py: %s", exc)
             log_fh.close()
-            return
+            return False
 
         _assign_app_to_job(proc)
         with self._lock:
             self._proc = proc
+        self._last_spawn_ts = time.monotonic()
         log.info("Spawned app.py as PID %d", proc.pid)
         threading.Thread(target=self._wait_for_ready, args=(proc.pid,),
                          daemon=True, name="srv-ready").start()
+        return True
 
     def _wait_for_ready(self, expected_pid: int) -> None:
         deadline = time.monotonic() + self.READY_TIMEOUT
@@ -552,30 +564,37 @@ class ServerManager:
                 self._port = None
                 with self._lock:
                     self._proc = None
-                self._spawn()
-                continue
-            # Unexpected exit -- auto-respawn (max 5 in 60s). The old behavior
-            # (dialog + stop watching) left the fleet dead overnight when the
-            # dialog went unnoticed: the in-app Restart button then had nothing
-            # listening and reported "did not come back". Only a genuine crash
-            # loop still stops here and asks the user.
+                if self._spawn():
+                    continue
+                log.error("Planned-restart respawn failed to launch -- notifying user")
+                if self._on_crash:
+                    self._on_crash(ret)
+                return
+            # Unexpected exit -- auto-respawn. The old behavior (dialog + stop
+            # watching) left the fleet dead overnight when the dialog went
+            # unnoticed: the in-app Restart button then had nothing listening
+            # and reported "did not come back". Only a genuine crash loop
+            # (MAX_CONSEC_CRASHES exits without a STABLE_UPTIME run in between)
+            # still stops here and asks the user.
             now = time.monotonic()
-            self._crash_times = [t for t in self._crash_times if now - t < 60]
-            if len(self._crash_times) < 5:
-                self._crash_times.append(now)
-                log.warning("Server exited unexpectedly (code %s) -- auto-respawning (%d/5 in 60s)",
-                            ret, len(self._crash_times))
-                self._ready_event.clear()
-                self._port = None
-                with self._lock:
-                    self._proc = None
-                self._spawn()
-                continue
-            log.error("Server crash-looping (%d exits in 60s) -- stopping and notifying", len(self._crash_times))
+            uptime = now - self._last_spawn_ts if self._last_spawn_ts else 0.0
+            if uptime >= self.STABLE_UPTIME:
+                self._consec_crashes = 0
+            self._consec_crashes += 1
             self._ready_event.clear()
             self._port = None
             with self._lock:
                 self._proc = None
+            if self._consec_crashes <= self.MAX_CONSEC_CRASHES:
+                log.warning("Server exited unexpectedly (code %s) after %.0fs up -- "
+                            "auto-respawning (consecutive crash %d/%d)",
+                            ret, uptime, self._consec_crashes, self.MAX_CONSEC_CRASHES)
+                if self._spawn():
+                    continue
+                log.error("Auto-respawn failed to launch -- notifying user")
+            else:
+                log.error("Server crash-looping (%d consecutive crashes, none reaching %ds uptime) "
+                          "-- stopping and notifying", self._consec_crashes, self.STABLE_UPTIME)
             if self._on_crash:
                 self._on_crash(ret)
             return
