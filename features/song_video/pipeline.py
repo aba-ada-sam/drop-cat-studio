@@ -58,18 +58,20 @@ def _extract_last_frame(video_path: str, out_path: str) -> str | None:
 
 # -- Subject anchor extraction -------------------------------------------------
 
-def _extract_subject_anchor(photo_path: str, llm_router) -> str:
+def _extract_subject_anchor(photo_path: str, llm_router) -> tuple:
     """Vision call to get a 12-15 word subject description prepended to every prompt.
 
+    Returns (anchor, scenery): scenery=True means the image has no face-bearing
+    subject, so nothing can gesture or lip-sync -- callers should warn loudly.
     Runs concurrently with beat analysis in run_song_prep so it adds ~0 wall time.
     Same pattern as multi_pipeline._generate_subject_anchor.
     """
     if not photo_path or not os.path.isfile(photo_path):
-        return ""
+        return "", False
     try:
         b64 = encode_image_b64(photo_path)
         if not b64:
-            return ""
+            return "", False
         raw = llm_router.route_vision(
             "Describe the main subject's APPEARANCE in 15-20 words. "
             "The subject may be human, animal, creature, object, or fantasy -- describe whatever is there. "
@@ -85,26 +87,53 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
             [b64], tier=TIER_FAST, max_tokens=90,
         )
         import re as _re
+        # Detect the no-face tag on the RAW reply, before any cleanup can eat it,
+        # and tolerate sloppy variants (markdown wrapper, missing colon, lowercase).
+        scenery = bool(_re.match(r'^[\s#*>"\'`-]*scenery\b', raw.strip(), _re.IGNORECASE))
         anchor = raw.strip()
         anchor = _re.sub(r'^#+\s*[^\n]*\n+', '', anchor)
         anchor = _re.sub(r'\*\*([^*]+)\*\*', r'\1', anchor)
         anchor = _re.sub(r'\*([^*]+)\*', r'\1', anchor)
         anchor = anchor.strip().strip('"').strip("'").split('\n')[0].strip()
-        # Reject unhelpful non-description responses
+        anchor = _re.sub(r"^scenery\b[\s:,.-]*", "", anchor, flags=_re.IGNORECASE).strip()
+        # Unhelpful non-description responses ("there is no person...") also mean
+        # no usable subject was found -- treat them as the scenery case.
         bad_starts = ("i don't see", "i cannot", "i can't", "there is no", "no person",
                       "i see no", "i'm unable", "i am unable", "the image shows no")
         if any(anchor.lower().startswith(b) for b in bad_starts):
             log.warning("[song-video] Subject anchor rejected unhelpful response: %r", anchor[:80])
-            return ""
+            return "", True
         if anchor and not anchor.endswith("."):
             anchor += "."
-        return anchor
+        return anchor, scenery
     except Exception as e:
         log.warning("[song-video] Subject anchor extraction failed (non-fatal): %s", e)
-        return ""
+        return "", False
 
 
 # -- Story arc generation ------------------------------------------------------
+
+def _varied_fallback_arc(user_idea: str, n_clips: int) -> list:
+    """No-LLM story arc: cycle distinct motions so clips NEVER share one prompt.
+
+    Handing every clip the same prompt renders as one static shot drifting for
+    the whole song -- every path that can't get real arc prompts must come
+    through here, loudly, instead of duplicating a single base prompt.
+    """
+    base = (user_idea or "Subject in original scene").strip()
+    motions = [
+        "head turns slowly to one side, then returns to center",
+        "one arm rises partway, hand opening, then lowers",
+        "torso leans forward, holds, then straightens back up",
+        "weight shifts to one hip, gentle sway, then settles",
+        "chin lifts, eyes close briefly, then head levels again",
+        "one shoulder rolls back, chest expands, then relaxes",
+        "hand reaches forward, fingers spreading, then retracts",
+        "body rocks gently side to side, hair and clothing stirring",
+    ]
+    return [{"prompt": f"{base} -- {motions[i % len(motions)]}", "duration": 7.0}
+            for i in range(n_clips)]
+
 
 _SONG_ARC_SYSTEM = """\
 You write image-to-video motion prompts for a music video.
@@ -263,27 +292,17 @@ def _generate_song_arc(
             src = len(result)
             while len(result) < n_clips and src > 0:
                 result.append(dict(result[len(result) % src]))
-            log.info("[song-video] Story arc: %d prompts from LLM, padded to %d", src, n_clips)
-            return result
+            if result:
+                log.info("[song-video] Story arc: %d prompts from LLM, padded to %d", src, n_clips)
+                return result
+            # Valid JSON whose entries all lacked a "prompt" key: NOT a success --
+            # fall through to the varied fallback instead of returning [] silently.
+            log.warning("[song-video] Story arc JSON parsed but had no usable 'prompt' entries")
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
 
-    # Fallback must NOT hand every clip the same prompt -- that renders as one
-    # static shot drifting for the whole song. Cycle distinct motions locally.
-    base = user_idea or "Subject in original scene"
-    fallback_motions = [
-        "head turns slowly to one side, then returns to center",
-        "one arm rises partway, hand opening, then lowers",
-        "torso leans forward, holds, then straightens back up",
-        "weight shifts to one hip, gentle sway, then settles",
-        "chin lifts, eyes close briefly, then head levels again",
-        "one shoulder rolls back, chest expands, then relaxes",
-        "hand reaches forward, fingers spreading, then retracts",
-        "body rocks gently side to side, hair and clothing stirring",
-    ]
     log.warning("[song-video] Story arc unavailable -- using local varied-motion fallback for %d clips", n_clips)
-    return [{"prompt": f"{base} -- {fallback_motions[i % len(fallback_motions)]}", "duration": 7.0}
-            for i in range(n_clips)]
+    return _varied_fallback_arc(user_idea, n_clips)
 
 
 def _merge_video_audio_trim(
@@ -429,16 +448,12 @@ def run_song_prep(job, photo_path, settings):
                 lyrics_text = detected
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
 
-        subject_anchor = fut_anchor.result() if fut_anchor else ""
-    if subject_anchor.upper().startswith("SCENERY:"):
-        subject_anchor = subject_anchor[len("SCENERY:"):].strip()
+        subject_anchor, anchor_scenery = fut_anchor.result() if fut_anchor else ("", False)
+    if anchor_scenery:
         warn = ("Source image has no face or figure -- nothing can gesture or lip-sync, so the "
                 "clips will drift like a slow pan. Use a creature/character with a visible face.")
-        log.warning("[song-video] SUBJECT WARNING: %s (anchor: %s)", warn, subject_anchor[:60])
-        try:
-            job.meta["subject_warning"] = warn
-        except Exception:
-            pass
+        log.warning("[song-video] SUBJECT WARNING: %s (anchor: %s)", warn, subject_anchor[:60] or "none")
+        job.meta["subject_warning"] = warn
     if subject_anchor:
         log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
 
@@ -558,7 +573,8 @@ def run_song_pipeline(job, photo_path, settings):
     keyframes      = settings.pop("_keyframes", [])  # Forge-generated start/end frames
 
     if not story_arc:
-        story_arc = [settings.get("video_prompt", "") or "Subject erupts into motion"] * n_clips
+        log.warning("[song-video] No story arc reached the render phase -- using varied-motion fallback")
+        story_arc = _varied_fallback_arc(settings.get("video_prompt", ""), n_clips)
     if not audio_path or not os.path.isfile(audio_path):
         raise RuntimeError("Audio file not found -- please re-upload the song")
 
@@ -1283,6 +1299,9 @@ def _do_song_gpu_phase(
             job.message += " -- but lip sync failed, so the mouth is not synced to the words"
         elif job.meta.get("lipsync_skipped"):
             job.message += " -- instrumental track, so no lip sync"
+        if job.meta.get("subject_warning"):
+            job.message += (" -- WARNING: the source image had no face or figure, "
+                            "so expect drifting scenery instead of a performance")
 
         # Auto-evaluate quality so regressions surface in the log without manual review.
         try:
