@@ -75,10 +75,13 @@ def _extract_subject_anchor(photo_path: str, llm_router) -> str:
             "The subject may be human, animal, creature, object, or fantasy -- describe whatever is there. "
             "Focus on: color, texture, material, shape, distinguishing features. "
             "Output ONLY the description, no preamble like 'The subject is' or 'I see'. "
+            "If the image is pure scenery/landscape/architecture with NO character, creature, "
+            "person, animal, or figure that has a face, begin your answer with exactly 'SCENERY: '. "
             "Examples: "
             "'Dusty rose skull, exposed cheekbones, dark hollow eye sockets, root tendrils at jaw.' "
             "'Brown teddy bear, worn felt nose, dark bead eyes, soft fluffy ears.' "
-            "'Red-haired woman, blue denim jacket, pale freckled skin, hazel eyes.'",
+            "'Red-haired woman, blue denim jacket, pale freckled skin, hazel eyes.' "
+            "'SCENERY: Moss-covered stone archway, weathered brick, green vegetation.'",
             [b64], tier=TIER_FAST, max_tokens=90,
         )
         import re as _re
@@ -117,6 +120,11 @@ LOCATION LOCK (mandatory every prompt):
 Include 6-10 words of the original setting from the photo.
 Example: "among large purple mushrooms, wooden fence background"
 Without this the background becomes fire/electricity/generic hallucination.
+
+FRAMING LOCK (mandatory every prompt):
+The subject's face stays fully inside the frame for the whole clip.
+Never crop the head, never let the subject leave frame -- the face carries
+the lip-sync, so a cropped or exiting face ruins the entire clip.
 
 BEAT ALIGNMENT (critical):
 Each clip includes "PEAK AT Xs" -- this is the beat hit in the music.
@@ -260,8 +268,22 @@ def _generate_song_arc(
     except Exception as e:
         log.warning("[song-video] Story arc LLM call failed: %s", e)
 
-    base = user_idea or "Subject in original scene, natural physical movement"
-    return [{"prompt": base, "duration": 7.0}] * n_clips
+    # Fallback must NOT hand every clip the same prompt -- that renders as one
+    # static shot drifting for the whole song. Cycle distinct motions locally.
+    base = user_idea or "Subject in original scene"
+    fallback_motions = [
+        "head turns slowly to one side, then returns to center",
+        "one arm rises partway, hand opening, then lowers",
+        "torso leans forward, holds, then straightens back up",
+        "weight shifts to one hip, gentle sway, then settles",
+        "chin lifts, eyes close briefly, then head levels again",
+        "one shoulder rolls back, chest expands, then relaxes",
+        "hand reaches forward, fingers spreading, then retracts",
+        "body rocks gently side to side, hair and clothing stirring",
+    ]
+    log.warning("[song-video] Story arc unavailable -- using local varied-motion fallback for %d clips", n_clips)
+    return [{"prompt": f"{base} -- {fallback_motions[i % len(fallback_motions)]}", "duration": 7.0}
+            for i in range(n_clips)]
 
 
 def _merge_video_audio_trim(
@@ -408,6 +430,15 @@ def run_song_prep(job, photo_path, settings):
                 log.info("[song-video] Auto-detected %d chars of lyrics", len(lyrics_text))
 
         subject_anchor = fut_anchor.result() if fut_anchor else ""
+    if subject_anchor.upper().startswith("SCENERY:"):
+        subject_anchor = subject_anchor[len("SCENERY:"):].strip()
+        warn = ("Source image has no face or figure -- nothing can gesture or lip-sync, so the "
+                "clips will drift like a slow pan. Use a creature/character with a visible face.")
+        log.warning("[song-video] SUBJECT WARNING: %s (anchor: %s)", warn, subject_anchor[:60])
+        try:
+            job.meta["subject_warning"] = warn
+        except Exception:
+            pass
     if subject_anchor:
         log.info("[song-video] Subject anchor: %s", subject_anchor[:80])
 
