@@ -148,8 +148,9 @@ mock-job scaffolding entirely and is the truest reproduction.
   passed landscapes/creatures SFW. NOTE the design catch: **classify image OR prompt** — a SFW still (e.g.
   the 00238 mirror) can be driven explicit by the animation prompt. For the website routing.
 - **Hub icon fixed** — `DropCatGo Studio.lnk` (was confusingly near-identical to `Drop Cat Go Studio.lnk`)
-  RENAMED to `DropCat Hub.lnk`. It launches `C:\Users\andre\DropCat-Hub` = the LIVE :7910 Hub + Featherless
-  lease broker + Overseer. **Do NOT archive that folder** — it's load-bearing.
+  RENAMED to `DropCat Hub.lnk`. (OUTDATED as of 2026-07-28: DropCat-Hub and the Overseer are BOTH GONE --
+  Hub archived to D:\ColdArchives\Mothballed_2026-07-28, Overseer purged everywhere per Andrew's order.
+  The "load-bearing, do not archive" warning that used to be here no longer applies.)
 - **DropCat-Studio default clip length** changed 5->6s (`fun_multi_clip_duration`, `config.py` + template +
   live config.json; also live `fun_multi_num_clips` 4->2) so a default 2-clip multi = 12s. Clamp ceiling in
   `features/fun_videos/routes.py:924` raised 5.0->6.0. (Andrew's request earlier in session.)
