@@ -423,6 +423,7 @@ class ServerManager:
         self._ready_event = threading.Event()
         self._port: int | None = None
         self._on_crash = on_crash  # callable(exit_code) -- shown to user on unexpected exit
+        self._crash_times: list[float] = []  # monotonic stamps of recent auto-respawns
 
     @property
     def port(self) -> int | None:
@@ -553,8 +554,24 @@ class ServerManager:
                     self._proc = None
                 self._spawn()
                 continue
-            # Unexpected exit -- notify the user instead of silently restarting.
-            log.warning("Server exited unexpectedly (code %s)", ret)
+            # Unexpected exit -- auto-respawn (max 5 in 60s). The old behavior
+            # (dialog + stop watching) left the fleet dead overnight when the
+            # dialog went unnoticed: the in-app Restart button then had nothing
+            # listening and reported "did not come back". Only a genuine crash
+            # loop still stops here and asks the user.
+            now = time.monotonic()
+            self._crash_times = [t for t in self._crash_times if now - t < 60]
+            if len(self._crash_times) < 5:
+                self._crash_times.append(now)
+                log.warning("Server exited unexpectedly (code %s) -- auto-respawning (%d/5 in 60s)",
+                            ret, len(self._crash_times))
+                self._ready_event.clear()
+                self._port = None
+                with self._lock:
+                    self._proc = None
+                self._spawn()
+                continue
+            log.error("Server crash-looping (%d exits in 60s) -- stopping and notifying", len(self._crash_times))
             self._ready_event.clear()
             self._port = None
             with self._lock:
@@ -1021,6 +1038,16 @@ def main() -> None:
             _k32.ReleaseMutex(_MUTEX_HANDLE)
             _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
             # Fall through to normal startup
+
+    # A respawn marker left on disk is stale by definition here: we have no
+    # child yet, so nothing planned this exit. Left in place it would make the
+    # NEXT genuine crash under this manager look like a planned restart.
+    if RESTART_MARKER.exists():
+        try:
+            RESTART_MARKER.unlink()
+            log.info("Removed stale planned-restart marker from a previous run")
+        except OSError:
+            pass
 
     _diag("calling _ensure_shortcut")
     # Keep the desktop shortcut pointing at manager.pyw (transition from launch.bat)

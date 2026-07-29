@@ -1099,11 +1099,16 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.disabled = true;
     btn.textContent = 'Restarting...';
 
-    let preHash = null;
+    let preHash = null, prePid = null, sawDown = false;
     try {
       const sys = await fetch('/api/system', { cache: 'no-store' }).then(r => r.json());
       preHash = sys.boot_git_hash;
-    } catch (_) { /* if we can't read it, fall back to "server answers again" below */ }
+      prePid  = sys.pid || null;
+    } catch (_) {
+      // Server already dead (e.g. clicked after a crash) -- any successful
+      // poll below means it came back.
+      sawDown = true;
+    }
 
     try {
       await apiFetch('/api/app/restart', { method: 'POST' });
@@ -1116,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const poll = setInterval(async () => {
       if (Date.now() > deadline) {
         clearInterval(poll);
-        if (textEl) textEl.textContent = 'Restart did not come back -- check the DCS tray/manager.';
+        if (textEl) textEl.textContent = 'Restart did not come back -- relaunch Drop Cat Go Studio from the desktop shortcut.';
         btn.textContent = 'Restart now';
         btn.disabled = false;
         return;
@@ -1126,11 +1131,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const tid  = setTimeout(() => ctrl.abort(), 1500);
         const sys  = await fetch('/api/system', { cache: 'no-store', signal: ctrl.signal }).then(r => r.json());
         clearTimeout(tid);
-        if (sys.boot_git_hash && sys.boot_git_hash !== preHash) {
+        // Restart confirmed by ANY of: new git hash, new server PID, or the
+        // server was observed down and answers again. Hash alone missed the
+        // same-code reboot (stale banner) and reported failure on success.
+        const restarted =
+          (sys.boot_git_hash && preHash !== null && sys.boot_git_hash !== preHash) ||
+          (sys.pid && prePid !== null && sys.pid !== prePid) ||
+          sawDown;
+        if (restarted) {
           clearInterval(poll);
           location.reload();
         }
-      } catch (_) { /* still down -- keep polling */ }
+      } catch (_) { sawDown = true; /* down now -- next success means it came back */ }
     }, 2000);
   });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));

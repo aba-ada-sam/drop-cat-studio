@@ -1198,6 +1198,9 @@ async def system_info():
         "services": svc.get_status(),
         "restart_needed": _restart_needed,
         "boot_git_hash": _boot_hash,
+        # Process identity -- lets the restart banner confirm a restart even when
+        # the git hash is unchanged (same-code reboot).
+        "pid": os.getpid(),
     }
     return JSONResponse(content=data, headers={"Cache-Control": "no-store"})
 

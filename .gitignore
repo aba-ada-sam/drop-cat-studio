@@ -38,6 +38,8 @@ desktop.ini
 # Chosen port + PID — written at server startup, consumed by launchers / tray
 .dcs-port
 .dcs-port.tmp
+# Planned-restart marker — written by app.py, consumed by manager.pyw's watchdog
+.dcs-manager-respawn
 
 # Node / Electron
 node_modules/
