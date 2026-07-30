@@ -933,6 +933,20 @@ def _do_song_gpu_phase(
             clip_end_image   = prepped_photo if _chain_frame else None
             _is_chained = bool(_chain_frame)
 
+        if _lip_sync:
+            # DCMVS's proven recipe runs LTX-2's native SE (start+end keyframe) mode
+            # for EVERY lip-sync clip, including clip 0 -- "every clip ends on the
+            # original frame" (locked subject, seamless hard-cut joins). The
+            # "Ken Burns zoom" concern above is about the general story-arc case,
+            # where progression is wanted; for lip-sync the opposite is wanted (the
+            # subject should stay put, only the mouth should move), so SE mode is
+            # correct here even on clip 0. Root-caused 2026-07-29: without this,
+            # the same seed/prompt/audio that clears the mouth-sync gate on DCMVS
+            # produces a near-static, unsynced clip through this pipeline --
+            # confirmed via matched raw-payload A/B testing (see LIPSYNC_HANDOFF_
+            # 2026-07-29_night.md), not a seed-lottery or worker-instance issue.
+            clip_end_image = clip_start_image
+
         prompt_to_use = clip_prompt
         from features.fun_videos.multi_pipeline import _strip_camera_moves
         if _lip_sync:
