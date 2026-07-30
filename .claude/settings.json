@@ -3,6 +3,6 @@
     "defaultMode": "bypassPermissions"
   },
   "env": {
-    "CLAUDETEAM_WORLD": "dropcat"
+    "CLAUDETEAM_WORLD": "studio"
   }
 }
