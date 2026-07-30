@@ -1,5 +1,20 @@
 # Lip-sync handoff -- 2026-07-29 night
 
+**UPDATE, later same night: ROOT CAUSE FOUND AND FIXED (commit 87883d5).** Everything below
+this point was accurate at the time it was written but describes an intermediate state, not
+the end state. The real remaining bug: this pipeline only used LTX-2's native SE (start+end
+keyframe) mode -- "every clip ends on the original frame" -- for chained clips (2+); clip 0
+(and any non-chained clip) ran plain I2V instead, which is why a seed/prompt/audio combo that
+reliably syncs on DCMVS scored static/unsynced through this pipeline even after the
+audio_scale/resolution/input_video_strength fixes below. Confirmed via matched-payload A/B
+testing (identical request, only end_image_path present/absent, reproducibly flips
+static<->synced across multiple seeds and a from-scratch worker restart -- ruling out
+worker-instance state, seed-family luck, or anything else as the cause). Fix: `pipeline.py`
+now sets `clip_end_image = clip_start_image` for every lip-sync clip. Post-fix hit rate on a
+small fresh sample: 2/4 seeds synced on first try, consistent with DCMVS's documented
+per-seed coin flip -- `best_of_n` (already implemented) is what makes that reliable in
+production, not a 100%-every-seed expectation.
+
 Session closing at Andrew's word mid-fix. Read this before touching lip-sync again.
 
 ## What's PROVEN tonight (don't re-derive)
