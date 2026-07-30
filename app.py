@@ -1338,6 +1338,7 @@ from features.retime.routes import router as retime_router
 from features.lipsync.routes import router as lipsync_router
 from features.manager.routes import router as manager_router
 from features.chat_studio.routes import router as chat_studio_router
+from features.image_studio.routes import router as image_studio_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Create Videos"])
@@ -1349,6 +1350,7 @@ app.include_router(retime_router, prefix="/api/retime", tags=["Retime"])
 app.include_router(lipsync_router, prefix="/api/lipsync", tags=["Lip Sync"])
 app.include_router(manager_router, prefix="/api/manager", tags=["AI Manager"])
 app.include_router(chat_studio_router, prefix="/api/chat-studio", tags=["Chat Studio"])
+app.include_router(image_studio_router, prefix="/api/image-studio", tags=["Image Studio"])
 # NOTE: dcmvs_chain_router is unfinished WIP (no module/import yet) and crashes
 # startup with NameError. Commented so this build runs; re-enable when implemented.
 # app.include_router(dcmvs_chain_router, prefix="/api/dcmvs-chain", tags=["DCMVS Chain"])

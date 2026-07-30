@@ -1,0 +1,278 @@
+/**
+ * Drop Cat Go Studio -- Image Studio.
+ * Manual, dedicated image-creation surface: prompt/negative/size/steps/cfg
+ * always visible, a preset selector (Default / NSFW) that can swap Forge's
+ * loaded checkpoint, and an Animate button into the same video pipeline
+ * Chat Studio uses.
+ */
+import { pollJob } from './api.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260620a';
+import { toast, apiFetch } from './shell/toast.js?v=20260620a';
+
+const GALLERY_KEY = 'dropcat_image_studio_gallery';
+const GALLERY_CAP = 200;
+
+export function init(panel) {
+  panel.innerHTML = '';
+
+  let gallery = _loadGallery();
+  let _currentImagePath = null;
+  const _activePollers = [];
+
+  const root = el('div', {
+    style: 'max-width:900px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:14px;',
+  });
+  panel.appendChild(root);
+
+  root.appendChild(el('div', {}, [
+    el('div', { style: 'font-size:1.3rem; font-weight:700; color:var(--text);', text: 'Image Studio' }),
+    el('div', { style: 'font-size:.82rem; color:var(--text-3);', text: 'Direct prompt controls, NSFW-capable presets, straight to Forge -- then animate the result.' }),
+  ]));
+
+  // -- Form card ---------------------------------------------------------------
+  const promptTa = el('textarea', { rows: '3', style: 'width:100%; font-size:.9rem; resize:vertical;', placeholder: 'Describe the image...' });
+  const negTa = el('input', { type: 'text', style: 'width:100%; font-size:.82rem; margin-top:6px;', placeholder: 'Negative prompt (optional)' });
+
+  const presetSel = el('select', { style: 'font-size:.85rem;' });
+  const presetDesc = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:4px;' });
+
+  const widthIn  = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
+  const heightIn = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
+  const stepsIn  = el('input', { type: 'number', min: '1', max: '80', value: '25', style: 'width:70px; font-size:.8rem;' });
+  const cfgIn    = el('input', { type: 'number', min: '1', max: '20', step: '0.5', value: '5', style: 'width:70px; font-size:.8rem;' });
+  const seedIn   = el('input', { type: 'number', step: '1', value: '-1', style: 'width:100px; font-size:.8rem;' });
+
+  const controlsRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;' }, [
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'W' }), widthIn,
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'H' }), heightIn,
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Steps' }), stepsIn,
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'CFG' }), cfgIn,
+    el('span', { style: 'font-size:.75rem; color:var(--text-3);', text: 'Seed' }), seedIn,
+  ]);
+
+  const genBtn = el('button', { class: 'btn btn-primary', text: 'Generate' });
+  const errBox = el('div', { style: 'display:none; font-size:.8rem; color:#e88; margin-top:8px;' });
+
+  const formCard = el('div', { class: 'card', style: 'padding:14px;' }, [
+    el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;', text: 'Prompt' }),
+    promptTa,
+    negTa,
+    el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:10px;' }, [
+      el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Preset' }),
+      presetSel,
+    ]),
+    presetDesc,
+    controlsRow,
+    el('div', { style: 'margin-top:10px;' }, [genBtn]),
+    errBox,
+  ]);
+  root.appendChild(formCard);
+
+  // -- Result card ---------------------------------------------------------------
+  const resultImg = el('img', { style: 'max-width:100%; border-radius:8px; cursor:pointer; display:none;', title: 'Click to open full size' });
+  resultImg.addEventListener('click', () => { if (resultImg.src) window.open(resultImg.src, '_blank'); });
+  const resultMeta = el('div', { style: 'font-size:.7rem; color:var(--text-3); margin-top:4px;' });
+
+  const videoInput = el('input', { type: 'text', style: 'flex:1; font-size:.82rem;', placeholder: 'Describe the motion...' });
+  const animateBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Animate this', style: 'flex-shrink:0;' });
+  const animateRow = el('div', { style: 'display:none; gap:6px; margin-top:10px;' }, [videoInput, animateBtn]);
+
+  const jobArea = el('div', { style: 'margin-top:10px;' });
+
+  const resultCard = el('div', { class: 'card', style: 'padding:14px; display:none;' }, [
+    el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;', text: 'Result' }),
+    resultImg, resultMeta, animateRow, jobArea,
+  ]);
+  root.appendChild(resultCard);
+
+  // -- Gallery ---------------------------------------------------------------
+  const galleryGrid = el('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' });
+  const galleryCard = el('div', { class: 'card', style: 'padding:14px;' }, [
+    el('div', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;', text: 'Session renders' }),
+    galleryGrid,
+  ]);
+  root.appendChild(galleryCard);
+
+  // -- Helpers ---------------------------------------------------------------
+  function _loadGallery() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(GALLERY_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    } catch (e) { return []; }
+  }
+
+  function _saveGallery() {
+    try { localStorage.setItem(GALLERY_KEY, JSON.stringify(gallery.slice(-GALLERY_CAP))); } catch (e) { /* non-fatal */ }
+  }
+
+  function _renderGallery() {
+    galleryGrid.innerHTML = '';
+    if (!gallery.length) {
+      galleryGrid.appendChild(el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'Nothing generated yet this session.' }));
+      return;
+    }
+    for (const item of gallery.slice().reverse()) {
+      const thumb = el('img', {
+        src: item.url, style: 'width:96px; height:96px; object-fit:cover; border-radius:6px; cursor:pointer;',
+        title: item.prompt || '',
+      });
+      thumb.addEventListener('click', () => _loadFromGallery(item));
+      galleryGrid.appendChild(thumb);
+    }
+  }
+
+  function _loadFromGallery(item) {
+    promptTa.value = item.prompt || '';
+    negTa.value = item.negative || '';
+    widthIn.value = item.width || 1024;
+    heightIn.value = item.height || 1024;
+    if (presetSel.querySelector(`option[value="${item.preset}"]`)) presetSel.value = item.preset;
+    _showResult(item);
+  }
+
+  function _showResult(data) {
+    _currentImagePath = data.image_path;
+    resultImg.src = data.url || data.image_url;
+    resultImg.style.display = '';
+    const bits = [`seed ${data.seed}`];
+    if (data.checkpoint_used) bits.push(data.checkpoint_used);
+    if (data.adetailer_ran) bits.push('ADetailer ran');
+    resultMeta.textContent = bits.join('  --  ');
+    resultCard.style.display = '';
+    animateRow.style.display = 'flex';
+    jobArea.innerHTML = '';
+  }
+
+  // -- Presets ---------------------------------------------------------------
+  async function _loadPresets() {
+    try {
+      const data = await apiFetch('/api/image-studio/presets', { context: 'image-studio.presets', silent: true });
+      presetSel.innerHTML = '';
+      for (const p of (data.presets || [])) {
+        const opt = el('option', { value: p.id, text: p.label });
+        presetSel.appendChild(opt);
+      }
+      _updatePresetDesc(data.presets || []);
+    } catch (e) {
+      presetSel.innerHTML = '';
+      presetSel.appendChild(el('option', { value: 'default', text: 'Default' }));
+    }
+  }
+
+  function _updatePresetDesc(presets) {
+    const p = presets.find(p => p.id === presetSel.value);
+    presetDesc.textContent = p ? p.description : '';
+  }
+  presetSel.addEventListener('change', async () => {
+    try {
+      const data = await apiFetch('/api/image-studio/presets', { context: 'image-studio.presets', silent: true });
+      _updatePresetDesc(data.presets || []);
+    } catch (e) { /* non-fatal */ }
+  });
+
+  // -- Generate ---------------------------------------------------------------
+  genBtn.addEventListener('click', async () => {
+    const prompt = promptTa.value.trim();
+    if (!prompt) { toast('Prompt is empty', 'error'); return; }
+    errBox.style.display = 'none';
+
+    const body = {
+      prompt,
+      negative_prompt: negTa.value.trim(),
+      width:  parseInt(widthIn.value, 10)  || 1024,
+      height: parseInt(heightIn.value, 10) || 1024,
+      steps:  parseInt(stepsIn.value, 10)  || 25,
+      cfg:    parseFloat(cfgIn.value)      || 5.0,
+      seed:   parseInt(seedIn.value, 10)   || -1,
+      preset: presetSel.value || 'default',
+    };
+
+    genBtn.disabled = true;
+    const origText = genBtn.textContent;
+    genBtn.textContent = 'Generating...';
+    try {
+      const data = await apiFetch('/api/image-studio/generate', {
+        method: 'POST', body: JSON.stringify(body), context: 'image-studio.generate', silent: true,
+      });
+      const item = {
+        url: data.image_url, image_path: data.image_path, seed: data.seed,
+        checkpoint_used: data.checkpoint_used, adetailer_ran: data.adetailer_ran,
+        prompt, negative: body.negative_prompt, width: body.width, height: body.height,
+        preset: body.preset,
+      };
+      gallery.push(item);
+      _saveGallery();
+      _renderGallery();
+      _showResult(item);
+    } catch (e) {
+      errBox.textContent = e.message || 'Generation failed';
+      errBox.style.display = '';
+    } finally {
+      genBtn.disabled = false;
+      genBtn.textContent = origText;
+    }
+  });
+
+  // -- Animate ---------------------------------------------------------------
+  animateBtn.addEventListener('click', async () => {
+    const vp = videoInput.value.trim();
+    if (!vp) { toast('Describe the motion first', 'error'); return; }
+    if (!_currentImagePath) { toast('No image to animate', 'error'); return; }
+    animateBtn.disabled = true;
+    try {
+      const data = await apiFetch('/api/image-studio/animate', {
+        method: 'POST',
+        body: JSON.stringify({ image_path: _currentImagePath, video_prompt: vp }),
+        context: 'image-studio.animate',
+      });
+      _watchVideoJob(data.job_id);
+    } catch (e) {
+      // apiFetch already toasted the server error string
+    } finally {
+      animateBtn.disabled = false;
+    }
+  });
+
+  function _watchVideoJob(jobId) {
+    jobArea.innerHTML = '';
+    const statusEl = el('div', { style: 'font-size:.82rem; color:var(--text-3);', text: 'Rendering video...' });
+    const track = el('div', { style: 'height:4px; width:220px; background:var(--border-2); border-radius:2px; overflow:hidden; margin-top:6px;' });
+    const fill  = el('div', { style: 'height:100%; width:0%; background:var(--accent); transition:width .4s;' });
+    track.appendChild(fill);
+    jobArea.appendChild(statusEl);
+    jobArea.appendChild(track);
+
+    const poller = pollJob(
+      jobId,
+      (j) => {
+        fill.style.width = `${j.progress || 0}%`;
+        statusEl.textContent = j.message || (j.status === 'queued' ? 'Queued -- waiting for GPU...' : 'Rendering video...');
+      },
+      (j) => {
+        const outputs = Array.isArray(j.output) ? j.output : [j.output];
+        const videoPath = outputs[0];
+        jobArea.innerHTML = '';
+        jobArea.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:4px;', text: 'Video ready' }));
+        jobArea.appendChild(el('video', {
+          controls: '', style: 'max-width:100%; border-radius:8px; background:#000;', src: pathToUrl(videoPath),
+        }));
+      },
+      (err) => {
+        jobArea.innerHTML = '';
+        jobArea.appendChild(el('div', { style: 'font-size:.82rem; color:#e88;', text: `Video failed: ${err}` }));
+      },
+      3000,
+    );
+    _activePollers.push(poller);
+  }
+
+  // -- Init ---------------------------------------------------------------
+  _loadPresets();
+  _renderGallery();
+
+  // Cleanup pollers if the tab is torn down (init() is only called once per
+  // panel lifetime in this app, but stop() is cheap and matches Chat's pattern).
+  panel.addEventListener('dcs:teardown', () => {
+    for (const p of _activePollers) { try { p.stop(); } catch (e) { /* already finished */ } }
+  });
+}

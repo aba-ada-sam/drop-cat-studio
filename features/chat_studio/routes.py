@@ -21,7 +21,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import config as cfg
-from core.job_manager import JOB_FUN_VIDEO
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -306,87 +305,7 @@ async def generate_image(request: Request):
 
 @router.post("/animate")
 async def animate(request: Request):
-    from app import get_job_manager
-    from features.fun_videos.pipeline import run_prep, run_pipeline
-    from features.fun_videos.video_generator import MODELS as _VG_MODELS
+    from core.animate_bridge import animate_image
 
     body = await _read_json(request)
-    image_path = body.get("image_path") or ""
-    if not image_path or not os.path.isfile(image_path):
-        raise HTTPException(400, f"Image not found: {image_path}")
-    if not _in_output_dir(image_path):
-        raise HTTPException(400, "image_path must be inside the output directory")
-    video_prompt = (body.get("video_prompt") or "").strip()
-    if not video_prompt:
-        raise HTTPException(400, "video_prompt required")
-
-    config = cfg.load()
-    requested_model = config.get("wan_model") or "LTX-2 Dev19B Distilled"
-
-    # Reject T2V models upfront -- WanGP would otherwise silently drop the
-    # start image and the job fails with an opaque error (same guard as
-    # /api/fun/make-it).
-    model_def = _VG_MODELS.get(requested_model)
-    if model_def is not None and not model_def.get("i2v", True):
-        raise HTTPException(
-            400,
-            f"{requested_model} is text-to-video and cannot accept a start image. "
-            f"Pick an I2V model in Settings.",
-        )
-
-    duration = _safe_float(body.get("duration"), config.get("fun_video_duration", 6.0))
-    duration = max(1.0, min(20.0, duration))
-
-    # Per-model minimum steps -- mirrors _MODEL_MIN_STEPS_SINGLE in
-    # features/fun_videos/routes.py make-it (a handler-local dict there, so it
-    # cannot be imported; keep the two in sync).
-    _min_steps = {
-        "LTX-2 Dev19B Distilled": 4,
-        "LTX-2 Dev13B":            20,
-        "LTX-2 Dev13B 360P":       20,
-        "Wan2.1-I2V-14B-480P":     20,
-        "Wan2.1-I2V-14B-720P":     20,
-        "Wan2.1-T2V-14B":          20,
-        "Wan2.1-T2V-1.3B":         15,
-    }.get(requested_model, 20)
-    video_steps = max(_safe_int(config.get("fun_video_steps"), 30), _min_steps)
-
-    settings = {
-        "video_prompt":   video_prompt,
-        "skip_audio":     True,
-        "model_name":     requested_model,
-        "resolution":     config.get("resolution", "580p"),
-        "video_duration": duration,
-        "video_steps":    video_steps,
-        "video_guidance": config.get("fun_video_guidance", 7.5),
-        "video_seed":     config.get("fun_video_seed", -1),
-        "use_wildcards":  False,
-        "instrumental":   True,
-        "upscale":        False,
-    }
-
-    label = f"Chat animate: {Path(image_path).stem[:20]}"
-    job_manager = get_job_manager()
-    try:
-        job = job_manager.submit_with_prep(
-            JOB_FUN_VIDEO, run_prep, run_pipeline, image_path, settings, label=label,
-        )
-    except RuntimeError as e:
-        raise HTTPException(429, str(e))
-
-    job.meta.update({
-        "feature":      "fun_video",
-        "source_image": image_path,
-        "prompt":       settings.get("video_prompt", "")[:120],
-        "model":        settings.get("model_name", ""),
-        "settings": {
-            "prompt":       settings.get("video_prompt", "")[:240],
-            "steps":        settings.get("video_steps"),
-            "guidance":     settings.get("video_guidance"),
-            "duration_sec": settings.get("video_duration"),
-            "source_image": image_path,
-            "model":        settings.get("model_name", ""),
-            "seed":         settings.get("video_seed"),
-        },
-    })
-    return {"job_id": job.id}
+    return await animate_image(body, label_prefix="Chat animate")

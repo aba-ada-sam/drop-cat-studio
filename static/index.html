@@ -136,6 +136,12 @@
           <span class="rail-tab-hint">Talk your way to a video</span>
         </button>
 
+        <!-- Image Studio -- manual Forge controls, NSFW-capable presets -->
+        <button class="rail-tab" data-tab="image-studio" title="Image Studio -- direct prompt controls, NSFW-capable presets, straight to Forge">
+          <span>Image Studio</span>
+          <span class="rail-tab-hint">Manual Forge + NSFW presets</span>
+        </button>
+
         <!-- Studio Home -- unified entry point for every creation type -->
         <button class="rail-tab active" data-tab="pipeline" title="Studio Home -- pick what you want to create and jump straight in">
           <span>Studio Home</span>
@@ -201,6 +207,7 @@
           <div id="split-controls" role="main">
             <!-- Tab panels -->
             <section class="tab-panel" id="panel-chat" aria-label="Chat"></section>
+            <section class="tab-panel" id="panel-image-studio" aria-label="Image Studio"></section>
             <section class="tab-panel" id="panel-pipeline" aria-label="Studio Home"></section>
             <section class="tab-panel" id="panel-express" aria-label="Express"></section>
             <section class="tab-panel" id="panel-create-videos" aria-label="Create Videos"></section>
@@ -443,6 +450,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/app.js?v=20260730a"></script>
+  <script type="module" src="/static/js/app.js?v=20260730c"></script>
 </body>
 </html>
