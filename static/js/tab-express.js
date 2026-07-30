@@ -247,6 +247,32 @@ export function init(panel) {
   }
   _applyImageFn = _applyImage;
 
+  // Idea-only start: every model this tab can pick (auto-pick's five buckets,
+  // and the hardcoded Quick Preview model) is I2V-only -- none of them route to
+  // the two T2V models that exist in the system. So "type an idea, no photo"
+  // used to reach WanGP with no start image and fail with an opaque error, and
+  // there was no in-tab way to get an image to satisfy it. Mirrors Chat
+  // Studio's own generate-image -> animate two-step chain (same endpoint) so a
+  // text-only idea gets a starting image instead of failing.
+  async function _ensureImage() {
+    if (_imagePath || _uploadInFlight) return;
+    const idea = ideaInput.value.trim();
+    if (!idea) return;
+    _showProgress(1, 'Creating a starting image from your idea...');
+    try {
+      const { image_path, image_url } = await api('/api/chat-studio/generate-image', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: idea }),
+      });
+      if (image_path) _applyImage(image_path, image_url);
+    } catch (e) {
+      // Non-fatal: fall through and let the existing "no image, no idea"
+      // validation (or WanGP itself) surface whatever actually went wrong --
+      // Forge not running, GPU busy, etc. -- rather than masking it here.
+      toast(`Couldn't auto-create a starting image (${e.message}) -- continuing without one`, 'error');
+    }
+  }
+
   clearImgBtn.addEventListener('click', e => {
     e.stopPropagation();
     _imagePath = null;
@@ -1152,6 +1178,7 @@ export function init(panel) {
     // If the background image upload is still running, wait for the real server
     // path so we don't submit with _imagePath still null (the no-image race).
     if (_uploadInFlight) { try { await _uploadInFlight; } catch (_) {} }
+    await _ensureImage();
     let motionPrompt = ideaInput.value.trim();
     const needIdea   = !motionPrompt;
     const needLyric  = !lyricInput.value.trim();
@@ -1468,6 +1495,8 @@ export function init(panel) {
 
   // -- Multi-video generation ------------------------------------------------
   async function _generateMulti() {
+    if (_uploadInFlight) { try { await _uploadInFlight; } catch (_) {} }
+    await _ensureImage();
     let motionPrompt = ideaInput.value.trim();
 
     // Auto-generate a story concept if the idea field is blank
@@ -1571,6 +1600,7 @@ export function init(panel) {
       toast('Drop an image or type an idea first', 'error');
       return;
     }
+    await _ensureImage();
     _showProgress(1, 'Quick Preview -- generating single clip...');
     try {
       const idea = ideaInput.value.trim();
