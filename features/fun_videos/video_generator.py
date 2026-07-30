@@ -183,6 +183,8 @@ def generate_video(
     start_video_path: str | None = None,
     loras: list | None = None,
     audio_source: str | None = None,
+    audio_scale: float | None = None,
+    input_video_strength: float | None = None,
     negative_prompt: str = "",
     stop_check=None,
     log_fn=None,
@@ -194,6 +196,11 @@ def generate_video(
     worker_url: routes to that WanGP HTTP endpoint instead of the local worker.
     progress_fn(step, total_steps) is called on each inference step.
     override_width/height bypass the model's native resolution.
+    audio_scale: LTX-2 native audio-conditioning strength (only meaningful when
+    audio_source is set). WanGP defaults this to 1.0 server-side when omitted --
+    the DCMVS-proven recipe for lip-sync uses 0.6; over-driving it concentrates
+    the diffusion model's attention on the mouth region hard enough to visibly
+    degrade detail there (soft/blurry patch) rather than just moving it more.
     """
     model_info = MODELS.get(model_name, MODELS["LTX-2 Dev19B Distilled"])
     fps = model_info.get("fps", 16)
@@ -240,7 +247,8 @@ def generate_video(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
-            mmaudio=mmaudio, audio_source=audio_source,
+            mmaudio=mmaudio, audio_source=audio_source, audio_scale=audio_scale,
+            input_video_strength=input_video_strength,
             negative_prompt=negative_prompt,
             worker_url=worker_url,
         )
@@ -250,7 +258,8 @@ def generate_video(
             image_path, prompt, out_path, num_frames, res_w, res_h,
             steps, guidance, seed, model_name, end_image_path,
             start_video_path, loras or [], stop_check, log_fn, progress_fn,
-            mmaudio=mmaudio, audio_source=audio_source,
+            mmaudio=mmaudio, audio_source=audio_source, audio_scale=audio_scale,
+            input_video_strength=input_video_strength,
             negative_prompt=negative_prompt,
             worker_url=WANGP_LOCAL_URL,
         )
@@ -362,6 +371,8 @@ def _generate_via_worker(
     start_video_path, loras, stop_check, log_fn, progress_fn=None,
     mmaudio: bool = False,
     audio_source: str | None = None,
+    audio_scale: float | None = None,
+    input_video_strength: float | None = None,
     negative_prompt: str = "",
     worker_url: str = WANGP_LOCAL_URL,
 ) -> str | None:
@@ -394,6 +405,20 @@ def _generate_via_worker(
     }
     if audio_source and os.path.isfile(audio_source):
         payload["audio_source"] = os.path.abspath(audio_source)
+        # WanGP requires audio_prompt_type="A" to actually engage native audio
+        # conditioning on the video (its wgp.py only maps in the audio branch
+        # when "A" is set), and defaults audio_scale to 1.0 server-side when
+        # omitted -- the DCMVS-proven recipe uses 0.6. Over-driving this
+        # concentrates the diffusion model's attention on the mouth region hard
+        # enough to visibly degrade detail there instead of just moving more.
+        payload["audio_prompt_type"] = "A"
+        payload["audio_scale"] = audio_scale if audio_scale is not None else 0.6
+    if input_video_strength is not None:
+        # Start-image conditioning weight. WanGP defaults to 1.0 (locks hard to
+        # the source frame) when omitted -- the DCMVS-proven recipe uses 0.69,
+        # giving the model enough freedom from the source to actually move in
+        # response to audio conditioning instead of holding a static pose.
+        payload["input_video_strength"] = float(input_video_strength)
     if start_video_path and os.path.isfile(start_video_path):
         payload["start_video"] = os.path.abspath(start_video_path)
     elif image_path:

@@ -584,10 +584,12 @@ def run_song_pipeline(job, photo_path, settings):
     job_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolution strategy:
-    # - Lip sync ON + audio WAV available: generate at 640x360 so audio tokens
-    #   fit in LTX-2's context window, then upscale each clip to 580p before concat.
-    #   At 580p the audio token budget is exceeded and WanGP silently drops audio
-    #   conditioning -- 360p is required for any audio-driven motion to work.
+    # - Lip sync ON + audio WAV available: generate natively at 960x544 -- the
+    #   DCMVS-proven lip-sync recipe (2026-07-29: cpuguard/sync root-caused the
+    #   mouth-box artifact -- audio tokens do NOT overflow at 960x544, only above
+    #   ~580p/1032x580; the old 640x360-then-upscale path was a workaround for a
+    #   threshold that was never actually being approached here, and the upscale
+    #   pass itself softened detail the native resolution doesn't need).
     # - Lip sync OFF or no audio WAV: native 580p, audio conditioning unavailable.
     # - Explicit override: honour ow/oh directly.
     # Forge keyframe dependency removed: chain-frame anchoring alone is sufficient
@@ -596,19 +598,11 @@ def run_song_pipeline(job, photo_path, settings):
         bool(settings.get("lip_sync", True)) and
         bool(audio_wav)
     )
-    # LIP SYNC REQUIRES 360p. At 580p the audio tokens overflow LTX-2's context
-    # window and WanGP silently DROPS the audio (= no lip sync at all). So when
-    # lip sync is on, generate at 640x360 (override) -- the audio conditioning
-    # actually applies -- and the per-clip upscale below brings each clip back to
-    # ~580p before concat. When lip sync is off (or no audio), use native res for
-    # maximum sharpness. (This restores the late-May "real lip sync" behavior that
-    # was traded away for sharpness when the pipeline switched to native 580p.)
     if ow and oh:
         tw, th = int(ow), int(oh)
     elif _lip_sync_res_active:
-        ow, oh = 960, 544
-        tw, th = 640, 360
-        log.info("[song-video] Lip sync ON -- generating at 640x360 so audio conditioning fits (upscaled to ~580p after)")
+        tw, th = 960, 544
+        log.info("[song-video] Lip sync ON -- generating natively at 960x544 (DCMVS-proven, no upscale pass needed)")
     else:
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
@@ -1001,14 +995,19 @@ def _do_song_gpu_phase(
                 duration=this_dur,
                 model_name=model_name,
                 resolution=resolution,
-                override_width=int(ow) if ow else None,
-                override_height=int(oh) if oh else None,
+                override_width=int(tw) if (ow and oh) or lip_sync_res_active else None,
+                override_height=int(th) if (ow and oh) or lip_sync_res_active else None,
                 steps=steps,
                 guidance=effective_guidance,
                 seed=_seed,
                 end_image_path=clip_end_image,
                 negative_prompt=("blurry, distorted" if _lip_sync else video_generator.negative_prompt_for(model_name, motion_style="narrative")),
                 audio_source=_audio_slice,
+                # DCMVS-proven conditioning strength -- WanGP defaults to 1.0 when
+                # unset, which over-drives the mouth region hard enough to visibly
+                # degrade detail there (the "box" artifact).
+                audio_scale=(0.6 if _lip_sync else None),
+                input_video_strength=(0.69 if _lip_sync else None),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
@@ -1067,14 +1066,16 @@ def _do_song_gpu_phase(
                         duration=this_dur,
                         model_name=model_name,
                         resolution=resolution,
-                        override_width=int(ow) if ow else None,
-                        override_height=int(oh) if oh else None,
+                        override_width=int(tw) if (ow and oh) or lip_sync_res_active else None,
+                        override_height=int(th) if (ow and oh) or lip_sync_res_active else None,
                         steps=steps,
                         guidance=effective_guidance,
                         seed=seed,
                         end_image_path=clip_end_image,
                         negative_prompt=("blurry, distorted" if _lip_sync else video_generator.negative_prompt_for(model_name, motion_style="narrative")),
                         audio_source=_audio_slice,
+                        audio_scale=(0.6 if _lip_sync else None),
+                        input_video_strength=(0.69 if _lip_sync else None),
                         stop_check=_stopped,
                         log_fn=_log,
                         worker_url=_worker_url or None,
