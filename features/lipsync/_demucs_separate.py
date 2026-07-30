@@ -16,7 +16,12 @@ from demucs.pretrained import get_model
 
 
 def main(in_path: str, out_path: str) -> int:
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "[DCS] No CUDA GPU detected -- refusing to silently run Demucs "
+            "vocal separation on CPU."
+        )
+    dev = "cuda"
     model = get_model("htdemucs")
     model.to(dev).eval()
 

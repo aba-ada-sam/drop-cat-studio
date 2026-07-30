@@ -11,14 +11,24 @@ import face_alignment as _face_alignment_pkg
 import torch
 from tqdm import tqdm
 
+# This module resolves its device at IMPORT time, before scripts/inference.py's
+# main() gets a chance to run -- so the CUDA check has to live here, not there,
+# or a lost GPU silently degrades landmark detection (and everything downstream)
+# to CPU with no error, just a multi-hour "stalled" run.
+if not torch.cuda.is_available():
+    raise RuntimeError(
+        "[DCS] No CUDA GPU detected -- refusing to silently run MuseTalk "
+        "face-alignment on CPU."
+    )
+
 # Landmark backend: face-alignment (68-point dlib layout) replaces mmpose/DWPose.
 # mmcv/mmpose has no Blackwell (sm_120) wheels and won't build on Windows; the
 # 68-point face_alignment output is index-compatible with the mmpose wholebody
 # face keypoints MuseTalk used (nose-bridge indices 28-30 line up).
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 _LMK_FA = _face_alignment_pkg.FaceAlignment(
     _face_alignment_pkg.LandmarksType.TWO_D, flip_input=False,
-    device=("cuda" if torch.cuda.is_available() else "cpu"),
+    device="cuda",
 )
 
 
@@ -30,8 +40,8 @@ def _get_face68(img_bgr):
     best = max(preds, key=lambda lm: (lm[:, 0].max() - lm[:, 0].min()) * (lm[:, 1].max() - lm[:, 1].min()))
     return best.astype(np.int32)
 
-# initialize the face detection model
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# initialize the face detection model (cuda guaranteed by the assert above)
+device = "cuda"
 fa = FaceAlignment(LandmarksType._2D, flip_input=False,device=device)
 
 # maker if the bbox is not sufficient

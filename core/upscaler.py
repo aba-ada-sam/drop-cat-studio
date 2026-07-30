@@ -208,6 +208,12 @@ def upscale_ai(
                 # Load model (x2 or x4 depending on target scale).
                 # Prefer a local copy in MODELS_DIR; otherwise hand RealESRGANer
                 # the release URL so it auto-downloads the weights on first use.
+                if not _torch.cuda.is_available():
+                    # Don't let RealESRGANer silently resolve device="cpu" on its
+                    # own -- that would grind through frame-by-frame CPU inference
+                    # for hours. Raise so the except below falls back to ffmpeg fast.
+                    raise RuntimeError("No CUDA GPU detected -- refusing to run Real-ESRGAN on CPU")
+
                 model_scale = 4 if scale > 2.5 else 2
                 local_weights = MODELS_DIR / f"RealESRGAN_x{model_scale}plus.pth"
                 model_path = str(local_weights) if local_weights.exists() else _ESRGAN_URLS[model_scale]
@@ -217,7 +223,8 @@ def upscale_ai(
                     scale=model_scale,
                     model_path=model_path,
                     model=net, tile=512, tile_pad=10, pre_pad=0,
-                    half=_torch.cuda.is_available(),  # fp16 convs unsupported on CPU
+                    half=True,
+                    device=_torch.device("cuda"),
                 )
 
                 total = len(frames)

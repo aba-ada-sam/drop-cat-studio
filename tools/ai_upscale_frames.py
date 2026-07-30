@@ -32,6 +32,13 @@ def main() -> int:
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from realesrgan import RealESRGANer
 
+    if not torch.cuda.is_available():
+        # Don't let RealESRGANer silently resolve device="cpu" -- the caller
+        # (core/upscaler.py._run_venv_worker) treats a non-zero exit as "fall
+        # back to ffmpeg", which is the correct behavior here, not a CPU grind.
+        print("ERROR no CUDA GPU detected -- refusing to run Real-ESRGAN on CPU", flush=True)
+        return 2
+
     frames = sorted(frames_dir.glob("*.png"))
     if not frames:
         print("ERROR no frames found", flush=True)
@@ -44,7 +51,7 @@ def main() -> int:
                   num_block=23, num_grow_ch=32, scale=model_scale)
     upsampler = RealESRGANer(scale=model_scale, model_path=model_path, model=net,
                              tile=512, tile_pad=10, pre_pad=0,
-                             half=torch.cuda.is_available())
+                             half=True, device=torch.device("cuda"))
 
     # cv2 BGR in/out is Real-ESRGAN's native path; compression level 1 keeps
     # the CPU out of the GPU's way (default PNG level 6 dominates frame time

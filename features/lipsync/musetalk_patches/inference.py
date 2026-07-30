@@ -65,8 +65,14 @@ def main(args):
         if not fast_check_ffmpeg():
             print("Warning: Unable to find ffmpeg, please ensure ffmpeg is properly installed")
     
-    # Set computing device
-    device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
+    # Set computing device -- refuse to silently run the DiT/VAE/Whisper stack
+    # on CPU (this would "succeed" hours later instead of failing loudly now).
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "[DCS] No CUDA GPU detected -- refusing to silently run MuseTalk "
+            "inference on CPU."
+        )
+    device = torch.device(f"cuda:{args.gpu_id}")
     # Load model weights
     vae, unet, pe = load_all_model(
         unet_model_path=args.unet_model_path, 

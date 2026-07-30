@@ -312,6 +312,10 @@ def start_acestep() -> tuple[bool, str | None]:
         env["PYTHONUNBUFFERED"] = "1"
         env["ACESTEP_NO_INIT"] = "false"
         env["ACESTEP_INIT_LLM"] = "auto"
+        # Explicit, not "auto" -- "auto" silently resolves to "cpu" when no GPU
+        # backend is found. Pairs with the init_service_setup.py patch that makes
+        # an unsatisfiable "cuda" request raise instead of quietly falling back.
+        env["ACESTEP_DEVICE"] = "cuda"
         # Force the SFT (Supervised Fine-Tuned) checkpoint instead of the
         # default turbo variant. Turbo is distilled to 8 steps and produces
         # music beds without intelligible vocals -- SFT accepts 20+ steps and
