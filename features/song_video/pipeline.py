@@ -1005,9 +1005,14 @@ def _do_song_gpu_phase(
                 audio_source=_audio_slice,
                 # DCMVS-proven conditioning strength -- WanGP defaults to 1.0 when
                 # unset, which over-drives the mouth region hard enough to visibly
-                # degrade detail there (the "box" artifact).
-                audio_scale=(0.6 if _lip_sync else None),
-                input_video_strength=(0.69 if _lip_sync else None),
+                # degrade detail there (the "box" artifact). Gated on _audio_slice,
+                # not the job-level _lip_sync flag: if this specific clip's slice
+                # extraction failed, it has no audio conditioning regardless of the
+                # job setting, and input_video_strength=0.69 (looser than the 1.0
+                # default) with nothing driving the motion just lets the subject
+                # drift off the source image for no benefit.
+                audio_scale=(0.6 if _audio_slice else None),
+                input_video_strength=(0.69 if _audio_slice else None),
                 stop_check=_stopped,
                 log_fn=_log,
                 progress_fn=_video_progress,
@@ -1074,8 +1079,8 @@ def _do_song_gpu_phase(
                         end_image_path=clip_end_image,
                         negative_prompt=("blurry, distorted" if _lip_sync else video_generator.negative_prompt_for(model_name, motion_style="narrative")),
                         audio_source=_audio_slice,
-                        audio_scale=(0.6 if _lip_sync else None),
-                        input_video_strength=(0.69 if _lip_sync else None),
+                        audio_scale=(0.6 if _audio_slice else None),
+                        input_video_strength=(0.69 if _audio_slice else None),
                         stop_check=_stopped,
                         log_fn=_log,
                         worker_url=_worker_url or None,
