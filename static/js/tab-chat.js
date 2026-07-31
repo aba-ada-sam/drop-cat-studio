@@ -217,7 +217,7 @@ export function init(panel) {
     const stepsIn = el('input', { type: 'number', min: '1', max: '80', style: 'width:70px; font-size:.8rem;' });
     stepsIn.value = '25';
     const cfgIn = el('input', { type: 'number', min: '1', max: '20', step: '0.5', style: 'width:70px; font-size:.8rem;' });
-    cfgIn.value = '5';
+    cfgIn.value = '3';
     const advanced = el('details', { style: 'margin-top:6px;' }, [
       el('summary', { style: 'cursor:pointer; font-size:.72rem; color:var(--text-3);', text: '+ steps & cfg' }),
       el('div', { style: 'display:flex; align-items:center; gap:10px; margin-top:6px;' }, [

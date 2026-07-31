@@ -57,7 +57,7 @@ export function init(panel) {
   const widthIn  = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
   const heightIn = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
   const stepsIn  = el('input', { type: 'number', min: '1', max: '80', value: '25', style: 'width:70px; font-size:.8rem;' });
-  const cfgIn    = el('input', { type: 'number', min: '1', max: '20', step: '0.5', value: '5', style: 'width:70px; font-size:.8rem;' });
+  const cfgIn    = el('input', { type: 'number', min: '1', max: '20', step: '0.5', value: '3', style: 'width:70px; font-size:.8rem;' });
   const seedIn   = el('input', { type: 'number', step: '1', value: '-1', style: 'width:100px; font-size:.8rem;' });
 
   const controlsRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;' }, [

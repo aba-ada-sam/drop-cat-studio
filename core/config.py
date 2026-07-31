@@ -137,7 +137,7 @@ DEFAULTS: dict = {
     "chat_image_width":  1024,
     "chat_image_height": 1024,
     "chat_image_steps":  25,
-    "chat_image_cfg":    5.0,
+    "chat_image_cfg":    3.0,
 
 }
 
