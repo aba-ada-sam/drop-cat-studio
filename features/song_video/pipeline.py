@@ -1105,7 +1105,9 @@ def _do_song_gpu_phase(
                     _log(f"[error] Clip {clip_num} retry also failed: {_re}")
             if not clip_path:
                 _log(f"[error] Clip {clip_num} produced no output -- stopping early")
-            break
+                break
+            # Retry succeeded -- fall through to the normal per-clip processing
+            # below (trim/chain-frame/upscale/append) instead of discarding it.
 
         # Trim clip to exact beat-aligned duration so timing errors don't
         # accumulate across clips. WanGP may over/undershoot by up to ~0.5s.

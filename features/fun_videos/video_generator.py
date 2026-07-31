@@ -516,12 +516,19 @@ def _generate_via_worker(
             ) as r:
                 status = json.loads(r.read())
 
-            # Reject this status if the worker is busy with a DIFFERENT job.
-            # Only check token while busy -- when the worker finishes it resets
-            # token to 0, which would falsely look like a mismatch otherwise.
-            if my_token is not None and status.get("busy") and status.get("token") != my_token:
+            # Reject this status if it isn't ours. This must NOT be gated on
+            # busy=True: _generation_token is never reset to 0 on a normal
+            # finish (it only advances when a NEW job is submitted), so on a
+            # clean completion status["token"] still equals my_token and this
+            # check is a no-op either way. But if the watchdog kills a
+            # deadlocked WanGP mid-poll and respawns it, the fresh process
+            # starts at token=0 with busy=False/result=None/error=None (its
+            # virgin idle state) -- gating on busy=True let that look like
+            # "your job finished with no output" instead of "the worker you
+            # were talking to is gone," costing a needless restart+retry.
+            if my_token is not None and status.get("token") != my_token:
                 if log_fn:
-                    log_fn("[error] Worker token mismatch -- our job was superseded")
+                    log_fn("[error] Worker token mismatch -- our job was superseded (worker likely restarted)")
                 return None
 
             if not status.get("busy"):
