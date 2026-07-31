@@ -1,0 +1,460 @@
+# Non-furred creature wildcard. Format: name|family
+# family drives body-covering/texture wording downstream -- NEVER "fur":
+#   bird       -> feathers/plumage
+#   reptile    -> hard scales
+#   amphibian  -> smooth moist skin
+#   fish       -> iridescent scales/fins
+#   arthropod  -> chitin/carapace/exoskeleton (includes true crustaceans --
+#                 crab/lobster/shrimp/barnacle -- Crustacea IS a subphylum
+#                 of Arthropoda, and "hard exoskeleton" reads correctly on
+#                 them; see 2026-07-31 reclassification note below)
+#   cephalopod -> smooth rubbery skin, beaked/tentacled (true cephalopods
+#                 only -- octopus/squid/cuttlefish/nautilus)
+#   mollusk    -> hard shell / soft-bodied non-cephalopod sea life (snails,
+#                 bivalves, echinoderms, cnidarians -- see note below)
+#   mythical   -> scales (draconic/serpentine) unless noted
+#   golem      -> the named inorganic material itself (stone/clay/crystal/
+#                 obsidian/coral/metal), not skin at all -- also covers
+#                 robots/androids/cyborgs/automatons (constructed, no flesh)
+#   elemental  -> living material of the named element (fire/ice/magma/
+#                 storm/earth/water/slime), constantly shifting, no skin
+#   undead     -> bone, wrapped bandage, or desiccated leathery skin
+#   spirit     -> translucent/incorporeal, no solid skin at all
+#   demonkin   -> thick warty/leathery humanoid-monster hide (ogre/troll/
+#                 demon archetype) -- NOT fur, NOT human skin
+#   alien      -> only the genuinely novel alien/cosmic-horror look (grey
+#                 alien, kaiju, eldritch/star-spawn horror, beholder); alien
+#                 entries that clearly read as an existing family (alien
+#                 REPTILIAN, alien CEPHALOPOD, INSECTOID alien, tentacled
+#                 horror, mind flayer) are tagged with that family directly
+#                 instead of a separate "alien" bucket, per Andrew's own
+#                 framing of these as reuses, not a new look
+#   plantfolk  -> bark, moss, fungal cap, root-woven skin
+#   crystalline -> faceted, translucent, gem-like surface
+# ("scalykin" from Andrew's own framing -- mythological humanoids that are
+# scaled/feathered, not furred -- was likewise folded directly into
+# reptile/bird rather than kept as its own bucket: medusa/lamia -> reptile,
+# harpy -> bird, gorgon already existed in this file as mythical and was
+# left there rather than duplicated.)
+# Deliberately excludes ALL mammals (wolf/lion/bear/tiger/fox/panther/etc,
+# and anything with hair/fur) and excludes any species whose common name
+# embeds a mammal word (e.g. "leopard gecko", "tiger shark"), so a random
+# pick can never read as a furry-fandom archetype. Same rule extends to the
+# monster/construct entries added below: classic FURRED monster archetypes
+# (yeti, bigfoot/sasquatch, minotaur, satyr, centaur, wendigo, werecreatures)
+# are deliberately excluded even though they're iconic -- don't add them
+# back in without a real texture plan for the fur problem.
+#
+# ADDED 2026-07-31, same round, Andrew mid-task looking at reference images
+# he likes (an elephant/fox news-anchor pair, a Vader-helmet officer beside
+# a bear officer, a reptilian-alien/unicorn/fox trio in suits): "Why can't
+# we have all sort of weird creatures, like actual creatures, monsters,
+# weird shit." The 325-entry real-animal-plus-classical-mythology pool above
+# was too narrow -- added 61 monster/construct/alien entries (golems,
+# elementals, undead, spirits, demonkin, aliens, plantfolk, crystal beings)
+# below, same nothing-with-fur constraint, each with its own texture family
+# (a golem is not a demon is not a ghost -- see the family list above).
+#
+# RECLASSIFIED 2026-07-31: the original "cephalopod" bucket lumped true
+# cephalopods in with crustaceans, snails/bivalves, and echinoderms/
+# cnidarians -- caught via a live test render of "pearl oyster" tagged
+# cephalopod, which produced a mostly-human-skinned figure because "smooth
+# rubbery slick skin, beaked maw, tentacled" is a true-cephalopod texture
+# that doesn't fit an oyster at all. Split into three families instead:
+# true crustaceans moved to arthropod (biologically correct, and "hard
+# exoskeleton, carapace" is a BETTER texture match for a crab/lobster shell
+# than the old bucket's rubbery-skin wording ever was); true cephalopods
+# (octopus/squid/cuttlefish/nautilus) kept in cephalopod; everything else
+# (snails, clams/oysters/scallops/chiton, starfish/urchin/sea cucumber,
+# jellyfish/coral/anemone) moved to a new "mollusk" family with its own
+# shell/soft-body texture and a head phrase that doesn't assume a face
+# (several of these -- starfish, jellyfish, coral, anemone -- have no head
+# at all in real life).
+raven|bird
+crow|bird
+rook|bird
+jackdaw|bird
+magpie|bird
+jay|bird
+barn owl|bird
+snowy owl|bird
+eagle owl|bird
+great horned owl|bird
+bald eagle|bird
+golden eagle|bird
+harpy eagle|bird
+red-tailed hawk|bird
+sparrowhawk|bird
+peregrine falcon|bird
+kestrel|bird
+osprey|bird
+harrier|bird
+buzzard|bird
+red kite|bird
+turkey vulture|bird
+condor|bird
+secretarybird|bird
+great blue heron|bird
+snowy egret|bird
+whooping crane|bird
+sandhill crane|bird
+marabou stork|bird
+wood stork|bird
+scarlet ibis|bird
+roseate spoonbill|bird
+greater flamingo|bird
+brown pelican|bird
+great cormorant|bird
+european shag|bird
+herring gull|bird
+arctic tern|bird
+wandering albatross|bird
+storm petrel|bird
+shearwater|bird
+mute swan|bird
+canada goose|bird
+mallard|bird
+wood duck|bird
+teal|bird
+wigeon|bird
+indian peafowl|bird
+ring-necked pheasant|bird
+bobwhite quail|bird
+grey partridge|bird
+ruffed grouse|bird
+ptarmigan|bird
+wild turkey|bird
+helmeted guineafowl|bird
+southern cassowary|bird
+emu|bird
+common ostrich|bird
+brown kiwi|bird
+greater rhea|bird
+emperor penguin|bird
+gentoo penguin|bird
+atlantic puffin|bird
+razorbill|bird
+common kingfisher|bird
+great hornbill|bird
+toco toucan|bird
+scarlet macaw|bird
+african grey parrot|bird
+sulphur-crested cockatoo|bird
+rainbow lorikeet|bird
+budgerigar|bird
+ruby-throated hummingbird|bird
+chimney swift|bird
+barn swallow|bird
+purple martin|bird
+downy woodpecker|bird
+red-breasted nuthatch|bird
+black-capped chickadee|bird
+house wren|bird
+european robin|bird
+song thrush|bird
+common blackbird|bird
+european starling|bird
+northern cardinal|bird
+house finch|bird
+house sparrow|bird
+meadowlark|bird
+baltimore oriole|bird
+scarlet tanager|bird
+hoopoe|bird
+european roller|bird
+rainbow bee-eater|bird
+resplendent quetzal|bird
+superb lyrebird|bird
+satin bowerbird|bird
+red-legged seriema|bird
+great bustard|bird
+eurasian curlew|bird
+sanderling|bird
+killdeer|bird
+pied avocet|bird
+black-necked stilt|bird
+jacana|bird
+water rail|bird
+american coot|bird
+common moorhen|bird
+bittern|bird
+jabiru|bird
+magnificent frigatebird|bird
+blue-footed booby|bird
+northern gannet|bird
+common loon|bird
+great crested grebe|bird
+common nightjar|bird
+tawny frogmouth|bird
+komodo dragon|reptile
+nile monitor|reptile
+green iguana|reptile
+marine iguana|reptile
+tokay gecko|reptile
+flying gecko|reptile
+veiled chameleon|reptile
+bearded dragon|reptile
+five-lined skink|reptile
+blue-tongued skink|reptile
+green anole|reptile
+basilisk lizard|reptile
+argentine tegu|reptile
+gila monster|reptile
+thorny devil|reptile
+frilled lizard|reptile
+common agama|reptile
+ball python|reptile
+reticulated python|reptile
+boa constrictor|reptile
+green anaconda|reptile
+king cobra|reptile
+gaboon viper|reptile
+timber rattlesnake|reptile
+black mamba|reptile
+coral snake|reptile
+garter snake|reptile
+common kingsnake|reptile
+banded sea snake|reptile
+saltwater crocodile|reptile
+american alligator|reptile
+gharial|reptile
+spectacled caiman|reptile
+caiman lizard|reptile
+galapagos tortoise|reptile
+green sea turtle|reptile
+snapping turtle|reptile
+painted turtle|reptile
+diamondback terrapin|reptile
+softshell turtle|reptile
+tuatara|reptile
+glass lizard|reptile
+slow worm|reptile
+plated lizard|reptile
+girdled lizard|reptile
+chuckwalla|reptile
+chinese water dragon|reptile
+sailfin dragon lizard|reptile
+draco lizard|reptile
+uromastyx|reptile
+horned lizard|reptile
+fire salamander|amphibian
+spotted salamander|amphibian
+marbled newt|amphibian
+alpine newt|amphibian
+axolotl|amphibian
+mudpuppy|amphibian
+hellbender|amphibian
+american bullfrog|amphibian
+red-eyed tree frog|amphibian
+poison dart frog|amphibian
+horned frog|amphibian
+glass frog|amphibian
+caecilian|amphibian
+spadefoot toad|amphibian
+fire-bellied toad|amphibian
+natterjack toad|amphibian
+cane toad|amphibian
+african clawed frog|amphibian
+surinam toad|amphibian
+goliath frog|amphibian
+wood frog|amphibian
+spring peeper|amphibian
+common toad|amphibian
+green frog|amphibian
+great white shark|fish
+hammerhead shark|fish
+whale shark|fish
+nurse shark|fish
+manta ray|fish
+stingray|fish
+moray eel|fish
+electric eel|fish
+european eel|fish
+channel catfish|fish
+koi|fish
+common carp|fish
+atlantic salmon|fish
+rainbow trout|fish
+northern pike|fish
+largemouth bass|fish
+blue marlin|fish
+swordfish|fish
+sailfish|fish
+bluefin tuna|fish
+great barracuda|fish
+angelfish|fish
+clownfish|fish
+lionfish|fish
+pufferfish|fish
+anglerfish|fish
+seahorse|fish
+pipefish|fish
+flying fish|fish
+flounder|fish
+atlantic halibut|fish
+sturgeon|fish
+arapaima|fish
+red-bellied piranha|fish
+longnose gar|fish
+sea lamprey|fish
+ocean sunfish|fish
+tarpon|fish
+red snapper|fish
+grouper|fish
+betta fish|fish
+discus fish|fish
+zebrafish|fish
+giant pacific octopus|cephalopod
+common octopus|cephalopod
+humboldt squid|cephalopod
+giant squid|cephalopod
+cuttlefish|cephalopod
+chambered nautilus|cephalopod
+coconut crab|arthropod
+hermit crab|arthropod
+blue crab|arthropod
+spider crab|arthropod
+american lobster|arthropod
+spiny lobster|arthropod
+crayfish|arthropod
+mantis shrimp|arthropod
+cleaner shrimp|arthropod
+gooseneck barnacle|arthropod
+garden snail|mollusk
+sea snail|mollusk
+nudibranch|mollusk
+giant clam|mollusk
+pearl oyster|mollusk
+scallop|mollusk
+crown-of-thorns starfish|mollusk
+sea urchin|mollusk
+sea cucumber|mollusk
+moon jellyfish|mollusk
+box jellyfish|mollusk
+coral polyp|mollusk
+sea anemone|mollusk
+chiton|mollusk
+praying mantis|arthropod
+orchid mantis|arthropod
+indian stick insect|arthropod
+stag beetle|arthropod
+rhinoceros beetle|arthropod
+hercules beetle|arthropod
+scarab beetle|arthropod
+dung beetle|arthropod
+firefly|arthropod
+emperor dragonfly|arthropod
+damselfly|arthropod
+cicada|arthropod
+desert locust|arthropod
+field cricket|arthropod
+katydid|arthropod
+walking stick insect|arthropod
+luna moth|arthropod
+atlas moth|arthropod
+monarch butterfly|arthropod
+swallowtail butterfly|arthropod
+carpenter ant|arthropod
+termite|arthropod
+paper wasp|arthropod
+hornet|arthropod
+honeybee|arthropod
+giant centipede|arthropod
+millipede|arthropod
+emperor scorpion|arthropod
+huntsman spider|arthropod
+orb weaver spider|arthropod
+giant isopod|arthropod
+pill bug|arthropod
+water strider|arthropod
+weevil|arthropod
+red dragon|mythical
+jade dragon|mythical
+sea dragon|mythical
+ice drake|mythical
+storm drake|mythical
+coral drake|mythical
+ember salamander|mythical
+void wyrm|mythical
+crystal serpent|mythical
+sea serpent|mythical
+hydra|mythical
+basilisk|mythical
+cockatrice|mythical
+roc|mythical
+thunderbird|mythical
+phoenix|mythical
+kraken|mythical
+leviathan|mythical
+naga|mythical
+lindworm|mythical
+amphisbaena|mythical
+gorgon|mythical
+wyrm|mythical
+feathered serpent|mythical
+ash wyvern|mythical
+storm wyvern|mythical
+deep-sea leviathan|mythical
+
+# --- monster/construct/alien addendum, 2026-07-31 (see header note above) ---
+alien grey|alien
+alien reptilian|reptile
+alien cephalopod|cephalopod
+insectoid alien|arthropod
+mothman|demonkin
+gargoyle|golem
+stone golem|golem
+clay golem|golem
+crystal golem|golem
+obsidian golem|golem
+coral golem|golem
+living statue|golem
+animated armor|golem
+cyclops|demonkin
+ogre|demonkin
+troll|demonkin
+goblin|demonkin
+orc|demonkin
+imp|demonkin
+demon|demonkin
+devil|demonkin
+bog monster|demonkin
+deep one|demonkin
+skeleton warrior|undead
+lich|undead
+mummy|undead
+wight|undead
+wraith|spirit
+shadow wraith|spirit
+void wraith|spirit
+specter|spirit
+banshee|spirit
+ghost|spirit
+ice elemental|elemental
+fire elemental|elemental
+magma elemental|elemental
+storm elemental|elemental
+earth elemental|elemental
+water elemental|elemental
+robot|golem
+android|golem
+cyborg|golem
+clockwork automaton|golem
+steampunk automaton|golem
+tentacled horror|cephalopod
+eldritch horror|alien
+star spawn horror|alien
+kaiju|alien
+mind flayer|cephalopod
+beholder|alien
+slime creature|elemental
+ooze creature|elemental
+medusa|reptile
+lamia|reptile
+harpy|bird
+djinn|elemental
+treant|plantfolk
+dryad|plantfolk
+fungal creature|plantfolk
+mushroom creature|plantfolk
+crystal being|crystalline
