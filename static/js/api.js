@@ -11,7 +11,9 @@ export async function api(path, opts = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || err.detail || `HTTP ${res.status}`);
+    const e = new Error(err.error || err.detail || `HTTP ${res.status}`);
+    e.status = res.status;
+    throw e;
   }
   return res.json().catch(() => { throw new Error(`Non-JSON response from server (${res.status})`); });
 }
