@@ -36,6 +36,24 @@ export function init(panel) {
   const presetSel = el('select', { style: 'font-size:.85rem;' });
   const presetDesc = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:4px;' });
 
+  const subjectSel = el('select', { style: 'font-size:.85rem; display:none;' }, [
+    el('option', { value: 'auto', text: 'Auto (detect from prompt)' }),
+    el('option', { value: 'male', text: 'Male' }),
+    el('option', { value: 'female', text: 'Female' }),
+    el('option', { value: 'multi', text: 'Multi: man + woman (regional)' }),
+    el('option', { value: 'multi_male', text: 'Multi: two+ men (regional)' }),
+    el('option', { value: 'multi_female', text: 'Multi: two+ women (regional)' }),
+  ]);
+  const creatureCb = el('input', { type: 'checkbox', id: 'is-creature-cb' });
+  const subjectRow = el('div', { style: 'display:none; align-items:center; gap:14px; margin-top:6px; flex-wrap:wrap;' }, [
+    el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Subject' }),
+    subjectSel,
+    el('label', { for: 'is-creature-cb', style: 'display:flex; align-items:center; gap:5px; font-size:.8rem; color:var(--text); cursor:pointer;' }, [
+      creatureCb,
+      el('span', { text: 'Anthropomorphic creature' }),
+    ]),
+  ]);
+
   const widthIn  = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
   const heightIn = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
   const stepsIn  = el('input', { type: 'number', min: '1', max: '80', value: '25', style: 'width:70px; font-size:.8rem;' });
@@ -62,6 +80,7 @@ export function init(panel) {
       presetSel,
     ]),
     presetDesc,
+    subjectRow,
     controlsRow,
     el('div', { style: 'margin-top:10px;' }, [genBtn]),
     errBox,
@@ -127,6 +146,9 @@ export function init(panel) {
     widthIn.value = item.width || 1024;
     heightIn.value = item.height || 1024;
     if (presetSel.querySelector(`option[value="${item.preset}"]`)) presetSel.value = item.preset;
+    if (item.subject && subjectSel.querySelector(`option[value="${item.subject}"]`)) subjectSel.value = item.subject;
+    creatureCb.checked = !!item.creature;
+    _updatePresetDesc();
     _showResult(item);
   }
 
@@ -136,6 +158,9 @@ export function init(panel) {
     resultImg.style.display = '';
     const bits = [`seed ${data.seed}`];
     if (data.checkpoint_used) bits.push(data.checkpoint_used);
+    if (data.subject_used && data.subject_used !== 'n/a') bits.push(`subject: ${data.subject_used}`);
+    if (data.creature && data.creature_applied) bits.push('creature');
+    if (data.creature && !data.creature_applied) bits.push('creature NOT applied (multi-subject not yet supported)');
     if (data.adetailer_ran) bits.push('ADetailer ran');
     resultMeta.textContent = bits.join('  --  ');
     resultCard.style.display = '';
@@ -144,31 +169,32 @@ export function init(panel) {
   }
 
   // -- Presets ---------------------------------------------------------------
+  let _presetsCache = [];
+
   async function _loadPresets() {
     try {
       const data = await apiFetch('/api/image-studio/presets', { context: 'image-studio.presets', silent: true });
+      _presetsCache = data.presets || [];
       presetSel.innerHTML = '';
-      for (const p of (data.presets || [])) {
+      for (const p of _presetsCache) {
         const opt = el('option', { value: p.id, text: p.label });
         presetSel.appendChild(opt);
       }
-      _updatePresetDesc(data.presets || []);
+      _updatePresetDesc();
     } catch (e) {
+      _presetsCache = [];
       presetSel.innerHTML = '';
       presetSel.appendChild(el('option', { value: 'default', text: 'Default' }));
     }
   }
 
-  function _updatePresetDesc(presets) {
-    const p = presets.find(p => p.id === presetSel.value);
+  function _updatePresetDesc() {
+    const p = _presetsCache.find(p => p.id === presetSel.value);
     presetDesc.textContent = p ? p.description : '';
+    const isNsfw = !!(p && p.nsfw);
+    subjectRow.style.display = isNsfw ? 'flex' : 'none';
   }
-  presetSel.addEventListener('change', async () => {
-    try {
-      const data = await apiFetch('/api/image-studio/presets', { context: 'image-studio.presets', silent: true });
-      _updatePresetDesc(data.presets || []);
-    } catch (e) { /* non-fatal */ }
-  });
+  presetSel.addEventListener('change', () => _updatePresetDesc());
 
   // -- Generate ---------------------------------------------------------------
   genBtn.addEventListener('click', async () => {
@@ -185,6 +211,8 @@ export function init(panel) {
       cfg:    parseFloat(cfgIn.value)      || 5.0,
       seed:   parseInt(seedIn.value, 10)   || -1,
       preset: presetSel.value || 'default',
+      subject: subjectSel.value || 'auto',
+      creature: creatureCb.checked === true,
     };
 
     genBtn.disabled = true;
@@ -197,8 +225,9 @@ export function init(panel) {
       const item = {
         url: data.image_url, image_path: data.image_path, seed: data.seed,
         checkpoint_used: data.checkpoint_used, adetailer_ran: data.adetailer_ran,
+        subject_used: data.subject_used, creature: data.creature, creature_applied: data.creature_applied,
         prompt, negative: body.negative_prompt, width: body.width, height: body.height,
-        preset: body.preset,
+        preset: body.preset, subject: body.subject,
       };
       gallery.push(item);
       _saveGallery();

@@ -79,6 +79,14 @@ async def generate(request: Request):
         preset_key = image_presets.DEFAULT_PRESET_KEY
     preset = image_presets.get_preset(preset_key)
 
+    subject = body.get("subject")
+    if subject is None:
+        subject = "auto"
+    elif not isinstance(subject, str) or subject not in image_presets.SUBJECT_CHOICES:
+        raise HTTPException(400, f"subject must be one of {image_presets.SUBJECT_CHOICES}")
+
+    creature = bool(body.get("creature") is True)
+
     config = cfg.load()
     width     = _safe_int(body.get("width"),  config.get("chat_image_width", 1024))
     height    = _safe_int(body.get("height"), config.get("chat_image_height", 1024))
@@ -87,20 +95,27 @@ async def generate(request: Request):
     seed      = _safe_int(body.get("seed"), -1)
     # Clamp to sane SDXL ranges -- a hand-edited or bad value would otherwise
     # go straight into the Forge payload (width=8192 hangs the GPU) or crash
-    # Forge outright (an out-of-int32-range seed throws a C-level overflow
-    # there, which then leaked as a raw 502 to the client).
+    # Forge outright (an out-of-range seed throws a C-level overflow there,
+    # which then leaked as a raw 502 to the client).
     width     = max(256, min(2048, width))
     height    = max(256, min(2048, height))
     steps     = max(1, min(80, steps))
     cfg_scale = max(1.0, min(15.0, cfg_scale))
-    seed      = max(-1, min(2**31 - 1, seed))
+    # Forge's own random seed generator draws from random.randrange(4294967294)
+    # (modules/processing.py) -- an UNSIGNED 32-bit range, not signed int32.
+    # The old ceiling (2**31-1) was too low: a seed Forge itself returned from
+    # a prior render (e.g. 3324213979) would silently get clamped to a
+    # DIFFERENT value here, breaking seed-reproducibility for exactly the
+    # comparison testing this tab exists for (caught 2026-07-30 mid-review).
+    seed      = max(-1, min(4294967294, seed))
 
     if preset["nsfw"]:
-        # Judge the FINAL wrapped scene text (user prompt is the subject; the
-        # preset wrap itself carries no age-relevant content, but judging the
-        # combined text is the conservative choice -- never judge less than
-        # what's about to render). prompt/negative_prompt are already clamped
-        # above, so the judge sees exactly what will reach Forge -- nothing
+        # Judge the user's own prompt/negative text (raw, before the preset's
+        # style/anatomy wrap is added in build_forge_payload below -- that
+        # wrap is static, age-neutral text, so judging pre-wrap vs post-wrap
+        # makes no safety difference here, but if the wrap ever grows scene
+        # content, judge the wrapped text instead). Already clamped above, so
+        # the judge sees the same length ceiling that reaches Forge -- nothing
         # padded past the judge's own text window can hide from it.
         scene_text = f"{prompt}\n{negative_prompt}".strip()
         blocked = await nsfw_render_blocked(scene_text)
@@ -118,8 +133,8 @@ async def generate(request: Request):
             {"error": "Video render in progress -- image generation waits for the GPU"}, 409,
         )
 
-    payload = image_presets.build_forge_payload(
-        preset_key, prompt, negative_prompt, width, height, steps, cfg_scale, seed,
+    payload, resolved_subject, creature_applied = image_presets.build_forge_payload(
+        preset_key, prompt, negative_prompt, width, height, steps, cfg_scale, seed, subject, creature,
     )
     try:
         r = await asyncio.to_thread(requests.post, FORGE_TXT2IMG_URL, json=payload, timeout=600)
@@ -160,14 +175,17 @@ async def generate(request: Request):
     out_path = out_dir / fname
     out_path.write_bytes(img_bytes)
 
-    log.info("[image-studio] generated image (preset=%s, checkpoint=%s) -> %s (seed=%s)",
-              preset_key, preset["checkpoint"], out_path, actual_seed)
+    log.info("[image-studio] generated image (preset=%s, subject=%s, creature=%s/%s, checkpoint=%s) -> %s (seed=%s)",
+              preset_key, resolved_subject, creature, creature_applied, preset["checkpoint"], out_path, actual_seed)
     return {
         "image_url":      f"/output/{ts}/{job_slug}/{fname}",
         "image_path":     str(out_path),
         "seed":           actual_seed,
         "checkpoint_used": preset["checkpoint"],
         "adetailer_ran":  ran_adetailer,
+        "subject_used":   resolved_subject,
+        "creature":       creature,
+        "creature_applied": creature_applied,
     }
 
 
