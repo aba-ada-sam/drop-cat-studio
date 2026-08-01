@@ -11,6 +11,7 @@ import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 
 const GALLERY_KEY = 'dropcat_image_studio_gallery';
 const GALLERY_CAP = 200;
+const SETTINGS_KEY = 'dropcat_image_studio_settings';
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -124,6 +125,28 @@ export function init(panel) {
     try { localStorage.setItem(GALLERY_KEY, JSON.stringify(gallery.slice(-GALLERY_CAP))); } catch (e) { /* non-fatal */ }
   }
 
+  // Preset/subject/creature choice previously reset to "Default" (vanilla
+  // zavychromaxl, no NSFW/taste steering) every time this tab was reopened
+  // or the app restarted, since the <select> was rebuilt fresh from the
+  // backend's preset list with no memory of the last choice -- silently, no
+  // indication anything changed. Andrew hit this 2026-08-01: generated
+  // through "Default" without noticing, got generic cloned-face stock-photo
+  // output. Persist the last-used choice so it survives reopens/restarts.
+  function _loadSettings() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      return (raw && typeof raw === 'object') ? raw : {};
+    } catch (e) { return {}; }
+  }
+
+  function _saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        preset: presetSel.value, subject: subjectSel.value, creature: creatureCb.checked,
+      }));
+    } catch (e) { /* non-fatal */ }
+  }
+
   function _renderGallery() {
     galleryGrid.innerHTML = '';
     if (!gallery.length) {
@@ -180,6 +203,14 @@ export function init(panel) {
         const opt = el('option', { value: p.id, text: p.label });
         presetSel.appendChild(opt);
       }
+      const saved = _loadSettings();
+      if (saved.preset && presetSel.querySelector(`option[value="${saved.preset}"]`)) {
+        presetSel.value = saved.preset;
+      }
+      if (saved.subject && subjectSel.querySelector(`option[value="${saved.subject}"]`)) {
+        subjectSel.value = saved.subject;
+      }
+      creatureCb.checked = !!saved.creature;
       _updatePresetDesc();
     } catch (e) {
       _presetsCache = [];
@@ -194,7 +225,9 @@ export function init(panel) {
     const isNsfw = !!(p && p.nsfw);
     subjectRow.style.display = isNsfw ? 'flex' : 'none';
   }
-  presetSel.addEventListener('change', () => _updatePresetDesc());
+  presetSel.addEventListener('change', () => { _updatePresetDesc(); _saveSettings(); });
+  subjectSel.addEventListener('change', _saveSettings);
+  creatureCb.addEventListener('change', _saveSettings);
 
   // -- Generate ---------------------------------------------------------------
   genBtn.addEventListener('click', async () => {
