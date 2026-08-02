@@ -523,13 +523,16 @@ def run_song_prep(job, photo_path, settings):
         arc = [user_idea or "Subject erupts into motion"] * n_clips
         settings["_story_arc"] = arc
 
-    # Do NOT re-anchor: resetting the chain start back to the source photo
-    # visibly repeats the same opening shot, which is not what we want -- the
-    # goal is continuity (same characters + set carried forward), not a repeated
-    # starter frame. Identity is held by chain-frame continuity + the subject
-    # anchor text in every prompt; generating at native resolution (not the old
-    # 360p) is what actually keeps the chain from melting.
-    reanchor_every = 0
+    # TEMPORARILY RE-ENABLED 2026-08-01 per Andrew's explicit request after the
+    # original "never reanchor" choice let a 5-clip chain drift completely off
+    # the source subject by clip 4 (crocheted mushroom -> unrelated furry
+    # creature, no stitching, background gone). The devs' tradeoff (continuity
+    # over fidelity, since a reanchor "visibly repeats the same opening shot")
+    # is real, but for THIS use case -- an unmistakable, specific physical
+    # object the video must stay recognizable as -- losing the subject entirely
+    # is worse than an occasional visible snap-back. Reanchor every 2 clips
+    # (not every clip) to still get some continuity between adjacent pairs.
+    reanchor_every = 2
     settings["_reanchor_every"] = reanchor_every
 
     # Forge keyframe generation removed -- chain-frame anchoring handles identity.
@@ -594,18 +597,21 @@ def run_song_pipeline(job, photo_path, settings):
     # - Explicit override: honour ow/oh directly.
     # Forge keyframe dependency removed: chain-frame anchoring alone is sufficient
     # to prevent identity drift. Forge is not required.
-    _lip_sync_res_active = (
-        bool(settings.get("lip_sync", True)) and
-        bool(audio_wav)
-    )
+    # 2026-08-01: 960x544 confirmed HUNG on this card -- GPU sat at 9% util /
+    # 2.4GB VRAM during the stall, so it isn't a VRAM-fit problem the
+    # model_vram_error() gate could ever catch (that gate only checks the
+    # named model's registered floor -- it has no visibility into overrides
+    # or into lip_sync silently swapping the render resolution out from under
+    # it). Blocking both paths to 960x544 outright until someone actually
+    # roots out why generation stalls at that resolution, rather than
+    # widening the VRAM gate to "fix" a bug that was never about VRAM.
+    _lip_sync_res_active = False
     if ow and oh:
-        tw, th = int(ow), int(oh)
-    elif _lip_sync_res_active:
-        tw, th = 960, 544
-        log.info("[song-video] Lip sync ON -- generating natively at 960x544 (DCMVS-proven, no upscale pass needed)")
-    else:
-        _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
-        tw, th = _native
+        log.warning("[song-video] Ignoring override_width/override_height "
+                    "(%sx%s requested) -- non-model resolutions are hanging "
+                    "on this GPU as of 2026-08-01, forcing model default.", ow, oh)
+    _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
+    tw, th = _native
 
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
