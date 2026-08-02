@@ -1,20 +1,25 @@
-"""Copy finished video outputs to the shared Inbox folder for easy review."""
+"""Copy finished video/audio outputs to a Desktop folder for easy review.
+
+Andrew wants this permanent, not a one-off manual copy: every finished video
+or standalone song lands in C:\\Users\\andre\\Desktop\\DCS_Review automatically
+so he can just scroll thumbnails there, no per-session copying.
+"""
 import logging
 import shutil
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_INBOX = Path(r"C:\DropCat-Studio\output\Inbox")
-_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+_INBOX = Path(r"C:\Users\andre\Desktop\DCS_Review")
+_MEDIA_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav"}
 
 
 def copy_to_inbox(path: str | None) -> None:
-    """Copy *path* into the Inbox folder if it is a video file that exists."""
+    """Copy *path* into the Inbox folder if it is a video/audio file that exists."""
     if not path:
         return
     src = Path(path)
-    if src.suffix.lower() not in _VIDEO_EXTS or not src.exists():
+    if src.suffix.lower() not in _MEDIA_EXTS or not src.exists():
         return
     try:
         _INBOX.mkdir(parents=True, exist_ok=True)

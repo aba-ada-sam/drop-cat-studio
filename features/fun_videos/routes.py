@@ -1531,6 +1531,8 @@ async def generate_audio_only(request: Request):
             raise RuntimeError(f"Audio generation failed: {audio_err}")
         job.output = audio_path
         job.message = f"Done -- {cfg_settings['music_prompt'][:60]}"
+        from core.inbox import copy_to_inbox
+        copy_to_inbox(audio_path)
 
     settings = {
         "music_prompt": music_prompt, "lyrics": lyrics,
