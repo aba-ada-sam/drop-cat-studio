@@ -1553,6 +1553,32 @@ def run_multi_prep(job, photo_path, settings):
             f"(Wan2.1-I2V-* or LTX-2 *)."
         )
 
+    # -- Auto-promote LTX-2 Distilled to Dev13B for multi-video -------------
+    # LTX-2 Distilled at 8 steps cannot calibrate motion. Across consecutive
+    # clips it alternates between near-zero motion (Ken Burns) and amplified
+    # chaos (random petal storms / sky flips), regardless of how gentle the
+    # prompt is. The non-distilled LTX-2 Dev13B is the same model family
+    # (same I2V, same 1032x580, same FPS) but uses a proper 25-step
+    # diffusion schedule, which produces consistent motion clip to clip.
+    # Roughly 3x the compute per clip but no longer alternates between
+    # static and chaos. Single-clip make-it still uses Distilled (no chain
+    # to compound on, so a single hit-or-miss clip is acceptable).
+    if model_name == "LTX-2 Dev19B Distilled" and "LTX-2 Dev13B" in _VG_MODELS:
+        log.info(
+            "[multi] Promoting LTX-2 Dev19B Distilled -> LTX-2 Dev13B for multi-video "
+            "(distilled schedule cannot calibrate motion across chained clips)."
+        )
+        model_name = "LTX-2 Dev13B"
+        settings["model_name"] = model_name
+        # Express's Fast pill ships 8 steps / CFG 3 (calibrated for Distilled).
+        # Dev13B needs 25 steps / CFG 3.5 -- 8 steps would produce noise.
+        # Only override if the caller used the Distilled defaults; respect any
+        # explicit higher values the user may have set.
+        if int(settings.get("video_steps", 0)) <= 12:
+            settings["video_steps"] = 25
+        if float(settings.get("video_guidance", 0)) < 3.0:
+            settings["video_guidance"] = 3.5
+
     # -- Story arc ---------------------------------------------------------
     # Each generated clip is later trimmed to _CHAIN_TRIM_RATIO of its
     # generated length so junctions are frame-exact. Plan ~12% longer so
