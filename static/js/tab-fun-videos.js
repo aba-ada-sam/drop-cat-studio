@@ -3,7 +3,7 @@
  * Pick a generated image, write a motion prompt, get a video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260620a';
-import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260620a';
+import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 import { handoff } from './handoff.js?v=20260620a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260620a';
@@ -105,31 +105,70 @@ export function init(panel) {
   // -- Start image / video upload --------------------------------------------
   const uploadCard = el('div', { class: 'card', style: 'padding:14px; display:flex; align-items:center; gap:10px;' });
   root.appendChild(uploadCard);
-  uploadCard.appendChild(el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Start Image or Video' }));
+  const uploadLabel = el('span', { style: 'font-size:.85rem; font-weight:600; flex:1;' });
+  uploadLabel.appendChild(el('span', { text: 'Start Image or Video' }));
+  uploadLabel.appendChild(el('span', { style: 'font-weight:400; color:var(--text-3);', text: ' -- or drop it here' }));
+  uploadCard.appendChild(uploadLabel);
 
   const fileInput = el('input', { type: 'file', accept: 'image/*,video/*', style: 'display:none' });
   uploadCard.appendChild(fileInput);
   const openFileBtn = el('button', { class: 'btn btn-sm', text: 'Open file...' });
   uploadCard.appendChild(openFileBtn);
   openFileBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    if (!fileInput.files?.length) return;
-    const f0 = fileInput.files[0];
+
+  async function _handleStartFiles(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const f0 = list[0];
     const isVid = f0.type.startsWith('video/');
     try {
-      const data = await apiUpload(isVid ? '/api/fun/upload-video' : '/api/fun/upload', Array.from(fileInput.files));
+      const data = await apiUpload(isVid ? '/api/fun/upload-video' : '/api/fun/upload', list);
       const f = data.files?.[0];
       if (f) {
         if (isVid) _applyVideo(f.path, f.url || pathToUrl(f.path));
         else        _applyStart(f.path, f.url || pathToUrl(f.path));
       }
     } catch (e) { toast(e.message, 'error'); }
+  }
+  fileInput.addEventListener('change', async () => {
+    await _handleStartFiles(fileInput.files);
     fileInput.value = '';
+  });
+
+  // Drag-and-drop: drop an image or video straight onto the upload card, same
+  // upload path as "Open file...". Accepts only image/video MIME types so a
+  // stray drag of something else (a text selection, a browser tab) no-ops.
+  uploadCard.style.transition = 'border-color .12s, background .12s';
+  uploadCard.addEventListener('dragover', e => {
+    e.preventDefault();
+    uploadCard.style.borderColor = 'var(--accent)';
+    uploadCard.style.background = 'var(--accent-bg)';
+  });
+  uploadCard.addEventListener('dragleave', () => {
+    uploadCard.style.borderColor = '';
+    uploadCard.style.background = '';
+  });
+  uploadCard.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadCard.style.borderColor = '';
+    uploadCard.style.background = '';
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    if (files.length) _handleStartFiles(files);
   });
 
   // -- Selected media preview -------------------------------------------------
   const previewCard = el('div', { class: 'drop-zone', style: 'display:none; position:relative; overflow:hidden; padding:0;' });
   root.appendChild(previewCard);
+  // Same drop target once a preview is showing, so replacing the source image
+  // doesn't require clicking "Clear" first.
+  previewCard.addEventListener('dragover', e => { e.preventDefault(); previewCard.classList.add('drag-over'); });
+  previewCard.addEventListener('dragleave', () => previewCard.classList.remove('drag-over'));
+  previewCard.addEventListener('drop', e => {
+    e.preventDefault();
+    previewCard.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    if (files.length) _handleStartFiles(files);
+  });
 
   const previewImg   = el('img',   { style: 'display:none; width:100%; max-height:260px; object-fit:contain; border-radius:8px; background:var(--bg-raised);' });
   const previewVid   = el('video', { controls: '', style: 'display:none; width:100%; max-height:260px; border-radius:8px; background:#000;' });
