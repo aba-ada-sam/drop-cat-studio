@@ -8,6 +8,15 @@ projects/
 config.json
 keys.json
 
+# Admin Review PIN + generated batch-run results -- runtime state/secrets,
+# not source. admin_pin.json holds the live PIN in plaintext.
+/admin_pin.json
+/batch_results.json
+
+# Claude Code local settings backup (world-switching tooling artifact,
+# not app config).
+/.claude/settings.json.bak_world
+
 # Python
 __pycache__/
 *.py[cod]
@@ -92,6 +101,15 @@ dcs-laptop-setup.zip
 /overnight_orchestrator.ps1
 /tools/screenshot.ps1
 /tools/setup_satellite.py
+
+# Final Outputs Collector: standalone sidecar (Scheduled Task, not wired into
+# app.py/manager.pyw). Hardcodes this machine's paths (C:\DropCat-Studio,
+# Z:\My Drive\...), same reasoning as setup_satellite.py above, so the script
+# and its state file stay local-only. Its log lives under logs/, already
+# covered by the "logs/" rule near the top of this file.
+/tools/final_outputs_collector.py
+/tools/final_outputs_collector_state.json
+/tools/final_outputs_collector_state.json.tmp
 
 # dropcat_output.ico is the icon for the Desktop "DropCat Output" shortcut --
 # it lives here on purpose. Ignore it rather than committing a binary.
