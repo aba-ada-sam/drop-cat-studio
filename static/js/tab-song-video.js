@@ -3,7 +3,7 @@
  * Drop a song -> AI analyzes BPM/key/energy -> generates a full-length music video.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260620a';
 export function receiveHandoff(data) {

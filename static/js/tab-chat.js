@@ -4,7 +4,7 @@
  * generate via Forge, refine through conversation, animate the result.
  */
 import { pollJob } from './api.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 
 const HISTORY_KEY = 'dropcat_chat_history';

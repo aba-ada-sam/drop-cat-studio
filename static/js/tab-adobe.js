@@ -10,7 +10,7 @@
  */
 
 import { apiFetch, toast }          from './shell/toast.js?v=20260620a';
-import { el }                       from './components.js?v=20260620a';
+import { el }                       from './components.js?v=20260801b';
 import { pollJob }                  from './api.js?v=20260620a';
 
 let _panel    = null;

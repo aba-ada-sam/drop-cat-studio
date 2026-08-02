@@ -6,7 +6,7 @@
  * Chat Studio uses.
  */
 import { pollJob } from './api.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 
 const GALLERY_KEY = 'dropcat_image_studio_gallery';

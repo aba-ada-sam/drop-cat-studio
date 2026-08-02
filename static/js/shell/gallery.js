@@ -6,7 +6,7 @@
 import { apiFetch, toast } from './toast.js?v=20260620a';
 import { applySettingsToTab } from './ai-intent.js?v=20260620a';
 import { handoff } from '../handoff.js?v=20260620a';
-import { pathToUrl } from '../components.js?v=20260620a';
+import { pathToUrl } from '../components.js?v=20260801b';
 import { VideoStretchTool } from '../components/video-stretch.js?v=20260620a';
 import { mountLipSyncTool } from '../components/lipsync-tool.js?v=20260620a';
 

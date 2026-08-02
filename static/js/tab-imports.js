@@ -7,7 +7,7 @@
  * - Browse and restore previous work
  */
 import { api } from './api.js?v=20260620a';
-import { createDropZone, el } from './components.js?v=20260620a';
+import { createDropZone, el } from './components.js?v=20260801b';
 import { toast } from './shell/toast.js?v=20260620a';
 
 export function init(panel) {

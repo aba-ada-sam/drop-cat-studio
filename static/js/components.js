@@ -170,8 +170,9 @@ export function createProgressCard(container) {
 // -- Video Player -------------------------------------------------------------
 
 export function createVideoPlayer(container) {
-  const vlcBtn    = el('button', { class: 'btn btn-sm', text: '▶ VLC' });
+  const vlcBtn    = el('button', { class: 'btn btn-sm', text: 'VLC' });
   const revealBtn = el('button', { class: 'btn btn-sm', text: 'Show in folder' });
+  const closeBtn  = el('button', { class: 'btn btn-sm btn-close-preview', text: 'Close' });
   const wrap = el('div', { class: 'card video-result', style: 'display:none' }, [
     el('video', { controls: 'true', preload: 'auto', class: 'video-player' }),
     el('div', { class: 'video-actions' }, [
@@ -179,6 +180,7 @@ export function createVideoPlayer(container) {
       vlcBtn,
       revealBtn,
       el('button', { class: 'btn btn-sm btn-start-over', text: 'Start Over' }),
+      closeBtn,
     ]),
   ]);
   container.appendChild(wrap);
@@ -190,6 +192,14 @@ export function createVideoPlayer(container) {
   let currentRawPath = null;
   let startOverFn = null;
   startOverBtn.addEventListener('click', () => { if (startOverFn) startOverFn(); });
+
+  function _hide() {
+    video.pause();
+    wrap.style.display = 'none';
+    video.src = '';
+    currentRawPath = null;
+  }
+  closeBtn.addEventListener('click', _hide);
 
   async function _reveal(action) {
     if (!currentRawPath) return;
@@ -236,7 +246,7 @@ export function createVideoPlayer(container) {
       labelEl.textContent = label;
       labelEl.style.display = '';
     },
-    hide() { wrap.style.display = 'none'; video.src = ''; currentRawPath = null; },
+    hide: _hide,
     onStartOver(fn) { startOverFn = fn; },
   };
 }
