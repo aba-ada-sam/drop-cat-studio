@@ -4,7 +4,7 @@
  */
 import { api } from './api.js?v=20260620a';
 import { toast } from './shell/toast.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260801b';
 import { VideoStretchTool } from './components/video-stretch.js?v=20260620a';
 import { mountLipSyncTool } from './components/lipsync-tool.js?v=20260620a';
 
@@ -605,7 +605,14 @@ function _showDetailPage(job) {
   // returns to the job list.
   const page = el('div', {
     id: 'queue-detail-page',
-    style: 'position:absolute; inset:0; z-index:20; background:var(--surface-1); display:flex; flex-direction:column; overflow:hidden;',
+    // z-index:200 (not the old 20) -- .tab-panel/#app-body have no `position`,
+    // so this absolute-positioned page's containing block is the viewport, same
+    // as #app-header (position:sticky, z-index:100). At the old z-index:20 the
+    // header rendered ON TOP of this page's own top edge -- exactly where the
+    // "< Back to queue" button lives -- making it visible but unclickable, with
+    // no other way to leave the page. 200 matches #gallery-overlay, the other
+    // "full-height panel that covers the work area" using this same pattern.
+    style: 'position:absolute; inset:0; z-index:200; background:var(--surface-1); display:flex; flex-direction:column; overflow:hidden;',
   });
   function _close() {
     _stopModalTimers();
