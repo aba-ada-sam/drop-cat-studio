@@ -1465,6 +1465,85 @@ async def add_music(request: Request):
     return {"job_id": job.id}
 
 
+@router.post("/generate-audio-only")
+async def generate_audio_only(request: Request):
+    """Generate a standalone ACE-Step track -- no video involved.
+
+    Unlike /add-music (which always has the LLM write sardonic/satirical
+    lyrics from a direction), this takes verbatim lyrics as given -- for
+    callers who already know exactly what they want sung.
+
+    Accepts:
+        music_prompt  -- style/genre prompt (required)
+        lyrics        -- verbatim lyric text, e.g. "[verse]\\nline one\\n..." (optional)
+        instrumental  -- bool, default False (False requires non-empty lyrics)
+        duration      -- seconds, default 30
+        bpm           -- optional int
+    Returns: { job_id } -- poll /api/jobs/{id}; job.output is the mp3 path.
+    """
+    from app import get_job_manager
+    job_manager = get_job_manager()
+    from features.fun_videos import audio_generator
+
+    body = await request.json()
+    music_prompt = body.get("music_prompt", "").strip()
+    if not music_prompt:
+        raise HTTPException(400, "music_prompt is required")
+    instrumental = bool(body.get("instrumental", False))
+    lyrics = body.get("lyrics", "").strip()
+    if not instrumental and not lyrics:
+        raise HTTPException(400, "lyrics required when instrumental=false")
+    duration = float(body.get("duration", 30.0))
+    bpm = body.get("bpm")
+
+    def _worker(job, _unused, cfg_settings):
+        job.update(progress=10, message="Generating music...")
+        from core.gpu_orchestrator import gpu
+        gpu.acquire("acestep", reason="generate-audio-only job")
+
+        import time as _time
+        from features.fun_videos.multi_pipeline import OUTPUT_DIR
+        ts = _time.strftime("%Y-%m-%d")
+        out_dir = OUTPUT_DIR / ts / f"audio_{job.id}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        def _progress(elapsed_s):
+            job.update(progress=10 + min(80, int(elapsed_s / max(1.0, cfg_settings["duration"]) * 80)),
+                       message=f"Generating music... {elapsed_s:.0f}s elapsed")
+
+        audio_path, audio_err = audio_generator.generate_audio(
+            prompt=cfg_settings["music_prompt"],
+            duration=cfg_settings["duration"],
+            output_dir=str(out_dir),
+            audio_format="mp3",
+            bpm=cfg_settings.get("bpm"),
+            steps=27,
+            guidance=7.0,
+            seed=-1,
+            lyrics=cfg_settings.get("lyrics", ""),
+            instrumental=cfg_settings["instrumental"],
+            stop_event=job.stop_event,
+            progress_cb=_progress,
+        )
+        if job.stop_event.is_set():
+            return
+        if not audio_path:
+            raise RuntimeError(f"Audio generation failed: {audio_err}")
+        job.output = audio_path
+        job.message = f"Done -- {cfg_settings['music_prompt'][:60]}"
+
+    settings = {
+        "music_prompt": music_prompt, "lyrics": lyrics,
+        "instrumental": instrumental, "duration": duration, "bpm": bpm,
+    }
+    label = f"Audio only: {music_prompt[:24]}"
+    try:
+        job = job_manager.submit(JOB_FUN_VIDEO, _worker, None, settings, label=label)
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
+    return {"job_id": job.id}
+
+
 @router.post("/suggest-music")
 async def suggest_music(request: Request):
     """LLM-derives a music prompt (and optional lyric direction) from video frames.
