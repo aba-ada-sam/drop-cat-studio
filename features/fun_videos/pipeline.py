@@ -509,6 +509,57 @@ def run_pipeline(job, photo_path, settings):
     if _stopped():
         return
     if not video_path:
+        # Mirrors the restart-and-retry-once recovery in features/song_video/pipeline.py
+        # (added there first) -- a WanGP hang (step stuck at 0, watchdog kills the worker)
+        # previously just failed this job outright with no recovery attempt, even though
+        # a plain retry against the freshly-restarted worker usually succeeds. Added
+        # 2026-08-02 after a single-clip job (no audio-conditioning involved) hit exactly
+        # this: worker got killed/restarted mid-request ("Worker token mismatch"), job died
+        # with no retry. Skip the retry for CUDA OOM (below) -- that needs a smaller
+        # request, not a bare retry of the same one.
+        raw = _last_error[0] or ""
+        if "out of memory" not in raw.lower() and "cuda error" not in raw.lower():
+            _log("[warning] Video generation failed -- restarting WanGP and retrying once...")
+            job.update(message="Restarting WanGP, retrying...")
+            from services import manager as _svc
+            _svc.restart_service("wangp")
+            for _w in range(45):
+                if _stopped():
+                    break
+                job.update(message=f"Waiting for WanGP restart ({_w*2}s)...")
+                time.sleep(2)
+                try:
+                    import urllib.request as _ur
+                    with _ur.urlopen("http://127.0.0.1:7899/health", timeout=3) as _r:
+                        if __import__("json").loads(_r.read()).get("ok"):
+                            break
+                except Exception:
+                    pass
+            if not _stopped():
+                video_path = video_generator.generate_video(
+                    image_path=photo_path,
+                    prompt=video_prompt,
+                    out_path=str(job_dir / f"video_{job.id[:8]}.mp4"),
+                    duration=float(settings.get("video_duration", 14.0)),
+                    model_name=_mn,
+                    resolution=settings.get("resolution", "580p"),
+                    override_width=int(ow) if ow else None,
+                    override_height=int(oh) if oh else None,
+                    mmaudio=use_mmaudio,
+                    steps=_steps,
+                    guidance=float(settings.get("video_guidance", 7.5)),
+                    seed=int(settings.get("video_seed", -1)),
+                    end_image_path=settings.get("end_photo_path"),
+                    start_video_path=None if video_mode == "continuation" else settings.get("start_video_path"),
+                    loras=settings.get("loras", []),
+                    negative_prompt=video_generator.negative_prompt_for(_mn, _motion_style_here),
+                    stop_check=_stopped,
+                    log_fn=_log,
+                    progress_fn=_video_progress,
+                )
+    if _stopped():
+        return
+    if not video_path:
         raw = _last_error[0] or "WanGP worker not running -- check Settings and start WanGP"
         if "out of memory" in raw.lower() or "cuda error" in raw.lower():
             from services import manager as _svc

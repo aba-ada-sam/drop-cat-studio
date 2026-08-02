@@ -267,7 +267,7 @@ async def generate(request: Request):
         "clip_duration":   clip_dur,
         "pad_before":      pad_before,
         "pad_after":       pad_after,
-        "model_name":      body.get("model", config.get("wan_model", "LTX-2 Dev19B Distilled")),
+        "model_name":      body.get("model") or config.get("wan_model") or "LTX-2 Dev19B Distilled",
         "resolution":      body.get("resolution", config.get("resolution", "580p")),
         "override_width":  body.get("output_width"),
         "override_height": body.get("output_height"),
@@ -277,11 +277,21 @@ async def generate(request: Request):
         "use_satellite":   bool(body.get("use_satellite", False)),
         # lip_sync = LTX-2 NATIVE audio conditioning (mouth moves DURING diffusion,
         # driven by the isolated vocal stem sliced per clip -> "sings to the music").
-        # ON by default: this is the proven "richer audio" recipe behind the good
-        # DropCatGo music videos (LTX-2 Distilled @ 960x544, audio_scale 0.6,
-        # audio_cfg_scale = video guidance 3.0 -- worker defaults already match).
-        # The pipeline itself already defaults this True; the route now agrees.
-        "lip_sync":        bool(body.get("lip_sync", True)),
+        # DEFAULT FLIPPED TO OFF 2026-08-02: confirmed via raw worker logs that
+        # native audio-conditioning deterministically deadlocks WanGP's sliding-window
+        # denoising at step 0 on this card/build -- reproduced across two different
+        # models/resolutions (LTX-2 Dev19B Distilled @ 1032x580 AND LTX-2 Dev13B 360P
+        # @ 640x360), so it is not a VRAM-fit issue (GPU sat idle at ~9% util / 2.4GB
+        # during the hang). The existing step-stuck-at-0 watchdog correctly kills and
+        # restarts WanGP after 120s, but the in-flight job does not recover from that
+        # restart ("Worker token mismatch") and the job just fails. auto_lipsync
+        # (MuseTalk post-pass, below) delivers the same real lip-synced result without
+        # touching this code path -- verified live, reliable, ~3-4 min/clip. Leaving
+        # this OFF by default until someone root-causes the deadlock in the vendored
+        # WanGP/LTX-2 sliding-window + audio-conditioning integration itself; still
+        # explicitly settable via the API for a caller who knows their environment
+        # (e.g. a cloud/satellite worker) does not hit this.
+        "lip_sync":        bool(body.get("lip_sync", False)),
         # auto_lipsync = MuseTalk post-pass driven by the isolated vocal stem, so
         # the mouth tracks the WORDS. Runs AFTER native conditioning -- the two
         # stack (Andrew: "Native + MuseTalk both"). face-alignment patches handle
@@ -293,6 +303,31 @@ async def generate(request: Request):
         # audio<->mouth sync score is highest. N>1 multiplies GPU time ~Nx.
         "best_of_n":       max(1, min(5, int(body.get("best_of_n", 1) or 1))),
     }
+    # VRAM safety net: this route picks its model independently of
+    # /api/fun/make-it and make-it-multi, and previously had NO check at all --
+    # a request for LTX-2 Dev19B Distilled (needs ~30GB, see
+    # features/fun_videos/video_generator.py vram_min_gb) on a card with less
+    # would load anyway with WanGP's budget forcibly clamped to 80% VRAM,
+    # which is exactly the deadlock this app hit on 2026-08-01 (WanGP worker
+    # died mid-render, killing the whole DCS process). Downgrade instead of
+    # erroring here (unlike make_it/make_it_multi's hard reject) because this
+    # route has no interactive user to show an error to when run unattended.
+    # TEMPORARILY DISABLED 2026-08-01, same reasoning/override as fun_videos/routes.py:
+    # historical output/ proves Dev19B Distilled works repeatedly on this card via
+    # mmgp RAM offload, faster and higher-res than the 360P fallback this was
+    # downgrading to.
+    try:
+        pass
+        # from app import _g as _app_g_vram
+        # from features.fun_videos.video_generator import model_vram_error
+        # _vram_gb = _app_g_vram.get("gpu_vram_gb")
+        # if model_vram_error(settings["model_name"], _vram_gb):
+        #     _fallback = "LTX-2 Dev13B 360P"
+        #     log.warning("[song-video] %s needs more VRAM than this GPU has (%.1fGB) -- "
+        #                 "downgrading to %s", settings["model_name"], _vram_gb or -1, _fallback)
+        #     settings["model_name"] = _fallback
+    except Exception as _ve:
+        log.warning("[song-video] VRAM check skipped (%s) -- proceeding with requested model", _ve)
     # Per-model step floors: Distilled caps at 8; everything else floors at 20.
     _mn  = settings["model_name"]
     _raw = int(settings["video_steps"])
