@@ -131,34 +131,40 @@ async def lifespan(app: FastAPI):
 
     # Background git pull -- keeps the app current without manual steps.
     # Runs in a daemon thread so startup is never delayed by network.
+    #
+    # boot_git_hash is recorded HERE, after the pull attempt resolves, not
+    # racing it. This process's own module code was already imported (from
+    # whatever was on disk) before this thread ever ran, whether that was
+    # pre- or post- the manager's own launch-time pull. What matters for the
+    # "restart needed" banner is not re-flagging changes this SAME boot's
+    # pull just absorbed -- only changes that land AFTER boot is complete.
+    # Capturing the hash before the pull (the old order) meant any commit
+    # this box was simply behind on at launch (routine, since the repo is
+    # pushed to from multiple boxes) triggered the banner immediately on
+    # every single startup.
     def _bg_pull():
         import subprocess as _sp, pathlib as _pl
         repo = _pl.Path(__file__).parent
-        if not (_repo := repo / ".git").exists():
-            return
+        if (repo / ".git").exists():
+            try:
+                r = _sp.run(["git", "-C", str(repo), "pull", "--ff-only"],
+                            capture_output=True, timeout=30)
+                out = (r.stdout + r.stderr).decode(errors="replace").strip()
+                if r.returncode == 0:
+                    if "Already up to date" not in out:
+                        log.info("[startup] git pull: %s", out)
+                else:
+                    log.debug("[startup] git pull skipped: %s", out)
+            except Exception as _e:
+                log.debug("[startup] git pull error: %s", _e)
         try:
-            r = _sp.run(["git", "-C", str(repo), "pull", "--ff-only"],
-                        capture_output=True, timeout=30)
-            out = (r.stdout + r.stderr).decode(errors="replace").strip()
-            if r.returncode == 0:
-                if "Already up to date" not in out:
-                    log.info("[startup] git pull: %s", out)
-            else:
-                log.debug("[startup] git pull skipped: %s", out)
-        except Exception as _e:
-            log.debug("[startup] git pull error: %s", _e)
+            _r = _sp.run(["git", "-C", str(APP_DIR), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, timeout=5)
+            _g["boot_git_hash"] = _r.stdout.strip() if _r.returncode == 0 else None
+        except Exception:
+            pass
     import threading as _threading
     _threading.Thread(target=_bg_pull, daemon=True, name="git-pull").start()
-
-    # Record git HEAD at boot so the UI can show a "restart needed" banner
-    # when new commits have landed since this process started.
-    try:
-        import subprocess as _sp2
-        _r = _sp2.run(["git", "-C", str(APP_DIR), "rev-parse", "HEAD"],
-                      capture_output=True, text=True, timeout=5)
-        _g["boot_git_hash"] = _r.stdout.strip() if _r.returncode == 0 else None
-    except Exception:
-        pass
 
     # Ensure runtime directories exist
     try:
@@ -354,6 +360,19 @@ async def index():
         html = html.replace('src="/static/js/app.js?', f'src="/static/js/app.js?b={_BUILD_TS}&')
         return HTMLResponse(content=html, headers=_NO_CACHE)
     return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
+
+
+@app.get("/admin")
+async def admin_review_page():
+    # Standalone, PIN-gated review loop -- deliberately NOT linked from the
+    # tab rail (see features/admin_review). The page itself has no sensitive
+    # content; the gate is enforced server-side on the /api/admin-review/*
+    # routes, not by hiding this HTML.
+    page_path = STATIC_DIR / "admin_review.html"
+    if page_path.exists():
+        html = page_path.read_text(encoding="utf-8")
+        return HTMLResponse(content=html, headers=_NO_CACHE)
+    return JSONResponse({"error": "admin_review.html not found"}, 404)
 
 
 @app.get("/static/js/app.js")
@@ -1339,6 +1358,7 @@ from features.lipsync.routes import router as lipsync_router
 from features.manager.routes import router as manager_router
 from features.chat_studio.routes import router as chat_studio_router
 from features.image_studio.routes import router as image_studio_router
+from features.admin_review.routes import router as admin_review_router
 
 app.include_router(i2v_router, prefix="/api/i2v", tags=["Image to Video"])
 app.include_router(fun_router, prefix="/api/fun", tags=["Create Videos"])
@@ -1351,6 +1371,7 @@ app.include_router(lipsync_router, prefix="/api/lipsync", tags=["Lip Sync"])
 app.include_router(manager_router, prefix="/api/manager", tags=["AI Manager"])
 app.include_router(chat_studio_router, prefix="/api/chat-studio", tags=["Chat Studio"])
 app.include_router(image_studio_router, prefix="/api/image-studio", tags=["Image Studio"])
+app.include_router(admin_review_router, prefix="/api/admin-review", tags=["Admin Review"])
 # NOTE: dcmvs_chain_router is unfinished WIP (no module/import yet) and crashes
 # startup with NameError. Commented so this build runs; re-enable when implemented.
 # app.include_router(dcmvs_chain_router, prefix="/api/dcmvs-chain", tags=["DCMVS Chain"])

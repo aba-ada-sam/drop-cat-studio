@@ -1,0 +1,271 @@
+<title>Admin Review</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #05100a; color: #6dffb0;
+    font-family: "Courier New", Consolas, monospace;
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  /* -- Keypad gate -- */
+  #gate { width: 100%; max-width: 360px; padding: 40px 20px; text-align: center; }
+  #gate h1 { font-size: 1.1rem; letter-spacing: .15em; margin-bottom: 4px; }
+  #gate .sub { font-size: .75rem; opacity: .6; margin-bottom: 28px; }
+  #pin-display {
+    font-size: 1.8rem; letter-spacing: .5em; height: 2.4rem; margin-bottom: 20px;
+    border-bottom: 2px solid #1e5c3d; padding-bottom: 6px;
+  }
+  #keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  #keypad button {
+    padding: 18px 0; font-size: 1.3rem; background: #0c2318; color: #6dffb0;
+    border: 1px solid #1e5c3d; border-radius: 6px; font-family: inherit; cursor: pointer;
+  }
+  #keypad button:active { background: #1e5c3d; }
+  #keypad button.wide { grid-column: span 1; }
+  #gate-msg { min-height: 1.4rem; margin-top: 16px; font-size: .85rem; color: #ff6d6d; }
+
+  /* -- Review UI -- */
+  #review { display: none; width: 100%; max-width: 760px; padding: 16px; }
+  #setup { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  #setup textarea, #setup select, #setup input[type=text] {
+    background: #0c2318; color: #cdffe4; border: 1px solid #1e5c3d; border-radius: 6px;
+    padding: 10px; font-family: inherit; font-size: .95rem; width: 100%;
+  }
+  #setup textarea { min-height: 60px; resize: vertical; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 120px; }
+  label.check { display: flex; align-items: center; gap: 6px; font-size: .85rem; flex: 0 0 auto; }
+  button.action {
+    background: #17663f; color: #eafff2; border: none; border-radius: 6px;
+    padding: 12px 16px; font-family: inherit; font-size: 1rem; cursor: pointer;
+  }
+  button.action:disabled { opacity: .4; }
+  #grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
+  @media (max-width: 480px) { #grid { grid-template-columns: 1fr; } }
+  .tile { position: relative; border: 2px solid #1e5c3d; border-radius: 8px; overflow: hidden; cursor: pointer; background: #0c2318; }
+  .tile.selected { border-color: #29ff8f; box-shadow: 0 0 12px #29ff8f88; }
+  .tile img { width: 100%; display: block; }
+  .tile .badge {
+    position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%;
+    background: #29ff8f; color: #04150c; display: none; align-items: center; justify-content: center;
+    font-weight: bold; font-size: 1.1rem;
+  }
+  .tile.selected .badge { display: flex; }
+  .tile .seed { position: absolute; bottom: 0; left: 0; right: 0; background: #000a; font-size: .7rem; padding: 3px 6px; color: #9dffcf; }
+  .tile .err { padding: 40px 10px; text-align: center; color: #ff6d6d; font-size: .85rem; }
+  #feedback-row { display: flex; gap: 8px; align-items: stretch; }
+  #feedback-row input { flex: 1; }
+  #status { font-size: .8rem; opacity: .7; min-height: 1.2rem; margin-top: 8px; }
+  #meta { font-size: .7rem; opacity: .5; margin-top: 4px; word-break: break-word; }
+  #chat-log {
+    max-height: 220px; overflow-y: auto; margin-bottom: 10px; padding: 8px;
+    background: #081a11; border: 1px solid #1e5c3d; border-radius: 6px; font-size: .85rem;
+  }
+  #chat-log:empty { display: none; }
+  #chat-log .msg { margin-bottom: 8px; }
+  #chat-log .who { font-weight: bold; }
+  #chat-log .who.admin { color: #9dffcf; }
+  #chat-log .who.assistant { color: #6dd5ff; }
+  #chat-log .who.fallback { color: #ffb06d; }
+</style>
+
+<div id="gate">
+  <h1>ADMIN ACCESS</h1>
+  <div class="sub">DropCat Studio -- Image Review</div>
+  <div id="pin-display">------</div>
+  <div id="keypad">
+    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+    <button id="clear">CLR</button><button data-k="0">0</button><button id="enter">ENTER</button>
+  </div>
+  <div id="gate-msg"></div>
+</div>
+
+<div id="review">
+  <div id="setup">
+    <textarea id="prompt" placeholder="Describe the scene..."></textarea>
+    <div class="row">
+      <select id="subject">
+        <option value="auto">auto</option>
+        <option value="female">female</option>
+        <option value="male">male</option>
+        <option value="multi">multi (M+F)</option>
+        <option value="multi_female">multi_female</option>
+        <option value="multi_male">multi_male</option>
+      </select>
+      <select id="preset">
+        <option value="nsfw" selected>NSFW</option>
+        <option value="default">Default</option>
+      </select>
+      <label class="check"><input type="checkbox" id="creature"> creature</label>
+    </div>
+    <button class="action" id="start">Start</button>
+  </div>
+
+  <div id="grid"></div>
+
+  <div id="chat-log"></div>
+
+  <div id="feedback-row">
+    <input type="text" id="feedback" placeholder="Talk about the 4 images, or leave blank + pick one...">
+    <button class="action" id="submit">Submit</button>
+  </div>
+  <div style="font-size:.7rem;opacity:.5;margin-top:4px;">
+    Talks back: describe what you want changed, compare images by number, say "keep #2 but...".
+    Say what you want, not what to avoid -- the assistant knows this checkpoint draws what the
+    negative prompt names, but your own wording to it isn't filtered, so still lean positive.
+  </div>
+  <div id="status"></div>
+  <div id="meta"></div>
+</div>
+
+<script>
+(function () {
+  var pin = "";
+  var pinDisplay = document.getElementById("pin-display");
+  var gateMsg = document.getElementById("gate-msg");
+
+  function renderPin() {
+    var dots = pin.split("").map(function () { return "*"; }).join("");
+    pinDisplay.textContent = (dots + "------").slice(0, 6).split("").join(" ");
+  }
+  renderPin();
+
+  document.getElementById("keypad").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.id === "clear") { pin = ""; renderPin(); gateMsg.textContent = ""; return; }
+    if (btn.id === "enter") { tryUnlock(); return; }
+    if (pin.length < 6) { pin += btn.dataset.k; renderPin(); }
+    if (pin.length === 6) { tryUnlock(); }
+  });
+
+  function tryUnlock() {
+    if (!pin) return;
+    fetch("/api/admin-review/unlock", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pin }),
+    }).then(function (r) {
+      if (r.ok) {
+        document.getElementById("gate").style.display = "none";
+        document.getElementById("review").style.display = "block";
+      } else {
+        return r.json().then(function (d) {
+          gateMsg.textContent = (d && d.detail) || "ACCESS DENIED";
+          pin = ""; renderPin();
+        });
+      }
+    }).catch(function () { gateMsg.textContent = "connection error"; pin = ""; renderPin(); });
+  }
+
+  // -- Review loop --
+  var selectedIndex = null;
+  var started = false;
+  var grid = document.getElementById("grid");
+  var chatLog = document.getElementById("chat-log");
+  var status = document.getElementById("status");
+  var meta = document.getElementById("meta");
+  var startBtn = document.getElementById("start");
+  var submitBtn = document.getElementById("submit");
+
+  function appendChat(who, cssClass, text) {
+    var line = document.createElement("div");
+    line.className = "msg";
+    line.innerHTML = '<span class="who ' + cssClass + '">' + escapeHtml(who) + ':</span> ' + escapeHtml(text);
+    chatLog.appendChild(line);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function renderGrid(images) {
+    grid.innerHTML = "";
+    selectedIndex = null;
+    images.forEach(function (img, i) {
+      var tile = document.createElement("div");
+      tile.className = "tile";
+      if (img.error) {
+        tile.innerHTML = '<div class="err">generation failed:<br>' + escapeHtml(img.error) + "</div>";
+      } else {
+        tile.innerHTML =
+          '<img src="' + img.image_url + '?t=' + Date.now() + '" loading="lazy">' +
+          '<div class="badge">&#10003;</div>' +
+          '<div class="seed">seed ' + img.seed + "</div>";
+        tile.addEventListener("click", function () {
+          var wasSelected = tile.classList.contains("selected");
+          Array.prototype.forEach.call(grid.children, function (t) { t.classList.remove("selected"); });
+          if (!wasSelected) { tile.classList.add("selected"); selectedIndex = i; }
+          else { selectedIndex = null; }
+        });
+      }
+      grid.appendChild(tile);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function setBusy(busy) {
+    startBtn.disabled = busy; submitBtn.disabled = busy;
+    status.textContent = busy ? "Generating..." : "";
+  }
+
+  function runRound(body) {
+    setBusy(true);
+    return fetch("/api/admin-review/round", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+        return d;
+      });
+    }).then(function (d) {
+      renderGrid(d.images);
+      if (d.assistant_reply) {
+        appendChat("Assistant", "assistant", d.assistant_reply);
+      } else if (body.feedback_text && !d.llm_used) {
+        appendChat("System", "fallback", "AI interpretation unavailable -- applied your text directly to the prompt.");
+      }
+      meta.textContent = "round " + d.round + " | subject=" + d.subject + " | preset=" + d.preset +
+        (d.anchor_used ? " | refining selected pick" : " | fresh spread") +
+        "\nprompt: " + d.prompt_used + (d.negative_used ? "\nnegative additions: " + d.negative_used : "");
+      document.getElementById("feedback").value = "";
+    }).catch(function (e) {
+      status.textContent = "error: " + e.message;
+    }).finally(function () { setBusy(false); });
+  }
+
+  startBtn.addEventListener("click", function () {
+    var prompt = document.getElementById("prompt").value.trim();
+    if (!prompt) { status.textContent = "enter a scene first"; return; }
+    started = true;
+    chatLog.innerHTML = "";
+    runRound({
+      reset: true, prompt: prompt,
+      subject: document.getElementById("subject").value,
+      preset: document.getElementById("preset").value,
+      creature: document.getElementById("creature").checked,
+    });
+  });
+
+  submitBtn.addEventListener("click", function () {
+    if (!started) { status.textContent = "click Start first"; return; }
+    var text = document.getElementById("feedback").value.trim();
+    if (text) appendChat("You", "admin", text);
+    runRound({
+      selected_index: selectedIndex,
+      feedback_text: text,
+    });
+  });
+
+  document.getElementById("feedback").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") submitBtn.click();
+  });
+})();
+</script>
