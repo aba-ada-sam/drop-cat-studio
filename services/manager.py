@@ -887,9 +887,29 @@ def _watchdog_loop():
                     log.error("[watchdog] orchestrator-aware WanGP respawn failed: %s; "
                               "falling back to direct start", e)
                     start_wangp_worker()
-            elif wangp_proc and wangp_proc.poll() is None:
-                # Process is alive -- check for stuck generation (busy=True but
-                # step hasn't advanced for _WANGP_STUCK_SECS).
+            else:
+                # Stuck-generation check runs regardless of whether
+                # _wangp_worker_proc is tracked (alive) or None/stale.
+                #
+                # BUG found 2026-07-30: this used to be gated on
+                # `elif wangp_proc and wangp_proc.poll() is None`, i.e. only
+                # ran when THIS manager instance's own process handle was
+                # known-alive. A real stuck job (busy=True, step frozen at 0)
+                # went undetected for the full session because
+                # _wangp_worker_proc had gone None/stale across one of this
+                # session's several app-crash-and-relaunch cycles -- a fresh
+                # manager.py process never re-adopts a still-running orphan
+                # worker's Popen handle, so both branches silently no-opped
+                # and the 120s deadlock timer never even started. Found by
+                # manually querying :7899/status and finding "step": 0 stuck
+                # indefinitely; had to kill it by hand. The query below is
+                # already port/HTTP-based (not process-handle-based) and
+                # already fails closed (caught by the try/except), so simply
+                # running it unconditionally -- instead of only when a
+                # tracked process object says it's alive -- closes the gap
+                # without weakening anything: if nothing is listening on
+                # 7899, the request raises and we fall through to `pass`,
+                # exactly like the old code path did when wangp_proc was None.
                 try:
                     with urllib.request.urlopen(
                         "http://127.0.0.1:7899/status"
