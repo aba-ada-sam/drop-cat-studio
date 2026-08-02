@@ -99,20 +99,76 @@ def _separate_vocals(musetalk_py: Path, in_audio: str, out_vocals: str) -> bool:
         return False
 
 
+def _freeze_gaps(base_video: str, intervals: list[tuple[float, float]],
+                  dur: float, out_path: str) -> bool:
+    """Rebuild `base_video` with everything OUTSIDE `intervals` frozen on the
+    frame at the start of that gap.
+
+    `_composite_voiced` used to fall back to the raw base video between
+    phrases on the assumption that a source video is naturally still when
+    nothing is being sung -- true for a real talking-head shot, false for a
+    WanGP-generated creature clip that has its own baked-in mouth motion as
+    part of the performance. That baked motion read as the character talking
+    to nothing, uncorrelated with the lyrics. Freezing the gaps here makes
+    "still" genuinely still regardless of what the source is doing.
+    """
+    gaps: list[tuple[float, float]] = []
+    prev_end = 0.0
+    for s, e in sorted(intervals):
+        if s > prev_end + 0.01:
+            gaps.append((prev_end, s))
+        prev_end = max(prev_end, e)
+    if prev_end < dur - 0.01:
+        gaps.append((prev_end, dur))
+    if not gaps:
+        return False  # sung end-to-end -- nothing to freeze
+
+    spans = sorted([(s, e, "live") for s, e in intervals] + [(s, e, "frozen") for s, e in gaps])
+    filters = []
+    labels = []
+    for i, (s, e, mode) in enumerate(spans):
+        seg_dur = max(0.05, e - s)
+        lbl = f"seg{i}"
+        if mode == "live":
+            filters.append(f"[0:v]trim=start={s}:end={e},setpts=PTS-STARTPTS[{lbl}]")
+        else:
+            hold_from = min(s + 0.04, e)
+            filters.append(
+                f"[0:v]trim=start={s}:end={hold_from},setpts=PTS-STARTPTS,"
+                f"tpad=stop_mode=clone:stop_duration={seg_dur}[{lbl}]"
+            )
+        labels.append(f"[{lbl}]")
+    filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[v]")
+
+    r = run_ffmpeg(
+        ["ffmpeg", "-y", "-i", base_video, "-filter_complex", ";".join(filters),
+         "-map", "[v]", "-an", *video_encode_args(crf=14), out_path],
+        timeout=1800,
+    )
+    if r.returncode != 0 or not os.path.isfile(out_path):
+        err = (r.stderr or b"").decode("utf-8", "replace")[-800:]
+        log.warning("[lipsync] freeze-gaps failed (falling back to raw base):\n%s", err)
+        return False
+    return True
+
+
 def _composite_voiced(base_video: str, synced_video: str,
                       intervals: list[tuple[float, float]], out_path: str) -> bool:
-    """Show `synced_video` only while someone is singing, `base_video` otherwise.
-
-    MuseTalk re-renders the mouth for every frame it is given, including the
-    instrumental bars where the gated driving audio is silent. Overlaying its
-    output onto the original video, enabled only inside the vocal intervals,
-    makes the mouth exactly as still as the source between phrases.
+    """Show `synced_video` only while someone is singing, `base_video` (with
+    the gaps between phrases frozen -- see `_freeze_gaps`) otherwise.
     """
     info = probe_file(base_video)
     w, h = info.get("width"), info.get("height")
     if not w or not h:
         log.warning("[lipsync] could not probe %s -- skipping composite", base_video)
         return False
+
+    dur = probe_duration(base_video) or 0.0
+    frozen_base = base_video
+    if dur:
+        candidate = str(Path(out_path).with_name(Path(out_path).stem + "_frozenbase.mp4"))
+        if _freeze_gaps(base_video, intervals, dur, candidate):
+            frozen_base = candidate
 
     # eof_action=pass + repeatlast=0: if MuseTalk's track ends early, the base
     # video plays on rather than freezing on its last synced frame.
@@ -122,11 +178,16 @@ def _composite_voiced(base_video: str, synced_video: str,
         f"[b][s]overlay=eof_action=pass:repeatlast=0:enable='{enable_expr(intervals)}'[v]"
     )
     r = run_ffmpeg(
-        ["ffmpeg", "-y", "-i", base_video, "-i", synced_video,
+        ["ffmpeg", "-y", "-i", frozen_base, "-i", synced_video,
          "-filter_complex", graph, "-map", "[v]", "-an",
          *video_encode_args(crf=14), "-movflags", "+faststart", out_path],
         timeout=1800,
     )
+    if frozen_base != base_video:
+        try:
+            os.remove(frozen_base)
+        except Exception:
+            pass
     if r.returncode != 0 or not os.path.isfile(out_path):
         err = (r.stderr or b"").decode("utf-8", "replace")[-800:]
         log.warning("[lipsync] composite failed:\n%s", err)
