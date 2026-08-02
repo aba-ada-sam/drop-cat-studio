@@ -41,10 +41,10 @@ _OPENAI_MODELS = {
 }
 
 
-# Phrases that signal a cloud vision API refused an image for content-policy
-# reasons. When we see any of these in a response (and the response is short
-# prose rather than the structured JSON we asked for), we transparently retry
-# against Ollama, which doesn't filter user content.
+# Phrases that signal a cloud API (vision OR text) refused a request for
+# content-policy reasons. When we see any of these in a response (and the
+# response is short prose rather than the structured JSON we asked for), we
+# transparently retry against the uncensored backend (Featherless/kobold).
 _SAFETY_REFUSAL_MARKERS = (
     "contains nudity",
     "i can't process",
@@ -79,7 +79,46 @@ _SAFETY_REFUSAL_MARKERS = (
     "i can't provide",
     "i cannot provide",
     "explicit sexual content",
+    # Text-generation refusals (lyrics/brainstorm/prompt writing). The markers
+    # above were all written for the vision-refusal case ("I can't describe/
+    # process this image") and none of them match how Claude phrases a refusal
+    # to WRITE something -- a real refusal ("I'm not able to write lyrics built
+    # around that phrase... it promotes antisemitic conspiracy thinking") sailed
+    # through as if it were valid output and got literally sung by ACE-Step.
+    "i'm not able to write",
+    "i am not able to write",
+    "i'm not able to provide",
+    "i am not able to provide",
+    "i'm not going to help",
+    "i am not going to help",
+    "i won't write",
+    "i will not write",
+    "i can't write",
+    "i cannot write",
+    "i'm not comfortable",
+    "i am not comfortable",
+    "not something i can help with",
+    "not something i'm able to help with",
+    # "generate" is its own common refusal verb, distinct from write/process/
+    # describe/provide above -- missed until a real refusal ("I can't generate
+    # that content. I'd be happy to help with a different video concept...")
+    # sailed through and got silently rehashed into an unrelated SFW idea.
+    "i can't generate",
+    "i cannot generate",
+    "i'm not able to generate",
+    "i am not able to generate",
 )
+
+
+def _looks_like_refusal_exception(exc: Exception) -> bool:
+    """True if a raised exception is Anthropic/OpenAI declining the request
+    outright (empty content / blocked stop_reason) rather than a real API
+    error. _anthropic_chat/_anthropic_vision/_openai_chat/_openai_vision all
+    raise ValueError with this exact phrase for that case -- see below. Unlike
+    _looks_like_safety_refusal() (which reads a returned string), this reads
+    a raised exception, because a hard content-policy block never reaches the
+    "return the text" path at all."""
+    return "possible content policy refusal" in str(exc).lower()
 
 
 def _looks_like_safety_refusal(text: str) -> bool:
@@ -145,6 +184,22 @@ class LLMRouter:
             "'Allow uncensored fallback' to use Featherless / local KoboldCpp."
         )
 
+    def _resolve_refusal_fallback(self, provider: str) -> str | None:
+        """`provider`'s response looked like a safety refusal -- return the
+        uncensored fallback provider (Featherless by default) if it's up,
+        else None so the caller just returns the original refusal text."""
+        fb = cfg.get("uncensored_provider") or "featherless"
+        try:
+            fb_up = self._client.is_available(fb)
+        except Exception:
+            fb_up = False
+        if fb_up:
+            log.info("[router] %s refused -- retrying via %s (no content filter)", provider, fb)
+            return fb
+        log.info("[router] %s refused and %s is not available -- user will see the refusal text",
+                 provider, fb)
+        return None
+
     def route(
         self,
         messages: list,
@@ -155,10 +210,34 @@ class LLMRouter:
         force_provider: str | None = None,
     ) -> str:
         provider = self._provider(force_provider)
-        if provider == "anthropic":
-            return self._call_with_retry(lambda: self._anthropic_chat(messages, tier, max_tokens, system), provider=provider)
-        if provider == "openai":
-            return self._call_with_retry(lambda: self._openai_chat(messages, tier, max_tokens, system), provider=provider)
+        if provider in ("anthropic", "openai"):
+            chat_fn = self._anthropic_chat if provider == "anthropic" else self._openai_chat
+            try:
+                result = self._call_with_retry(
+                    lambda: chat_fn(messages, tier, max_tokens, system), provider=provider,
+                )
+            except Exception as e:
+                # Hard content-policy block (empty response, no refusal text to read) --
+                # same recovery as the "refused with prose" case below, just triggered
+                # from the exception instead of the return value.
+                if _looks_like_refusal_exception(e):
+                    fb = self._resolve_refusal_fallback(provider)
+                    if fb:
+                        return self._client.chat(fb, messages, tier=tier, max_tokens=max_tokens, system=system)
+                raise
+            # Same cloud safety-refusal fallback as route_vision(), extended to
+            # text-only calls -- a plain-English refusal (e.g. an NSFW idea/lyric
+            # brainstorm) used to have nowhere to go on the text path even though
+            # photo analysis already recovered transparently via Featherless.
+            if _looks_like_safety_refusal(result):
+                fb = self._resolve_refusal_fallback(provider)
+                if fb:
+                    try:
+                        return self._client.chat(fb, messages, tier=tier, max_tokens=max_tokens, system=system)
+                    except Exception as e:
+                        log.warning("[router] %s fallback failed after %s refusal: %s", fb, provider, e)
+                        # Return the original refusal so the caller's UI can show it
+            return result
         # uncensored backend (featherless / kobold)
         return self._call_with_retry(
             lambda: self._client.chat(provider, messages, tier=tier, max_tokens=max_tokens, system=system),
@@ -178,15 +257,9 @@ class LLMRouter:
     ) -> str:
         provider = self._provider(force_provider)
         if provider == "anthropic":
-            result = self._call_with_retry(
-                lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system),
-                provider=provider,
-            )
+            vision_fn = lambda: self._anthropic_vision(prompt, images_b64, tier, max_tokens, system)
         elif provider == "openai":
-            result = self._call_with_retry(
-                lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system),
-                provider=provider,
-            )
+            vision_fn = lambda: self._openai_vision(prompt, images_b64, tier, max_tokens, system)
         else:
             # uncensored backend (featherless / kobold) does its own vision
             return self._call_with_retry(
@@ -195,6 +268,20 @@ class LLMRouter:
                                                      format_json=format_json),
                 provider=provider,
             )
+        try:
+            result = self._call_with_retry(vision_fn, provider=provider)
+        except Exception as e:
+            # Hard content-policy block (empty response, no refusal text to read) --
+            # same recovery as the "refused with prose" case below, just triggered
+            # from the exception instead of the return value.
+            if _looks_like_refusal_exception(e):
+                fb = self._resolve_refusal_fallback(provider)
+                if fb:
+                    return self._client.chat_with_images(
+                        fb, prompt, images_b64, tier=tier,
+                        max_tokens=max_tokens, system=system, format_json=format_json,
+                    )
+            raise
 
         # Cloud safety-refusal fallback: Anthropic and OpenAI refuse images
         # they classify as containing nudity / sensitive content with a plain-
@@ -204,14 +291,8 @@ class LLMRouter:
         # analysis without making the uncensored provider the default for SFW
         # calls. Caller never needs to know which provider answered.
         if _looks_like_safety_refusal(result):
-            fb = cfg.get("uncensored_provider") or "featherless"
-            try:
-                fb_up = self._client.is_available(fb)
-            except Exception:
-                fb_up = False
-            if fb_up:
-                log.info("[router] %s refused the image as NSFW -- retrying via %s (no content filter)",
-                         provider, fb)
+            fb = self._resolve_refusal_fallback(provider)
+            if fb:
                 try:
                     return self._client.chat_with_images(
                         fb, prompt, images_b64, tier=tier,
@@ -220,9 +301,6 @@ class LLMRouter:
                 except Exception as e:
                     log.warning("[router] %s fallback failed after %s refusal: %s", fb, provider, e)
                     # Return the original refusal so the caller's UI can show it
-            else:
-                log.info("[router] %s refused the image and %s is not available -- "
-                         "user will see the refusal text", provider, fb)
         return result
 
     def stats(self) -> dict:
@@ -345,6 +423,13 @@ class LLMRouter:
                                                "PermissionDeniedError", "InvalidRequestError",
                                                "BadRequestError")):
                     log.error("LLM permanent error (will not retry): %s", exc)
+                    raise
+                # Never retry a content-policy block -- the same prompt against the
+                # same provider refuses identically every time. Raise immediately so
+                # route()/route_vision() can fall back to Featherless right away
+                # instead of burning 3 attempts' worth of backoff on a dead end.
+                if _looks_like_refusal_exception(exc):
+                    log.info("%s declined the request (no retry -- falling back): %s", actual_provider, exc)
                     raise
                 # Never retry timeouts for a LOCAL KoboldCpp -- the model is already
                 # running; a second queued call just adds to the backlog. (Cloud

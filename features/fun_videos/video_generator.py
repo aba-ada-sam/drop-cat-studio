@@ -131,7 +131,14 @@ MODELS = {
     # causing a consistent Step 0 deadlock. Minimum confirmed working: 20 GB.
     "Wan2.1-I2V-14B-480P":    {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 4, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800, "vram_min_gb": 20},
     "Wan2.1-I2V-14B-720P":    {"res": (1280, 720), "fps": 16, "max_sec": 12, "i2v": True,  "steps": 25, "guidance": 4.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 2400, "vram_min_gb": 24},
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600,  "vram_min_gb": 10},
+    # vram_min_gb corrected 2026-07-31: the old "10" assumed a ~9GB checkpoint.
+    # The actual file on disk (ltx-2-19b-distilled-fp8_diffusion_model.safetensors)
+    # is 20.07 GB -- confirmed via a live deadlock ("Model 'transformer' is too
+    # large (20547.5 MB) to fit... max capacity is 13042.1 MB", i.e. 80% of a
+    # 16.3GB card). Was being handed out as the "safe 16GB default" by
+    # _auto_pick_model, so it deadlocked at Step 0 on essentially every I2V job.
+    # Floor per the standard rule (model_size/0.8 + ~5GB headroom): 20.07/0.8+5.
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600,  "vram_min_gb": 30},
     "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 20},
     # 360P variant: same model, resolution capped to 640x360 so step-0 VRAM
     # drops ~75% vs native 580P -- reliably fits 16GB WanGP budget. Real-ESRGAN
@@ -141,6 +148,36 @@ MODELS = {
     "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800, "vram_min_gb": 12},
     "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 900,  "vram_min_gb": 4},
 }
+
+
+def model_vram_error(model_name: str, vram_gb: float | None) -> str | None:
+    """Pre-flight VRAM check -- returns an error message if this model can't fit
+    on the detected card, else None.
+
+    Without this, an undersized model reaches WanGP and deadlocks at Step 0
+    (see the 2026-07-31 incident: LTX-2 Dev19B Distilled needs a real 30GB
+    floor but was tagged 10GB, so it was being handed out as the "safe"
+    default and hanging every I2V job on a 16GB card). A deadlock can only be
+    cleared by killing the worker process -- Cancel/Stop just flips a flag the
+    wedged worker never gets a chance to check. Failing fast here turns that
+    into an immediate, clear rejection instead.
+
+    Fails OPEN (returns None) when vram_gb is unknown or the model isn't in
+    the table -- an undetectable card should not block submission outright.
+    """
+    if not vram_gb:
+        return None
+    model_def = MODELS.get(model_name)
+    if not model_def:
+        return None
+    floor = model_def.get("vram_min_gb")
+    if floor and vram_gb < floor:
+        return (
+            f"{model_name} needs ~{floor}GB VRAM to run without deadlocking "
+            f"(this GPU has {vram_gb}GB). Pick a smaller model -- "
+            f"LTX-2 Dev13B 360P (10GB) or Wan2.1-T2V-1.3B (4GB, text-to-video only)."
+        )
+    return None
 
 
 def _worker_alive(base_url: str = WANGP_LOCAL_URL) -> bool:

@@ -19,7 +19,7 @@ from core import config as cfg
 from core.job_manager import JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO
 from core.llm_client import encode_image_b64
 from core.wangp_models import resolve_model_name
-from features.fun_videos.video_generator import MODELS
+from features.fun_videos.video_generator import MODELS, model_vram_error
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -564,19 +564,28 @@ def _get_pick_to_model() -> dict:
     LTX-2 Dev13B requires >16 GB VRAM (WanGP 80% budget = 13 GB is not enough --
     step 0 deadlocks on RTX 5080 15.9 GB). Fall back to LTX-2 Distilled on
     cards below 20 GB; it won't do strong kinetic action but it won't deadlock.
+
+    Corrected 2026-07-31: "LTX-2 Dev19B Distilled" was the hardcoded <20GB/
+    calm/long_story default under the belief its checkpoint was ~9GB. It's
+    actually 20.07GB on disk (vram_min_gb corrected to 30 in video_generator.py)
+    -- deadlocked every auto-picked job on this 16GB card. "LTX-2 Dev13B 360P"
+    (vram_min_gb 10) is the one variant with a code comment confirming it was
+    actually tuned to fit the 16GB budget; use it below the 30GB floor instead.
     """
     from app import _g as _app_g
+    from features.fun_videos.video_generator import MODELS as _models_tbl
     gpu_vram = _app_g.get("gpu_vram_gb") or 0
+    safe_calm = "LTX-2 Dev19B Distilled" if gpu_vram >= _models_tbl["LTX-2 Dev19B Distilled"]["vram_min_gb"] else "LTX-2 Dev13B 360P"
     if not gpu_vram or gpu_vram >= 20:
         action_model = "LTX-2 Dev13B"             # needs 24GB+
     else:
-        action_model = "LTX-2 Dev19B Distilled"   # only model confirmed working on 16GB
+        action_model = safe_calm
     return {
-        "calm":         ("LTX-2 Dev19B Distilled", "calm"),
+        "calm":         (safe_calm, "calm"),
         "action":       (action_model,              "dynamic"),
         "action_hd":    (action_model,              "dynamic"),
         "story_action": (action_model,              "dynamic"),
-        "long_story":   ("LTX-2 Dev19B Distilled", "calm"),
+        "long_story":   (safe_calm, "calm"),
     }
 # Hardware reality on 16GB VRAM cards (RTX 5080):
 #   * LTX-2 Dev19B Distilled  int8 ~ 9 GB  -- fits cleanly, ~3-4s/step,
@@ -672,7 +681,8 @@ def _auto_pick_model(
     idea_clean = (idea or "").strip()
     if not idea_clean and not photo_b64:
         # No idea, no photo -- can't classify. Ship motion-by-default.
-        return ("LTX-2 Dev19B Distilled", "calm", "no idea -- LTX safe default (Wan I2V won't fit 16GB)")
+        safe_model, safe_motion = _get_pick_to_model()["calm"]
+        return (safe_model, safe_motion, "no idea -- VRAM-safe default for this card")
 
     user_msg = (
         f"User idea: {idea_clean or '(no explicit idea given)'}\n"
@@ -801,6 +811,17 @@ async def make_it(request: Request):
             f"{requested_model} is text-to-video and cannot accept a start image. "
             f"Pick an I2V model (Wan2.1-I2V-* or LTX-2 *), or remove the photo to run text-only.",
         )
+
+    # Pre-flight VRAM check -- reject fast instead of deadlocking WanGP at Step 0.
+    # TEMPORARILY DISABLED 2026-08-01 per Andrew's explicit override (informed of
+    # the crash risk beforehand) -- historical output/ files from 7/29-7/30 show
+    # Dev19B Distilled working repeatedly on this card via mmgp RAM offload, faster
+    # and higher-res than the "safe" fallback. Re-enable this block once the real
+    # fix (a check that accounts for RAM-offload mode, not a flat model ban) exists.
+    # from app import _g as _app_g_vram
+    # _vram_err = model_vram_error(requested_model, _app_g_vram.get("gpu_vram_gb"))
+    # if _vram_err:
+    #     raise HTTPException(400, _vram_err)
 
     # motion_style: auto_picked_motion wins when auto-pick ran; otherwise use what
     # the client sent (e.g. the Create Videos motion style chips); fall back to
@@ -958,6 +979,17 @@ async def make_it_multi(request: Request):
         requested_motion = picked_motion
         log.info("[make-it-multi] auto-pick chose %s (%s, %d clips) -- %s",
                  picked_model, picked_motion, n_clips, pick_reason)
+
+    # Pre-flight VRAM check -- reject fast instead of deadlocking WanGP at Step 0.
+    # TEMPORARILY DISABLED 2026-08-01 per Andrew's explicit override (informed of
+    # the crash risk beforehand) -- historical output/ files from 7/29-7/30 show
+    # Dev19B Distilled working repeatedly on this card via mmgp RAM offload, faster
+    # and higher-res than the "safe" fallback. Re-enable this block once the real
+    # fix (a check that accounts for RAM-offload mode, not a flat model ban) exists.
+    # from app import _g as _app_g_vram
+    # _vram_err = model_vram_error(requested_model, _app_g_vram.get("gpu_vram_gb"))
+    # if _vram_err:
+    #     raise HTTPException(400, _vram_err)
 
     # Per-model step minimums. Auto-pick can change the model from what the UI
     # configured, so we recompute the step count here using the picked model's
@@ -1186,13 +1218,26 @@ async def brainstorm(request: Request):
     has_image = bool(image_path and os.path.isfile(image_path))
     b64 = await asyncio.to_thread(encode_image_b64, image_path) if has_image else None
 
-    from features.fun_videos.multi_pipeline import _pick_cloud_provider
-    _cloud_force = _pick_cloud_provider(llm_router)
-
     result = None
     last_exc = None
-    # Try configured provider first, then force cloud if Ollama times out.
-    for _force in (None, _cloud_force):
+    # Brainstorm exists to turn the user's idea (photo and/or text) into a
+    # usable video/lyric prompt, and cloud vision/chat (Anthropic/OpenAI) is
+    # unreliable for that well short of a clean refusal: it either refuses
+    # outright ("I can't generate this content") or silently launders the
+    # result into something generic and unrelated to what was actually asked
+    # for -- confirmed live: "a giant [...] destroys NY city like godzilla"
+    # came back as a sanitized monster-stomps-city idea with no refusal
+    # marker in the response at all ("as close as I can get within content
+    # limits"), so nothing downstream could detect or recover from it. Go
+    # straight to the configured uncensored backend for BOTH the photo and
+    # text-only paths instead of trying cloud first and hoping to catch a
+    # refusal -- the same Featherless Qwen3-VL-32B vision call already proven
+    # reliable for dropcatgo.com's booth pipeline (see _nsfw_decider_handoff.py).
+    # Respects Settings if switched to a local "kobold" backend later.
+    # `None` as the second entry auto-resolves to the configured cloud
+    # provider -- a last-resort fallback if the uncensored backend is down.
+    _try_order = (cfg.get("uncensored_provider") or "featherless", None)
+    for _force in _try_order:
         if _force is not None and _force == llm_router._provider():
             continue  # already tried this provider
         try:
@@ -1212,15 +1257,8 @@ async def brainstorm(request: Request):
             break  # success
         except Exception as exc:
             last_exc = exc
-            msg = str(exc).lower()
-            is_timeout = "timeout" in msg or "timed out" in msg
-            # Only a LOCAL KoboldCpp benefits from a cloud retry on timeout
-            # (cloud providers already retry internally).
-            is_local  = (llm_router._provider() if not _force else _force) == "kobold"
-            if is_timeout and is_local and _cloud_force and _force is None:
-                log.info("[brainstorm] local KoboldCpp timeout -- retrying via %s", _cloud_force)
-                continue
-            break  # non-retryable error
+            log.info("[brainstorm] %s failed (%s) -- trying next provider", _force or "auto", exc)
+            continue
 
     if result is None:
         msg = str(last_exc) if last_exc else "unknown error"
