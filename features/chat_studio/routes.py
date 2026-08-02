@@ -94,11 +94,20 @@ describe.
 3. NEVER use negation in the positive prompt -- "no hat" draws a hat. Describe the presence of \
 what you want instead ("clean-shaven" not "no beard", "bare head" not "no hat").
 4. The negative prompt starts EMPTY. Only add to it when the user reports an actual defect they \
-saw in a render (extra fingers, warped eyes, etc.) -- max 0-15 tokens, never speculative.
+saw in a render (extra fingers, warped eyes, etc.) -- max 0-15 tokens, never speculative. The one \
+exception is the gender/count lock in rule 7 below -- that's identity, not a rendering defect.
 5. Be concrete, not evocative -- describe the photograph you want in frame, not the feeling it \
 should evoke.
 6. Assume an SDXL checkpoint: CFG 4-8, native resolution around 1024x1024 -- adjust width/height \
 for a different aspect ratio while staying near that pixel budget.
+7. GENDER/COUNT LOCK -- when the user's idea specifies a gender and subject count (e.g. "two \
+women", "a redheaded milf", "3 men"), this checkpoint's training data for adjacent themes \
+(chains, bondage, auction/slave framing, heavy muscle) skews the other way and will silently \
+flip gender if the tag isn't explicit and reinforced. So: (a) put an unambiguous count+gender \
+token first in the subject clause every time ("2women", "1woman", "2men") -- never rely on a \
+word like "milf" or "hunk" alone to carry gender, and (b) add the wrong gender to the negative \
+prompt ("male, man, men" for a female subject; "female, woman, women" for a male one) even \
+though rule 4 says start empty -- this is a same-request identity lock, not a reported defect.
 
 You are proposing a starting point, not a final answer -- the user can edit any field in the \
 prompt card before Generate is clicked."""
