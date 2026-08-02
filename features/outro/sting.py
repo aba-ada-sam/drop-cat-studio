@@ -344,10 +344,15 @@ def _darken_steps(color_hex: str, max_alpha: float, darken_start: float,
 # clip's true end (breathing room so the sign-off doesn't feel clipped).
 
 _VARIANT_TIMING = {
-    "minimal_fade": dict(word_dur=0.46, gap=0.16, pre_pad=0.20, post_pad=0.40),
-    "ink_stamp":    dict(word_dur=0.40, gap=0.12, pre_pad=0.12, post_pad=0.30),
-    "circus_glow":  dict(word_dur=0.50, gap=0.18, pre_pad=0.25, post_pad=0.45),
-    "neo_mono":     dict(word_dur=0.46, gap=0.14, pre_pad=0.16, post_pad=0.32),
+    # Andrew, 2026-08-02: "why do you keep cutting the audio before the
+    # video is over?" -- measured 3.7s of near-silence at the tail of a
+    # 32.2s video (music fades ~28.5s, video ran to 32.2s). Cut every pad/
+    # gap here to shrink that dead-air window by roughly half while still
+    # giving each word enough hold time to actually read.
+    "minimal_fade": dict(word_dur=0.42, gap=0.10, pre_pad=0.08, post_pad=0.18),
+    "ink_stamp":    dict(word_dur=0.36, gap=0.08, pre_pad=0.06, post_pad=0.14),
+    "circus_glow":  dict(word_dur=0.44, gap=0.10, pre_pad=0.08, post_pad=0.18),
+    "neo_mono":     dict(word_dur=0.40, gap=0.08, pre_pad=0.06, post_pad=0.15),
 }
 
 
@@ -577,7 +582,7 @@ def _concat_two(video_a: str, video_b: str, out_path: str) -> bool:
 
 def append_outro(input_video_path: str | Path, variant_key: str,
                   output_path: str | Path | None = None,
-                  min_buffer: float = 0.35) -> tuple[Path | None, str | None]:
+                  min_buffer: float = 0.10) -> tuple[Path | None, str | None]:
     """Composite the "Drop"/"Cat"/"GO" sign-off directly onto the tail of
     input_video_path, timed to land after its audio has gone silent.
 
@@ -732,11 +737,21 @@ def append_outro(input_video_path: str | Path, variant_key: str,
             if has_audio:
                 fade_dur = min(_AUDIO_FADE_S, max(0.1, audio_dur))
                 fade_start = max(0.0, audio_dur - fade_dur)
+                # apad + a hard -t total_duration cap: afade alone only shapes
+                # the LEVELS within whatever length the audio stream already
+                # is (audio_dur, typically well short of total_duration once
+                # the tail's been freeze-extended for the sign-off) -- it
+                # never extends the stream itself, so without this the muxed
+                # audio track simply ends mid-video and everything after it
+                # plays with NO audio track at all, not silence-with-a-track.
+                # Caught 2026-08-02 via ffprobe: audio stream 28.5s vs video/
+                # format duration 31.1s on a real render.
                 rr = subprocess.run(
                     [FFMPEG, "-y", "-i", str(filtered_video), "-i", input_video_path,
                      "-map", "0:v", "-map", "1:a?",
-                     "-af", f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}",
-                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out_path)],
+                     "-af", f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f},apad",
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                     "-t", f"{total_duration:.3f}", str(out_path)],
                     capture_output=True, timeout=300,
                 )
                 if rr.returncode == 0 and out_path.exists():
@@ -769,13 +784,22 @@ def append_outro(input_video_path: str | Path, variant_key: str,
                 dms = int(max(0.0, t0) * 1000)
                 af_parts.append(f"[{bass_base_idx + i}:a]adelay={dms}|{dms}[bass{i}]")
                 mix_labels.append(f"[bass{i}]")
+            # amix's own "longest" input is whichever of song/bass-hits ends
+            # latest -- NOT necessarily total_duration (the bass hits are
+            # short blips landing near darken_start, well before the video's
+            # true end once post_pad is added). Without the apad+hard -t
+            # below, the muxed audio track fell short of the video/format
+            # duration every time (caught via ffprobe on a real render:
+            # 28.5s audio vs 31.1s video) -- same root bug as the fallback
+            # path, just reached through the bass-mix branch instead.
             af_parts.append(f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:"
-                             f"duration=longest:dropout_transition=0[aout]")
+                             f"duration=longest:dropout_transition=0,apad[aout]")
 
             r = subprocess.run(
                 cmd2 + ["-filter_complex", ";".join(af_parts),
                         "-map", "0:v", "-map", "[aout]",
-                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out_path)],
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                        "-t", f"{total_duration:.3f}", str(out_path)],
                 capture_output=True, timeout=300,
             )
             if r.returncode != 0 or not out_path.exists():
