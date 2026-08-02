@@ -2,7 +2,7 @@
 
 Renders a short (~3.3-3.9s) branded end-card: kinetic type spelling out
 "Drop" / "Cat" / "GO" word-by-word in a modern, ephemeral style, followed by
-the app logo (static/logo-512.png) spinning and scaling into place. Pure
+a "Drop Cat / Studio" text wordmark spinning and scaling into place. Pure
 ffmpeg filters (drawtext, rotate, scale, gblur, vignette) -- no WanGP, no
 ACE-Step, no GPU job queue. Safe to call from any thread at any time; never
 competes for GPU with in-flight generation work.
@@ -16,9 +16,14 @@ picked by eye. Once one is chosen:
     exact dimensions/fps, and concatenates it onto the end. Not called from
     any pipeline yet -- that's a follow-up once Andrew picks a favourite.
 
-READ-ONLY asset: static/logo-512.png (also -256/-192) is the app's splash-screen
-mark, treated as sacred elsewhere in this codebase. This module only ever reads
-it as an ffmpeg input -- never writes, overwrites, or modifies it.
+DO NOT use static/logo-*.png (the app's splash-screen cat mark) anywhere in
+this module. Andrew, 2026-08-02: "I do not like the website's cheesey logo
+being involved in this video output, that's for me only" -- that icon is
+chrome for using the DCS app itself, not a brand mark for content he creates
+or shares. The "spin and settle" motion beat that used to carry the logo
+image now carries a pure-typography wordmark instead (_wordmark_chain +
+_spin_settle_chain below). If you're tempted to reintroduce an icon/mark of
+any kind here, don't -- ask first.
 
 --- ffmpeg gotcha discovered while building this (2026-08-02) ---
 `overlay` in this ffmpeg build (8.1 gyan.dev essentials) does NOT alpha-blend
@@ -29,8 +34,9 @@ written by PIL) composites correctly. So any filter chain here that needs a
 "draw on a transparent layer, then overlay" step (blur-in, scale-pop word
 styles) sources that transparent layer from a tiny cached PNG on disk
 (_blank_rgba_png), never from lavfi color+alpha. rotate()'s own fillcolor
-alpha (used for the logo's spin padding) is unaffected -- verified separately
-that rotate + overlay correctly preserve real per-pixel alpha end to end.
+alpha (used for the wordmark's spin padding) is unaffected -- verified
+separately that rotate + overlay correctly preserve real per-pixel alpha
+end to end.
 """
 import logging
 import math
@@ -44,7 +50,6 @@ from core.ffmpeg_utils import find_ffmpeg, video_encode_args, probe_file, probe_
 log = logging.getLogger(__name__)
 
 APP_DIR = Path(__file__).resolve().parent.parent.parent
-LOGO_PATH = APP_DIR / "static" / "logo-512.png"          # READ-ONLY -- never write this
 OUTPUT_DIR = APP_DIR / "output" / "outro_samples"
 FFMPEG = find_ffmpeg() or "ffmpeg"
 
@@ -215,18 +220,45 @@ def _combined_scale_pop_expr(windows, fade_in=0.28, start_frac=0.82) -> str:
     return expr
 
 
-# -- logo spin+scale ----------------------------------------------------
+# -- wordmark spin+scale ----------------------------------------------------
+# Replaces what used to be an app-logo image spin (see docstring at top of
+# file for why: the splash-screen mark is off-limits here). Same motion
+# beat, built from typography instead of an icon: a two-line "DROP CAT" /
+# "S T U D I O" lockup rendered onto a transparent canvas, then spun+scaled
+# in exactly like the old logo image was.
 
-def _logo_chain(logo_px: int, spin_start: float, spin_dur: float, turns: float,
-                 overshoot: bool = False) -> str:
-    """Filter chain for the logo input stream: scale to logo_px (fixed),
-    rotate with a decelerating spin-in (static padded canvas -- see module
-    docstring for why the canvas size must be a static int, not a per-frame
-    expression), then a scale pop-in from small -> logo_px, then an alpha
-    fade-in gated to spin_start. Settles to a static, unrotated, full-size
-    logo for the remainder of the clip.
+def _wordmark_chain(font_main: Path, font_sub: Path, color_main: str, color_sub: str,
+                     cw: int, ch: int) -> str:
+    """Draw a static two-line 'DROP CAT' / tracked 'S T U D I O' wordmark
+    onto a transparent canvas of size cw x ch. Pure typography -- no icon,
+    no image asset. The canvas is then handed to _spin_settle_chain() for
+    the actual spin/settle motion."""
+    line1_size = int(ch * 0.44)
+    line2_size = int(ch * 0.20)
+    gap = int(ch * 0.10)
+    total_h = line1_size + gap + line2_size
+    y1 = f"(h-{total_h})/2"
+    y2 = f"(h-{total_h})/2+{line1_size + gap}"
+    return (
+        f"format=rgba,"
+        f"drawtext=fontfile='{_ff_path(font_main)}':text='DROP CAT':fontcolor={color_main}:"
+        f"fontsize={line1_size}:x=(w-text_w)/2:y='{y1}',"
+        f"drawtext=fontfile='{_ff_path(font_sub)}':text='{_esc_text(_tracked('Studio'))}':"
+        f"fontcolor={color_sub}:fontsize={line2_size}:x=(w-text_w)/2:y='{y2}'"
+    )
+
+
+def _spin_settle_chain(w: int, h: int, spin_start: float, spin_dur: float, turns: float,
+                        overshoot: bool = False) -> str:
+    """Filter chain for an already-rgba, already-sized (w x h) input layer:
+    rotate with a decelerating spin-in (static padded square canvas -- see
+    module docstring for why the canvas size must be a static int, not a
+    per-frame expression), then a scale pop-in from small -> full size, then
+    an alpha fade-in gated to spin_start. Settles to a static, unrotated,
+    full-size layer for the remainder of the clip. Content-agnostic (it used
+    to carry the app logo image; now it carries the text wordmark).
     """
-    pad = int(math.ceil(logo_px * 1.4143 / 2) * 2)  # diagonal, rounded even
+    pad = int(math.ceil(math.hypot(w, h) / 2) * 2)  # diagonal, rounded even
     tl = f"(t-{spin_start})"
     # angle: starts at turns*2*PI, eases to 0 by spin_start+spin_dur
     angle = _if3(f"lt(t\\,{spin_start})", "0",
@@ -246,7 +278,6 @@ def _logo_chain(logo_px: int, spin_start: float, spin_dur: float, turns: float,
                     _if3(f"lt(t\\,{spin_start + spin_dur:.3f})",
                          f"40+({pad}-40)*{tl}/{spin_dur}", f"{pad}"))
     return (
-        f"format=rgba,scale={logo_px}:{logo_px},"
         f"rotate=a='{angle}':fillcolor=black@0:ow={pad}:oh={pad},"
         f"scale=w='{grow}':h=-1:eval=frame,"
         f"fade=t=in:st={spin_start}:d=0.15:alpha=1"
@@ -265,16 +296,16 @@ def _bg_grain(strength=4) -> str:
 
 def _variant_minimal_fade(w, h, fps):
     """Safe, elegant baseline: plain dark bg, soft fade+rise kinetic type in
-    wide-tracked light caps, snappy logo spin-in."""
+    wide-tracked light caps, snappy wordmark spin-in."""
     windows, words_end = _word_windows(start=0.24, word_dur=0.44, gap=0.13)
-    logo_start = words_end + 0.24
+    wm_start = words_end + 0.24
     spin_dur = 0.70
     hold = 0.55
-    duration = logo_start + spin_dur + hold + 0.26
+    duration = wm_start + spin_dur + hold + 0.26
 
-    logo_px = int(min(w, h) * 0.40)
+    cw, ch = int(w * 0.52), int(h * 0.24)
     bg_in = ["-f", "lavfi", "-i", f"color=c={BG_NEAR_BLACK}:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    logo_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(LOGO_PATH)]
+    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
 
     word_chain = ["vignette=PI/2.6"]
     for i, word in enumerate(WORDS):
@@ -287,29 +318,32 @@ def _variant_minimal_fade(w, h, fps):
                              text=_tracked(word))
         )
 
+    wm_chain = (_wordmark_chain(FONT_SEGOE_LIGHT, FONT_SEGOE_LIGHT, CREAM, GOLD, cw, ch)
+                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.3))
+
     filter_complex = (
         f"[0:v]{','.join(word_chain)}[bg];"
-        f"[1:v]{_logo_chain(logo_px, logo_start, spin_dur, turns=1.3)}[logo];"
-        f"[bg][logo]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
+        f"[1:v]{wm_chain}[wordmark];"
+        f"[bg][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
         f"fade=t=in:st=0:d=0.18,fade=t=out:st={duration-0.30:.3f}:d=0.30[outv]"
     )
-    cmd = [FFMPEG, "-y"] + bg_in + logo_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
+    cmd = [FFMPEG, "-y"] + bg_in + wm_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
     return duration, cmd
 
 
 def _variant_ink_stamp(w, h, fps):
     """Nods to the app's new bold-ink/high-contrast graphic-novel identity:
-    tighter vignette + subtle grain, tracked-caps SNAP reveal, harder spin
-    with a small landing bounce."""
+    tighter vignette + subtle grain, tracked-caps SNAP reveal, harder
+    wordmark spin with a small landing bounce."""
     windows, words_end = _word_windows(start=0.22, word_dur=0.42, gap=0.12)
-    logo_start = words_end + 0.22
+    wm_start = words_end + 0.22
     spin_dur = 0.55
     hold = 0.70
-    duration = logo_start + spin_dur + 0.20 + hold + 0.28
+    duration = wm_start + spin_dur + 0.20 + hold + 0.28
 
-    logo_px = int(min(w, h) * 0.40)
+    cw, ch = int(w * 0.52), int(h * 0.24)
     bg_in = ["-f", "lavfi", "-i", f"color=c={BG_NEAR_BLACK}:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    logo_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(LOGO_PATH)]
+    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
 
     word_chain = [f"{_bg_grain(4)},vignette=PI/4,eq=contrast=1.08:saturation=1.05"]
     for i, word in enumerate(WORDS):
@@ -319,29 +353,32 @@ def _variant_ink_stamp(w, h, fps):
         fontsize = int(h * 0.16) if is_go else int(h * 0.135)
         word_chain.extend(_word_snap_track(word, FONT_BAHNSCHRIFT, fontsize, color, t0, t1, w, h))
 
+    wm_chain = (_wordmark_chain(FONT_BAHNSCHRIFT, FONT_BAHNSCHRIFT, CREAM, CRIMSON, cw, ch)
+                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=2.0, overshoot=True))
+
     filter_complex = (
         f"[0:v]{','.join(word_chain)}[bg];"
-        f"[1:v]{_logo_chain(logo_px, logo_start, spin_dur, turns=2.0, overshoot=True)}[logo];"
-        f"[bg][logo]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
+        f"[1:v]{wm_chain}[wordmark];"
+        f"[bg][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
         f"fade=t=in:st=0:d=0.12,fade=t=out:st={duration-0.28:.3f}:d=0.28[outv]"
     )
-    cmd = [FFMPEG, "-y"] + bg_in + logo_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
+    cmd = [FFMPEG, "-y"] + bg_in + wm_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
     return duration, cmd
 
 
 def _variant_circus_glow(w, h, fps):
     """Most literally on-brand: warm crimson-to-black radial glow (the app's
-    circus palette), soft scale-in pop kinetic type, graceful slow logo
+    circus palette), soft scale-in pop kinetic type, graceful slow wordmark
     settle with a longer hold -- the most 'graceful' paced variant."""
     windows, words_end = _word_windows(start=0.26, word_dur=0.46, gap=0.14)
-    logo_start = words_end + 0.26
+    wm_start = words_end + 0.26
     spin_dur = 0.85
     hold = 0.60
-    duration = logo_start + spin_dur + hold + 0.30
+    duration = wm_start + spin_dur + hold + 0.30
 
-    logo_px = int(min(w, h) * 0.42)
+    cw, ch = int(w * 0.54), int(h * 0.25)
     bg_in = ["-f", "lavfi", "-i", f"color=c=0x3a0d10:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    logo_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(LOGO_PATH)]
+    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
     png = _blank_rgba_png(w, h)
     words_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png)]
 
@@ -356,31 +393,34 @@ def _variant_circus_glow(w, h, fps):
     word_frags.append(f"scale=w='{grow}':h=-1:eval=frame")
     words_chain = "format=rgba," + ",".join(word_frags)
 
+    wm_chain = (_wordmark_chain(FONT_SEGOE, FONT_SEGOE, GOLD, CREAM, cw, ch)
+                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.0))
+
     filter_complex = (
         f"[0:v]vignette=PI/3.2[bg];"
         f"[2:v]{words_chain}[wtxt];"
-        f"[1:v]{_logo_chain(logo_px, logo_start, spin_dur, turns=1.0)}[logo];"
+        f"[1:v]{wm_chain}[wordmark];"
         f"[bg][wtxt]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto[bgw];"
-        f"[bgw][logo]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
+        f"[bgw][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
         f"fade=t=in:st=0:d=0.22,fade=t=out:st={duration-0.35:.3f}:d=0.35[outv]"
     )
-    cmd = [FFMPEG, "-y"] + bg_in + logo_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
+    cmd = [FFMPEG, "-y"] + bg_in + wm_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
     return duration, cmd
 
 
 def _variant_neo_mono(w, h, fps):
     """Most minimal / editorial: flat near-black, tight-tracked genuine
-    blur-in kinetic type, fastest cleanest hard-settle logo spin -- the
+    blur-in kinetic type, fastest cleanest hard-settle wordmark spin -- the
     variant that leans hardest away from anything that could read as dated."""
     windows, words_end = _word_windows(start=0.24, word_dur=0.46, gap=0.14)
-    logo_start = words_end + 0.22
+    wm_start = words_end + 0.22
     spin_dur = 0.50
     hold = 0.75
-    duration = logo_start + spin_dur + hold + 0.28
+    duration = wm_start + spin_dur + hold + 0.28
 
-    logo_px = int(min(w, h) * 0.38)
+    cw, ch = int(w * 0.50), int(h * 0.22)
     bg_in = ["-f", "lavfi", "-i", f"color=c=0x0a0808:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    logo_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(LOGO_PATH)]
+    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
     png = _blank_rgba_png(w, h)
     words_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png)]
 
@@ -392,37 +432,40 @@ def _variant_neo_mono(w, h, fps):
         word_frags.extend(_word_blur_in_layer(word, FONT_BAHNSCHRIFT, fontsize, CREAM, t0, t1))
     words_chain = "format=rgba," + ",".join(word_frags)
 
+    wm_chain = (_wordmark_chain(FONT_BAHNSCHRIFT, FONT_BAHNSCHRIFT, CREAM, CREAM, cw, ch)
+                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.0))
+
     filter_complex = (
         f"[0:v]{_bg_grain(3)}[bg];"
         f"[2:v]{words_chain}[wtxt];"
-        f"[1:v]{_logo_chain(logo_px, logo_start, spin_dur, turns=1.0)}[logo];"
+        f"[1:v]{wm_chain}[wordmark];"
         f"[bg][wtxt]overlay=0:0:format=auto[bgw];"
-        f"[bgw][logo]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
+        f"[bgw][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
         f"fade=t=in:st=0:d=0.14,fade=t=out:st={duration-0.28:.3f}:d=0.28[outv]"
     )
-    cmd = [FFMPEG, "-y"] + bg_in + logo_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
+    cmd = [FFMPEG, "-y"] + bg_in + wm_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
     return duration, cmd
 
 
 VARIANTS = {
     "minimal_fade": {
         "label": "Minimal Fade",
-        "description": "Plain near-black bg, soft vignette; wide-tracked light caps fade+rise in; snappy 1.3-turn logo spin. The safe, elegant baseline.",
+        "description": "Plain near-black bg, soft vignette; wide-tracked light caps fade+rise in; snappy 1.3-turn 'Drop Cat / Studio' wordmark spin (text only, no icon). The safe, elegant baseline.",
         "builder": _variant_minimal_fade,
     },
     "ink_stamp": {
         "label": "Ink Stamp",
-        "description": "Subtle grain + tighter vignette + contrast boost (nods to the app's new bold-ink graphic-novel style); tracked-caps SNAP into tight caps; punchy 2-turn logo spin with a small landing bounce.",
+        "description": "Subtle grain + tighter vignette + contrast boost (nods to the app's new bold-ink graphic-novel style); tracked-caps SNAP into tight caps; punchy 2-turn wordmark spin with a small landing bounce.",
         "builder": _variant_ink_stamp,
     },
     "circus_glow": {
         "label": "Circus Glow",
-        "description": "Warm crimson-to-black radial glow (the app's own circus palette, most literal brand match); gold words soft-scale-in; graceful single-turn logo settle with a longer hold.",
+        "description": "Warm crimson-to-black radial glow (the app's own circus palette, most literal brand match); gold words soft-scale-in; graceful single-turn wordmark settle with a longer hold.",
         "builder": _variant_circus_glow,
     },
     "neo_mono": {
         "label": "Neo Mono",
-        "description": "Flattest, most minimal/editorial treatment; genuine stepped blur-to-sharp kinetic type (no color accents); fastest, hardest-settle logo spin. Leans furthest from anything dated.",
+        "description": "Flattest, most minimal/editorial treatment; genuine stepped blur-to-sharp kinetic type (no color accents); fastest, hardest-settle wordmark spin. Leans furthest from anything dated.",
         "builder": _variant_neo_mono,
     },
 }
@@ -440,8 +483,6 @@ def render_variant(variant_key: str, output_path: str | Path,
     """Render one outro variant to output_path. Returns (path, error)."""
     if variant_key not in VARIANTS:
         return None, f"Unknown outro variant '{variant_key}' (have: {', '.join(VARIANTS)})"
-    if not LOGO_PATH.exists():
-        return None, f"Logo asset missing: {LOGO_PATH}"
 
     # even dims required for yuv420p encode
     width = width if width % 2 == 0 else width + 1
