@@ -85,6 +85,10 @@ DEFAULT_W, DEFAULT_H, DEFAULT_FPS = 1280, 720, 30
 
 _TMP_PREFIX = "dcs-outro-"
 
+# How long the re-attached audio fades to silence before it ends, instead of
+# stopping dead -- see append_outro().
+_AUDIO_FADE_S = 0.8
+
 
 # -- tiny expression helpers (ffmpeg eval syntax; commas inside nested calls
 #    are backslash-escaped -- validated empirically against this ffmpeg build)
@@ -502,9 +506,10 @@ def append_outro(input_video_path: str | Path, variant_key: str,
     If the source doesn't already have enough silent runway at the end
     (audio duration close to or equal to video duration -- the common case
     for a generated music video), the tail is extended with a frozen last
-    frame first. The original audio track is re-attached unmodified, so it
-    naturally ends before the overlay's darken pass begins -- genuinely
-    silent under the text, not just visually timed to look that way.
+    frame first. The original audio track is re-attached with a short
+    fade-out (_AUDIO_FADE_S) instead of stopping dead, and finishes before
+    the overlay's darken pass begins -- genuinely silent under the text,
+    not just visually timed to look that way.
 
     Returns (output_path, error).
     """
@@ -620,13 +625,18 @@ def append_outro(input_video_path: str | Path, variant_key: str,
         if not filtered_video.exists() or filtered_video.stat().st_size == 0:
             return None, "ffmpeg produced empty overlay output"
 
-        # Re-attach the original audio (unmodified) -- it naturally ends
-        # before darken_start, which is the whole point: silence under the
-        # sign-off, not a manufactured fade.
+        # Re-attach the original audio, fading it out over its last
+        # _AUDIO_FADE_S seconds instead of letting it stop dead -- ending
+        # before darken_start was never meant to mean "hard-cut," a clipped
+        # song reads as broken even when the silence timing itself is right.
         if has_audio:
+            fade_dur = min(_AUDIO_FADE_S, max(0.1, audio_dur))
+            fade_start = max(0.0, audio_dur - fade_dur)
             r = subprocess.run(
                 [FFMPEG, "-y", "-i", str(filtered_video), "-i", input_video_path,
-                 "-map", "0:v", "-map", "1:a?", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                 "-map", "0:v", "-map", "1:a?",
+                 "-af", f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}",
+                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                  str(out_path)],
                 capture_output=True, timeout=300,
             )
