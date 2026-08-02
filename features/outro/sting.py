@@ -61,6 +61,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from PIL import Image, ImageDraw
+
 from core.ffmpeg_utils import find_ffmpeg, video_encode_args, probe_file, probe_duration
 
 log = logging.getLogger(__name__)
@@ -78,8 +80,21 @@ FONT_SEGOE_LIGHT = FONTS_DIR / "segoeuil.ttf"        # light weight, elegant
 GOLD = "0xd4a017"
 CRIMSON = "0xc41e3a"
 CREAM = "0xf0e6d0"
+GOLD_RGB = (0xd4, 0xa0, 0x17)
+CREAM_RGB = (0xf0, 0xe6, 0xd0)
 
 WORDS = ["Drop", "Cat", "GO"]
+
+# Icon accent color per variant -- gold for the warm circus-glow palette,
+# cream everywhere else to match each variant's existing word color.
+_ICON_COLOR = {
+    "minimal_fade": CREAM_RGB, "ink_stamp": CREAM_RGB,
+    "circus_glow": GOLD_RGB, "neo_mono": CREAM_RGB,
+}
+
+# Bass-hit pitch per word (Hz) -- a small rising pattern, not just a
+# repeated single tone, so the three words don't sound identical.
+_BASS_FREQS = [55, 65, 78]
 
 DEFAULT_W, DEFAULT_H, DEFAULT_FPS = 1280, 720, 30
 
@@ -88,6 +103,69 @@ _TMP_PREFIX = "dcs-outro-"
 # How long the re-attached audio fades to silence before it ends, instead of
 # stopping dead -- see append_outro().
 _AUDIO_FADE_S = 0.8
+
+_ICON_CACHE: dict[tuple, Path] = {}
+
+
+def _make_flat_icon(size: int, rgb: tuple[int, int, int]) -> Path:
+    """A small flat cat mark -- rounded head, two triangle ears, one dot eye --
+    solid single color on a transparent canvas. No gradient, no stroke, no
+    bevel, no shading of any kind: flat fill is the whole point, it's the one
+    style of "logo" that structurally cannot read as a 90s-CGI chrome render.
+    Cached per (size, color) since append_outro may call this once per word.
+    """
+    key = (size, rgb)
+    if key in _ICON_CACHE and _ICON_CACHE[key].exists():
+        return _ICON_CACHE[key]
+
+    ss = size * 4  # supersample, downscale at the end for clean edges
+    img = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    fill = (*rgb, 255)
+
+    cx, cy = ss / 2, ss * 0.58
+    r = ss * 0.28
+    # Ears first (tips well above the head, bases tucked under the circle's
+    # top edge so the circle drawn on top cleans up the seam) then the head
+    # circle on top -- guarantees a smooth head outline with two clean
+    # triangle points breaking above it, not two shapes buried inside one.
+    d.polygon([
+        (cx - r * 0.95, cy - r * 0.10),
+        (cx - r * 1.05, cy - r * 1.75),
+        (cx - r * 0.05, cy - r * 0.65),
+    ], fill=fill)
+    d.polygon([
+        (cx + r * 0.95, cy - r * 0.10),
+        (cx + r * 1.05, cy - r * 1.75),
+        (cx + r * 0.05, cy - r * 0.65),
+    ], fill=fill)
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill)
+
+    eye_r = r * 0.13
+    # punch the eye out as a hole so the mark reads on any background
+    mask = Image.new("L", (ss, ss), 0)
+    ImageDraw.Draw(mask).ellipse([cx - eye_r, cy - eye_r, cx + eye_r, cy + eye_r], fill=255)
+    img.paste((0, 0, 0, 0), (0, 0), mask)
+
+    img = img.resize((size, size), Image.LANCZOS)
+    out = Path(tempfile.gettempdir()) / f"{_TMP_PREFIX}icon_{size}_{rgb[0]}{rgb[1]}{rgb[2]}.png"
+    img.save(out)
+    _ICON_CACHE[key] = out
+    return out
+
+
+def _bass_hit(tmp: Path, freq: int = 62, dur: float = 0.55) -> Path:
+    """Synthesize a short low sub-bass 'thump' -- fast attack, exponential-ish
+    decay -- as a standalone wav. No sample assets needed; built fresh each
+    call via ffmpeg's own sine source."""
+    out = tmp / f"bass_{freq}.wav"
+    r = subprocess.run(
+        [FFMPEG, "-y", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={dur}",
+         "-af", f"afade=t=in:d=0.01,afade=t=out:st=0.08:d={dur - 0.08:.3f},volume=0.9",
+         str(out)],
+        capture_output=True, timeout=30,
+    )
+    return out if r.returncode == 0 and out.exists() else None
 
 
 # -- tiny expression helpers (ffmpeg eval syntax; commas inside nested calls
@@ -604,15 +682,31 @@ def append_outro(input_video_path: str | Path, variant_key: str,
         main_chain, words_layer_chain = VARIANTS[variant_key]["builder"](w, h, windows, darken_start, total_duration)
 
         cmd = [FFMPEG, "-y", "-i", str(base_video)]
+        next_input_idx = 1
         if words_layer_chain is not None:
             cmd += ["-loop", "1", "-t", f"{total_duration:.3f}", "-i", str(_blank_rgba_png(w, h))]
             filter_complex = (
                 f"[0:v]{main_chain}[bg];"
                 f"[1:v]{words_layer_chain}[wtxt];"
-                f"[bg][wtxt]overlay=0:0:format=auto[outv]"
+                f"[bg][wtxt]overlay=0:0:format=auto[outv0]"
             )
+            next_input_idx = 2
         else:
-            filter_complex = f"[0:v]{main_chain}[outv]"
+            filter_complex = f"[0:v]{main_chain}[outv0]"
+
+        # A small flat icon (see _make_flat_icon) fades in with the darken
+        # pass and holds through the end -- Andrew wants an actual mark
+        # integrated, not just bare words, but done as flat vector fill so
+        # it structurally cannot read as a 90s-CGI chrome/bevel render.
+        icon_input_idx = next_input_idx
+        icon_size = int(h * 0.16)
+        icon_path = _make_flat_icon(icon_size, _ICON_COLOR.get(variant_key, CREAM_RGB))
+        cmd += ["-loop", "1", "-t", f"{total_duration:.3f}", "-i", str(icon_path)]
+        icon_y = int(h * 0.20)
+        filter_complex += (
+            f";[{icon_input_idx}:v]fade=t=in:st={darken_start:.3f}:d=0.4:alpha=1[icon];"
+            f"[outv0][icon]overlay=x=(W-w)/2:y={icon_y}:format=auto[outv]"
+        )
 
         filtered_video = tmp / "filtered.mp4"
         cmd += ["-filter_complex", filter_complex, "-map", "[outv]", "-t", f"{total_duration:.3f}"]
@@ -629,25 +723,68 @@ def append_outro(input_video_path: str | Path, variant_key: str,
         # _AUDIO_FADE_S seconds instead of letting it stop dead -- ending
         # before darken_start was never meant to mean "hard-cut," a clipped
         # song reads as broken even when the silence timing itself is right.
-        if has_audio:
-            fade_dur = min(_AUDIO_FADE_S, max(0.1, audio_dur))
-            fade_start = max(0.0, audio_dur - fade_dur)
+        # Then mix in a bass hit timed to each word's onset (windows[i][0])
+        # so the reveal has a stinger accent, not silent text popping in.
+        bass_paths = [_bass_hit(tmp, freq=f) for f in _BASS_FREQS[:len(windows)]]
+        bass_ok = all(bass_paths)
+
+        def _fallback_remux():
+            if has_audio:
+                fade_dur = min(_AUDIO_FADE_S, max(0.1, audio_dur))
+                fade_start = max(0.0, audio_dur - fade_dur)
+                rr = subprocess.run(
+                    [FFMPEG, "-y", "-i", str(filtered_video), "-i", input_video_path,
+                     "-map", "0:v", "-map", "1:a?",
+                     "-af", f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}",
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out_path)],
+                    capture_output=True, timeout=300,
+                )
+                if rr.returncode == 0 and out_path.exists():
+                    return True
+            import shutil
+            shutil.copy2(filtered_video, out_path)
+            return False
+
+        if bass_ok:
+            cmd2 = [FFMPEG, "-y", "-i", str(filtered_video)]
+            next_idx = 1
+            song_idx = None
+            if has_audio:
+                cmd2 += ["-i", input_video_path]
+                song_idx = next_idx
+                next_idx += 1
+            bass_base_idx = next_idx
+            for p in bass_paths:
+                cmd2 += ["-i", str(p)]
+                next_idx += 1
+
+            af_parts = []
+            mix_labels = []
+            if has_audio:
+                fade_dur = min(_AUDIO_FADE_S, max(0.1, audio_dur))
+                fade_start = max(0.0, audio_dur - fade_dur)
+                af_parts.append(f"[{song_idx}:a]afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}[song]")
+                mix_labels.append("[song]")
+            for i, (t0, _t1) in enumerate(windows):
+                dms = int(max(0.0, t0) * 1000)
+                af_parts.append(f"[{bass_base_idx + i}:a]adelay={dms}|{dms}[bass{i}]")
+                mix_labels.append(f"[bass{i}]")
+            af_parts.append(f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:"
+                             f"duration=longest:dropout_transition=0[aout]")
+
             r = subprocess.run(
-                [FFMPEG, "-y", "-i", str(filtered_video), "-i", input_video_path,
-                 "-map", "0:v", "-map", "1:a?",
-                 "-af", f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f}",
-                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                 str(out_path)],
+                cmd2 + ["-filter_complex", ";".join(af_parts),
+                        "-map", "0:v", "-map", "[aout]",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out_path)],
                 capture_output=True, timeout=300,
             )
             if r.returncode != 0 or not out_path.exists():
-                log.warning("[outro] audio re-mux failed, falling back to silent output: %s",
-                            r.stderr[-400:])
-                import shutil
-                shutil.copy2(filtered_video, out_path)
+                log.warning("[outro] bass-hit audio mix failed, falling back to fade-only: %s",
+                            (r.stderr or b"")[-400:] if isinstance(r.stderr, bytes) else r.stderr[-400:] if r.stderr else "")
+                _fallback_remux()
         else:
-            import shutil
-            shutil.copy2(filtered_video, out_path)
+            log.warning("[outro] bass-hit synth failed -- falling back to fade-only audio")
+            _fallback_remux()
 
     if not out_path.exists() or out_path.stat().st_size == 0:
         return None, "append_outro produced empty output"
