@@ -33,8 +33,8 @@ _FALLBACK_PHASES = [
 ]
 
 _FALLBACK_PHASES_CALM = [
-    "ambient light shifts softly across the scene, subject completely still",
-    "steam rises gently, background details settle, subject motionless",
+    "ambient light shifts softly across the scene, subject mostly still",
+    "steam rises gently, background details settle, subject barely stirs",
     "shadow creeps slowly across the surface, atmosphere breathes",
     "curtain stirs slightly from unseen air, scene holds steady",
     "distant element drifts gently, foreground subject unchanged",
@@ -372,18 +372,26 @@ _STORY_ARC_CALM = _STORY_ARC_BASE + """
 MODEL: LTX-2 Distilled, calm/scene-hold mode.
 PROMPT LENGTH: 20-30 words per clip.
 
-The SUBJECT is completely still. Motion comes ONLY from the environment.
+The scene mostly holds still. Motion comes from the environment, plus AT MOST
+one small subject-periphery movement per clip (same ceiling as GENTLE mode --
+proven safe at 8 steps). This is not a slideshow: give the subject something
+small and real to do when the idea implies it.
 
-ALLOWED (one per clip):
+ALLOWED environment (one per clip):
   light shifts across a surface, shadow lengthens by 10cm, curtain drifts 5cm,
   steam rises from a vessel, leaf trembles once, water surface ripples slightly
 
-BANNED -- subject motion of any kind (causes ghosting at 8 steps):
-  head, face, eyes, mouth, brows, hands, arms, torso breathing, any body part
+ALLOWED subject periphery (at most one per clip):
+  a hand lifts slightly, fingers shift, fabric or sleeve ripples once,
+  hair stirs from unseen air, weight settles, shoulders shift faintly
 
-STRUCTURE: [subject completely still, 10 words] + [one environmental change, 12 words] + [scene anchor, 8 words]
+BANNED -- causes ghosting at 8 steps:
+  head turning or nodding, face motion, eyes or mouth moving, full-arm reach,
+  torso rotation
 
-Arc: same scene, one different environmental detail per clip. Breathing photograph.\
+STRUCTURE: [subject mostly still, 10 words] + [one environmental OR periphery change, 12 words] + [scene anchor, 8 words]
+
+Arc: same scene, one different detail per clip. Breathing photograph.\
 """
 
 
@@ -466,12 +474,14 @@ def _generate_story_arc(
         ]
         anchor = (
             "Breathing photograph, fixed camera. "
-            "Subject holds perfectly still. "
+            "Subject stays in place -- at most a hand lifts slightly, fabric or "
+            "hair shifts, or weight settles; face and head stay still. "
             "{effect} "
             "Background unchanged, sky clear and steady, horizon locked."
         )
         fallback_base = (
-            "breathing photograph, fixed wide shot, subject perfectly still, "
+            "breathing photograph, fixed wide shot, subject stays in place with "
+            "subtle periphery motion, face and head still, "
             "{effect} background unchanged, fixed frame, photorealistic"
         )
         clips = []
@@ -488,7 +498,7 @@ def _generate_story_arc(
         return clips, "scene-hold"
 
     if resolved_style == "calm":
-        default_idea = "Create a calm breathing-photograph short film, environment-only motion, subject completely still"
+        default_idea = "Create a calm breathing-photograph short film, mostly environment motion with subtle subject periphery movement"
     elif is_ltx and is_ltx_dev13:
         default_idea = "Create a short film with deliberate physical motion, subject moves with clear filmable actions, scene preserved"
     elif is_ltx:
@@ -508,7 +518,7 @@ def _generate_story_arc(
     # Wan T2V: same as I2V but needs fuller scene description (no reference image).
     is_wan_t2v = "t2v" in (model_name or "").lower()
     if resolved_style == "calm":
-        style_hint = "CALM -- environment-only motion, subject completely still, one environmental effect per clip, explicit background anchor"
+        style_hint = "CALM -- mostly environment motion, plus at most one small subject-periphery movement (hand, fabric, hair) per clip, head/face still, explicit background anchor"
     elif is_ltx and is_ltx_dev13:
         style_hint = (
             "LTX Dev13B (40 steps) -- deliberate physical motion OK (strides, gestures, turns). "
@@ -539,7 +549,7 @@ def _generate_story_arc(
     # The system prompt already bans "erupts, slams" etc., but a repeated prompt-level
     # note prevents the LLM from treating the user idea as higher-priority than the rules.
     if resolved_style == "calm":
-        idea_display = f"[CALM MODE -- translate this idea into environment-only, subject-still motion]\n{idea_text}"
+        idea_display = f"[CALM MODE -- translate this idea into mostly environment motion, with at most one small subject-periphery movement; head/face stay still]\n{idea_text}"
     else:
         idea_display = idea_text
     user_msg = (
@@ -732,26 +742,30 @@ Return ONLY valid JSON, no other text:
 _DIRECTOR_SYSTEM_CALM = """\
 You are a film director reviewing footage from a calm, scene-hold short film.
 You will be shown 2 frames per clip (early frame and late frame within each clip's segment).
-Mode: CALM. The subject must be COMPLETELY STILL. Motion comes only from the environment.
+Mode: CALM. The scene mostly holds still. Environment motion is expected, plus AT MOST
+one small subject-periphery movement per clip (hand, fingers, fabric, hair, weight settling).
+Head, face, eyes, and mouth must stay still -- that specific motion causes ghosting at 8 steps.
 Your job: identify clips that failed so they can be re-shot.
 
 Rate each clip 1-5:
-  5 = excellent -- subject pixel-stable, environment motion visible (light, steam, shadow, curtain), scene preserved
+  5 = excellent -- environment motion visible (light, steam, shadow, curtain) and/or subtle
+      periphery motion (hand, fabric, hair), head/face pixel-stable, scene preserved
   4 = good -- minor flicker but acceptable
-  3 = passable -- slight subject drift but scene held
-  2 = weak -- subject visibly animated (head moved, eyes shifted, body moved), or scene replaced
-  1 = bad -- subject replaced, scene changed to different location, or environment motion absent entirely
+  3 = passable -- slight extra drift but scene held, head/face still stable
+  2 = weak -- head moved, eyes/mouth shifted, full-arm or torso motion, or scene replaced
+  1 = bad -- subject replaced, scene changed to different location, or all motion absent (pure freeze-frame)
 
-For clips rated <= 2: write a corrected calm prompt (35-55 words, environment-only motion).
-  - Subject described as completely still
-  - ONE environmental change only (light shift, steam, shadow, fabric settle, curtain stir)
+For clips rated <= 2: write a corrected calm prompt (35-55 words).
+  - Subject's head and face stay still; at most one small periphery motion (hand, fabric, hair) is fine
+  - ONE environmental change (light shift, steam, shadow, fabric settle, curtain stir)
   - Add camera lock phrase at end: "Static shot, fixed camera."
 Apply TYPE rules:
-  TYPE A (people/characters): name their visual markers (hair, clothing, skin) -- no body motion
+  TYPE A (people/characters): name their visual markers (hair, clothing, skin) -- periphery motion only, no head/face motion
   TYPE B (landscape/objects): describe background element change only
 
-Be conservative: flag at most 2-3 clips. Only flag clips where the subject moved or scene changed.
-A still-subject clip with barely visible environment motion is rated 3 (passable), NOT flagged.
+Be conservative: flag at most 2-3 clips. Only flag clips where the head/face moved or scene changed --
+NOT clips with a hand, fabric, or hair moving; that motion is intended, not a defect.
+A pixel-frozen clip with zero motion of any kind is itself a defect (rated <= 2, "all motion absent").
 
 Return ONLY valid JSON, no other text:
 {"ratings": [5, 3, 2, 4], "regenerate": [{"clip_idx": 2, "new_prompt": "..."}], "notes": "one sentence what you changed and why"}
