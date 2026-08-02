@@ -47,6 +47,83 @@ _STYLE_LEAD = (
     "(shallow depth of field, blurred foreground element, cinematic depth:1.2)"
 )
 
+# GRAPHIC NOVEL render style -- added 2026-08-02 per Andrew: "we're going to
+# have to lean into the german bdsm graphic novel genre for stylistic
+# guidance here... people can go to any AI site to create stupid regular
+# images." A second, opt-in RENDERING identity alongside _STYLE_LEAD's
+# photoreal-leaning 2.5D look -- selected via a new preset
+# ("nsfw_graphic_novel", see PRESETS below), never the silent default.
+# Reuses this file's already-proven nemo_fumetti_eurocomic LoRA (the SAME
+# LoRA _STYLE_LEAD already uses at 0.6) but pushed hard in the opposite
+# direction: _STYLE_LEAD actively counter-asserts "unretouched amateur
+# photograph...not illustration" to fight the LoRA's own comic-ink pull back
+# toward photoreal; this style drops that counter-assertion and inverts it,
+# so the LoRA's native bold-ink/high-contrast look is what actually reaches
+# the render instead of being fought. Kept the LoRA choice/weight change
+# scoped to a NEW alternate constant rather than touching _STYLE_LEAD itself,
+# so every existing photoreal preset/render is byte-for-byte unaffected.
+#
+# Prior art found on this machine but NOT wired into this file: C:\Forge\
+# styles.csv already has unused "Painted Graphic Novel" / "Painted NSFW"
+# Forge-side saved styles built around a different LoRA
+# (vixon_gothic_oil_d4rk01l, confirmed present in C:\Forge\models\Lora\) with
+# score_9-tag (Pony-convention) quality tags and painterly-oil/chiaroscuro
+# wording. Real prior exploration of this exact aesthetic direction, but
+# built for Pony-tag conventions and never plumbed through this preset
+# system's checkpoint/anatomy-LoRA stack (Girthy, Flat_Chest_Helper,
+# Body_weight_slider -- all tuned against perfection25D_illustrious's
+# rating_explicit/Illustrious tag convention, not score_9). Deliberately NOT
+# reused here to avoid destabilizing that proven anatomy stack with an
+# unverified checkpoint+LoRA combo on a first pass; vixon_gothic_oil is a
+# known escalation lever (stronger chiaroscuro/painterly texture) if
+# nemo_fumetti_eurocomic alone doesn't read graphic-novel enough on
+# retest -- try stacking it at a low weight (~0.3-0.4) before anything more
+# invasive like a checkpoint swap.
+#
+# Scope is RENDERING TECHNIQUE ONLY (ink linework, contrast, panel-art
+# treatment) -- no forced setting/prop/wardrobe words (dungeon, leather,
+# latex, rope). Two reasons: (1) this file's own house rule (see the module
+# docstring) is that the wrap adds a checkpoint/style/safety lead-in, never
+# scene content -- _STYLE_LEAD has never forced a setting either, and this
+# style shouldn't be the first to break that; (2) _ANATOMY_POSITIVE asserts
+# "(completely nude, naked, bare skin, no clothing:1.3)" universally across
+# every subject path, and this file has hit the exact clothing-negation/
+# graphic-artifact backfire (see the artifact-saga comment above
+# _female_positive) enough times to know naming a garment/prop, even as a
+# genre flourish, risks fighting that nudity anchor or summoning an
+# unintended costume graphic. Genre wardrobe/props (leather, latex, rope,
+# restraints, dungeon/industrial setting) are left to the USER'S OWN prompt
+# text, same as any other scene detail -- this style renders whatever the
+# user describes in bold ink/high-contrast graphic-novel treatment instead
+# of photoreal, it doesn't inject genre content on its own.
+
+# ESCALATED same round -- first live test (seed 501001, "woman in a
+# rain-soaked alley") came back with a strongly illustrated BACKGROUND (flat
+# shading, graphic doors/shutters) but a near-photoreal FIGURE: the
+# checkpoint's own photoreal training bias, plus this file's universal
+# _ANATOMY_POSITIVE/_female_positive skin wording ("visible pores, matte
+# skin, amateur candid photo quality" -- explicitly photographic language,
+# proven necessary there for the separate "too perfect/doll face" fight),
+# was winning over nemo_fumetti_eurocomic alone on the body specifically.
+# Two changes: (1) stacked the vixon_gothic_oil_d4rk01l LoRA noted above as
+# the next lever -- confirmed present in C:\Forge\models\Lora\, kept at a
+# conservative 0.35 (below this file's own documented "0.5-0.6+ on an
+# unfamiliar LoRA risks artifacts" pattern from the muscular-female-LoRA
+# saga) since it had never been combined with this checkpoint's anatomy-LoRA
+# stack before; (2) added much more concrete, literal comic-art nouns (ink
+# outline AROUND the figure specifically, flat cel-shaded coloring, screentone/
+# halftone shading) instead of relying on general "graphic novel" framing --
+# per this file's own repeatedly-proven "concrete beats evocative" rule.
+_GRAPHIC_NOVEL_STYLE_LEAD = (
+    "<lora:nemo_fumetti_eurocomic:1.0>, <lora:vixon_gothic_oil_d4rk01l:0.35>, rating_explicit, "
+    "(bold graphic novel illustration, inked comic book art, european comic style, "
+    "not a photograph, not photorealistic, not a realistic photo:1.4), "
+    "(thick black ink outline around the figure, heavy black linework, flat cel-shaded coloring, "
+    "screentone shading, halftone dot shading, high contrast, deep chiaroscuro shadow masses:1.4), "
+    "(dramatic rim light, moody cinematic lighting, limited stark palette, strong graphic "
+    "silhouette, hand-drawn illustrated look:1.2)"
+)
+
 # Anthropomorphic creature style -- Andrew's core DropCat brand (colorful
 # fantasy creatures, never real people) applied to the NSFW anatomy-accurate
 # pipeline. Fumetti weight lowered (0.6 -> 0.4) to leave headroom for the
@@ -1072,6 +1149,14 @@ PRESETS = {
         "description": "perfection25D_illustrious + nemo_fumetti_eurocomic 2.5D recipe, subject-aware anatomy anchoring, face+hand ADetailer, regional mode for multi-subject scenes.",
         "checkpoint": NSFW_CHECKPOINT,
         "nsfw": True,
+        "render_style": "realistic",
+    },
+    "nsfw_graphic_novel": {
+        "label": "NSFW (Graphic Novel)",
+        "description": "Same perfection25D_illustrious anatomy/gender/creature stack as NSFW (Explicit), but rendered as bold-ink, high-contrast graphic-novel/comic-panel art instead of the photoreal 2.5D look -- a distinct DropCat visual identity, not another photoreal AI image.",
+        "checkpoint": NSFW_CHECKPOINT,
+        "nsfw": True,
+        "render_style": "graphic_novel",
     },
 }
 
@@ -1293,7 +1378,19 @@ def build_forge_payload(
     # (human) is the live path again; _creature_male_positive still exists
     # for whenever the checkbox is on.
     creature_applied = creature and resolved not in _REGIONAL_SUBJECTS
-    style_lead = _CREATURE_STYLE_LEAD if creature_applied else _STYLE_LEAD
+    # render_style is preset-driven (see PRESETS above), not a separate
+    # function argument -- keeps this function's call signature (and every
+    # existing caller: features/image_studio/routes.py, features/
+    # admin_review/routes.py) unchanged. Creature style still wins over
+    # graphic-novel style if both are somehow in play, same conservative
+    # stance as the existing creature+regional-mode limitation above (never
+    # verified live together, so don't silently combine).
+    render_style = preset.get("render_style", "realistic")
+    style_lead = (
+        _CREATURE_STYLE_LEAD if creature_applied
+        else _GRAPHIC_NOVEL_STYLE_LEAD if render_style == "graphic_novel"
+        else _STYLE_LEAD
+    )
 
     if resolved in _REGIONAL_SUBJECTS:
         # variant offsets (0, 1) so a mixed/two-woman pair gets two DIFFERENT
