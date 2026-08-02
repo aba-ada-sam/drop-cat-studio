@@ -1,48 +1,64 @@
-"""Branded outro / logo-sting generator for Drop Cat Studio.
+"""Branded outro / sign-off generator for Drop Cat Studio.
 
-Renders a short (~3.3-3.9s) branded end-card: kinetic type spelling out
-"Drop" / "Cat" / "GO" word-by-word in a modern, ephemeral style, followed by
-a "Drop Cat / Studio" text wordmark spinning and scaling into place. Pure
-ffmpeg filters (drawtext, rotate, scale, gblur, vignette) -- no WanGP, no
-ACE-Step, no GPU job queue. Safe to call from any thread at any time; never
-competes for GPU with in-flight generation work.
+Andrew, 2026-08-02 (final direction -- this module has been through two
+earlier designs, both superseded, see git log if curious):
 
-Four variants ship out of the box (see VARIANTS below) so a favourite can be
-picked by eye. Once one is chosen:
-  - render_variant() / render_samples()  -- standalone review clips (this file's
-    __main__ / the /api caller uses these to produce the .mp4s Andrew watches).
-  - append_outro()                        -- the wiring point for later: takes a
-    finished video + a variant name, renders the sting to match that video's
-    exact dimensions/fps, and concatenates it onto the end. Not called from
-    any pipeline yet -- that's a follow-up once Andrew picks a favourite.
+  "don't even mention drop cat studio, just leave them guessing after the
+  'Drop', the 'Cat' and the 'GO'. If they can't figure it out, all the
+  better. ... those three bursts should show up at the end superimposed
+  over the video, after the music has stopped. kind of a 'sign off'."
 
-DO NOT use static/logo-*.png (the app's splash-screen cat mark) anywhere in
-this module. Andrew, 2026-08-02: "I do not like the website's cheesey logo
-being involved in this video output, that's for me only" -- that icon is
-chrome for using the DCS app itself, not a brand mark for content he creates
-or shares. The "spin and settle" motion beat that used to carry the logo
-image now carries a pure-typography wordmark instead (_wordmark_chain +
-_spin_settle_chain below). If you're tempted to reintroduce an icon/mark of
-any kind here, don't -- ask first.
+So: NO wordmark, NO brand name spelled out, NO icon/logo of any kind --
+just the three words "Drop" / "Cat" / "GO" appearing in sequence, deliberately
+unexplained. And it is NOT a separate appended clip with its own background
+card -- it's composited directly on top of the source video's own real tail
+footage, timed to start after that video's audio has gone silent (extending
+the tail with a frozen last frame first, if the video doesn't already have
+enough silent runway at the end).
 
---- ffmpeg gotcha discovered while building this (2026-08-02) ---
+Pure ffmpeg filters (drawtext, drawbox, gblur) -- no WanGP, no ACE-Step, no
+GPU job queue. Safe to call from any thread at any time; never competes for
+GPU with in-flight generation work.
+
+append_outro(input_video_path, variant_key, output_path=None) is the single
+entry point:
+  1. Probes the source: dimensions/fps/container duration/audio extent.
+  2. Works out how much silent runway already exists at the tail (video
+     duration minus audio duration) and extends the video with a frozen
+     last frame if that isn't enough to fit the word-reveal comfortably
+     after the audio ends.
+  3. Composites a variant's word-reveal treatment (see VARIANTS) directly
+     onto that (possibly-extended) tail: a brief darken/vignette pass for
+     legibility against real footage, then "Drop" -> "Cat" -> "GO" in
+     sequence, timed to land entirely within the silent portion.
+  4. Re-attaches the original audio track (naturally shorter than the new
+     video length by design -- that gap is the point: it's silent under
+     the sign-off).
+
+render_samples(input_video_path, out_dir=None) runs all four variants
+against one real source clip for side-by-side review.
+
+--- ffmpeg gotchas discovered while building this (2026-08-02) ---
 `overlay` in this ffmpeg build (8.1 gyan.dev essentials) does NOT alpha-blend
-against a synthetic `-f lavfi -i "color=c=black@0.0:..."` transparent source --
-it silently ignores the alpha plane and paints the RGB (black) opaquely,
-blowing away whatever is behind it. A REAL rgba PNG file (even a blank one
-written by PIL) composites correctly. So any filter chain here that needs a
-"draw on a transparent layer, then overlay" step (blur-in, scale-pop word
-styles) sources that transparent layer from a tiny cached PNG on disk
-(_blank_rgba_png), never from lavfi color+alpha. rotate()'s own fillcolor
-alpha (used for the wordmark's spin padding) is unaffected -- verified
-separately that rotate + overlay correctly preserve real per-pixel alpha
-end to end.
+against a synthetic `-f lavfi -i "color=c=...@alpha"` transparent source --
+it silently ignores the alpha plane and paints the RGB opaquely, blowing
+away whatever is behind it. A REAL rgba PNG file (even a blank one written
+by PIL) composites correctly, so the blur-in/scale-pop word styles (which
+need an isolated transparent layer to blur/scale without dragging the whole
+frame with them) source that layer from a tiny cached PNG on disk
+(_blank_rgba_png), never from lavfi color+alpha.
+By contrast, `drawbox` and `drawtext` draw DIRECTLY onto whatever frame
+they're given and blend their own alpha correctly against real (non-alpha)
+video content -- verified empirically -- so the legibility darken pass and
+the fade_rise/snap_track word styles are chained straight onto the main
+video stream with no separate transparent layer at all.
+`scale`'s w/h expressions don't support the `enable` timeline option in this
+build ("Timeline not supported with filter 'scale'"); `eq`, `drawbox`,
+`gblur` and `rotate` all do.
 """
 import logging
-import math
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 
 from core.ffmpeg_utils import find_ffmpeg, video_encode_args, probe_file, probe_duration
@@ -59,7 +75,6 @@ FONT_SEGOE = FONTS_DIR / "segoeui.ttf"               # regular weight
 FONT_SEGOE_LIGHT = FONTS_DIR / "segoeuil.ttf"        # light weight, elegant
 
 # Palette anchored on the app's circus theme (static/css/design-system.css)
-BG_NEAR_BLACK = "0x0d0606"
 GOLD = "0xd4a017"
 CRIMSON = "0xc41e3a"
 CREAM = "0xf0e6d0"
@@ -72,8 +87,7 @@ _TMP_PREFIX = "dcs-outro-"
 
 
 # -- tiny expression helpers (ffmpeg eval syntax; commas inside nested calls
-#    are backslash-escaped -- validated empirically against this ffmpeg build,
-#    see module docstring) ------------------------------------------------
+#    are backslash-escaped -- validated empirically against this ffmpeg build)
 
 def _if3(cond: str, a: str, b: str) -> str:
     return f"if({cond}\\,{a}\\,{b})"
@@ -117,9 +131,10 @@ def _blank_rgba_png(w: int, h: int) -> Path:
 
 # -- word timeline ----------------------------------------------------------
 
-def _word_windows(start: float, word_dur: float, gap: float, n: int = 3):
-    """Return [(t0, t1), ...] for n sequential words, plus the end time."""
-    t = start
+def _word_windows(base: float, word_dur: float, gap: float, n: int = 3):
+    """Return [(t0, t1), ...] for n sequential words starting at absolute
+    time `base`, plus the end time of the last word."""
+    t = base
     windows = []
     for _ in range(n):
         windows.append((t, t + word_dur))
@@ -128,12 +143,12 @@ def _word_windows(start: float, word_dur: float, gap: float, n: int = 3):
 
 
 # -- word reveal styles -------------------------------------------------
-# Each returns a filter-chain fragment (or list of fragments to comma-join).
-# fade_rise/snap_track chain directly onto the background stream (no separate
-# compositing needed -- drawtext blends onto whatever frame it's given).
-# blur_in/scale_pop need their own real-alpha transparent PNG-sourced canvas
-# (see _blank_rgba_png + the per-variant builders below that wire it up with
-# its own `-loop 1` input + a single overlay back onto the background).
+# fade_rise/snap_track chain directly onto the main video stream (no separate
+# compositing needed -- drawtext blends onto whatever frame it's given, real
+# footage included). blur_in/scale_pop need their own real-alpha transparent
+# PNG-sourced canvas (see _blank_rgba_png), composited back with a single
+# overlay -- `scale`/gblur inside that canvas must not drag real video
+# content along with them.
 
 def _word_fade_rise(word, font, fontsize, color, t0, t1, w, h,
                      fade_in=0.22, fade_out=0.16, rise_px=16, text=None) -> str:
@@ -196,9 +211,8 @@ def _word_scale_pop_layer(word, font, fontsize, color, t0, t1, fade_in=0.28) -> 
     """Drawtext-only fragment for the shared transparent word-layer (fade in,
     hold, fade out). The scale-in pop itself is added once, combined across
     all words, by _combined_scale_pop_expr() -- `scale` does not support the
-    'enable' timeline option in this ffmpeg build ("Timeline not supported
-    with filter 'scale'"), so per-word gating has to happen inside the width
-    expression instead of via `enable=`."""
+    'enable' timeline option in this ffmpeg build, so per-word gating has to
+    happen inside the width expression instead of via `enable=`."""
     alpha = _if3(f"lt(t\\,{t0})", "0", _min2(f"(t-{t0})/{fade_in}", "1"))
     return [
         f"drawtext=fontfile='{_ff_path(font)}':text='{_esc_text(word)}':"
@@ -220,252 +234,132 @@ def _combined_scale_pop_expr(windows, fade_in=0.28, start_frac=0.82) -> str:
     return expr
 
 
-# -- wordmark spin+scale ----------------------------------------------------
-# Replaces what used to be an app-logo image spin (see docstring at top of
-# file for why: the splash-screen mark is off-limits here). Same motion
-# beat, built from typography instead of an icon: a two-line "DROP CAT" /
-# "S T U D I O" lockup rendered onto a transparent canvas, then spun+scaled
-# in exactly like the old logo image was.
+# -- legibility darken pass ---------------------------------------------
+# Drawn directly onto the real video (drawbox blends its alpha correctly
+# against real frame content -- see module docstring). A single drawbox
+# can't animate its own alpha smoothly (the "@alpha" is parsed as part of
+# the color literal, not a runtime expression), so the fade-in is faked
+# with a few stacked drawbox layers of increasing alpha over disjoint
+# `enable` windows -- same stepping trick used for the blur-in word style.
 
-def _wordmark_chain(font_main: Path, font_sub: Path, color_main: str, color_sub: str,
-                     cw: int, ch: int) -> str:
-    """Draw a static two-line 'DROP CAT' / tracked 'S T U D I O' wordmark
-    onto a transparent canvas of size cw x ch. Pure typography -- no icon,
-    no image asset. The canvas is then handed to _spin_settle_chain() for
-    the actual spin/settle motion."""
-    line1_size = int(ch * 0.44)
-    line2_size = int(ch * 0.20)
-    gap = int(ch * 0.10)
-    total_h = line1_size + gap + line2_size
-    y1 = f"(h-{total_h})/2"
-    y2 = f"(h-{total_h})/2+{line1_size + gap}"
-    return (
-        f"format=rgba,"
-        f"drawtext=fontfile='{_ff_path(font_main)}':text='DROP CAT':fontcolor={color_main}:"
-        f"fontsize={line1_size}:x=(w-text_w)/2:y='{y1}',"
-        f"drawtext=fontfile='{_ff_path(font_sub)}':text='{_esc_text(_tracked('Studio'))}':"
-        f"fontcolor={color_sub}:fontsize={line2_size}:x=(w-text_w)/2:y='{y2}'"
-    )
+def _darken_steps(color_hex: str, max_alpha: float, darken_start: float,
+                   clip_end: float, fade_in: float = 0.35, steps: int = 4) -> list:
+    frags = []
+    for i in range(1, steps + 1):
+        a = round(max_alpha * i / steps, 3)
+        s0 = darken_start + (i - 1) * fade_in / steps
+        s1 = darken_start + i * fade_in / steps if i < steps else clip_end
+        frags.append(
+            f"drawbox=x=0:y=0:w=iw:h=ih:color={color_hex}@{a}:t=fill:"
+            f"enable='between(t\\,{s0:.3f}\\,{s1:.3f})'"
+        )
+    return frags
 
 
-def _spin_settle_chain(w: int, h: int, spin_start: float, spin_dur: float, turns: float,
-                        overshoot: bool = False) -> str:
-    """Filter chain for an already-rgba, already-sized (w x h) input layer:
-    rotate with a decelerating spin-in (static padded square canvas -- see
-    module docstring for why the canvas size must be a static int, not a
-    per-frame expression), then a scale pop-in from small -> full size, then
-    an alpha fade-in gated to spin_start. Settles to a static, unrotated,
-    full-size layer for the remainder of the clip. Content-agnostic (it used
-    to carry the app logo image; now it carries the text wordmark).
-    """
-    pad = int(math.ceil(math.hypot(w, h) / 2) * 2)  # diagonal, rounded even
-    tl = f"(t-{spin_start})"
-    # angle: starts at turns*2*PI, eases to 0 by spin_start+spin_dur
-    angle = _if3(f"lt(t\\,{spin_start})", "0",
-                 _if3(f"lt(t\\,{spin_start + spin_dur:.3f})",
-                      f"2*PI*{turns}*(1-{tl}/{spin_dur})", "0"))
-    if overshoot:
-        # grow past 100% briefly then settle back -- a small "impact" bounce
-        peak = spin_start + spin_dur * 0.78
-        settle = spin_start + spin_dur
-        grow = _if3(f"lt(t\\,{spin_start})", "40",
-                    _if3(f"lt(t\\,{peak:.3f})", f"40+({pad}*1.08-40)*{tl}/{spin_dur * 0.78:.3f}",
-                         _if3(f"lt(t\\,{settle:.3f})",
-                              f"{pad}*1.08-({pad}*0.08)*(t-{peak:.3f})/{spin_dur * 0.22:.3f}",
-                              f"{pad}")))
-    else:
-        grow = _if3(f"lt(t\\,{spin_start})", "40",
-                    _if3(f"lt(t\\,{spin_start + spin_dur:.3f})",
-                         f"40+({pad}-40)*{tl}/{spin_dur}", f"{pad}"))
-    return (
-        f"rotate=a='{angle}':fillcolor=black@0:ow={pad}:oh={pad},"
-        f"scale=w='{grow}':h=-1:eval=frame,"
-        f"fade=t=in:st={spin_start}:d=0.15:alpha=1"
-    )
+# -- per-variant timing (independent of source video dims/fps) --------------
+# pre_pad: seconds of held darken before the first word starts fading in.
+# post_pad: seconds held after the last word finishes fading out, before the
+# clip's true end (breathing room so the sign-off doesn't feel clipped).
+
+_VARIANT_TIMING = {
+    "minimal_fade": dict(word_dur=0.46, gap=0.16, pre_pad=0.20, post_pad=0.40),
+    "ink_stamp":    dict(word_dur=0.40, gap=0.12, pre_pad=0.12, post_pad=0.30),
+    "circus_glow":  dict(word_dur=0.50, gap=0.18, pre_pad=0.25, post_pad=0.45),
+    "neo_mono":     dict(word_dur=0.46, gap=0.14, pre_pad=0.16, post_pad=0.32),
+}
 
 
-# -- backgrounds ----------------------------------------------------------
+def _overlay_span(variant_key: str) -> float:
+    t = _VARIANT_TIMING[variant_key]
+    return t["pre_pad"] + 3 * t["word_dur"] + 2 * t["gap"] + t["post_pad"]
 
-def _bg_grain(strength=4) -> str:
-    return f"noise=alls={strength}:allf=t+u"
 
+# -- per-variant filter builders ---------------------------------------------
+# Each returns (filter_chain_to_append_to_main_video, extra_word_layer_chain).
+# extra_word_layer_chain is only non-None for styles that need their own
+# transparent word-layer input (blur_in / scale_pop); the caller wires up the
+# extra input and a single overlay back onto the main chain.
 
-# -- variant registry -------------------------------------------------------
-# Each entry is (label, description, builder). Builders take (w, h, fps) and
-# return (duration_seconds, ffmpeg_cmd_list).
-
-def _variant_minimal_fade(w, h, fps):
-    """Safe, elegant baseline: plain dark bg, soft fade+rise kinetic type in
-    wide-tracked light caps, snappy wordmark spin-in."""
-    windows, words_end = _word_windows(start=0.24, word_dur=0.44, gap=0.13)
-    wm_start = words_end + 0.24
-    spin_dur = 0.70
-    hold = 0.55
-    duration = wm_start + spin_dur + hold + 0.26
-
-    cw, ch = int(w * 0.52), int(h * 0.24)
-    bg_in = ["-f", "lavfi", "-i", f"color=c={BG_NEAR_BLACK}:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
-
-    word_chain = ["vignette=PI/2.6"]
+def _variant_minimal_fade(w, h, windows, darken_start, clip_end):
+    """Safe, elegant baseline: gentle darken, wide-tracked light caps
+    fade+rise in, one at a time."""
+    frags = _darken_steps("black", 0.40, darken_start, clip_end, fade_in=0.35)
     for i, word in enumerate(WORDS):
         t0, t1 = windows[i]
         is_go = word == "GO"
         color = GOLD if is_go else CREAM
-        fontsize = int(h * 0.135) if is_go else int(h * 0.115)
-        word_chain.append(
-            _word_fade_rise(word, FONT_SEGOE_LIGHT, fontsize, color, t0, t1, w, h,
-                             text=_tracked(word))
-        )
-
-    wm_chain = (_wordmark_chain(FONT_SEGOE_LIGHT, FONT_SEGOE_LIGHT, CREAM, GOLD, cw, ch)
-                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.3))
-
-    filter_complex = (
-        f"[0:v]{','.join(word_chain)}[bg];"
-        f"[1:v]{wm_chain}[wordmark];"
-        f"[bg][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
-        f"fade=t=in:st=0:d=0.18,fade=t=out:st={duration-0.30:.3f}:d=0.30[outv]"
-    )
-    cmd = [FFMPEG, "-y"] + bg_in + wm_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
-    return duration, cmd
+        fontsize = int(h * 0.155) if is_go else int(h * 0.13)
+        frags.append(_word_fade_rise(word, FONT_SEGOE_LIGHT, fontsize, color, t0, t1, w, h,
+                                      text=_tracked(word)))
+    return ",".join(frags), None
 
 
-def _variant_ink_stamp(w, h, fps):
-    """Nods to the app's new bold-ink/high-contrast graphic-novel identity:
-    tighter vignette + subtle grain, tracked-caps SNAP reveal, harder
-    wordmark spin with a small landing bounce."""
-    windows, words_end = _word_windows(start=0.22, word_dur=0.42, gap=0.12)
-    wm_start = words_end + 0.22
-    spin_dur = 0.55
-    hold = 0.70
-    duration = wm_start + spin_dur + 0.20 + hold + 0.28
-
-    cw, ch = int(w * 0.52), int(h * 0.24)
-    bg_in = ["-f", "lavfi", "-i", f"color=c={BG_NEAR_BLACK}:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
-
-    word_chain = [f"{_bg_grain(4)},vignette=PI/4,eq=contrast=1.08:saturation=1.05"]
+def _variant_ink_stamp(w, h, windows, darken_start, clip_end):
+    """Nods to the app's bold-ink/high-contrast graphic-novel identity:
+    stronger darken + a contrast/desaturation push under the text, tracked
+    caps SNAP into tight caps."""
+    frags = _darken_steps("black", 0.55, darken_start, clip_end, fade_in=0.25)
+    frags.append(f"eq=contrast=1.08:saturation=0.85:enable='between(t\\,{darken_start:.3f}\\,{clip_end:.3f})'")
     for i, word in enumerate(WORDS):
         t0, t1 = windows[i]
         is_go = word == "GO"
         color = CRIMSON if is_go else CREAM
-        fontsize = int(h * 0.16) if is_go else int(h * 0.135)
-        word_chain.extend(_word_snap_track(word, FONT_BAHNSCHRIFT, fontsize, color, t0, t1, w, h))
-
-    wm_chain = (_wordmark_chain(FONT_BAHNSCHRIFT, FONT_BAHNSCHRIFT, CREAM, CRIMSON, cw, ch)
-                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=2.0, overshoot=True))
-
-    filter_complex = (
-        f"[0:v]{','.join(word_chain)}[bg];"
-        f"[1:v]{wm_chain}[wordmark];"
-        f"[bg][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
-        f"fade=t=in:st=0:d=0.12,fade=t=out:st={duration-0.28:.3f}:d=0.28[outv]"
-    )
-    cmd = [FFMPEG, "-y"] + bg_in + wm_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
-    return duration, cmd
+        fontsize = int(h * 0.17) if is_go else int(h * 0.145)
+        frags.extend(_word_snap_track(word, FONT_BAHNSCHRIFT, fontsize, color, t0, t1, w, h))
+    return ",".join(frags), None
 
 
-def _variant_circus_glow(w, h, fps):
-    """Most literally on-brand: warm crimson-to-black radial glow (the app's
-    circus palette), soft scale-in pop kinetic type, graceful slow wordmark
-    settle with a longer hold -- the most 'graceful' paced variant."""
-    windows, words_end = _word_windows(start=0.26, word_dur=0.46, gap=0.14)
-    wm_start = words_end + 0.26
-    spin_dur = 0.85
-    hold = 0.60
-    duration = wm_start + spin_dur + hold + 0.30
-
-    cw, ch = int(w * 0.54), int(h * 0.25)
-    bg_in = ["-f", "lavfi", "-i", f"color=c=0x3a0d10:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
-    png = _blank_rgba_png(w, h)
-    words_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png)]
-
+def _variant_circus_glow(w, h, windows, darken_start, clip_end):
+    """Most literally on-brand: a warm crimson-black darken (not flat black)
+    under gold words that soft-scale-in."""
+    frags = _darken_steps("0x1a0508", 0.58, darken_start, clip_end, fade_in=0.45)
     word_frags = []
     for i, word in enumerate(WORDS):
         t0, t1 = windows[i]
         is_go = word == "GO"
         color = CREAM if is_go else GOLD
-        fontsize = int(h * 0.15) if is_go else int(h * 0.125)
+        fontsize = int(h * 0.16) if is_go else int(h * 0.135)
         word_frags.extend(_word_scale_pop_layer(word, FONT_SEGOE, fontsize, color, t0, t1))
     grow = _combined_scale_pop_expr(windows, fade_in=0.28)
     word_frags.append(f"scale=w='{grow}':h=-1:eval=frame")
     words_chain = "format=rgba," + ",".join(word_frags)
-
-    wm_chain = (_wordmark_chain(FONT_SEGOE, FONT_SEGOE, GOLD, CREAM, cw, ch)
-                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.0))
-
-    filter_complex = (
-        f"[0:v]vignette=PI/3.2[bg];"
-        f"[2:v]{words_chain}[wtxt];"
-        f"[1:v]{wm_chain}[wordmark];"
-        f"[bg][wtxt]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto[bgw];"
-        f"[bgw][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
-        f"fade=t=in:st=0:d=0.22,fade=t=out:st={duration-0.35:.3f}:d=0.35[outv]"
-    )
-    cmd = [FFMPEG, "-y"] + bg_in + wm_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
-    return duration, cmd
+    return ",".join(frags), words_chain
 
 
-def _variant_neo_mono(w, h, fps):
-    """Most minimal / editorial: flat near-black, tight-tracked genuine
-    blur-in kinetic type, fastest cleanest hard-settle wordmark spin -- the
-    variant that leans hardest away from anything that could read as dated."""
-    windows, words_end = _word_windows(start=0.24, word_dur=0.46, gap=0.14)
-    wm_start = words_end + 0.22
-    spin_dur = 0.50
-    hold = 0.75
-    duration = wm_start + spin_dur + hold + 0.28
-
-    cw, ch = int(w * 0.50), int(h * 0.22)
-    bg_in = ["-f", "lavfi", "-i", f"color=c=0x0a0808:s={w}x{h}:d={duration:.3f}:r={fps}"]
-    wm_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(_blank_rgba_png(cw, ch))]
-    png = _blank_rgba_png(w, h)
-    words_in = ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(png)]
-
+def _variant_neo_mono(w, h, windows, darken_start, clip_end):
+    """Most minimal / editorial: strongest, flattest darken (nearly a fade
+    to black) under genuine stepped blur-to-sharp kinetic type, no color
+    accents."""
+    frags = _darken_steps("black", 0.68, darken_start, clip_end, fade_in=0.30)
     word_frags = []
     for i, word in enumerate(WORDS):
         t0, t1 = windows[i]
         is_go = word == "GO"
-        fontsize = int(h * 0.145) if is_go else int(h * 0.12)
+        fontsize = int(h * 0.155) if is_go else int(h * 0.13)
         word_frags.extend(_word_blur_in_layer(word, FONT_BAHNSCHRIFT, fontsize, CREAM, t0, t1))
     words_chain = "format=rgba," + ",".join(word_frags)
-
-    wm_chain = (_wordmark_chain(FONT_BAHNSCHRIFT, FONT_BAHNSCHRIFT, CREAM, CREAM, cw, ch)
-                + "," + _spin_settle_chain(cw, ch, wm_start, spin_dur, turns=1.0))
-
-    filter_complex = (
-        f"[0:v]{_bg_grain(3)}[bg];"
-        f"[2:v]{words_chain}[wtxt];"
-        f"[1:v]{wm_chain}[wordmark];"
-        f"[bg][wtxt]overlay=0:0:format=auto[bgw];"
-        f"[bgw][wordmark]overlay=x='(main_w-overlay_w)/2':y='(main_h-overlay_h)/2':format=auto,"
-        f"fade=t=in:st=0:d=0.14,fade=t=out:st={duration-0.28:.3f}:d=0.28[outv]"
-    )
-    cmd = [FFMPEG, "-y"] + bg_in + wm_in + words_in + ["-filter_complex", filter_complex, "-map", "[outv]"]
-    return duration, cmd
+    return ",".join(frags), words_chain
 
 
 VARIANTS = {
     "minimal_fade": {
         "label": "Minimal Fade",
-        "description": "Plain near-black bg, soft vignette; wide-tracked light caps fade+rise in; snappy 1.3-turn 'Drop Cat / Studio' wordmark spin (text only, no icon). The safe, elegant baseline.",
+        "description": "Gentle darken under real footage; wide-tracked light caps fade+rise in, one word at a time. The safe, elegant baseline.",
         "builder": _variant_minimal_fade,
     },
     "ink_stamp": {
         "label": "Ink Stamp",
-        "description": "Subtle grain + tighter vignette + contrast boost (nods to the app's new bold-ink graphic-novel style); tracked-caps SNAP into tight caps; punchy 2-turn wordmark spin with a small landing bounce.",
+        "description": "Stronger darken + contrast/desaturation push (nods to the app's bold-ink graphic-novel style); tracked-caps SNAP into tight caps.",
         "builder": _variant_ink_stamp,
     },
     "circus_glow": {
         "label": "Circus Glow",
-        "description": "Warm crimson-to-black radial glow (the app's own circus palette, most literal brand match); gold words soft-scale-in; graceful single-turn wordmark settle with a longer hold.",
+        "description": "Warm crimson-black darken (not flat black) under gold words that soft-scale-in; the most literal brand-palette match.",
         "builder": _variant_circus_glow,
     },
     "neo_mono": {
         "label": "Neo Mono",
-        "description": "Flattest, most minimal/editorial treatment; genuine stepped blur-to-sharp kinetic type (no color accents); fastest, hardest-settle wordmark spin. Leans furthest from anything dated.",
+        "description": "Strongest, flattest darken (near-fade-to-black) under genuine stepped blur-to-sharp kinetic type, no color accents. Most minimal/editorial.",
         "builder": _variant_neo_mono,
     },
 }
@@ -475,65 +369,99 @@ def list_variants() -> dict:
     return {k: {"label": v["label"], "description": v["description"]} for k, v in VARIANTS.items()}
 
 
+# -- source probing -----------------------------------------------------
+
+def _audio_stream_duration(path: str) -> float | None:
+    """Precise duration of the first audio stream, or None if it can't be
+    determined (caller should then assume the worst case: audio runs to the
+    very end of the video, forcing a tail extension)."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        val = r.stdout.strip()
+        if val and val != "N/A":
+            return float(val)
+    except Exception:
+        pass
+    return None
+
+
+def _measure_silence(path: str, start: float, dur: float) -> dict:
+    """Run volumedetect over [start, start+dur] of path's audio. Returns
+    {"mean_db": float|None, "max_db": float|None, "has_audio_samples": bool}.
+    Used to positively verify the overlay window is silent, not just assume
+    it structurally should be."""
+    try:
+        r = subprocess.run(
+            [FFMPEG, "-y", "-ss", f"{max(0.0, start):.3f}", "-t", f"{dur:.3f}",
+             "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        out = r.stderr
+        mean_db = max_db = None
+        for line in out.splitlines():
+            if "mean_volume:" in line:
+                mean_db = float(line.split("mean_volume:")[1].strip().split(" ")[0])
+            elif "max_volume:" in line:
+                max_db = float(line.split("max_volume:")[1].strip().split(" ")[0])
+        return {"mean_db": mean_db, "max_db": max_db, "has_audio_samples": mean_db is not None}
+    except Exception as e:
+        return {"mean_db": None, "max_db": None, "has_audio_samples": False, "error": str(e)}
+
+
 # -- rendering --------------------------------------------------------------
 
-def render_variant(variant_key: str, output_path: str | Path,
-                    width: int = DEFAULT_W, height: int = DEFAULT_H,
-                    fps: int = DEFAULT_FPS) -> tuple[Path | None, str | None]:
-    """Render one outro variant to output_path. Returns (path, error)."""
-    if variant_key not in VARIANTS:
-        return None, f"Unknown outro variant '{variant_key}' (have: {', '.join(VARIANTS)})"
-
-    # even dims required for yuv420p encode
-    width = width if width % 2 == 0 else width + 1
-    height = height if height % 2 == 0 else height + 1
-
-    duration, cmd = VARIANTS[variant_key]["builder"](width, height, fps)
-    out_path = Path(output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = cmd + video_encode_args(crf=16) + ["-an", "-t", f"{duration:.3f}", str(out_path)]
-
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except Exception as e:
-        return None, f"outro render error: {e}"
-    if r.returncode != 0:
-        log.warning("[outro] render failed for %s: %s", variant_key, r.stderr[-800:])
-        return None, f"ffmpeg failed: {r.stderr[-400:]}"
-    if not out_path.exists() or out_path.stat().st_size == 0:
-        return None, "ffmpeg produced empty output"
-
-    # Verify with ffprobe rather than trusting the exit code alone.
-    info = probe_file(out_path)
-    if not info["width"] or info["duration"] <= 0:
-        return None, f"ffprobe could not validate output: {info}"
-    log.info("[outro] rendered %s -> %s (%sx%s, %.2fs)",
-              variant_key, out_path.name, info["width"], info["height"], info["duration"])
-    return out_path, None
+def _grab_near_end_frame(video_path: str, near_dur: float, out_path: Path) -> bool:
+    """Grab a frame close to the end of video_path. `-sseof` was unreliable
+    in this ffmpeg build (yielded 0 frames on a real test clip), and even a
+    computed `-ss` timestamp can miss if `near_dur` slightly overstates the
+    actual last decodable frame (observed on a real lip-sync export: the
+    container's format.duration overstated the true video length by over a
+    second). So this tries a cascade of seek offsets working backward from
+    near_dur until one actually produces a frame, instead of trusting a
+    single computed timestamp."""
+    for backoff in (0.15, 0.5, 1.0, 2.0, 3.5, 5.0):
+        seek = max(0.0, near_dur - backoff)
+        r = subprocess.run(
+            [FFMPEG, "-y", "-ss", f"{seek:.3f}", "-i", video_path,
+             "-frames:v", "1", "-update", "1", str(out_path)],
+            capture_output=True, timeout=30,
+        )
+        if r.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+            return True
+    return False
 
 
-def render_samples(out_dir: str | Path | None = None,
-                    width: int = DEFAULT_W, height: int = DEFAULT_H,
-                    fps: int = DEFAULT_FPS) -> dict:
-    """Render all variants as standalone review clips. Returns
-    {variant_key: {"path": ..., "error": ...}}."""
-    out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    results = {}
-    for key in VARIANTS:
-        out_path = out_dir / f"outro_sample_{key}.mp4"
-        path, err = render_variant(key, out_path, width=width, height=height, fps=fps)
-        results[key] = {"path": str(path) if path else None, "error": err}
-    return results
+def _extend_with_freeze(norm_video_path: str, norm_dur: float, extra_seconds: float,
+                         fps: int, tmp_dir: Path) -> Path | None:
+    """Grab a frame near the end of norm_video_path (already normalized to
+    the target w x h/fps -- see append_outro) and build a silent,
+    frozen-frame video-only clip of extra_seconds at the same dims. Returns
+    the clip path, or None on failure."""
+    last_frame = tmp_dir / "last_frame.png"
+    if not _grab_near_end_frame(norm_video_path, norm_dur, last_frame):
+        log.warning("[outro] could not grab a near-end frame for freeze extension after trying multiple seek offsets")
+        return None
+    freeze_clip = tmp_dir / "freeze_tail.mp4"
+    r = subprocess.run(
+        [FFMPEG, "-y", "-loop", "1", "-t", f"{extra_seconds:.3f}", "-i", str(last_frame),
+         "-r", str(fps)] + video_encode_args(crf=16) + ["-an", str(freeze_clip)],
+        capture_output=True, timeout=60,
+    )
+    if r.returncode != 0 or not freeze_clip.exists():
+        log.warning("[outro] freeze-tail encode failed: %s", r.stderr[-300:] if r.stderr else "")
+        return None
+    return freeze_clip
 
 
-# -- appending onto a finished video -----------------------------------------
-
-def _concat_two(video_a: str, video_b: str, out_path: str, w: int, h: int, fps: int) -> bool:
+def _concat_two(video_a: str, video_b: str, out_path: str) -> bool:
     """Concatenate two already-matching (same codec/dims/fps, no audio)
     clips via the concat demuxer (stream copy), falling back to a
-    filter_complex re-encode if stream copy fails. Mirrors the pattern used
-    by features/fun_videos/multi_pipeline.py's _concat_clips."""
+    filter_complex re-encode if stream copy fails."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         for p in (video_a, video_b):
             fwd = str(p).replace("\\", "/").replace("'", "''")
@@ -566,15 +494,25 @@ def _concat_two(video_a: str, video_b: str, out_path: str, w: int, h: int, fps: 
 
 
 def append_outro(input_video_path: str | Path, variant_key: str,
-                  output_path: str | Path | None = None) -> tuple[Path | None, str | None]:
-    """Render `variant_key` to match input_video_path's dimensions/fps and
-    concatenate it onto the end. Preserves the original video's audio track
-    (the outro itself is silent -- it just plays out after the source audio
-    ends, which is normal for a brand sting). Returns (output_path, error).
+                  output_path: str | Path | None = None,
+                  min_buffer: float = 0.35) -> tuple[Path | None, str | None]:
+    """Composite the "Drop"/"Cat"/"GO" sign-off directly onto the tail of
+    input_video_path, timed to land after its audio has gone silent.
+
+    If the source doesn't already have enough silent runway at the end
+    (audio duration close to or equal to video duration -- the common case
+    for a generated music video), the tail is extended with a frozen last
+    frame first. The original audio track is re-attached unmodified, so it
+    naturally ends before the overlay's darken pass begins -- genuinely
+    silent under the text, not just visually timed to look that way.
+
+    Returns (output_path, error).
     """
     input_video_path = str(input_video_path)
     if not Path(input_video_path).exists():
         return None, f"Input video not found: {input_video_path}"
+    if variant_key not in VARIANTS:
+        return None, f"Unknown outro variant '{variant_key}' (have: {', '.join(VARIANTS)})"
 
     info = probe_file(input_video_path)
     w = info["width"] or DEFAULT_W
@@ -582,20 +520,29 @@ def append_outro(input_video_path: str | Path, variant_key: str,
     fps = int(round(info["fps"])) or DEFAULT_FPS
     w = w if w % 2 == 0 else w + 1
     h = h if h % 2 == 0 else h + 1
+    container_dur = info["duration"] or probe_duration(input_video_path)
+    if container_dur <= 0:
+        return None, "could not determine source video duration"
+    has_audio = info["has_audio"]
+
+    overlay_span = _overlay_span(variant_key)
 
     out_path = Path(output_path) if output_path else Path(input_video_path).with_name(
         Path(input_video_path).stem + f"_outro_{variant_key}.mp4")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix=_TMP_PREFIX) as tmp:
         tmp = Path(tmp)
-        outro_clip = tmp / "outro.mp4"
-        rendered, err = render_variant(variant_key, outro_clip, width=w, height=h, fps=fps)
-        if err:
-            return None, f"outro render failed: {err}"
 
-        # Normalize the source video's video stream to the same codec/pix_fmt
-        # so the concat demuxer's stream-copy path has a fair chance (falls
-        # back to a filter_complex re-encode automatically otherwise).
+        # Always normalize first (re-encode to the target dims/fps, video
+        # only) and measure the RESULT's real duration -- container-level
+        # duration metadata can overstate the actual decodable video length
+        # (observed on a real lip-sync export: format.duration said 30.0s,
+        # the true video was ~28.9s). Every timing decision below is anchored
+        # to this measured duration and to the audio stream's own measured
+        # duration, never to the container's claimed duration, so the darken
+        # pass can't accidentally land while audio is still technically
+        # present just because a metadata tag was optimistic.
         norm_src = tmp / "src_normalized.mp4"
         r = subprocess.run(
             [FFMPEG, "-y", "-i", input_video_path,
@@ -605,18 +552,80 @@ def append_outro(input_video_path: str | Path, variant_key: str,
         )
         if r.returncode != 0 or not norm_src.exists():
             return None, f"could not normalize source video: {r.stderr[-400:].decode(errors='replace') if isinstance(r.stderr, bytes) else r.stderr}"
+        norm_dur = probe_duration(str(norm_src))
+        if norm_dur <= 0:
+            norm_dur = container_dur
 
-        concat_silent = tmp / "concat_silent.mp4"
-        if not _concat_two(str(norm_src), str(rendered), str(concat_silent), w, h, fps):
-            return None, "concat of source + outro failed"
+        if has_audio:
+            audio_dur = _audio_stream_duration(input_video_path)
+            if audio_dur is None:
+                audio_dur = norm_dur  # unknown -- assume the worst case, audio runs to the very end
+        else:
+            audio_dur = 0.0
 
-        # Re-attach the original audio (if any) -- video track is now longer
-        # than the audio track by the outro's duration, which is fine: the
-        # sting plays out silent, which is normal for a brand sting.
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if info["has_audio"]:
+        # Ensure darken_start (= total_duration - overlay_span) lands at
+        # least min_buffer seconds after audio_dur.
+        needed_extra = max(0.0, (audio_dur + min_buffer + overlay_span) - norm_dur)
+
+        if needed_extra > 0.05:
+            freeze_clip = _extend_with_freeze(str(norm_src), norm_dur, needed_extra, fps, tmp)
+            if freeze_clip is None:
+                return None, "could not build frozen-frame tail extension"
+            base_video = tmp / "base_extended.mp4"
+            if not _concat_two(str(norm_src), str(freeze_clip), str(base_video)):
+                return None, "could not concatenate frozen tail onto source"
+            log.info("[outro] extended tail by %.2fs (freeze frame) -- audio ends at %.2fs, normalized video was %.2fs",
+                      needed_extra, audio_dur, norm_dur)
+        else:
+            base_video = norm_src
+            log.info("[outro] existing tail has enough silent runway -- no extension needed "
+                      "(audio ends at %.2fs, normalized video is %.2fs)", audio_dur, norm_dur)
+
+        # Re-probe once more: concat (even with the re-encode fallback) can
+        # shift the total by a frame or two, and this is the figure every
+        # absolute timestamp below is built from.
+        total_duration = probe_duration(str(base_video))
+        if total_duration <= 0:
+            total_duration = norm_dur + (needed_extra if needed_extra > 0.05 else 0.0)
+        if total_duration < overlay_span:
+            log.warning("[outro] base video (%.2fs) shorter than the overlay span (%.2fs) -- "
+                        "sign-off will be tight/may not fully fit", total_duration, overlay_span)
+
+        darken_start = total_duration - overlay_span
+        wm_start = darken_start + _VARIANT_TIMING[variant_key]["pre_pad"]
+        windows, _ = _word_windows(wm_start, _VARIANT_TIMING[variant_key]["word_dur"],
+                                    _VARIANT_TIMING[variant_key]["gap"])
+
+        main_chain, words_layer_chain = VARIANTS[variant_key]["builder"](w, h, windows, darken_start, total_duration)
+
+        cmd = [FFMPEG, "-y", "-i", str(base_video)]
+        if words_layer_chain is not None:
+            cmd += ["-loop", "1", "-t", f"{total_duration:.3f}", "-i", str(_blank_rgba_png(w, h))]
+            filter_complex = (
+                f"[0:v]{main_chain}[bg];"
+                f"[1:v]{words_layer_chain}[wtxt];"
+                f"[bg][wtxt]overlay=0:0:format=auto[outv]"
+            )
+        else:
+            filter_complex = f"[0:v]{main_chain}[outv]"
+
+        filtered_video = tmp / "filtered.mp4"
+        cmd += ["-filter_complex", filter_complex, "-map", "[outv]", "-t", f"{total_duration:.3f}"]
+        cmd += video_encode_args(crf=16) + ["-an", str(filtered_video)]
+
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if r.returncode != 0:
+            log.warning("[outro] overlay render failed for %s: %s", variant_key, r.stderr[-800:])
+            return None, f"ffmpeg overlay failed: {r.stderr[-400:]}"
+        if not filtered_video.exists() or filtered_video.stat().st_size == 0:
+            return None, "ffmpeg produced empty overlay output"
+
+        # Re-attach the original audio (unmodified) -- it naturally ends
+        # before darken_start, which is the whole point: silence under the
+        # sign-off, not a manufactured fade.
+        if has_audio:
             r = subprocess.run(
-                [FFMPEG, "-y", "-i", str(concat_silent), "-i", input_video_path,
+                [FFMPEG, "-y", "-i", str(filtered_video), "-i", input_video_path,
                  "-map", "0:v", "-map", "1:a?", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                  str(out_path)],
                 capture_output=True, timeout=300,
@@ -625,14 +634,35 @@ def append_outro(input_video_path: str | Path, variant_key: str,
                 log.warning("[outro] audio re-mux failed, falling back to silent output: %s",
                             r.stderr[-400:])
                 import shutil
-                shutil.copy2(concat_silent, out_path)
+                shutil.copy2(filtered_video, out_path)
         else:
             import shutil
-            shutil.copy2(concat_silent, out_path)
+            shutil.copy2(filtered_video, out_path)
 
     if not out_path.exists() or out_path.stat().st_size == 0:
         return None, "append_outro produced empty output"
-    dur = probe_duration(out_path)
-    log.info("[outro] appended '%s' to %s -> %s (%.2fs)",
-              variant_key, Path(input_video_path).name, out_path.name, dur)
+
+    final_info = probe_file(out_path)
+    if not final_info["width"] or final_info["duration"] <= 0:
+        return None, f"ffprobe could not validate output: {final_info}"
+
+    silence = _measure_silence(str(out_path), darken_start, total_duration - darken_start)
+    log.info("[outro] appended '%s' to %s -> %s (%.2fs, overlay window %.2f-%.2fs, "
+              "audio under overlay: mean=%s dB max=%s dB)",
+              variant_key, Path(input_video_path).name, out_path.name, final_info["duration"],
+              darken_start, total_duration, silence.get("mean_db"), silence.get("max_db"))
     return out_path, None
+
+
+def render_samples(input_video_path: str | Path, out_dir: str | Path | None = None) -> dict:
+    """Run all four variants against one real source clip for side-by-side
+    review. Returns {variant_key: {"path": ..., "error": ...}}."""
+    out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(input_video_path).stem
+    results = {}
+    for key in VARIANTS:
+        out_path = out_dir / f"outro_composite_{key}_{stem}.mp4"
+        path, err = append_outro(input_video_path, key, output_path=out_path)
+        results[key] = {"path": str(path) if path else None, "error": err}
+    return results
