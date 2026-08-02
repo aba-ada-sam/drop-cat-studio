@@ -12,6 +12,7 @@ keys.json
 # not source. admin_pin.json holds the live PIN in plaintext.
 /admin_pin.json
 /batch_results.json
+/queue_save.json
 
 # Claude Code local settings backup (world-switching tooling artifact,
 # not app config).
