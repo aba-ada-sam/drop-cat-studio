@@ -3,17 +3,23 @@
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260620a';
+import { el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 import { handoff } from './handoff.js?v=20260620a';
 
-// Module-level so receiveHandoff can call _applyImageFn even after init
+// Module-level so receiveHandoff can call _applyImageFn/_setIdeaFn even after init
 let _applyImageFn = null;
+let _setIdeaFn = null;
 
 export function receiveHandoff(data) {
-  if (!_applyImageFn) return;
   if (data?.type === 'image' && data.path) {
-    _applyImageFn(data.path, data.url || pathToUrl(data.path));
+    _applyImageFn?.(data.path, data.url || pathToUrl(data.path));
+  } else if (data?.type === 'concept' && data.text) {
+    // From the Studio Home "Start a Quick Video from this Idea" box -- text
+    // only, no photo. Without this the idea text was dropped on the floor
+    // (this handler only ever understood type:'image') and the tab landed
+    // empty, so Create saw no image + no idea and asked the user to drop one.
+    _setIdeaFn?.(data.text);
   }
 }
 
@@ -254,22 +260,40 @@ export function init(panel) {
   // there was no in-tab way to get an image to satisfy it. Mirrors Chat
   // Studio's own generate-image -> animate two-step chain (same endpoint) so a
   // text-only idea gets a starting image instead of failing.
+  // GPU-busy (409) is the one failure mode worth waiting out: the server refuses
+  // outright rather than queuing, but a live WanGP render is normally done well
+  // within a minute or two. Poll instead of giving up on the first check, so
+  // "waits for the GPU" (the toast text below) is actually true. Any other error
+  // (Forge not running, etc.) won't resolve itself by waiting -- fail immediately.
+  const GPU_WAIT_RETRY_MS = 5000;
+  const GPU_WAIT_MAX_MS = 60000;
   async function _ensureImage() {
     if (_imagePath || _uploadInFlight) return;
     const idea = ideaInput.value.trim();
     if (!idea) return;
     _showProgress(1, 'Creating a starting image from your idea...');
-    try {
-      const { image_path, image_url } = await api('/api/chat-studio/generate-image', {
-        method: 'POST',
-        body: JSON.stringify({ prompt: idea }),
-      });
-      if (image_path) _applyImage(image_path, image_url);
-    } catch (e) {
-      // Non-fatal: fall through and let the existing "no image, no idea"
-      // validation (or WanGP itself) surface whatever actually went wrong --
-      // Forge not running, GPU busy, etc. -- rather than masking it here.
-      toast(`Couldn't auto-create a starting image (${e.message}) -- continuing without one`, 'error');
+    const deadline = Date.now() + GPU_WAIT_MAX_MS;
+    for (;;) {
+      try {
+        const { image_path, image_url } = await api('/api/chat-studio/generate-image', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: idea }),
+        });
+        if (image_path) _applyImage(image_path, image_url);
+        return;
+      } catch (e) {
+        if (e.status === 409 && Date.now() < deadline) {
+          _showProgress(1, 'Video render in progress -- waiting for the GPU...');
+          await new Promise(r => setTimeout(r, GPU_WAIT_RETRY_MS));
+          continue;
+        }
+        // Non-fatal: fall through and let the existing "no image, no idea"
+        // validation (or WanGP itself) surface whatever actually went wrong --
+        // Forge not running, GPU still busy after waiting, etc. -- rather than
+        // masking it here.
+        toast(`Couldn't auto-create a starting image (${e.message}) -- continuing without one`, 'error');
+        return;
+      }
     }
   }
 
@@ -352,6 +376,7 @@ export function init(panel) {
     style: 'width:100%; font-size:.82rem;',
     placeholder: 'e.g. "gypsy folk, raw vocals" | "dark cabaret wit" | "dreamy indie, wistful"',
   });
+  _setIdeaFn = (text) => { ideaInput.value = text; };
 
   // Shared brainstorm call -- updates fields, returns {idea, lyric_direction, reply}
   let _chatHistory = [];
