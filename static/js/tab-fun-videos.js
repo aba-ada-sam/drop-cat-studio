@@ -1027,11 +1027,14 @@ export function init(panel) {
     el('label', { for: 'fv-instr', text: 'Instrumental (no vocals)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
 
-  // Lip sync -- on by default; drives subject mouth/face motion from audio waveform
-  const lipSyncChk = el('input', { type: 'checkbox', id: 'fv-lip-sync', checked: 'true' });
+  // Lip sync -- off by default. This is LTX-2 native audio conditioning during
+  // diffusion, which deterministically deadlocks WanGP (no MuseTalk fallback
+  // exists on this pipeline, unlike the Music Video tab). Leave off unless
+  // testing; a hung job here needs a manual WanGP restart to clear.
+  const lipSyncChk = el('input', { type: 'checkbox', id: 'fv-lip-sync' });
   audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
     lipSyncChk,
-    el('label', { for: 'fv-lip-sync', text: 'Lip Sync (audio drives subject mouth/face motion)', style: 'cursor:pointer; font-size:.85rem;' }),
+    el('label', { for: 'fv-lip-sync', text: 'Lip Sync (audio drives subject mouth/face motion -- experimental, may hang)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
 
   // Lyric direction (visible when not instrumental)

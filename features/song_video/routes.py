@@ -481,11 +481,11 @@ async def batch_start(request: Request):
         "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
         "video_seed":     body.get("seed",     config.get("fun_video_seed",     -1)),
         "use_satellite":  bool(body.get("use_satellite", False)),
-        # Both sync mechanisms ON (matches /generate): lip_sync = LTX-2 native
-        # audio conditioning during diffusion (the proven "richer audio" recipe);
-        # auto_lipsync = MuseTalk word-level post-pass on top. The pipeline
-        # already defaults lip_sync True; the batch route now agrees.
-        "lip_sync":       bool(body.get("lip_sync", True)),
+        # lip_sync = LTX-2 native audio conditioning during diffusion --
+        # deterministically deadlocks WanGP's sliding-window denoising at step 0
+        # (confirmed via raw logs, 2026-08-02). Defaulted off here too, matching
+        # /generate. auto_lipsync (MuseTalk post-pass) still delivers real lip-sync.
+        "lip_sync":       bool(body.get("lip_sync", False)),
         "auto_lipsync":   bool(body.get("auto_lipsync", True)),
     }
     # LTX Distilled sweet spot is 8 steps

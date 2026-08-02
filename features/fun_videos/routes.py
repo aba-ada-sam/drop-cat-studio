@@ -872,7 +872,10 @@ async def make_it(request: Request):
         "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
         "bpm": body.get("bpm"),
         "skip_audio": body.get("skip_audio", False),
-        "lip_sync": bool(body.get("lip_sync", True)),
+        # Unused by this single-clip path today (pipeline.py never reads it), but
+        # kept consistent with the fixed default in make-it-multi/song_video in
+        # case a future call site starts honoring it.
+        "lip_sync": bool(body.get("lip_sync", False)),
         "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
         "end_photo_path": body.get("end_photo_path"),
         "start_video_path":          _resolve_path(body.get("start_video_path", "")),
@@ -1035,7 +1038,11 @@ async def make_it_multi(request: Request):
         "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
         "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
         "skip_audio":           body.get("skip_audio", False),
-        "lip_sync":             bool(body.get("lip_sync", True)),
+        # LTX-2 native audio conditioning during diffusion (multi_pipeline.py's
+        # audio_source= param) deterministically deadlocks WanGP's sliding-window
+        # denoising at step 0 -- same root cause fixed in song_video/routes.py on
+        # 2026-08-02. Defaulted off here too.
+        "lip_sync":             bool(body.get("lip_sync", False)),
         "bpm":                  body.get("bpm"),
         "target_story_length":  target_secs,
         "upscale":              body.get("upscale", True),

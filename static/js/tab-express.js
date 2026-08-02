@@ -927,7 +927,9 @@ export function init(panel) {
     }),
   ]));
 
-  let _lipSync = true;
+  // Off by default -- native audio conditioning deterministically deadlocks
+  // WanGP on the make-it-multi path (no MuseTalk fallback here).
+  let _lipSync = false;
   const lipSyncChk = el('input', {
     type: 'checkbox', id: 'express-lip-sync',
     style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;',
@@ -939,7 +941,7 @@ export function init(panel) {
     el('label', {
       for: 'express-lip-sync',
       style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;',
-      text: 'Lip Sync (audio drives mouth/face motion)',
+      text: 'Lip Sync (audio drives mouth/face motion -- experimental, may hang)',
     }),
   ]));
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [

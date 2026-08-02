@@ -224,7 +224,7 @@ export function init(panel) {
   }
 
   const { wrap: loopWrap, input: loopCheck }    = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (sings during generation + word-level MuseTalk pass)', true);
+  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (word-level MuseTalk pass)', true);
 
   // Clip duration slider
   function _numRow(labelText, min, max, step, def, unit) {
@@ -345,11 +345,11 @@ export function init(panel) {
         folder:        _folderPath,
         images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        loopCheck.checked,
-        // One "Lip Sync" toggle drives BOTH mechanisms: lip_sync = LTX-2 native
-        // audio conditioning during diffusion (the proven "richer audio" recipe),
-        // auto_lipsync = MuseTalk word-level post-pass on top.
+        // lip_sync (LTX-2 native audio conditioning during diffusion) deadlocks
+        // WanGP -- always off. The "Lip Sync" toggle only drives auto_lipsync
+        // (MuseTalk word-level post-pass), which is the real, working mechanism.
         auto_lipsync:  lipSyncCheck.checked,
-        lip_sync:      lipSyncCheck.checked,
+        lip_sync:      false,
         use_satellite: satCheck.checked,
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
@@ -495,10 +495,10 @@ export function init(panel) {
         photo_path:     shot.path || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
-        // One "Lip Sync" toggle drives BOTH: lip_sync = LTX-2 native audio
-        // conditioning during diffusion; auto_lipsync = MuseTalk post-pass on top.
+        // lip_sync (LTX-2 native audio conditioning) deadlocks WanGP -- always
+        // off. The toggle only drives auto_lipsync (MuseTalk post-pass).
         auto_lipsync:   lipSyncCheck.checked,
-        lip_sync:       lipSyncCheck.checked,
+        lip_sync:       false,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
         steps:          8,
