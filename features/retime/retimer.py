@@ -50,6 +50,16 @@ def retime_video(job, in_path: str, out_path: str, anchors: list[dict]) -> str:
     # Build one filter_complex: trim each source segment, setpts to its target
     # span, then concat the warped segments. Audio is mapped straight from the
     # source (0:a) and left untouched.
+    #
+    # A segment's raw factor (d_span/s_span) getting silently clamped into
+    # range used to render that segment at the CLAMPED duration instead of the
+    # requested one, while -t total below still hard-trims the whole output to
+    # the original length -- the concatenated video no longer lines up with
+    # the untouched, still-full-length audio for the rest of the clip, with
+    # no error and no indication anything was off. Failing loudly here instead
+    # (before any ffmpeg work runs) trades "can't do an extreme drag" for
+    # "never silently produces desynced output", which is the right tradeoff --
+    # the user can just move the anchor to a less extreme stretch.
     chains = []
     labels = []
     for k in range(len(pts) - 1):
@@ -57,7 +67,15 @@ def retime_video(job, in_path: str, out_path: str, anchors: list[dict]) -> str:
         s1, d1 = pts[k + 1]
         s_span = max(0.001, s1 - s0)
         d_span = max(0.001, d1 - d0)
-        factor = max(_MIN_FACTOR, min(_MAX_FACTOR, d_span / s_span))
+        raw_factor = d_span / s_span
+        if raw_factor < _MIN_FACTOR or raw_factor > _MAX_FACTOR:
+            raise RuntimeError(
+                f"Segment {k + 1}/{len(pts) - 1} (source {s0:.1f}s-{s1:.1f}s -> "
+                f"{d0:.1f}s-{d1:.1f}s) needs a {raw_factor:.2f}x speed change, "
+                f"outside the supported {_MIN_FACTOR}x-{_MAX_FACTOR}x range -- "
+                f"move that lock closer to its source position and try again."
+            )
+        factor = raw_factor
         chains.append(
             f"[0:v]trim={s0:.3f}:{s1:.3f},setpts=(PTS-STARTPTS)*{factor:.5f}[v{k}]"
         )

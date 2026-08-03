@@ -7,6 +7,7 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -28,17 +29,27 @@ def ffmpeg_available() -> bool:
 
 
 _nvenc_cache: bool | None = None
+_nvenc_cache_time: float = 0.0
+# Re-probe periodically after a FAILED result only. A failure can be transient
+# (the tiny test encode loses a VRAM race against Forge/WanGP holding the GPU
+# at that exact moment, not a genuine missing driver/hardware) -- caching it
+# forever meant one unlucky first probe silently downgraded every video export
+# for the rest of the app's runtime to slow CPU x264, with no error and no way
+# to recover short of restarting. A successful result still never re-probes.
+_NVENC_RECHECK_SECS = 300
 
 
 def nvenc_available() -> bool:
     """True if NVIDIA NVENC H.264 hardware encoding actually works here.
 
-    Functionally probed once (a tiny encode), then cached -- the encoder can be
+    Functionally probed (a tiny encode), then cached -- the encoder can be
     listed but still fail to initialise if the driver/GPU is busy or absent.
     """
-    global _nvenc_cache
-    if _nvenc_cache is None:
+    global _nvenc_cache, _nvenc_cache_time
+    now = time.time()
+    if _nvenc_cache is None or (_nvenc_cache is False and now - _nvenc_cache_time > _NVENC_RECHECK_SECS):
         _nvenc_cache = _probe_nvenc()
+        _nvenc_cache_time = now
         log.info("NVENC hardware encoding %s", "available" if _nvenc_cache else "NOT available -- using CPU x264")
     return _nvenc_cache
 
@@ -99,15 +110,26 @@ def probe_file(path: str | Path) -> dict:
         )
         if r.returncode != 0:
             return result
-
         data = json.loads(r.stdout)
+    except Exception as e:
+        log.debug("probe_file(%s) failed: %s", path, e)
+        return result
 
-        # Duration from format
-        fmt = data.get("format", {})
-        result["duration"] = float(fmt.get("duration", 0))
+    # Duration from format -- guarded on its own so a malformed stream entry
+    # below can't wipe out an already-successfully-parsed duration.
+    try:
+        result["duration"] = float(data.get("format", {}).get("duration", 0))
+    except (TypeError, ValueError):
+        pass
 
-        # Find video and audio streams
-        for s in data.get("streams", []):
+    # Find video and audio streams. Each stream is guarded individually --
+    # previously one malformed field (e.g. a non-numeric width) raised out of
+    # the whole loop, silently discarding whatever had already been parsed
+    # AND whatever a later stream (e.g. the audio track) would have provided,
+    # while still returning a normal-looking result dict indistinguishable
+    # from a genuinely clean probe.
+    for s in data.get("streams", []):
+        try:
             codec_type = s.get("codec_type", "")
             if codec_type == "video" and result["width"] is None:
                 result["width"] = int(s.get("width", 0)) or None
@@ -116,22 +138,16 @@ def probe_file(path: str | Path) -> dict:
                 rfr = s.get("r_frame_rate", "")
                 if "/" in rfr:
                     parts = rfr.split("/")
-                    try:
-                        num, den = float(parts[0]), float(parts[1])
-                        if den > 0:
-                            result["fps"] = round(num / den, 2)
-                    except (ValueError, ZeroDivisionError):
-                        pass
+                    num, den = float(parts[0]), float(parts[1])
+                    if den > 0:
+                        result["fps"] = round(num / den, 2)
                 elif rfr:
-                    try:
-                        result["fps"] = float(rfr)
-                    except ValueError:
-                        pass
+                    result["fps"] = float(rfr)
             elif codec_type == "audio":
                 result["has_audio"] = True
-
-    except Exception as e:
-        log.debug("probe_file(%s) failed: %s", path, e)
+        except (ValueError, ZeroDivisionError, TypeError, IndexError) as e:
+            log.debug("probe_file(%s): skipping malformed stream entry: %s", path, e)
+            continue
 
     return result
 

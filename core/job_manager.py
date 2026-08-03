@@ -52,6 +52,15 @@ class Job:
         self.finished_at: float | None = None  # set when terminal (done/error/stopped/cancelled)
         self.stop_event = threading.Event()
         self.timeout_seconds: int | None = timeout_seconds  # overrides gpu_job_timeout_seconds
+        # Worker functions that shell out to ffmpeg/subprocess can register the
+        # live Popen here (see core.ffmpeg_utils.run_ffmpeg's active_procs/
+        # procs_lock convention) so stop() can actually kill in-flight work
+        # instead of merely setting stop_event and hoping the worker notices
+        # between steps -- upscale_video() runs single ffmpeg/Real-ESRGAN calls
+        # that can take hours with no internal stop_event checkpoint, so this
+        # was previously the only way for a long-running one to ever end early.
+        self.active_procs: set = set()
+        self.procs_lock = threading.Lock()
         self._worker_fn: Callable | None = None
         self._worker_args: tuple = ()
         self._worker_kwargs: dict = {}
@@ -189,6 +198,17 @@ class JobManager:
         if job is None:
             return False
         job.stop_event.set()
+        # Kill any subprocess the worker registered (see Job.active_procs) --
+        # without this, setting stop_event alone does nothing for a worker
+        # blocked inside a single long-running subprocess.run/Popen.communicate
+        # call with no stop_event checkpoint of its own.
+        with job.procs_lock:
+            procs = list(job.active_procs)
+        for proc in procs:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         if job.status == "queued":
             with self._lock:
                 job.status = "cancelled"
@@ -367,6 +387,7 @@ class JobManager:
                 original._worker_fn,
                 *original._worker_args,
                 label=original.label,
+                timeout_seconds=original.timeout_seconds,
                 **original._worker_kwargs,
             )
             new_job.meta.update(original.meta)
@@ -444,11 +465,11 @@ class JobManager:
             [j.to_dict() for j in all_jobs if j.status == "queued"],
             key=lambda j: j["created_at"],  # oldest first = next-to-run at top
         )
-        cutoff = time.time() - 900  # hide terminal jobs older than 15 minutes
+        cutoff = time.time() - 900  # hide terminal jobs finished more than 15 minutes ago
         recent = [
             j.to_dict() for j in all_jobs
             if j.status in ("done", "error", "stopped", "cancelled")
-            and j.created_at >= cutoff
+            and (j.finished_at or j.created_at) >= cutoff
         ]
         recent.sort(key=lambda j: j["created_at"], reverse=True)
         return {
@@ -546,7 +567,7 @@ class JobManager:
             to_remove = [
                 jid for jid, j in self._jobs.items()
                 if j.status in ("done", "error", "stopped", "cancelled")
-                and j.created_at < cutoff
+                and (j.finished_at or j.created_at) < cutoff
             ]
             for jid in to_remove:
                 del self._jobs[jid]

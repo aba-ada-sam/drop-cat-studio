@@ -7,6 +7,7 @@ tool in the Queue modal and the Gallery detail view.
 import datetime
 import logging
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -50,7 +51,12 @@ async def run_retime(request: Request):
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     dest_dir = OUTPUT_DIR / date_str
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dst = dest_dir / f"{src.stem}_retimed_{datetime.datetime.now().strftime('%H%M%S')}.mp4"
+    # HHMMSS alone collides if two jobs on the same source video are submitted
+    # within the same wall-clock second (JOB_VIDEO_TOOL jobs are unqueued, so
+    # nothing serializes them) -- two processes then race to write the same
+    # path with ffmpeg's -y. A short uuid suffix makes every output unique
+    # regardless of timing.
+    dst = dest_dir / f"{src.stem}_retimed_{datetime.datetime.now().strftime('%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
 
     def _worker(job, in_path, out_path, anchor_list):
         job.update(progress=5, message="Starting retime...")

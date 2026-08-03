@@ -54,7 +54,8 @@ def process_upscale_batch(job, file_list: list[str], settings: dict):
             job.update(progress=int(_base + frac * _span), message=f"{_n}/{total}: {msg}")
 
         out_path, err = upscale_video(src, dst, scale=scale, method=method,
-                                      crf=crf, progress_cb=_cb)
+                                      crf=crf, progress_cb=_cb,
+                                      active_procs=job.active_procs, procs_lock=job.procs_lock)
         if out_path:
             results.append(out_path)
             log.info("Done: %s", os.path.basename(out_path))

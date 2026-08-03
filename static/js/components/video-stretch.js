@@ -19,6 +19,12 @@ import { el, pathToUrl } from '../components.js?v=20260801b';
 import { apiFetch, toast } from '../shell/toast.js?v=20260620a';
 
 const MARK_R = 6;
+// Must match features/retime/retimer.py's _MIN_FACTOR/_MAX_FACTOR -- the
+// backend now rejects (rather than silently clamps and desyncs) a segment
+// outside this range, so warn here too instead of only finding out from a
+// server error after clicking Export.
+const MIN_FACTOR = 0.25;
+const MAX_FACTOR = 4.0;
 
 export class VideoStretchTool {
   constructor(containerEl, opts = {}) {
@@ -58,7 +64,8 @@ export class VideoStretchTool {
     this._canvas.addEventListener('mousedown', e => this._onDown(e));
     this._canvas.addEventListener('mousemove', e => this._onMove(e));
     this._canvas.addEventListener('dblclick',  e => this._onDblClick(e));
-    window.addEventListener('mouseup', () => { this._dragIdx = -1; });
+    this._mouseUpHandler = () => { this._dragIdx = -1; };
+    window.addEventListener('mouseup', this._mouseUpHandler);
 
     this._info = el('div', { style: 'font-size:11px; color:var(--text-3); min-height:14px; margin-top:4px;' });
 
@@ -78,7 +85,8 @@ export class VideoStretchTool {
     this._el.append(title, hint, this._canvas, this._info, btnRow, this._barWrap, this._status);
     this._updateInfo();
     requestAnimationFrame(() => this._draw());
-    new ResizeObserver(() => this._draw()).observe(this._canvas);
+    this._resizeObserver = new ResizeObserver(() => this._draw());
+    this._resizeObserver.observe(this._canvas);
   }
 
   async _loadAudio() {
@@ -214,18 +222,31 @@ export class VideoStretchTool {
     if (!this._anchors.length) { this._info.textContent = 'No locks yet -- the video plays at its natural timing.'; return; }
     const pts = [[0, 0], ...this._anchors.map(a => [a.src_t, a.dst_t]), [this._dur, this._dur]];
     const parts = [];
+    let outOfRange = false;
     for (let k = 0; k < pts.length - 1; k++) {
       const ss = pts[k + 1][0] - pts[k][0], ds = pts[k + 1][1] - pts[k][1];
       if (ss > 0.05 && ds > 0.05) {
         const f = ds / ss;
-        parts.push(`${pts[k][1].toFixed(1)}-${pts[k + 1][1].toFixed(1)}s: video ${f < 1 ? 'faster' : (f > 1 ? 'slower' : 'normal')} ${f.toFixed(2)}x`);
+        const bad = f < MIN_FACTOR || f > MAX_FACTOR;
+        if (bad) outOfRange = true;
+        parts.push(`${pts[k][1].toFixed(1)}-${pts[k + 1][1].toFixed(1)}s: video ${f < 1 ? 'faster' : (f > 1 ? 'slower' : 'normal')} ${f.toFixed(2)}x${bad ? ' (too extreme!)' : ''}`);
       }
     }
     this._info.textContent = `${this._anchors.length} lock(s) | ${parts.join('  |  ')}`;
+    this._info.style.color = outOfRange ? 'var(--circus-red, #c0392b)' : '';
+    // Don't fight the button's own disabled state while an export is already
+    // in flight (a lock could still be dragged/removed during that window).
+    if (this._exportBtn && !this._exporting) {
+      this._exportBtn.disabled = outOfRange;
+      this._exportBtn.title = outOfRange
+        ? `Move a lock closer to its source position -- max supported speed change is ${MIN_FACTOR}x-${MAX_FACTOR}x`
+        : '';
+    }
   }
 
   async _export() {
     if (!this._videoPath) { toast('No source video path', 'error'); return; }
+    this._exporting = true;
     this._exportBtn.disabled = true;
     this._status.textContent = 'Submitting...';
     this._barWrap.style.display = 'block'; this._bar.style.width = '5%';
@@ -235,23 +256,25 @@ export class VideoStretchTool {
         body: JSON.stringify({ video_path: this._videoPath, anchors: this._anchors }),
       });
       if (!resp.job_id) throw new Error(resp.error || 'No job started');
-      const poll = setInterval(async () => {
+      this._pollInterval = setInterval(async () => {
         try {
           const j = await apiFetch(`/api/jobs/${resp.job_id}`);
           this._bar.style.width = (j.progress || 5) + '%';
           this._status.textContent = j.message || 'Retiming...';
           if (j.status === 'done') {
-            clearInterval(poll);
+            clearInterval(this._pollInterval);
             this._barWrap.style.display = 'none';
             this._status.textContent = 'Saved: ' + (j.output || '');
+            this._exporting = false;
             this._exportBtn.disabled = false;
             document.dispatchEvent(new Event('session-updated'));
             toast('Retimed video saved', 'success');
             if (this._opts.onApplied) this._opts.onApplied(j.output);
           } else if (j.status === 'error' || j.status === 'stopped') {
-            clearInterval(poll);
+            clearInterval(this._pollInterval);
             this._barWrap.style.display = 'none';
             this._status.textContent = 'Failed: ' + (j.error || j.status);
+            this._exporting = false;
             this._exportBtn.disabled = false;
           }
         } catch (_) {}
@@ -259,9 +282,15 @@ export class VideoStretchTool {
     } catch (e) {
       this._barWrap.style.display = 'none';
       this._status.textContent = 'Error: ' + e.message;
+      this._exporting = false;
       this._exportBtn.disabled = false;
     }
   }
 
-  destroy() { this._stopRaf(); }
+  destroy() {
+    this._stopRaf();
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    if (this._mouseUpHandler) window.removeEventListener('mouseup', this._mouseUpHandler);
+    if (this._resizeObserver) this._resizeObserver.disconnect();
+  }
 }

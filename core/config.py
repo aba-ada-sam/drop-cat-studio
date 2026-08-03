@@ -153,7 +153,6 @@ DEFAULTS: dict = {
 _lock = threading.RLock()  # BUG-05: RLock so load() inside save() doesn't deadlock
 _cache: dict | None = None
 _cache_mtime: float = 0.0
-_validated = False
 
 _log = logging.getLogger(__name__)
 
@@ -166,8 +165,12 @@ def _validate_config(data: dict) -> dict:
         expected = type(DEFAULTS[key])
         if expected == type(value) or value == "" or DEFAULTS[key] == "":
             continue
-        # int/float are interchangeable
-        if expected in (int, float) and isinstance(value, (int, float)):
+        # int/float are interchangeable, but bool is a subclass of int in
+        # Python -- isinstance(True, int) is True -- so this used to also
+        # accept a JSON true/false for an int-typed key (e.g. a stray
+        # "i2v_fps": true) without coercing it back, silently handing a bool
+        # to code expecting a real int.
+        if expected in (int, float) and isinstance(value, (int, float)) and not isinstance(value, bool):
             continue
         _log.warning("[Config] Key '%s' expected %s, got %s (%r) -- using default",
                      key, expected.__name__, type(value).__name__, value)
@@ -198,10 +201,14 @@ def load() -> dict:
         if CONFIG_FILE.exists():
             try:
                 data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                global _validated
-                if not _validated:
-                    data = _validate_config(data)
-                    _validated = True
+                # Re-validate on every actual disk re-read (mtime changed --
+                # load() above already returns the cached dict without ever
+                # reaching here on a cache hit, so this doesn't run on every
+                # call). Previously gated to "only the first successful parse
+                # ever", so a bad-typed value written by save() (which never
+                # validates) or by hand-editing config.json while the app is
+                # running would never get coerced back, even on a later reload.
+                data = _validate_config(data)
                 merged = {**DEFAULTS, **data}
                 _cache = merged
                 _cache_mtime = mtime

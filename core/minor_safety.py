@@ -36,6 +36,16 @@ async def minor_safety_verdict(scene_text: str) -> str:
             system=JUDGE_SYSTEM_PROMPT,
             tier=TIER_FAST,
             max_tokens=5,
+            # This judge exists specifically to catch sexual/nude language
+            # near an under-18 signal. On the anthropic/openai path (the
+            # default provider), route() otherwise runs both this system
+            # prompt and the judged text through the NSFW euphemism
+            # sanitizer meant for prompt-drafting calls -- softening the
+            # judge's own instructions ("sexual"->"intimate", "nude"->
+            # "minimally dressed", etc.) and the content it's judging by
+            # the same amount, diluting exactly the signal this exists to
+            # catch. Never sanitize this call.
+            skip_sanitize=True,
         )
 
     try:

@@ -118,12 +118,24 @@ class GPUOrchestrator:
                 self.release_all()
 
     def _wangp_busy(self) -> bool:
-        """Return True if WanGP reports an active generation in progress."""
+        """Return True if WanGP reports an active generation in progress.
+
+        Both call sites only reach this after confirming the WanGP process
+        itself is alive -- the only open question here is busy vs idle. A
+        slow/unresponsive /status call (plausible during heavy inference,
+        since a synchronous CUDA call can block the GIL long enough to stall
+        even a lightweight HTTP handler) used to fail open (treated as idle),
+        which could let idle-eviction or a different service's acquire() kill
+        an actively-rendering WanGP -- exactly the "frozen render" bug this
+        function exists to prevent. Failing closed (assume busy) instead
+        costs at most one skipped eviction cycle or one GPUBusyError that the
+        caller already handles -- never a stuck/hung state.
+        """
         try:
             with urllib.request.urlopen("http://127.0.0.1:7899/status", timeout=2) as r:
                 return json.loads(r.read()).get("busy", False)
         except Exception:
-            return False  # unreachable = idle
+            return True  # can't confirm idle -- assume busy, never assume safe-to-kill
 
     def is_wangp_rendering(self) -> bool:
         """True if WanGP holds the GPU and is actively generating a video."""
@@ -145,10 +157,15 @@ class GPUOrchestrator:
         pipeline transitions (e.g. acestep after the video phase) run when WanGP
         is already idle, so they are unaffected.
         """
-        self._last_acquire = time.time()
         if _is_remote(service):
             log.debug("[gpu] acquire %s -- remote, skipping local eviction", service)
             return
+        # Only a LOCAL acquire counts as GPU activity -- a remote acquire (e.g.
+        # acestep_host pointing at another machine) used to reset this clock
+        # too, which could perpetually defer idle-eviction of a genuinely-idle
+        # local service (e.g. WanGP sitting loaded while only remote acestep
+        # calls keep happening) -- defeating the point of idle eviction.
+        self._last_acquire = time.time()
         with self._lock:
             if self._current == service:
                 if not self._is_alive(service):

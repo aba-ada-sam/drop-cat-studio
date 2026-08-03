@@ -18,6 +18,23 @@ let _filters = { tab: '', search: '' };
 let _containerEl = null;
 let _detailItem = null;
 let _preview = null; // { url, prompt, actions: [{label, onClick}] }
+// Detail-view tools (Stretch & Lock, Lip Sync) mounted fresh on every
+// _openDetail() call with no teardown of the previous mount -- leaked global
+// listeners/ResizeObservers per video reviewed, and a still-polling export
+// job from a previous item kept firing toasts/session-updated after the user
+// moved on. Track the live instances so they can be destroyed before the next
+// mount and on overlay close.
+let _activeStretchTool = null;
+let _activeLipSyncTool = null;
+let _detailToolsGen = 0;
+
+function _destroyDetailTools() {
+  _detailToolsGen++;  // invalidates any in-flight async mount from a prior open()
+  try { _activeStretchTool?.destroy(); } catch (_) {}
+  try { _activeLipSyncTool?.destroy(); } catch (_) {}
+  _activeStretchTool = null;
+  _activeLipSyncTool = null;
+}
 
 export function init(containerEl) {
   _containerEl = containerEl;
@@ -363,6 +380,7 @@ function _makeCard(item) {
 
 function _openDetail(item) {
   _detailItem = item;
+  _destroyDetailTools();  // tear down whatever the previous open() mounted
   let overlay = document.getElementById('gallery-detail-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -375,6 +393,7 @@ function _openDetail(item) {
       if (e.target === overlay) {
         overlay.querySelector('video')?.pause();
         overlay.classList.remove('open');
+        _destroyDetailTools();
       }
     });
   }
@@ -385,6 +404,7 @@ function _openDetail(item) {
   function _closeOverlay() {
     overlay.querySelector('video')?.pause();
     overlay.classList.remove('open');
+    _destroyDetailTools();
   }
 
   overlay.innerHTML = `
@@ -475,12 +495,13 @@ function _openDetail(item) {
   overlay.classList.add('open');
 
   // Manual Stretch & Lock tool for video items
+  const myToolsGen = _detailToolsGen;
   if (isVideo) {
     const slot = overlay.querySelector('#gd-stretch-slot');
     const vid  = overlay.querySelector('video');
     if (slot && vid) {
       try {
-        new VideoStretchTool(slot, {
+        _activeStretchTool = new VideoStretchTool(slot, {
           videoUrl: item.url,
           videoPath: item.metadata?.path || item.url,
           videoEl: vid,
@@ -490,6 +511,13 @@ function _openDetail(item) {
     const lipSlot = overlay.querySelector('#gd-lipsync-slot');
     if (lipSlot) {
       mountLipSyncTool(lipSlot, { videoPath: item.metadata?.path || item.url })
+        .then(handle => {
+          // A newer open()/close() already ran (and destroyed whatever this
+          // call would have produced) while the mount was still in flight --
+          // destroy this one too instead of leaking it into _activeLipSyncTool.
+          if (myToolsGen !== _detailToolsGen) { handle?.destroy(); return; }
+          _activeLipSyncTool = handle;
+        })
         .catch(e => console.error('LipSync mount failed', e));
     }
   }

@@ -29,9 +29,13 @@ _PAIRS = [
     ("boobs", "bust area"),        # "shoulders" was too innocent; "bust" itself is kept below
     ("buttocks", "lower torso"),   # was "lower back" -- "back" too common
     ("butt", "rear end"),          # was "back" -- "back" is FAR too common a word
-    ("ass", "rear end"),           # was "back" -- ditto; both map to same euphemism is fine
+    ("ass", "hindquarters"),       # was "back" -- ditto. Must NOT share "rear end" with
+                                   # "butt": desanitize() can't tell which explicit term a
+                                   # shared euphemism came from, so it always reverses to
+                                   # whichever pair is listed first -- silently swapping the
+                                   # user's actual word choice on every round-trip.
     ("groin", "waistline"),
-    ("crotch", "waistline"),
+    ("crotch", "pelvic area"),     # distinct from "groin" for the same reason
     ("genitals", "midsection"),
     ("thighs", "upper legs"),      # was "legs" -- "legs" is too common; "upper legs" is specific
     ("thigh", "upper leg"),        # was "leg"  -- ditto
@@ -81,13 +85,14 @@ _PAIRS = [
     ("gimp", "glossy bodysuit wearer"),
     ("latex catsuit", "glossy black suit"),
     ("latex", "glossy synthetic"),
-    ("rubber suit", "glossy black bodysuit"),
-    ("rubber", "glossy synthetic"),
+    ("rubber suit", "glossy elastic suit"),   # was "glossy black bodysuit" -- distinct from
+                                              # "gimp suit" (same-euphemism round-trip bug)
+    ("rubber", "glossy elastic"),             # was "glossy synthetic" -- distinct from "latex"
     ("leather catsuit", "sleek black suit"),
     ("leather harness", "sculpted harness"),
     ("harness", "sculpted strap set"),
     ("ball gag", "ornamental mouthpiece"),
-    ("gag", "ornamental mouthpiece"),
+    ("gag", "decorative mouthpiece"),   # distinct from "ball gag" -- same-euphemism bug
     ("shackles", "ornamental cuffs"),
     ("chains", "decorative chains"),
     ("collar and leash", "neckpiece with tether"),
@@ -101,11 +106,39 @@ _PAIRS = [
     ("whip", "ornamental cord"),
     ("corset", "fitted bodice"),
     ("thong", "narrow garment"),
-    ("g-string", "narrow garment"),
+    ("g-string", "slender garment"),   # distinct from "thong" -- same-euphemism bug
 ]
+
+# Defensive check: if two different explicit terms ever share a euphemism,
+# desanitize() can't tell which one a match came from and always reverses to
+# whichever pair happens to be listed first, silently swapping the other
+# term's original wording on every round-trip (found live, see the inline
+# comments above for the pairs this actually happened to). Catch any future
+# addition that reintroduces a collision at import time instead of silently.
+_euphemism_owners: dict[str, str] = {}
+for _explicit, _euphemism in _PAIRS:
+    _key = _euphemism.lower()
+    if _key in _euphemism_owners:
+        raise ValueError(
+            f"nsfw_sanitizer: euphemism {_euphemism!r} is used by both "
+            f"{_euphemism_owners[_key]!r} and {_explicit!r} -- desanitize() "
+            f"cannot round-trip these correctly, give one a distinct euphemism"
+        )
+    _euphemism_owners[_key] = _explicit
+del _euphemism_owners, _explicit, _euphemism, _key
 
 # Pre-sort by length (longest first) to avoid partial phrase matches
 _PAIRS.sort(key=lambda p: len(p[0]), reverse=True)
+
+# desanitize() runs in the opposite direction (searching for euphemisms,
+# restoring explicit terms), so it needs its OWN longest-first order keyed on
+# euphemism length -- sorting only by explicit-term length (above) leaves
+# desanitize() vulnerable to a shorter euphemism that's a substring of a
+# longer one (e.g. "garment" inside "narrow garment"): the short pair matches
+# first and corrupts the longer phrase before its own pair ever gets a
+# chance (found live: "thong" -> "narrow garment" -> "narrow panties" instead
+# of back to "thong", because ("panties", "garment") matched inside it first).
+_PAIRS_BY_EUPHEMISM_LEN = sorted(_PAIRS, key=lambda p: len(p[1]), reverse=True)
 
 
 def sanitize(text: str) -> str:
@@ -123,7 +156,7 @@ def desanitize(text: str) -> str:
     if not text:
         return text
     result = text
-    for explicit, euphemism in _PAIRS:
+    for explicit, euphemism in _PAIRS_BY_EUPHEMISM_LEN:
         result = _replace_preserve_case(result, euphemism, explicit)
     return result
 

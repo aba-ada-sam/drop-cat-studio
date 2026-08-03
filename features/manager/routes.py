@@ -147,10 +147,12 @@ async def manager_think(request: Request):
     # The user picked Claude to power the Manager. Prefer Anthropic; fall back to
     # the configured provider if the key is missing or the call fails.
     raw = None
+    force_used = "anthropic"
     try:
         raw = await asyncio.to_thread(_call, "anthropic")
     except Exception as e:
         log.warning("[manager] anthropic call failed (%s); falling back to configured provider", e)
+        force_used = None
         try:
             raw = await asyncio.to_thread(_call, None)
         except Exception as e2:
@@ -175,7 +177,7 @@ async def manager_think(request: Request):
             action = {"type": "say", "message": thought or "Thinking..."}
 
     try:
-        provider_used = llm._provider("anthropic")  # noqa: SLF001
+        provider_used = llm._provider(force_used)  # noqa: SLF001
     except Exception:
         provider_used = "auto"
 

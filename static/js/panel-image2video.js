@@ -25,11 +25,13 @@ export function init(panel) {
     async onFiles(files) {
       try {
         const data = await apiUpload('/api/i2v/upload', files);
-        for (const img of data.images || []) {
+        const added = data.images || [];
+        for (const img of added) {
           images.push({ ...img, motion: 'random' });
         }
         renderList();
-        toast(`${files.length} image(s) added`, 'success');
+        if (added.length) toast(`${added.length} image(s) added`, 'success');
+        if (added.length < files.length) toast(`${files.length - added.length} file(s) skipped -- not a supported image type`, 'error');
       } catch (e) { toast(e.message, 'error'); }
     },
   });

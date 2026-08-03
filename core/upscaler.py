@@ -68,13 +68,18 @@ def ai_available() -> bool:
         return False
 
 
-def _run_venv_worker(frames_dir: Path, up_dir: Path, scale: float, progress_cb) -> bool:
+def _run_venv_worker(frames_dir: Path, up_dir: Path, scale: float, progress_cb,
+                      active_procs=None, procs_lock=None) -> bool:
     """Run the Real-ESRGAN frame worker in venv-upscale. Returns success."""
     cmd = [str(_VENV_PY), str(_AI_WORKER), str(frames_dir), str(up_dir), str(scale)]
     tail: list[str] = []
+    proc = None
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        if active_procs is not None and procs_lock is not None:
+            with procs_lock:
+                active_procs.add(proc)
         for line in proc.stdout:
             line = line.strip()
             if line.startswith("PROGRESS "):
@@ -98,6 +103,10 @@ def _run_venv_worker(frames_dir: Path, up_dir: Path, scale: float, progress_cb) 
     except Exception as e:
         log.warning("[upscale] AI worker error: %s", e)
         return False
+    finally:
+        if proc is not None and active_procs is not None and procs_lock is not None:
+            with procs_lock:
+                active_procs.discard(proc)
 
 
 def _probe_video(path: str) -> tuple[int, int, str]:
@@ -120,6 +129,8 @@ def upscale_ffmpeg(
     scale: float = 2.0,
     crf: int = 14,
     preset: str = "fast",
+    active_procs=None,
+    procs_lock=None,
 ) -> tuple[str | None, str | None]:
     """Upscale video using ffmpeg lanczos. Returns (output_path, error).
 
@@ -131,15 +142,15 @@ def upscale_ffmpeg(
         new_w = _nearest_even(int(w * scale))
         new_h = _nearest_even(int(h * scale))
 
-        from core.ffmpeg_utils import video_encode_args
+        from core.ffmpeg_utils import video_encode_args, run_ffmpeg
         cmd = ["ffmpeg", "-y", "-i", input_path]
         if scale != 1.0:
             cmd += ["-vf", f"scale={new_w}:{new_h}:flags=lanczos"]
         cmd += video_encode_args(crf=int(crf))
         cmd += ["-c:a", "copy", output_path]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=12 * 3600)
+        r = run_ffmpeg(cmd, timeout=12 * 3600, active_procs=active_procs, procs_lock=procs_lock)
         if r.returncode != 0:
-            return None, f"ffmpeg upscale failed: {r.stderr[-400:]}"
+            return None, f"ffmpeg upscale failed: {(r.stderr or b'').decode(errors='replace')[-400:]}"
         if Path(output_path).exists() and Path(output_path).stat().st_size > 0:
             log.info("Upscaled %s -> %dx%d lanczos crf=%d", Path(input_path).name, new_w, new_h, crf)
             return output_path, None
@@ -154,6 +165,8 @@ def upscale_ai(
     scale: float = 2.0,
     crf: int = 14,
     progress_cb=None,
+    active_procs=None,
+    procs_lock=None,
 ) -> tuple[str | None, str | None]:
     """Upscale video with Real-ESRGAN (frame-by-frame). Falls back to ffmpeg.
 
@@ -169,10 +182,12 @@ def upscale_ai(
             from realesrgan import RealESRGANer  # noqa: F401
         except ImportError:
             log.info("Real-ESRGAN not installed -- using ffmpeg lanczos upscale")
-            return upscale_ffmpeg(input_path, output_path, scale, crf=crf)
+            return upscale_ffmpeg(input_path, output_path, scale, crf=crf,
+                                   active_procs=active_procs, procs_lock=procs_lock)
 
     try:
         w, h, fps_str = _probe_video(input_path)
+        from core.ffmpeg_utils import run_ffmpeg
 
         with tempfile.TemporaryDirectory(prefix=_TMP_PREFIX) as tmp:
             frames_dir = Path(tmp) / "frames"
@@ -182,22 +197,26 @@ def upscale_ai(
             # Extract frames
             if progress_cb:
                 progress_cb(0.0, "Extracting frames...")
-            ex = subprocess.run(
+            ex = run_ffmpeg(
                 ["ffmpeg", "-y", "-i", input_path, str(frames_dir / "f%05d.png")],
-                capture_output=True, timeout=6 * 3600,
+                timeout=6 * 3600, active_procs=active_procs, procs_lock=procs_lock,
             )
             if ex.returncode != 0:
                 log.warning("[upscale] Frame extract failed -- using ffmpeg")
-                return upscale_ffmpeg(input_path, output_path, scale, crf=crf)
+                return upscale_ffmpeg(input_path, output_path, scale, crf=crf,
+                                       active_procs=active_procs, procs_lock=procs_lock)
 
             frames = sorted(frames_dir.glob("*.png"))
             if not frames:
-                return upscale_ffmpeg(input_path, output_path, scale, crf=crf)
+                return upscale_ffmpeg(input_path, output_path, scale, crf=crf,
+                                       active_procs=active_procs, procs_lock=procs_lock)
 
             if use_venv:
-                if not _run_venv_worker(frames_dir, up_dir, scale, progress_cb):
+                if not _run_venv_worker(frames_dir, up_dir, scale, progress_cb,
+                                         active_procs=active_procs, procs_lock=procs_lock):
                     log.warning("[upscale] venv AI worker failed -- falling back to ffmpeg")
-                    return upscale_ffmpeg(input_path, output_path, scale, crf=crf)
+                    return upscale_ffmpeg(input_path, output_path, scale, crf=crf,
+                                           active_procs=active_procs, procs_lock=procs_lock)
             else:
                 import numpy as np
                 import torch as _torch
@@ -239,7 +258,7 @@ def upscale_ai(
             if progress_cb:
                 progress_cb(0.98, "Encoding output...")
             from core.ffmpeg_utils import video_encode_args
-            r = subprocess.run(
+            r = run_ffmpeg(
                 ["ffmpeg", "-y",
                  "-framerate", fps_str,
                  "-i", str(up_dir / "f%05d.png"),
@@ -249,7 +268,7 @@ def upscale_ai(
                  *video_encode_args(crf=int(crf)),
                  "-c:a", "copy", "-shortest",
                  output_path],
-                capture_output=True, timeout=12 * 3600,
+                timeout=12 * 3600, active_procs=active_procs, procs_lock=procs_lock,
             )
             if r.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 0:
                 log.info("AI upscaled %s x%.1f Real-ESRGAN", Path(input_path).name, scale)
@@ -259,7 +278,8 @@ def upscale_ai(
     except Exception as e:
         log.warning("[upscale] Real-ESRGAN failed: %s -- falling back to ffmpeg", e)
 
-    return upscale_ffmpeg(input_path, output_path, scale, crf=crf)
+    return upscale_ffmpeg(input_path, output_path, scale, crf=crf,
+                           active_procs=active_procs, procs_lock=procs_lock)
 
 
 def upscale_video(
@@ -270,13 +290,23 @@ def upscale_video(
     crf: int = 14,
     preset: str = "fast",
     progress_cb=None,
+    active_procs=None,
+    procs_lock=None,
 ) -> tuple[str | None, str | None]:
     """Upscale a video file. Returns (output_path, error_or_None).
 
     method: 'ffmpeg' (lanczos, default) or 'ai' (Real-ESRGAN with ffmpeg fallback).
     scale: output multiplier, e.g. 2.0 doubles both dimensions. 1.0 = re-encode
            only (optimize file size without resizing); AI is skipped at 1.0.
+
+    active_procs/procs_lock: same convention as core.ffmpeg_utils.run_ffmpeg --
+    pass a job's tracking set/lock so a Stop click can actually kill the
+    in-flight ffmpeg/Real-ESRGAN subprocess instead of only setting
+    stop_event and waiting for a checkpoint this function never had (a single
+    upscale can run for hours with no internal stop check).
     """
     if method == "ai" and scale > 1.0:
-        return upscale_ai(input_path, output_path, scale, crf=crf, progress_cb=progress_cb)
-    return upscale_ffmpeg(input_path, output_path, scale, crf=crf, preset=preset)
+        return upscale_ai(input_path, output_path, scale, crf=crf, progress_cb=progress_cb,
+                           active_procs=active_procs, procs_lock=procs_lock)
+    return upscale_ffmpeg(input_path, output_path, scale, crf=crf, preset=preset,
+                           active_procs=active_procs, procs_lock=procs_lock)

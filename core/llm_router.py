@@ -208,13 +208,15 @@ class LLMRouter:
         est_tokens: int = 500,
         system: str = "",
         force_provider: str | None = None,
+        skip_sanitize: bool = False,
     ) -> str:
         provider = self._provider(force_provider)
         if provider in ("anthropic", "openai"):
             chat_fn = self._anthropic_chat if provider == "anthropic" else self._openai_chat
             try:
                 result = self._call_with_retry(
-                    lambda: chat_fn(messages, tier, max_tokens, system), provider=provider,
+                    lambda: chat_fn(messages, tier, max_tokens, system, skip_sanitize=skip_sanitize),
+                    provider=provider,
                 )
             except Exception as e:
                 # Hard content-policy block (empty response, no refusal text to read) --
@@ -308,23 +310,25 @@ class LLMRouter:
 
     # -- Anthropic -------------------------------------------------------------
 
-    def _anthropic_chat(self, messages, tier, max_tokens, system):
+    def _anthropic_chat(self, messages, tier, max_tokens, system, skip_sanitize=False):
         import anthropic
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
+        _san = (lambda t: t) if skip_sanitize else sanitize
+        _desan = (lambda t: t) if skip_sanitize else desanitize
         client = anthropic.Anthropic(api_key=get_key("anthropic"))
         model = cfg.get(f"ai_model_{tier}") or _ANTHROPIC_MODELS.get(tier, _ANTHROPIC_MODELS[TIER_BALANCED])
         safe_msgs = [
-            {**m, "content": sanitize(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
+            {**m, "content": _san(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
             for m in messages
         ]
         kwargs = dict(model=model, max_tokens=max_tokens, messages=safe_msgs)
         if system:
-            kwargs["system"] = sanitize(system)
+            kwargs["system"] = _san(system)
         resp = client.messages.create(**kwargs)
         if not resp.content:
             raise ValueError(f"Anthropic returned empty response (stop_reason={resp.stop_reason!r}) -- possible content policy refusal")
-        return desanitize(resp.content[0].text)
+        return _desan(resp.content[0].text)
 
     def _anthropic_vision(self, prompt, images_b64, tier, max_tokens, system):
         import anthropic
@@ -353,19 +357,21 @@ class LLMRouter:
 
     # -- OpenAI ----------------------------------------------------------------
 
-    def _openai_chat(self, messages, tier, max_tokens, system):
+    def _openai_chat(self, messages, tier, max_tokens, system, skip_sanitize=False):
         from openai import OpenAI
         from core.keys import get_key
         from core.nsfw_sanitizer import sanitize, desanitize
+        _san = (lambda t: t) if skip_sanitize else sanitize
+        _desan = (lambda t: t) if skip_sanitize else desanitize
         client = OpenAI(api_key=get_key("openai"))
         model = cfg.get(f"ai_model_{tier}") or _OPENAI_MODELS.get(tier, _OPENAI_MODELS[TIER_BALANCED])
         safe_msgs = [
-            {**m, "content": sanitize(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
+            {**m, "content": _san(m["content"]) if isinstance(m.get("content"), str) else m.get("content")}
             for m in messages
         ]
         all_messages = []
         if system:
-            all_messages.append({"role": "system", "content": sanitize(system)})
+            all_messages.append({"role": "system", "content": _san(system)})
         all_messages.extend(safe_msgs)
         resp = client.chat.completions.create(
             model=model,
@@ -375,7 +381,7 @@ class LLMRouter:
         if not resp.choices or resp.choices[0].message.content is None:
             reason = getattr(resp.choices[0], "finish_reason", "unknown") if resp.choices else "no choices"
             raise ValueError(f"OpenAI returned empty response (finish_reason={reason!r}) -- possible content policy refusal")
-        return desanitize(resp.choices[0].message.content)
+        return _desan(resp.choices[0].message.content)
 
     def _openai_vision(self, prompt, images_b64, tier, max_tokens, system):
         from openai import OpenAI

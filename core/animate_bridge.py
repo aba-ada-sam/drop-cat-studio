@@ -6,12 +6,15 @@ step-floor dict -- there is already a third copy of this floor in
 features/fun_videos/routes.py's make-it handler (handler-local, can't be
 imported); this module is the single shared copy for chat_studio + image_studio.
 """
+import logging
 import os
 from pathlib import Path
 
 from fastapi import HTTPException
 
 from core import config as cfg
+
+log = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 
@@ -85,6 +88,14 @@ async def animate_image(body: dict, label_prefix: str = "Animate") -> dict:
             f"{requested_model} is text-to-video and cannot accept a start image. "
             f"Pick an I2V model in Settings.",
         )
+    if model_def is None:
+        # requested_model doesn't match any current entry (stale/renamed config
+        # value) -- can't verify I2V support, so this guard's whole point (catch
+        # a T2V model before WanGP silently drops the start image) is skipped
+        # for exactly the model it can't recognize. Not hard-blocking since the
+        # model may still be genuinely valid; at least make it debuggable.
+        log.warning("animate_bridge: requested_model %r not found in the current "
+                    "model catalog -- cannot verify I2V support", requested_model)
 
     duration = _safe_float(body.get("duration"), config.get("fun_video_duration", 6.0))
     duration = max(1.0, min(20.0, duration))

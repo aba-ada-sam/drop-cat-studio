@@ -6,9 +6,12 @@ a short style/safety lead-in, subject-aware anatomy anchoring, and ADetailer
 passes. See reference_forge_prompt_best_practices: short and concrete beats
 long and evocative, so keep every wrap lean.
 """
+import logging
 import random
 import re
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 DEFAULT_CHECKPOINT = "zavychromaxl_v90.safetensors"
 NSFW_CHECKPOINT = "perfection25D_illustrious.safetensors"
@@ -1175,7 +1178,12 @@ def list_presets() -> list[dict]:
 def get_preset(preset_key) -> dict:
     if not isinstance(preset_key, str):
         return PRESETS[DEFAULT_PRESET_KEY]
-    return PRESETS.get(preset_key, PRESETS[DEFAULT_PRESET_KEY])
+    if preset_key not in PRESETS:
+        log.warning("[image_presets] unrecognized preset_key %r -- falling back to %r "
+                    "(a stale/mistyped id silently renders with a completely different "
+                    "checkpoint/wrap otherwise)", preset_key, DEFAULT_PRESET_KEY)
+        return PRESETS[DEFAULT_PRESET_KEY]
+    return PRESETS[preset_key]
 
 
 def clamp_prompt_text(text: str) -> str:
