@@ -105,6 +105,16 @@ render defects (warped anatomy, extra limbs, garbled text/artifacts), never for 
 You are proposing the next round's prompt, not making the final call -- he can always type again to redirect."""
 
 _SESSIONS: dict[str, dict] = {}
+# Serializes the whole "check lockout -> read body -> verify PIN -> maybe
+# record a failure" sequence in unlock() below. Without this, the lockout
+# check and the failure-recording were on opposite sides of an `await`
+# (_read_json_capped) with no atomicity between them -- any number of
+# concurrent /unlock requests could all pass the lockout check before any
+# of them had registered a failure, so LOCKOUT_THRESHOLD/
+# GLOBAL_LOCKOUT_THRESHOLD only bounded SEQUENTIAL guessing, not a
+# concurrent burst. PIN checks are rare in normal use, so fully serializing
+# them has no real cost.
+_pin_lock = asyncio.Lock()
 _FAILED_ATTEMPTS: dict[str, list] = {}  # ip -> [timestamps of recent failures]
 LOCKOUT_THRESHOLD = 5
 LOCKOUT_SECONDS = 300
@@ -184,13 +194,14 @@ def _require_session(request: Request) -> dict:
 @router.post("/unlock")
 async def unlock(request: Request, response: Response):
     ip = _client_ip(request)
-    if _is_locked_out(ip):
-        raise HTTPException(429, "too many wrong PIN attempts -- wait a few minutes")
-    body = await _read_json_capped(request)
-    pin = str(body.get("pin") or "")
-    if not secrets.compare_digest(pin, _get_or_create_pin()):
-        _record_failure(ip)
-        raise HTTPException(403, "wrong PIN")
+    async with _pin_lock:
+        if _is_locked_out(ip):
+            raise HTTPException(429, "too many wrong PIN attempts -- wait a few minutes")
+        body = await _read_json_capped(request)
+        pin = str(body.get("pin") or "")
+        if not secrets.compare_digest(pin, _get_or_create_pin()):
+            _record_failure(ip)
+            raise HTTPException(403, "wrong PIN")
     token = secrets.token_urlsafe(32)
     _SESSIONS[token] = {
         "created": time.time(), "last_seen": time.time(),
@@ -261,7 +272,12 @@ async def _generate_one(prompt, negative_prompt, preset_key, subject, creature, 
 
 def _interpret_chat(sess: dict, chat_message: str) -> dict | None:
     """Send the admin's message + the 4 images currently on screen to a vision
-    LLM, get back {reply, updated_prompt, negative_additions, anchor_image}.
+    LLM, get back {reply, updated_prompt, negative_additions,
+    anchor_original_index}. anchor_original_index is already resolved to a
+    real 0-based index into sess["last_seeds"]/last_image_paths -- not the
+    LLM's raw 1-based "image N" answer, which is numbered over whatever
+    subset of images actually survived b64 encoding and so cannot be
+    assumed to line up positionally with last_seeds.
     Returns None on any failure (bad response, provider error) so the caller
     can fall back to raw text -- never raises, this is a best-effort call."""
     from app import get_llm_router
@@ -269,10 +285,22 @@ def _interpret_chat(sess: dict, chat_message: str) -> dict | None:
 
     image_paths = [p for p in sess.get("last_image_paths", []) if p]
     b64_images = []
-    for p in image_paths[:BATCH_SIZE]:
+    # last_image_paths is already compacted to stay parallel with
+    # sess["last_seeds"] (a failed GENERATION is dropped from both at the
+    # same index). But encode_image_b64() can ALSO fail independently here
+    # (missing/corrupt file, I/O error) on an image that generated fine --
+    # if that happens mid-list, b64_images ends up shorter than
+    # image_paths with a gap the vision LLM never sees, so its 1-based
+    # "image N" numbering (based on len(b64_images)) would silently drift
+    # out of alignment with last_seeds for every image after the gap.
+    # Track which ORIGINAL indices survived so anchor_image can be mapped
+    # back correctly regardless of where a gap falls.
+    survived_indices = []
+    for i, p in enumerate(image_paths[:BATCH_SIZE]):
         b64 = encode_image_b64(p)
         if b64:
             b64_images.append(b64)
+            survived_indices.append(i)
     if not b64_images:
         return None
 
@@ -304,11 +332,18 @@ def _interpret_chat(sess: dict, chat_message: str) -> dict | None:
 
     updated_prompt = parsed.get("updated_prompt")
     anchor_image = parsed.get("anchor_image")
+    anchor_original_index = None
+    if isinstance(anchor_image, int) and 1 <= anchor_image <= len(b64_images):
+        # anchor_image is 1-based over the (possibly gappy) b64_images the
+        # LLM actually saw -- map it back through survived_indices to the
+        # ORIGINAL 0-based index into image_paths/sess["last_seeds"],
+        # instead of assuming direct positional alignment.
+        anchor_original_index = survived_indices[anchor_image - 1]
     return {
         "reply": parsed["reply"].strip()[:600],
         "updated_prompt": updated_prompt.strip() if isinstance(updated_prompt, str) and updated_prompt.strip() else None,
         "negative_additions": (parsed.get("negative_additions") or "").strip()[:150] if isinstance(parsed.get("negative_additions"), str) else "",
-        "anchor_image": anchor_image if isinstance(anchor_image, int) and 1 <= anchor_image <= len(b64_images) else None,
+        "anchor_original_index": anchor_original_index,
     }
 
 
@@ -319,6 +354,23 @@ async def round_(request: Request):
     sess = _require_session(request)
     body = await _read_json_capped(request)
     reset = bool(body.get("reset") is True)
+
+    # Check GPU availability BEFORE any session mutation below (the reset
+    # block, and especially the chat/LLM-interpretation block, which spends
+    # a real vision-LLM call and appends chat_log entries). This check
+    # doesn't depend on the prompt at all, so there's no correctness reason
+    # to defer it -- doing so meant a 409 aborted the request only AFTER
+    # those mutations had already landed, so a retry (the obvious response
+    # to "GPU busy, try again") re-ran the chat interpretation a second
+    # time on the same feedback_text, duplicating the chat_log entry and
+    # spending a second LLM call, with the admin never having gotten
+    # confirmation the first attempt did anything. (The nsfw_render_blocked
+    # check a bit further down stays where it is -- it must run on the
+    # prompt AFTER chat interpretation folds this round's message in, or it
+    # would be checking stale content and could miss something this round's
+    # message just introduced.)
+    if gpu.is_wangp_rendering():
+        raise HTTPException(409, "Video render in progress -- image generation waits for the GPU")
 
     if reset or not sess["prompt"]:
         raw_prompt = body.get("prompt")
@@ -364,8 +416,8 @@ async def round_(request: Request):
             if interpreted["updated_prompt"]:
                 sess["prompt"] = image_presets.clamp_prompt_text(interpreted["updated_prompt"])
             sess["negative_extra"] = interpreted["negative_additions"]
-            if not explicit_anchor and interpreted["anchor_image"] is not None:
-                idx = interpreted["anchor_image"] - 1
+            if not explicit_anchor and interpreted["anchor_original_index"] is not None:
+                idx = interpreted["anchor_original_index"]  # already a real index into last_seeds -- see _interpret_chat
                 if 0 <= idx < len(sess["last_seeds"]):
                     sess["anchor_seed"] = sess["last_seeds"][idx]
         else:
@@ -381,6 +433,12 @@ async def round_(request: Request):
     composed_prompt = sess["prompt"]
     negative_prompt = sess["negative_extra"]
 
+    # Not a redundant repeat of the early check above -- this is a second,
+    # deliberate checkpoint: chat interpretation just above can spend a real
+    # few-second vision-LLM round trip, during which a video render could
+    # have started. Re-checking right before the actual (expensive) image
+    # generation catches that window without re-doing the early-exit
+    # benefit the first check provides for the common "already busy" case.
     if gpu.is_wangp_rendering():
         raise HTTPException(409, "Video render in progress -- image generation waits for the GPU")
 
