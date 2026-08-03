@@ -25,6 +25,15 @@ export function init(panel) {
   // to silently wipe its visible progress with no indication it was still
   // working (the job itself keeps running server-side regardless).
   let _animateJobActive = false;
+  // Tags which animate job is "current" -- see _watchVideoJob(). Without
+  // this, generating a new image (or re-clicking Animate) while a previous
+  // video was still rendering started a SECOND poller against the same
+  // shared jobArea/_animateJobActive with no way to tell them apart:
+  // whichever job's poller callback fired last silently won, sometimes
+  // overwriting an already-displayed finished video with a stale/abandoned
+  // job's result, and could reset _animateJobActive to false while the
+  // real current job was still running.
+  let _latestVideoJobId = null;
 
   const root = el('div', {
     style: 'max-width:900px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:14px;',
@@ -324,6 +333,7 @@ export function init(panel) {
   });
 
   function _watchVideoJob(jobId) {
+    _latestVideoJobId = jobId;
     jobArea.innerHTML = '';
     _animateJobActive = true;
     const statusEl = el('div', { style: 'font-size:.82rem; color:var(--text-3);', text: 'Rendering video...' });
@@ -336,10 +346,12 @@ export function init(panel) {
     const poller = pollJob(
       jobId,
       (j) => {
+        if (jobId !== _latestVideoJobId) return; // a newer animate job has superseded this one
         fill.style.width = `${j.progress || 0}%`;
         statusEl.textContent = j.message || (j.status === 'queued' ? 'Queued -- waiting for GPU...' : 'Rendering video...');
       },
       (j) => {
+        if (jobId !== _latestVideoJobId) return; // stale/abandoned job -- don't clobber the current one's display
         _animateJobActive = false;
         const outputs = Array.isArray(j.output) ? j.output : [j.output];
         const videoPath = outputs[0];
@@ -350,6 +362,7 @@ export function init(panel) {
         }));
       },
       (err) => {
+        if (jobId !== _latestVideoJobId) return; // stale/abandoned job
         _animateJobActive = false;
         jobArea.innerHTML = '';
         jobArea.appendChild(el('div', { style: 'font-size:.82rem; color:#e88;', text: `Video failed: ${err}` }));

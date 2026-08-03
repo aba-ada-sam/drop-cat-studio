@@ -9,6 +9,8 @@ import { handoff } from './handoff.js?v=20260620a';
 // -- Module state (reset on each init) --------------------------------------
 let _svcInterval = null;
 let _stepCards   = [];   // [{step, dot, msg}]
+let _recentGrid  = null; // the "Recent Work" grid element, kept for refresh
+let _listenersBound = false; // init() only runs once per app.js's TAB_INIT guard, but guard anyway
 
 // -- Pipeline step definitions ---------------------------------------------
 const STEPS = [
@@ -56,6 +58,36 @@ export function init(panel) {
   // Live service status on the step cards
   _pollServices();
   _svcInterval = setInterval(_pollServices, 8000);
+
+  // app.js's TAB_INIT only calls init() once per tab (see _tabInitialized) --
+  // the panel is hidden/shown via CSS on every later visit, never rebuilt.
+  // Without this, the very first /api/gallery fetch above is the ONLY one
+  // that ever runs: anything generated afterward (on this tab or any other)
+  // never appears in "Recent Work" again for the rest of the session, no
+  // matter how many times the user comes back to Studio Home. Refresh on
+  // both "something new landed" and "user came back to look" -- listened on
+  // document AND window since call sites in this codebase dispatch
+  // session-updated on both targets inconsistently.
+  if (!_listenersBound) {
+    _listenersBound = true;
+    let _firstActivation = true; // the init() call above already fetched once for this activation
+    const refresh = () => _refreshRecent();
+    document.addEventListener('session-updated', refresh);
+    window.addEventListener('session-updated', refresh);
+    document.addEventListener('dcs:tab-activated', e => {
+      const isPipeline = e.detail?.tab === 'pipeline';
+      if (isPipeline && _firstActivation) { _firstActivation = false; return; }
+      // Stop burning a poll every 8s while the user is on a different tab --
+      // Queue tab gets an explicit pause()/resume() wired into app.js's
+      // switchTab(); this tab isn't part of that, so it self-manages off
+      // the same tab-activated broadcast every switchTab() already sends.
+      if (_svcInterval) { clearInterval(_svcInterval); _svcInterval = null; }
+      if (!isPipeline) return;
+      _refreshRecent();
+      _pollServices();
+      _svcInterval = setInterval(_pollServices, 8000);
+    });
+  }
 }
 
 // -- Hero ------------------------------------------------------------------
@@ -176,7 +208,7 @@ function _buildSteps(root) {
 }
 
 // -- Recent work -------------------------------------------------------------
-async function _buildRecent(root) {
+function _buildRecent(root) {
   const section = el('div', { class: 'pipeline-recent-section' });
   root.appendChild(section);
 
@@ -186,12 +218,22 @@ async function _buildRecent(root) {
 
   const grid = el('div', { class: 'pipeline-recent-grid' });
   section.appendChild(grid);
+  _recentGrid = grid;
 
   // Show skeleton placeholder while loading
   for (let i = 0; i < 6; i++) {
     grid.appendChild(el('div', { class: 'pipeline-recent-thumb pipeline-recent-skel' }));
   }
 
+  _refreshRecent();
+}
+
+// Re-fetches and repopulates the Recent Work grid. Called on first build,
+// and again on every 'session-updated'/return-to-this-tab signal -- see
+// init()'s listener setup for why this can't just be a one-shot fetch.
+async function _refreshRecent() {
+  const grid = _recentGrid;
+  if (!grid) return;
   try {
     const data = await fetch('/api/gallery').then(r => r.json());
     const items = (data.items || []).slice(0, 10);
