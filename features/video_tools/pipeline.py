@@ -10,7 +10,6 @@ when available -- see core.ffmpeg_utils.video_encode_args.
 import datetime
 import logging
 import os
-import subprocess
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -133,6 +132,12 @@ class _SilentJob:
     (the batch aggregates progress at the file level)."""
     def __init__(self, real_job):
         self.stop_event = real_job.stop_event
+        # Share the REAL job's process-tracking set/lock (not a fresh one) --
+        # core.job_manager.JobManager.stop() kills whatever is registered on
+        # the actual Job object; a per-file set here would never be seen by
+        # it, silently defeating Stop for the whole batch.
+        self.active_procs = real_job.active_procs
+        self.procs_lock = real_job.procs_lock
         self.meta = {}
         self.output = None
         self.message = ""
@@ -226,7 +231,8 @@ def _apply_step(job, step: dict, src: str, dst: str, crf: int, cb) -> None:
         scale = float(step.get("scale", 2.0))
         method = "ai" if step.get("engine") == "ai" else "ffmpeg"
         out, err = upscale_video(src, dst, scale=scale, method=method, crf=crf,
-                                 progress_cb=lambda f, m="": cb(f, m))
+                                 progress_cb=lambda f, m="": cb(f, m),
+                                 active_procs=job.active_procs, procs_lock=job.procs_lock)
         if not out:
             raise RuntimeError(err or "Upscale failed")
 
@@ -239,10 +245,10 @@ def _apply_step(job, step: dict, src: str, dst: str, crf: int, cb) -> None:
                *video_encode_args(crf=crf)]
         cmd += ["-c:a", "copy"] if keep_audio else ["-an"]
         cmd += [dst]
-        _run(cmd, cb)
+        _run(job, cmd, cb)
 
     elif op == "crop":
-        _apply_crop(src, dst, step, crf, cb)
+        _apply_crop(job, src, dst, step, crf, cb)
 
     elif op == "transform":
         from features.video_tools.reverser import build_ffmpeg_cmd
@@ -258,7 +264,7 @@ def _apply_step(job, step: dict, src: str, dst: str, crf: int, cb) -> None:
             "out_format": "mp4",
             "crf": crf,
         }
-        _run(build_ffmpeg_cmd(src, dst, settings), cb)
+        _run(job, build_ffmpeg_cmd(src, dst, settings), cb)
 
     elif op == "smooth":
         from features.video_tools.interpolator import interpolate_video
@@ -269,7 +275,7 @@ def _apply_step(job, step: dict, src: str, dst: str, crf: int, cb) -> None:
         raise RuntimeError(f"Unknown step: {op}")
 
 
-def _apply_crop(src: str, dst: str, step: dict, crf: int, cb) -> None:
+def _apply_crop(job, src: str, dst: str, step: dict, crf: int, cb) -> None:
     rect = step.get("rect") or {}
     try:
         rx, ry = float(rect["x"]), float(rect["y"])
@@ -289,13 +295,24 @@ def _apply_crop(src: str, dst: str, step: dict, crf: int, cb) -> None:
            *video_encode_args(crf=crf)]
     cmd += ["-c:a", "copy"] if keep_audio else ["-an"]
     cmd += [dst]
-    _run(cmd, cb)
+    _run(job, cmd, cb)
 
 
-def _run(cmd: list[str], cb, timeout: int = 12 * 3600) -> None:
+def _run(job, cmd: list[str], cb, timeout: int = 12 * 3600) -> None:
+    # Was a bare subprocess.run() with no job.stop_event check and no
+    # registration in job.active_procs -- Stop/Cancel could set stop_event
+    # but nothing here ever looked at it or had a live Popen to kill, so
+    # Sharpen/Crop/Transform (and Upscale, fixed via its own active_procs/
+    # procs_lock kwargs above) kept running to completion in the background
+    # after the UI already told the user it stopped. run_ffmpeg gives Stop
+    # an actual process to kill, same convention as every other GPU/ffmpeg
+    # call site in this app (core.upscaler, features.lipsync.runner,
+    # features.retime.retimer).
+    from core.ffmpeg_utils import run_ffmpeg
     cb(0.1, "encoding...")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    r = run_ffmpeg(cmd, timeout=timeout, active_procs=job.active_procs, procs_lock=job.procs_lock)
     if r.returncode != 0:
-        detail = (r.stderr or "").strip().splitlines()
+        stderr = (r.stderr or b"").decode(errors="replace")
+        detail = stderr.strip().splitlines()
         raise RuntimeError("ffmpeg failed: " + (detail[-1] if detail else "unknown error"))
     cb(1.0, "done")

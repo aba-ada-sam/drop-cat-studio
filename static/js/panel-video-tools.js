@@ -605,6 +605,7 @@ function _buildCropEditor(container, source) {
 function _buildAudioSection(root, source) {
   let _selectedVideo = null;
   let _activeJobId   = null;
+  let _musicPoller   = null;
 
   // -- Session video picker ------------------------------------------------
   const pickerCard = el('div', { class: 'card', style: 'padding:14px;' });
@@ -742,7 +743,20 @@ function _buildAudioSection(root, source) {
   root.appendChild(progWrap);
   const prog = createProgressCard(progWrap);
   prog.onCancel(async () => {
-    if (_activeJobId) { await stopJob(_activeJobId).catch(() => {}); toast('Stopping...', 'info'); _activeJobId = null; }
+    if (_activeJobId) {
+      await stopJob(_activeJobId).catch(() => {});
+      toast('Stopping...', 'info');
+      _activeJobId = null;
+      // Without this the pipeline's own cancel handler (line ~230, same
+      // pattern) already does this -- this one didn't, so Cancel here left
+      // the progress bar frozen and "Generate & Mix Music" disabled until
+      // the backend job independently reached a terminal status on its own
+      // schedule, with no client-side floor on how long that could take.
+      _musicPoller?.stop();
+      _musicPoller = null;
+      prog.hide();
+      genBtn.disabled = false;
+    }
   });
 
   const vidWrap = el('div');
@@ -769,9 +783,10 @@ function _buildAudioSection(root, source) {
       });
       _activeJobId = job_id;
 
-      pollJob(job_id,
+      _musicPoller = pollJob(job_id,
         j => prog.update(j.progress || 0, j.message || 'Working...'),
         j => {
+          _musicPoller = null;
           prog.hide();
           genBtn.disabled = false;
           _activeJobId = null;
@@ -782,6 +797,7 @@ function _buildAudioSection(root, source) {
           }
         },
         err => {
+          _musicPoller = null;
           prog.hide();
           genBtn.disabled = false;
           _activeJobId = null;

@@ -286,7 +286,11 @@ def _run_rife(job, rife_exe: str, src: str, dst: str, src_fps: float,
 
     from core.ffmpeg_utils import video_encode_args
 
-    with tempfile.TemporaryDirectory() as tmp:
+    # Prefixed (not bare) so a startup sweep can reclaim it after a hard kill --
+    # this stages the full source+interpolated frame explosion, which this
+    # module's own _RIFE_TEMP_BUDGET_GB comment above notes "needs hundreds
+    # of GB" for a long/4K clip.
+    with tempfile.TemporaryDirectory(prefix="dcs-rife-") as tmp:
         frames_in = os.path.join(tmp, "in")
         frames_out = os.path.join(tmp, "out")
         os.makedirs(frames_in)

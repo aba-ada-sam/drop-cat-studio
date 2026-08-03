@@ -7,10 +7,37 @@ import json
 import logging
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def cleanup_orphan_temp_dirs(prefix: str) -> int:
+    """Delete leftover %TEMP%/<prefix>* dirs from a killed/crashed job.
+
+    Same convention as core.upscaler.cleanup_orphan_temp() (which predates
+    this and stays as-is, prefix "dcs-upscale-") -- generalized here so
+    other features that stage large intermediate files in a prefixed temp
+    dir (video_tools' chained pipeline, RIFE frame-explosion) can get the
+    same startup sweep instead of leaving orphaned temp dirs (potentially
+    hundreds of GB for RIFE on a long/4K clip) to rot in %TEMP% forever
+    after a crash, forced restart, or GPU TDR. Safe at app startup:
+    single-instance means no worker from a prior process can still be
+    alive when this runs. Returns bytes freed (best effort).
+    """
+    freed = 0
+    for d in Path(tempfile.gettempdir()).glob(prefix + "*"):
+        if not d.is_dir():
+            continue
+        try:
+            freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        except OSError:
+            pass
+        shutil.rmtree(d, ignore_errors=True)
+        log.info("[cleanup] reclaimed orphan temp dir %s", d.name)
+    return freed
 
 
 def find_ffmpeg() -> str | None:

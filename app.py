@@ -286,6 +286,20 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning("[startup] upscale temp cleanup failed (non-fatal): %s", _e)
 
+    # Same reclaim for the Video Tools chained pipeline's intermediate-step
+    # temp dir and RIFE smoothing's frame-explosion temp dir -- neither had
+    # this before (only upscale did), so a crash/forced-restart/GPU-TDR mid
+    # multi-step edit or mid-RIFE-smooth left its temp dir orphaned forever.
+    try:
+        from core.ffmpeg_utils import cleanup_orphan_temp_dirs
+        _freed_pipe = cleanup_orphan_temp_dirs("dcs-pipeline-")
+        _freed_rife = cleanup_orphan_temp_dirs("dcs-rife-")
+        if _freed_pipe or _freed_rife:
+            log.info("[startup] reclaimed %.1f GB of orphaned video_tools temp",
+                      (_freed_pipe + _freed_rife) / 1e9)
+    except Exception as _e:
+        log.warning("[startup] video_tools temp cleanup failed (non-fatal): %s", _e)
+
     # Background: detect current state then start any stopped workers
     threading.Thread(target=svc.startup_all, daemon=True).start()
 

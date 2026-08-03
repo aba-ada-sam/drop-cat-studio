@@ -255,6 +255,17 @@ async def run_video_pipeline(request: Request):
             bad = s.get("op") if isinstance(s, dict) else s
             raise HTTPException(400, f"Invalid step: {bad}")
 
+    # _run_chain() only honors crf on the LAST step (intermediate steps are
+    # always near-lossless) and falls back to a hard-coded 18 if the step
+    # dict has no "crf" key -- which it never does, since the step builders
+    # in panel-video-tools.js don't send one. /process and /crop (the two
+    # other routes that produce a final encode) both merge in the user's
+    # configured tools_crf; this route was the one that silently ignored it.
+    if steps:
+        last = steps[-1]
+        if isinstance(last, dict) and "crf" not in last:
+            last["crf"] = cfg.load().get("tools_crf", 18)
+
     n_steps = len(steps)
     if len(paths) == 1:
         def _worker(job, sp, st, od):
