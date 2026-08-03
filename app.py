@@ -91,10 +91,31 @@ OUTPUT_DIR  = APP_DIR / "output"
 STATIC_DIR  = APP_DIR / "static"
 _BUILD_TS   = int(time.time())   # changes every restart; busts Chrome module-map cache
 
+# Older output files get moved off C: to cold storage on a schedule (external
+# robocopy /MOVE task, see logs/output_archive_move.log) -- same relative
+# structure preserved under this root, e.g. output/2026-08-02/x.mp4 becomes
+# D:\ColdArchives\DropCat-Studio-Output\2026-08-02\x.mp4.
+COLD_ARCHIVE_DIR = Path(r"D:\ColdArchives\DropCat-Studio-Output")
+
 # BUG-01: create directories at module level so StaticFiles mounts succeed on
 # fresh install (StaticFiles checks directory existence in __init__).
 UPLOADS_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+
+def _resolve_possibly_archived(file_path: Path) -> Path | None:
+    """Return file_path if it exists under output/, else the same relative
+    path under the cold-storage mirror if that copy exists. Returns None if
+    neither exists, or if file_path isn't under OUTPUT_DIR at all (nothing
+    outside output/ ever gets archived, so no fallback applies there)."""
+    if file_path.is_file():
+        return file_path
+    try:
+        rel = file_path.resolve().relative_to(OUTPUT_DIR.resolve())
+    except ValueError:
+        return None
+    archived = COLD_ARCHIVE_DIR / rel
+    return archived if archived.is_file() else None
 
 
 def _read_git_version() -> str:
@@ -925,6 +946,8 @@ async def get_thumbnail(path: str, size: int = 120):
             path = str(_Path(__file__).resolve().parent / path.lstrip('/'))
         p = _Path(path)
         if not p.is_file():
+            p = _resolve_possibly_archived(p) or p
+        if not p.is_file():
             return JSONResponse({"error": "Not found"}, status_code=404)
         suf = p.suffix.lower()
         if suf in _THUMBNAIL_NO_SUPPORT:
@@ -974,9 +997,10 @@ async def serve_output_file(path: str):
     # Guard against directory traversal
     if not str(file_path).startswith(str(OUTPUT_DIR.resolve())):
         return JSONResponse({"error": "Forbidden"}, status_code=403)
-    if not file_path.is_file():
+    resolved = _resolve_possibly_archived(file_path)
+    if resolved is None:
         return JSONResponse({"error": "Not found"}, status_code=404)
-    return FileResponse(str(file_path))
+    return FileResponse(str(resolved))
 
 
 def _find_vlc() -> str | None:
