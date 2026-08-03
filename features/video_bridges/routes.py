@@ -142,6 +142,18 @@ def _bridges_worker(job, items, settings):
     job_dir = OUTPUT_DIR / ts / f"{slug}_{job.id}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    # -- GPU: acquire WanGP exclusively (orchestrator evicts everything else) --
+    # Every other WanGP-driving feature (song_video/pipeline.py, fun_videos/
+    # pipeline.py) does this before touching video_generator.generate_video()
+    # -- it is NOT acquired internally by that function, it's the caller's
+    # job. Bridges was the one feature that skipped it entirely: without
+    # this, a concurrent Forge/ACE-Step/other-WanGP job could hold or steal
+    # the GPU mid-bridge-generation with nothing here ever having staked a
+    # claim, and a live bridges render had no protection from a different
+    # service's acquire() evicting it out from under itself.
+    from core.gpu_orchestrator import gpu
+    gpu.acquire("wangp", reason=f"video bridges, {len(items)} clips")
+
     segment_paths = [item.get("path") for item in items]
     segment_kinds = [item.get("kind", "video") for item in items]
     analyses = [item.get("analysis") for item in items]
@@ -270,7 +282,7 @@ def _bridges_worker(job, items, settings):
     model_tag = settings.get("model", "ltx2").split()[0].lower()
     final_out = str(job_dir / f"bridges_{model_tag}_{time.strftime('%H%M%S')}.mp4")
 
-    result = compile_with_bridges(
+    result, dropped_segments = compile_with_bridges(
         segment_paths=segment_paths,
         bridge_paths=bridge_paths,
         out_path=final_out,
@@ -284,17 +296,26 @@ def _bridges_worker(job, items, settings):
         job.output = result
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         succeeded = sum(1 for p in bridge_paths if p)
+        problems = []
         if succeeded < num_bridges:
             failed = num_bridges - succeeded
             job.meta["bridges_failed"] = failed
-            job.message = (f"Complete, but {failed} of {num_bridges} bridge(s) failed to generate "
-                            f"and were skipped (hard cut used instead)")
+            problems.append(f"{failed} of {num_bridges} bridge(s) failed to generate "
+                             f"and were skipped (hard cut used instead)")
+        if dropped_segments:
+            job.meta["segments_dropped"] = dropped_segments
+            problems.append(f"{len(dropped_segments)} source clip(s) failed to normalize "
+                             f"and were dropped entirely from the output (clip index "
+                             f"{', '.join(str(i) for i in dropped_segments)})")
+        if problems:
+            job.message = "Complete, but " + "; ".join(problems)
         else:
             job.message = f"Complete! {num_bridges} bridge(s) generated"
         from core.session import get_current as get_session
         get_session().add_file(Path(result).name, "video", "video_bridges", path=result)
     else:
-        raise RuntimeError("Final compilation failed")
+        detail = f" (clip index {', '.join(str(i) for i in dropped_segments)} failed to normalize)" if dropped_segments else ""
+        raise RuntimeError(f"Final compilation failed{detail}")
 
 
 @router.post("/generate")

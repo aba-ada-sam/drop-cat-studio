@@ -133,10 +133,19 @@ def compile_with_bridges(
     segment_kinds: list[str] | None = None,
     image_duration: float = 2.5,
     log_fn=None,
-) -> str | None:
-    """Compile original clips interleaved with bridge videos."""
+) -> tuple[str | None, list[int]]:
+    """Compile original clips interleaved with bridge videos.
+
+    Returns (out_path_or_None, dropped_segment_indices). A dropped segment
+    (ffmpeg normalize failure -- corrupt file, unusual codec, etc.) used to
+    just `continue` past silently: the compile still succeeded as long as
+    ANY segment survived, with nothing telling the caller footage went
+    missing from the final video. Callers must report dropped_segment_indices
+    the same way bridge-generation failures are already surfaced.
+    """
     res_w, res_h = parse_resolution(resolution)
     fps = 24
+    dropped: list[int] = []
 
     with tempfile.TemporaryDirectory(prefix="compile_") as tmpdir:
         normalized = []
@@ -171,6 +180,7 @@ def compile_with_bridges(
             if r.returncode != 0:
                 if log_fn:
                     log_fn(f"[error] Failed to normalize segment {i}: {r.stderr[-200:]}")
+                dropped.append(i)
                 continue
             normalized.append(norm_path)
 
@@ -192,7 +202,7 @@ def compile_with_bridges(
                         normalized.append(bridge_norm)
 
         if not normalized:
-            return None
+            return None, dropped
 
         # Concat all normalized clips
         concat_txt = os.path.join(tmpdir, "concat.txt")
@@ -209,8 +219,8 @@ def compile_with_bridges(
         ]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode == 0 and os.path.isfile(out_path):
-            return out_path
+            return out_path, dropped
 
         if log_fn:
             log_fn(f"[error] Final compilation failed: {r.stderr[-300:]}")
-        return None
+        return None, dropped
