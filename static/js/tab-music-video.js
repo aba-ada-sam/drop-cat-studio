@@ -239,13 +239,27 @@ export function init(panel) {
   }
 
   const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 15, 1, 6, 's');
+  // Shared by both Single Image and Folder Batch below -- but the server
+  // floors Folder Batch clips at 8s regardless of this value (routes.py
+  // batch_start: max(8, min(15, ...))), while Single Image respects it
+  // exactly (routes.py generate: max(4, min(15, ...))). A batch run left at
+  // the 6s default silently became 8s with no indication anywhere, so this
+  // only shows up when it's actually relevant instead of raising the slider's
+  // floor and taking away a range Single Image genuinely supports.
+  const clipDurBatchHint = el('div', {
+    style: 'display:none; font-size:11px; color:#e8b820;',
+    text: 'Folder Batch floors this at 8s regardless -- Single Image uses your exact value.',
+  });
+  clipDurWrap.appendChild(clipDurBatchHint);
+  function _updateClipDurHint() {
+    clipDurBatchHint.style.display = parseInt(clipDurSlider.value, 10) < 8 ? '' : 'none';
+  }
+  clipDurSlider.addEventListener('input', _updateClipDurHint);
+  _updateClipDurHint();
 
   // Padding: seconds of silent video before song starts / after song ends
   const { wrap: padBeforeWrap, input: padBeforeSlider } = _numRow('Video before song starts', 0, 10, 1, 0, 's');
   const { wrap: padAfterWrap,  input: padAfterSlider  } = _numRow('Video after song ends',    0, 10, 1, 0, 's');
-  // Satellite disabled -- unstable, kept for future use
-  const satCheck = { checked: false };
-  const satWrap  = null;
 
   // ── Batch controls ─────────────────────────────────────────────────────────
 
@@ -350,7 +364,7 @@ export function init(panel) {
         // (MuseTalk word-level post-pass), which is the real, working mechanism.
         auto_lipsync:  lipSyncCheck.checked,
         lip_sync:      false,
-        use_satellite: satCheck.checked,
+        use_satellite: false,  // satellite hardware retired -- see project memory
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
         steps:         8,
@@ -588,9 +602,17 @@ export function init(panel) {
 
   // ── Assemble layout ────────────────────────────────────────────────────────
 
-  panel.style.cssText = 'display:flex; flex-direction:column; gap:14px; padding:16px; overflow-y:auto; height:100%;';
+  // A style set directly on the shared `panel` element (rather than a child
+  // wrapper, the pattern every other tab uses) is an inline style that
+  // persists forever once set -- switchTab() in app.js only ever toggles the
+  // .active CLASS to hide inactive panels (.tab-panel { display:none }), and
+  // an inline style always wins over a class rule. Visiting Music Video once
+  // left it permanently showing display:flex underneath/around whatever tab
+  // was opened next, for the rest of the session.
+  const root = el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding:16px; overflow-y:auto; height:100%;' });
+  panel.appendChild(root);
 
-  panel.append(
+  root.append(
     // Title
     el('div', { style: 'font-size:18px; font-weight:700; color:var(--gold); letter-spacing:-.01em;', text: 'Music Video' }),
 

@@ -313,7 +313,13 @@ function _render(data) {
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';
 
-  // Re-render cards -- preserve existing DOM nodes by job id to avoid flicker
+  // Preserve existing DOM nodes by job id to avoid flicker -- every poll (2s,
+  // for the whole time any job is active) used to tear down and rebuild every
+  // card unconditionally, including ones whose job hadn't changed at all.
+  // That re-fetched/re-decoded every thumbnail and reset any hover state on
+  // every tick. Only rebuild a job's card when something _jobCard() actually
+  // renders for it has changed (see _jobSig below); otherwise reuse the
+  // untouched node.
   const existing = new Map();
   list.querySelectorAll('[data-job-id]').forEach(n => existing.set(n.dataset.jobId, n));
 
@@ -332,11 +338,29 @@ function _render(data) {
   for (const section of ordered) {
     list.appendChild(_sectionHead(section.head));
     section.jobs.forEach((job, idx) => {
-      const card = _jobCard(job, section.active, idx, section.jobs.length);
-      list.appendChild(card);
+      const sig = _jobSig(job, idx);
+      const prev = existing.get(String(job.id));
+      if (prev && prev.dataset.jobSig === sig) {
+        list.appendChild(prev);
+      } else {
+        const card = _jobCard(job, section.active, idx, section.jobs.length);
+        card.dataset.jobSig = sig;
+        list.appendChild(card);
+      }
     });
   }
   list.appendChild(empty); // keep in DOM (display:none)
+}
+
+// Every field _jobCard() actually renders, keyed to detect when a rebuild is
+// needed -- deliberately excludes elapsed_seconds and other fields the list
+// card doesn't display, or a live job would never stop rebuilding every poll.
+function _jobSig(job, idx) {
+  return [
+    job.id, job.status, job.progress, job.message, job.error, job.queue_position, idx,
+    job.label, job.type, job.meta?.prompt, job.meta?.batch_loop, job.meta?.source_image,
+    _bestOutput(job),
+  ].join('|');
 }
 
 function _sectionHead(text) {
@@ -498,7 +522,16 @@ function _jobCard(job, active, idx, total) {
       cancelBtn.disabled = true;
       card.remove();
       toast(job.status === 'running' ? 'Cancelling... (GPU will free in a moment)' : 'Job cancelled', 'info');
-      await api(`/api/jobs/${job.id}/stop`, { method: 'POST' }).catch(() => {});
+      try {
+        await api(`/api/jobs/${job.id}/stop`, { method: 'POST' });
+      } catch (err) {
+        // The card was already removed optimistically -- if the stop request
+        // itself failed (not just "GPU takes a moment"), the job is still
+        // really running with no feedback otherwise, silently reappearing up
+        // to 2s later via the next automatic poll with no explanation.
+        toast(`Cancel failed: ${err.message || 'unknown error'}`, 'error');
+        _poll();
+      }
     });
     actions.appendChild(cancelBtn);
   }
@@ -719,7 +752,12 @@ function _showDetailPage(job) {
 function _renderModal(job, els) {
   const isDone   = job.status === 'done';
   const isActive = job.status === 'running' || job.status === 'queued' || job.status === 'preparing';
-  const isFailed = job.status === 'error' || job.status === 'stopped';
+  // Must match the card-list isFailed check above (line ~353) -- a job
+  // cancelled while still queued reported status "cancelled" here as neither
+  // done nor failed, so the header chip correctly said "Cancelled" while the
+  // body still showed "Working", a live accent-colored heartbeat, and hid
+  // the cancellation reason entirely.
+  const isFailed = job.status === 'error' || job.status === 'stopped' || job.status === 'cancelled';
 
   // Status chip (re-render in case status changed)
   els.chipSlot.innerHTML = '';

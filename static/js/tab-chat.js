@@ -19,6 +19,11 @@ export function init(panel) {
   let _currentPromptText = '';
   let _currentImagePath = null;
   let _lastVideoPrompt = '';
+  // Bumped by Clear chat -- lets an in-flight _send() notice its chat was
+  // cleared out from under it and discard its own result instead of applying
+  // a reply (and re-populating history/_currentPromptText/_currentImagePath)
+  // into a transcript the user just wiped.
+  let _chatGen = 0;
 
   // -- Layout --------------------------------------------------------------
   const root = el('div', {
@@ -244,6 +249,13 @@ export function init(panel) {
   function _addPromptCard(imagePrompt) {
     const promptTa = el('textarea', { rows: '3', style: 'width:100%; font-size:.85rem; resize:vertical;' });
     promptTa.value = imagePrompt.prompt || '';
+    // _currentPromptText previously only got set once Generate was clicked, so
+    // asking for a tweak before that ("actually make it two women" right
+    // after seeing the proposal) sent the backend a stale/empty current_prompt
+    // -- it had no idea what was actually sitting in this visible, editable
+    // card. Keep it live: set on creation, and follow further edits.
+    _currentPromptText = promptTa.value;
+    promptTa.addEventListener('input', () => { _currentPromptText = promptTa.value; });
 
     const negTa = el('input', { type: 'text', style: 'width:100%; font-size:.8rem; margin-top:6px;', placeholder: 'Negative prompt (optional)' });
     negTa.value = imagePrompt.negative || '';
@@ -315,9 +327,18 @@ export function init(panel) {
 
   // -- Send flow ---------------------------------------------------------------
   async function _send() {
+    // sendBtn.disabled already guards the button itself, but the Enter-key
+    // handler below didn't check it -- typing a follow-up and hitting Enter
+    // before the previous reply lands (a completely normal chat pattern) fired
+    // a second overlapping _send(), and whichever response resolved first
+    // spliced its bubble into whatever was then the end of the transcript,
+    // landing replies under the wrong turn and desyncing `history` (sent back
+    // to the LLM as literal context) from what was actually typed.
+    if (sendBtn.disabled) return;
     const text = inputTa.value.trim();
     if (!text) return;
     inputTa.value = '';
+    const myGen = _chatGen;
 
     _addTextBubble('user', text);
     history.push({ role: 'user', content: text });
@@ -337,6 +358,7 @@ export function init(panel) {
         method: 'POST', body: JSON.stringify(payload), context: 'chat.message',
       });
       thinking.remove();
+      if (myGen !== _chatGen) return; // chat was cleared while this was in flight
 
       _addTextBubble('assistant', data.reply || '...');
       history.push({ role: 'assistant', content: data.reply || '' });
@@ -370,6 +392,7 @@ export function init(panel) {
   });
 
   clearBtn.addEventListener('click', () => {
+    _chatGen++; // any _send() still in flight discards its result on return
     for (const p of _activePollers) { try { p.stop(); } catch (e) { /* already finished */ } }
     _activePollers.length = 0;
     history = [];

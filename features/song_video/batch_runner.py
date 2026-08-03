@@ -149,6 +149,11 @@ def _public_snapshot() -> dict[str, Any]:
         "active":          _state.get("active", False),
         "folder":          _state.get("folder", ""),
         "audio_name":      _state.get("audio_name", ""),
+        # The frontend uses this to restore its folder-image list on reconnect
+        # (e.g. after a DCS restart mid-batch) -- without it, re-queueing a
+        # reconnected batch throws a KeyError server-side on the placeholder
+        # {} entries the client falls back to.
+        "images":          list(_state.get("images", [])),
         "total":           len(_state.get("images", [])),
         "index":           _state.get("index", 0),
         "lap":             _state.get("lap", 1),

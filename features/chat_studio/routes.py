@@ -130,7 +130,13 @@ def _looks_like_refinement(message: str) -> bool:
     low = (message or "").strip().lower()
     if not low:
         return False
-    return not any(low.startswith(w) for w in _NON_REFINEMENT_STARTERS)
+    # Whole-message match only -- "yes"/"ok" alone is pure acknowledgment, but
+    # startswith() also matched "yes, make the hair red" / "no, brighter
+    # background", a completely ordinary way to answer a follow-up question
+    # while still requesting an image edit. That silently skipped vision and
+    # let the model edit blind with no idea what it was actually changing.
+    stripped = low.rstrip("!.,").strip()
+    return stripped not in _NON_REFINEMENT_STARTERS
 
 
 @router.post("/message")

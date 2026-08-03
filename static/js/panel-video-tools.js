@@ -21,7 +21,7 @@ export function init(panel) {
   _buildPipeline(root, source);
 
   _buildDivider(root, 'Add AI Music');
-  _buildAudioSection(root);
+  _buildAudioSection(root, source);
 }
 
 // -- Shared source picker ------------------------------------------------------
@@ -602,7 +602,7 @@ function _buildCropEditor(container, source) {
 
 // -- AI Music (generate + mix a soundtrack) ------------------------------------
 
-function _buildAudioSection(root) {
+function _buildAudioSection(root, source) {
   let _selectedVideo = null;
   let _activeJobId   = null;
 
@@ -693,6 +693,17 @@ function _buildAudioSection(root) {
   if (_sessionListener) window.removeEventListener('session-updated', _sessionListener);
   _sessionListener = _refreshList;
   window.addEventListener('session-updated', _sessionListener);
+
+  // Mirror the "Choose video(s)" picker above by default -- these used to be
+  // two completely independent pickers, so a video chosen for editing had no
+  // effect down here and you had to pick it again. Only auto-fills while
+  // nothing has been explicitly chosen down here yet, so it never clobbers a
+  // deliberate different pick for the music step.
+  if (source) {
+    const cur = source.get();
+    if (cur) _applyVideo(cur.path);
+    source.onChange(s => { if (s && !_selectedVideo) _applyVideo(s.path); });
+  }
 
   // -- Music options --------------------------------------------------------
   const optionsCard = el('div', { class: 'card', style: 'padding:14px;' });

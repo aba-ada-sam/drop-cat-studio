@@ -175,6 +175,21 @@ function readScreen() {
 // -- action executors --------------------------------------------------------
 function _findRef(ref) { return document.querySelector(`[data-mgr-ref="${CSS.escape(ref)}"]`); }
 
+// A stable fingerprint for loop detection. Raw refs (r1, r2, ...) are reassigned
+// on every readScreen() call, so two consecutive clicks on the visually same
+// button can carry different ref strings and slip past a naive JSON.stringify
+// comparison -- this resolves click/set_field targets to something that stays
+// constant across re-reads (the element's id, falling back to its label).
+function _actionSig(action) {
+  if (!action || !action.type) return '';
+  if (action.type === 'click' || action.type === 'set_field') {
+    const el = _findRef(action.ref);
+    const target = el?.id || _labelFor(el) || action.ref;
+    return `${action.type}:${target}:${action.value ?? ''}`;
+  }
+  return JSON.stringify(action);
+}
+
 async function _navigate(tab) {
   if (tab === 'gallery') { $('btn-gallery-rail')?.click(); await _sleep(SETTLE_MS); return `opened gallery`; }
   const btn = document.querySelector(`.rail-tab[data-tab="${tab}"]`);
@@ -229,9 +244,22 @@ async function _click(ref) {
     el.scrollIntoView({ block: 'center', behavior: 'instant' in el ? 'instant' : 'auto' });
   } catch (_) {}
   const label = (el.textContent || _labelFor(el) || ref).trim().slice(0, 50);
+  const toastWrap = $('toast-wrap');
+  const errCountBefore = toastWrap ? toastWrap.querySelectorAll('.toast.error').length : 0;
   el.click();
   await _sleep(450);
-  return `clicked "${label}"`;
+  let result = `clicked "${label}"`;
+  // The click may have been silently rejected by client-side validation (e.g. a
+  // required field is empty). readScreen() can't see toasts, so without this the
+  // brain has no signal the click did nothing and will just click again forever.
+  if (toastWrap) {
+    const errs = toastWrap.querySelectorAll('.toast.error');
+    if (errs.length > errCountBefore) {
+      const msg = errs[errs.length - 1].querySelector('.toast-msg')?.textContent?.trim();
+      if (msg) result += ` -- REJECTED: "${msg}". Do not click this again; fix the underlying issue first.`;
+    }
+  }
+  return result;
 }
 
 // -- chat / panel UI ---------------------------------------------------------
@@ -356,10 +384,11 @@ async function runGoal(goal) {
       const type = action.type;
       if (thought) _addMsg('thought', thought);
 
-      // loop guard: identical action repeated 3x
-      const sig = JSON.stringify(action);
+      // loop guard: same target hit twice in a row -- stop before the 2nd click,
+      // not after it (previously allowed 2 duplicate executions before tripping).
+      const sig = _actionSig(action);
       if (sig === lastSig) { repeat++; } else { repeat = 0; lastSig = sig; }
-      if (repeat >= 2) {
+      if (repeat >= 1) {
         _addMsg('manager', "I seem to be stuck repeating myself, so I'll stop. Try rephrasing or tell me the next step.");
         break;
       }

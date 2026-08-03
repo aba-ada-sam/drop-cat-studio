@@ -25,7 +25,7 @@ const STEPS = [
     },
   },
   {
-    num: '02', icon: '', label: 'Audio',
+    num: '02', icon: '', label: 'Video Tools',
     hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
     tab: 'video-tools', svc: 'acestep',
     svcLabels: {
@@ -70,7 +70,7 @@ function _buildHero(root) {
   inner.appendChild(el('h1', { class: 'pipeline-hero-title', text: 'What do you want to create?' }));
   inner.appendChild(el('p', {
     class: 'pipeline-hero-sub',
-    text: 'Type your idea below and the AI will write the prompt, generate the images, animate the video, and add the music -- one step at a time.',
+    text: 'Type your idea below to start a Quick Video -- it writes the prompt, generates the images, animates it, and adds the music for you.',
   }));
 
   const wrap = el('div', { class: 'pipeline-concept-wrap' });
@@ -125,8 +125,8 @@ function _buildSteps(root) {
 
   // Section heading
   const heading = el('div', { class: 'pipeline-section-heading' });
-  heading.appendChild(el('span', { text: 'THE PIPELINE' }));
-  heading.appendChild(el('span', { class: 'pipeline-section-sub', text: '-- do these in order, or jump to any step' }));
+  heading.appendChild(el('span', { text: 'QUICK LINKS' }));
+  heading.appendChild(el('span', { class: 'pipeline-section-sub', text: '-- jump straight to a specific tool' }));
   section.appendChild(heading);
 
   const row = el('div', { class: 'pipeline-steps-row' });
@@ -142,7 +142,7 @@ function _buildSteps(root) {
       class: 'pipeline-step-card',
       role: 'button',
       tabindex: '0',
-      'aria-label': `Go to step ${step.num}: ${step.label}`,
+      'aria-label': `Open ${step.label}`,
       onclick() { document.querySelector(`[data-tab="${step.tab}"]`)?.click(); },
     });
     card.addEventListener('keydown', e => {

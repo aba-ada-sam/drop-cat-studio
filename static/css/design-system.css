@@ -1149,6 +1149,31 @@ select option { background: var(--surface-2); }
 }
 .wc-chip:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 
+/* Segmented chip-toggle group (quality/ratio/mode pickers) -- one canonical
+   version of the button styling that tab-express.js and tab-fun-videos.js
+   each hand-rolled slightly differently (CHIP_BASE, _vmBtnBase, _msBtnBase). */
+.chip-toggle {
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: .78rem;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-2);
+  transition: background .15s, color .15s;
+}
+.chip-toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+  font-weight: 600;
+}
+.chip-toggle:disabled, .chip-toggle.chip-disabled {
+  opacity: .3;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 @media (max-width: 1000px) {
   .sd-top-grid, .sd-out-grid { grid-template-columns: 1fr; }
 }

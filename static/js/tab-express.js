@@ -119,11 +119,11 @@ export function init(panel) {
     for (const [val, btn] of Object.entries(_ratioChips)) {
       const ok = supported.includes(val);
       const isActive = val === _ratio;
-      btn.setAttribute('style', CHIP_BASE + (isActive && ok ? CHIP_ON : '') + (ok ? '' : CHIP_DISABLED));
+      btn.setAttribute('class', 'chip-toggle' + (isActive && ok ? ' active' : '') + (ok ? '' : ' chip-disabled'));
       btn.title = ok ? '' : 'Switch to LTX Fast quality for portrait, square & alternative ratios';
       if (!ok && isActive) {
         _ratio = '16:9';
-        _ratioChips['16:9']?.setAttribute('style', CHIP_BASE + CHIP_ON);
+        _ratioChips['16:9']?.setAttribute('class', 'chip-toggle active');
       }
     }
     if (_ratioHint) {
@@ -277,7 +277,7 @@ export function init(panel) {
       try {
         const { image_path, image_url } = await api('/api/chat-studio/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt: idea }),
+          body: JSON.stringify({ prompt: idea, preset: stylePresetSel.value || undefined }),
         });
         if (image_path) _applyImage(image_path, image_url);
         return;
@@ -377,6 +377,44 @@ export function init(panel) {
     placeholder: 'e.g. "gypsy folk, raw vocals" | "dark cabaret wit" | "dreamy indie, wistful"',
   });
   _setIdeaFn = (text) => { ideaInput.value = text; };
+
+  // Style preset for the idea-only starting image (same catalog + NSFW gate as
+  // Image Studio / Chat). Was previously missing here entirely, so a text-only
+  // idea always generated with whatever checkpoint happened to be loaded in
+  // Forge instead of the preset the rest of the app uses.
+  const STYLE_KEY = 'dropcat_express_style';
+  const stylePresetSel = el('select', { style: 'font-size:.78rem; max-width:220px;' });
+  const styleDesc = el('div', { style: 'font-size:.7rem; color:var(--text-3);' });
+  let _presetsCache = [];
+  async function _loadStylePresets() {
+    try {
+      const data = await api('/api/image-studio/presets');
+      _presetsCache = data.presets || [];
+    } catch (e) { _presetsCache = []; }
+    stylePresetSel.innerHTML = '';
+    stylePresetSel.appendChild(el('option', { value: '', text: 'Default (no style override)' }));
+    for (const p of _presetsCache) stylePresetSel.appendChild(el('option', { value: p.id, text: p.label }));
+    let saved = '';
+    try { saved = localStorage.getItem(STYLE_KEY) || ''; } catch (e) { /* non-fatal */ }
+    if (stylePresetSel.querySelector(`option[value="${saved}"]`)) stylePresetSel.value = saved;
+    _updateStyleDesc();
+  }
+  function _updateStyleDesc() {
+    const p = _presetsCache.find(p => p.id === stylePresetSel.value);
+    styleDesc.textContent = p ? p.description : '';
+  }
+  stylePresetSel.addEventListener('change', () => {
+    try { localStorage.setItem(STYLE_KEY, stylePresetSel.value); } catch (e) { /* non-fatal */ }
+    _updateStyleDesc();
+  });
+  _loadStylePresets();
+  const stylePresetRow = el('div', { style: 'display:flex; flex-direction:column; gap:2px;' }, [
+    el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+      el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: 'Style (used only when starting from text, no photo)' }),
+      stylePresetSel,
+    ]),
+    styleDesc,
+  ]);
 
   // Shared brainstorm call -- updates fields, returns {idea, lyric_direction, reply}
   let _chatHistory = [];
@@ -554,6 +592,30 @@ export function init(panel) {
     }
   }
 
+  // Express has no separate Motion Style control -- the Quality preset IS the
+  // motion control (Photo Mood -> LTX 'calm', Action/Action HD -> Wan
+  // 'dynamic', see motion_style below). 'calm' appends "subject completely
+  // still, static shot, fixed camera" server-side (features/fun_videos/
+  // pipeline.py _PROMPT_SUFFIXES), which silently fights an idea describing
+  // explosive/kinetic action -- same failure mode as Create Videos' Motion
+  // Style chips, just with no visible toggle to notice was wrong. Photo Mood
+  // is the default quality, so this is the likelier place to hit it blind.
+  const MOTION_CONFLICT_WORDS = /\b(explode|explod\w*|burst\w*|erupt\w*|shatter\w*|smash\w*|slam\w*|crash\w*|punch\w*|kick\w*|sprint\w*|leap\w*|jump\w*|whirl\w*|charg\w*|hurl\w*|launch\w*|lunge\w*|thrash\w*|flail\w*|spin(s|ning)?\s+(rapid|wild|fast))\b/i;
+  const qualityConflictWarn = el('div', {
+    style: 'display:none; font-size:.75rem; color:#e8b820; background:rgba(232,184,32,.08); border:1px solid rgba(232,184,32,.3); border-radius:6px; padding:7px 10px; align-items:center; gap:8px; flex-wrap:wrap;',
+  });
+  const qualityConflictSwitchBtn = el('button', { class: 'btn btn-sm', text: 'Switch to Action', style: 'flex-shrink:0;' });
+  qualityConflictWarn.appendChild(el('span', {
+    text: 'This idea sounds like an explosive/kinetic action, but Photo Mood forces "subject completely still" and will suppress it.',
+  }));
+  qualityConflictWarn.appendChild(qualityConflictSwitchBtn);
+  function _checkQualityConflict() {
+    const conflict = _qualityId === 'fast' && MOTION_CONFLICT_WORDS.test(ideaInput.value);
+    qualityConflictWarn.style.display = conflict ? 'flex' : 'none';
+  }
+  ideaInput.addEventListener('input', _checkQualityConflict);
+  qualityConflictSwitchBtn.addEventListener('click', () => { _qualChips['quality']?.click(); _checkQualityConflict(); });
+
   root.appendChild(el('div', { class: 'card', style: 'padding:14px; display:flex; flex-direction:column; gap:10px;' }, [
     el('div', { style: 'display:flex; align-items:center; justify-content:space-between;' }, [
       el('div', { style: 'font-size:.75rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em;', text: 'Creative brief' }),
@@ -561,22 +623,23 @@ export function init(panel) {
     ]),
     ideaInput,
     ideaHint,
+    qualityConflictWarn,
+    stylePresetRow,
     musicVibeBlock,
     talkReplyEl,
   ]));
 
   // -- Output settings -------------------------------------------------------
-  const CHIP_BASE     = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 10px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
-  const CHIP_ON       = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
-  const CHIP_DISABLED = 'opacity:.3; cursor:not-allowed; pointer-events:none;';
-
+  // Chip styling lives in design-system.css (.chip-toggle / .active / .chip-disabled)
+  // -- shared with tab-fun-videos.js's equivalent toggle-button groups instead of
+  // each tab hand-rolling its own near-identical inline styles.
   function _makeChipGroup(items, activeVal, onPick) {
     const row = el('div', { style: 'display:flex; gap:6px; flex-wrap:wrap;' });
     const chips = {};
     for (const item of items) {
-      const btn = el('button', { style: CHIP_BASE + (item.value === activeVal ? CHIP_ON : ''), text: item.label, title: item.title || '' });
+      const btn = el('button', { class: 'chip-toggle' + (item.value === activeVal ? ' active' : ''), text: item.label, title: item.title || '' });
       btn.addEventListener('click', () => {
-        Object.entries(chips).forEach(([v, b]) => b.setAttribute('style', CHIP_BASE + (v === item.value ? CHIP_ON : '')));
+        Object.entries(chips).forEach(([v, b]) => b.setAttribute('class', 'chip-toggle' + (v === item.value ? ' active' : '')));
         onPick(item);
       });
       chips[item.value] = btn;
@@ -659,7 +722,7 @@ export function init(panel) {
     _updateExpressHint(modelName);
   }
 
-  const { row: qualRow } = _makeChipGroup(
+  const { row: qualRow, chips: _qualChips } = _makeChipGroup(
     QUALITIES.map(q => ({ label: q.label, value: q.id, title: q.hint || '' })),
     _qualityId,
     item => {
@@ -674,6 +737,7 @@ export function init(panel) {
       _updateRatioAvailability();
       _announceModel();
       _updateQualityVramHints();
+      _checkQualityConflict();
     },
   );
 
@@ -1607,8 +1671,13 @@ export function init(panel) {
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
-      toast('Drop an image or type a video idea first', 'error');
+      toast('Drop an image or type a video idea first', 'error', { id: 'express-need-input' });
       return;
+    }
+    // Backstop for the inline warning above: covers ideas filled in by Spark
+    // (no 'input' event) instead of typing.
+    if (_qualityId === 'fast' && MOTION_CONFLICT_WORDS.test(ideaInput.value)) {
+      toast('Photo Mood forces "subject completely still" -- this may suppress the action in your idea. Consider switching to Action.', 'info');
     }
     _showProgress(1, 'Getting started...');
     const submitted = _multiVideo ? await _generateMulti() : await _generateOne();
@@ -1624,7 +1693,7 @@ export function init(panel) {
     if (!_imagePath && !ideaInput.value.trim()) {
       dropZone.style.borderColor = 'var(--red)';
       setTimeout(() => { if (!_imagePath) dropZone.style.borderColor = 'var(--border-2)'; }, 2000);
-      toast('Drop an image or type an idea first', 'error');
+      toast('Drop an image or type an idea first', 'error', { id: 'express-need-input' });
       return;
     }
     await _ensureImage();

@@ -67,6 +67,68 @@ export function init(panel) {
     } catch (e) { toast(e.message, 'error'); }
   }
 
+  // -- Quick-add from session / gallery -- clips generated elsewhere in the app
+  // previously had to be re-uploaded here from disk; Video Tools already has
+  // this pattern, this mirrors it so a clip only needs picking once.
+  const quickAddRow = el('div', { style: 'display:flex; gap:8px; margin-bottom:10px;' });
+  pickerCard.appendChild(quickAddRow);
+  const sessBtn = el('button', { class: 'btn btn-sm', text: '+ From session' });
+  const galBtn  = el('button', { class: 'btn btn-sm', text: '+ From gallery' });
+  quickAddRow.appendChild(sessBtn);
+  quickAddRow.appendChild(galBtn);
+
+  const quickPicker = el('div', { style: 'display:none; border:1px solid var(--border); border-radius:6px; max-height:180px; overflow-y:auto; margin-bottom:10px;' });
+  pickerCard.appendChild(quickPicker);
+
+  async function _toggleQuickPicker(loader) {
+    const show = quickPicker.style.display === 'none';
+    quickPicker.style.display = show ? '' : 'none';
+    if (!show) return;
+    quickPicker.innerHTML = '<div style="padding:10px; font-size:.8rem; color:var(--text-3);">Loading...</div>';
+    try {
+      const rows = await loader();
+      quickPicker.innerHTML = '';
+      if (!rows.length) { quickPicker.appendChild(el('div', { style: 'padding:10px; font-size:.8rem; color:var(--text-3);', text: 'Nothing here yet.' })); return; }
+      for (const r of rows) {
+        quickPicker.appendChild(el('div', {
+          style: 'display:flex; align-items:center; gap:8px; padding:7px 11px; cursor:pointer; border-bottom:1px solid var(--border-2);',
+          onclick() {
+            quickPicker.style.display = 'none';
+            if (_addItem({ path: r.path, name: r.name, kind: r.kind, duration: r.duration })) {
+              _renderItems();
+              toast(`Added "${r.name}"`, 'success');
+            }
+          },
+        }, [
+          el('span', { style: 'flex:1; font-size:.8rem; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', text: r.name }),
+          el('span', { style: 'font-size:.72rem; color:var(--text-3); flex-shrink:0;', text: r.meta || '' }),
+        ]));
+      }
+    } catch (e) { quickPicker.innerHTML = ''; toast(e.message, 'error'); }
+  }
+
+  sessBtn.addEventListener('click', () => _toggleQuickPicker(async () => {
+    const [vids, imgs] = await Promise.all([
+      api('/api/session/videos').catch(() => ({ videos: [] })),
+      api('/api/session/images').catch(() => ({ images: [] })),
+    ]);
+    const vRows = (vids.videos || []).map(v => ({ path: v.path, name: v.filename, kind: 'video', duration: v.duration, meta: formatDuration(v.duration) }));
+    const iRows = (imgs.images || []).map(i => ({ path: i.path, name: i.filename, kind: 'image', meta: 'image' }));
+    return [...vRows, ...iRows];
+  }));
+
+  galBtn.addEventListener('click', () => _toggleQuickPicker(async () => {
+    const data = await api('/api/gallery?limit=60');
+    return (data.items || data || [])
+      .filter(i => /\.(mp4|webm|mov|mkv|m4v|jpg|jpeg|png|webp)$/i.test(i.url || ''))
+      .map(i => {
+        const p = i.metadata?.path || i.url;
+        const name = p.split(/[\\/]/).pop();
+        const kind = /\.(jpg|jpeg|png|webp)$/i.test(name) ? 'image' : 'video';
+        return { path: p, name, kind, meta: kind };
+      });
+  }));
+
   const dropZone = el('div', { style: 'border:2px dashed var(--border-2); border-radius:8px; padding:28px 16px; text-align:center; cursor:pointer; transition:border-color .15s;' }, [
     el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:10px;', text: 'Drop video clips here' }),
     el('button', { class: 'btn btn-sm', text: 'Open files...' }),
@@ -139,7 +201,7 @@ export function init(panel) {
   textToggleRow.appendChild(textToggle);
   const textInput = el('div', { style: 'display:none; margin-top:8px;' });
   textToggleRow.appendChild(textInput);
-  const textTA = el('input', { type: 'text', placeholder: 'Describe a scene...', style: 'flex:1;' });
+  const textTA = el('textarea', { rows: '2', placeholder: 'Describe a scene...', style: 'flex:1; resize:vertical;' });
   const textAddBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Add' });
   textInput.appendChild(el('div', { style: 'display:flex; gap:6px;' }, [textTA, textAddBtn]));
   let textOpen = false;
@@ -157,7 +219,7 @@ export function init(panel) {
     toast('Text scene added', 'success');
   };
   textAddBtn.addEventListener('click', addText);
-  textTA.addEventListener('keydown', e => { if (e.key === 'Enter') addText(); });
+  textTA.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addText(); } });
 
   _renderItems = function renderItems() {
     itemList.innerHTML = '';

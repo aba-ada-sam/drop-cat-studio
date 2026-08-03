@@ -386,15 +386,15 @@ export function init(panel) {
     }
   }
 
-  // Video mode toggle -- shown once a video is loaded
-  const _vmBtnBase = 'border:1px solid var(--border-2); border-radius:5px; padding:3px 10px; font-size:.75rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
-  const _vmBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
-  const vmBtnCont  = el('button', { style: _vmBtnBase + _vmBtnOn, text: 'Continue', title: 'Continue the video -- AI picks up from the last frame and the original video is prepended to the output' });
-  const vmBtnInsp  = el('button', { style: _vmBtnBase, text: 'Inspired by', title: 'Use the video as creative inspiration -- AI generates new clips in the same world, no stitching' });
+  // Video mode toggle -- shown once a video is loaded. Styling is the shared
+  // .chip-toggle class (design-system.css) -- same pattern as Express's quality/
+  // ratio chips and the motion-style buttons below, instead of a third hand-rolled copy.
+  const vmBtnCont  = el('button', { class: 'chip-toggle active', text: 'Continue', title: 'Continue the video -- AI picks up from the last frame and the original video is prepended to the output' });
+  const vmBtnInsp  = el('button', { class: 'chip-toggle', text: 'Inspired by', title: 'Use the video as creative inspiration -- AI generates new clips in the same world, no stitching' });
   function _setVideoMode(mode) {
     _videoMode = mode;
-    vmBtnCont.setAttribute('style', _vmBtnBase + (mode === 'continuation' ? _vmBtnOn : ''));
-    vmBtnInsp.setAttribute('style', _vmBtnBase + (mode === 'inspired'     ? _vmBtnOn : ''));
+    vmBtnCont.setAttribute('class', 'chip-toggle' + (mode === 'continuation' ? ' active' : ''));
+    vmBtnInsp.setAttribute('class', 'chip-toggle' + (mode === 'inspired'     ? ' active' : ''));
     _showFramePicker(mode === 'continuation' && !!_startVideoPath);
   }
   vmBtnCont.addEventListener('click', () => _setVideoMode('continuation'));
@@ -577,6 +577,33 @@ export function init(panel) {
     style: 'font-size:.72rem; color:var(--text-3); margin-top:4px; line-height:1.5;',
   });
   promptCard.appendChild(promptHint);
+
+  // Calm motion style appends "subject completely still, static shot, fixed
+  // camera" to every prompt (see _PROMPT_SUFFIXES / _finalize_prompt in
+  // features/fun_videos/pipeline.py) -- a hard directive, not just a
+  // suggestion, and it silently wins over whatever the prompt itself asks
+  // for. A prompt describing an explosive/kinetic action while Motion Style
+  // is still on its Calm default (see _motionStyle below) burns a full
+  // generation on a near-static frame with no error, nothing to debug -- this
+  // happened for real chasing a "yarn explodes from the mouth" effect. This
+  // is a same-page nudge, not a block: switching motion style is one click,
+  // and the heuristic can obviously be wrong in either direction.
+  const MOTION_CONFLICT_WORDS = /\b(explode|explod\w*|burst\w*|erupt\w*|shatter\w*|smash\w*|slam\w*|crash\w*|punch\w*|kick\w*|sprint\w*|leap\w*|jump\w*|whirl\w*|charg\w*|hurl\w*|launch\w*|lunge\w*|thrash\w*|flail\w*|spin(s|ning)?\s+(rapid|wild|fast))\b/i;
+  const motionConflictWarn = el('div', {
+    style: 'display:none; font-size:.75rem; color:#e8b820; background:rgba(232,184,32,.08); border:1px solid rgba(232,184,32,.3); border-radius:6px; padding:7px 10px; margin-top:6px; align-items:center; gap:8px; flex-wrap:wrap;',
+  });
+  const motionConflictSwitchBtn = el('button', { class: 'btn btn-sm', text: 'Switch to Dynamic', style: 'flex-shrink:0;' });
+  motionConflictWarn.appendChild(el('span', {
+    text: 'This prompt sounds like an explosive/kinetic action, but Motion Style is Calm -- Calm forces "subject completely still" and will suppress it.',
+  }));
+  motionConflictWarn.appendChild(motionConflictSwitchBtn);
+  promptCard.appendChild(motionConflictWarn);
+  function _checkMotionConflict() {
+    const conflict = _motionStyle === 'calm' && MOTION_CONFLICT_WORDS.test(promptTA.value);
+    motionConflictWarn.style.display = conflict ? 'flex' : 'none';
+  }
+  promptTA.addEventListener('input', _checkMotionConflict);
+  motionConflictSwitchBtn.addEventListener('click', () => { _setMotionStyle('dynamic'); _checkMotionConflict(); });
 
   // "Enhance" button -- calls /api/fun/enhance-prompt to rewrite current text.
   const enhanceBtn = el('button', {
@@ -830,7 +857,7 @@ export function init(panel) {
     title: 'Let AI pick the best model for your idea. Off by default so your selection wins.',
   }, [
     autoPickChk,
-    el('span', { text: 'Auto-pick model from idea' }),
+    el('span', { text: 'Auto-pick best model for my idea' }),
   ]);
   function _applyFvAutoPickState() {
     modelSel.disabled = _autoPick;
@@ -1238,18 +1265,17 @@ export function init(panel) {
     clipsSlider, clipsLabel, totalLabel,
   ]));
 
-  // Motion style toggle
-  const _msBtnBase = 'border:1px solid var(--border-2); border-radius:6px; padding:4px 12px; font-size:.78rem; cursor:pointer; background:transparent; color:var(--text-2); transition:background .15s,color .15s;';
-  const _msBtnOn   = 'background:var(--accent); border-color:var(--accent); color:#000; font-weight:600;';
-  const msBtnCalm  = el('button', { style: _msBtnBase + _msBtnOn, text: 'Calm', title: 'Environment-only motion -- subject stays still (best for LTX)' });
-  const msBtnDyn   = el('button', { style: _msBtnBase, text: 'Dynamic', title: 'Subject action -- kinetic motion (Wan I2V)' });
-  const msBtnNar   = el('button', { style: _msBtnBase, text: 'Narrative', title: 'Story beats -- subject does purposeful things with narrative meaning' });
+  // Motion style toggle -- shared .chip-toggle class, see the video-mode toggle above.
+  const msBtnCalm  = el('button', { class: 'chip-toggle active', text: 'Calm', title: 'Environment-only motion -- subject stays still (best for LTX)' });
+  const msBtnDyn   = el('button', { class: 'chip-toggle', text: 'Dynamic', title: 'Subject action -- kinetic motion (Wan I2V)' });
+  const msBtnNar   = el('button', { class: 'chip-toggle', text: 'Narrative', title: 'Story beats -- subject does purposeful things with narrative meaning' });
   function _setMotionStyle(style) {
     _motionStyle = style;
-    msBtnCalm.setAttribute('style', _msBtnBase + (style === 'calm'      ? _msBtnOn : ''));
-    msBtnDyn .setAttribute('style', _msBtnBase + (style === 'dynamic'   ? _msBtnOn : ''));
-    msBtnNar .setAttribute('style', _msBtnBase + (style === 'narrative' ? _msBtnOn : ''));
+    msBtnCalm.setAttribute('class', 'chip-toggle' + (style === 'calm'      ? ' active' : ''));
+    msBtnDyn .setAttribute('class', 'chip-toggle' + (style === 'dynamic'   ? ' active' : ''));
+    msBtnNar .setAttribute('class', 'chip-toggle' + (style === 'narrative' ? ' active' : ''));
     _updatePromptGuide(modelSel.value, style);
+    _checkMotionConflict();
   }
   msBtnCalm.addEventListener('click', () => _setMotionStyle('calm'));
   msBtnDyn .addEventListener('click', () => _setMotionStyle('dynamic'));
@@ -1469,6 +1495,12 @@ export function init(panel) {
 
     const prompt = promptTA.value.trim() || PROMPT_DEFAULT;
     if (!promptTA.value.trim()) promptTA.value = prompt;
+    // Backstop for the inline warning above: covers prompts filled in by Create
+    // Story/Enhance/Suggest (no 'input' event) instead of typing, so this can't
+    // be missed regardless of how the text got into the box.
+    if (_motionStyle === 'calm' && MOTION_CONFLICT_WORDS.test(prompt)) {
+      toast('Motion Style is Calm, which forces "subject completely still" -- this may suppress the action described in your prompt. Consider switching to Dynamic or Narrative.', 'info');
+    }
     if (!_startImagePath && !_startVideoPath) {
       uploadCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       uploadCard.style.outline = '2px solid var(--red)';

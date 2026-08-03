@@ -19,6 +19,12 @@ export function init(panel) {
   let gallery = _loadGallery();
   let _currentImagePath = null;
   const _activePollers = [];
+  // animateBtn only stays disabled for the initial POST, not for however long
+  // the render actually takes, and jobArea is one shared div with no per-job
+  // scoping -- generating a new image while a video is still rendering used
+  // to silently wipe its visible progress with no indication it was still
+  // working (the job itself keeps running server-side regardless).
+  let _animateJobActive = false;
 
   const root = el('div', {
     style: 'max-width:900px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:14px;',
@@ -168,6 +174,14 @@ export function init(panel) {
     negTa.value = item.negative || '';
     widthIn.value = item.width || 1024;
     heightIn.value = item.height || 1024;
+    // This tab's whole point is seed-comparison work (per the backend's own
+    // doc comments) -- restoring the prompt/preset but leaving whatever
+    // seed/steps/cfg happen to still be sitting in the inputs meant clicking
+    // an old thumbnail to reproduce/tweak it silently used the WRONG
+    // generation settings, with nothing indicating the restore was partial.
+    if (item.seed  != null) seedIn.value  = item.seed;
+    if (item.steps != null) stepsIn.value = item.steps;
+    if (item.cfg   != null) cfgIn.value   = item.cfg;
     if (presetSel.querySelector(`option[value="${item.preset}"]`)) presetSel.value = item.preset;
     if (item.subject && subjectSel.querySelector(`option[value="${item.subject}"]`)) subjectSel.value = item.subject;
     creatureCb.checked = !!item.creature;
@@ -176,7 +190,15 @@ export function init(panel) {
   }
 
   function _showResult(data) {
+    if (_animateJobActive) {
+      // The job is still running server-side (and will still show up in the
+      // Queue tab) -- clearing jobArea here would just make it look like it
+      // vanished instead of saying so.
+      toast('The previous video is still rendering in the background -- check the Queue tab for progress', 'info');
+      _animateJobActive = false;
+    }
     _currentImagePath = data.image_path;
+    videoInput.value = ''; // motion description was for the previous image -- don't silently reuse it
     resultImg.src = data.url || data.image_url;
     resultImg.style.display = '';
     const bits = [`seed ${data.seed}`];
@@ -242,7 +264,12 @@ export function init(panel) {
       height: parseInt(heightIn.value, 10) || 1024,
       steps:  parseInt(stepsIn.value, 10)  || 25,
       cfg:    parseFloat(cfgIn.value)      || 5.0,
-      seed:   parseInt(seedIn.value, 10)   || -1,
+      // NOT `|| -1` -- 0 is a legitimate deliberately-chosen seed and is
+      // falsy in JS, so that pattern silently turned "seed 0" into "randomize"
+      // with no error and no hint in the response (data.seed just comes back
+      // as whatever random seed was actually rolled, indistinguishable from
+      // "the seed I asked for, resolved").
+      seed:   (() => { const s = parseInt(seedIn.value, 10); return Number.isNaN(s) ? -1 : s; })(),
       preset: presetSel.value || 'default',
       subject: subjectSel.value || 'auto',
       creature: creatureCb.checked === true,
@@ -260,6 +287,7 @@ export function init(panel) {
         checkpoint_used: data.checkpoint_used, adetailer_ran: data.adetailer_ran,
         subject_used: data.subject_used, creature: data.creature, creature_applied: data.creature_applied,
         prompt, negative: body.negative_prompt, width: body.width, height: body.height,
+        steps: body.steps, cfg: body.cfg,
         preset: body.preset, subject: body.subject,
       };
       gallery.push(item);
@@ -297,6 +325,7 @@ export function init(panel) {
 
   function _watchVideoJob(jobId) {
     jobArea.innerHTML = '';
+    _animateJobActive = true;
     const statusEl = el('div', { style: 'font-size:.82rem; color:var(--text-3);', text: 'Rendering video...' });
     const track = el('div', { style: 'height:4px; width:220px; background:var(--border-2); border-radius:2px; overflow:hidden; margin-top:6px;' });
     const fill  = el('div', { style: 'height:100%; width:0%; background:var(--accent); transition:width .4s;' });
@@ -311,6 +340,7 @@ export function init(panel) {
         statusEl.textContent = j.message || (j.status === 'queued' ? 'Queued -- waiting for GPU...' : 'Rendering video...');
       },
       (j) => {
+        _animateJobActive = false;
         const outputs = Array.isArray(j.output) ? j.output : [j.output];
         const videoPath = outputs[0];
         jobArea.innerHTML = '';
@@ -320,6 +350,7 @@ export function init(panel) {
         }));
       },
       (err) => {
+        _animateJobActive = false;
         jobArea.innerHTML = '';
         jobArea.appendChild(el('div', { style: 'font-size:.82rem; color:#e88;', text: `Video failed: ${err}` }));
       },
