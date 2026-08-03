@@ -129,7 +129,7 @@ def compute_clip_plan(
         import librosa
         import numpy as np
 
-        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(total_dur, 300))
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(total_dur, 900))
         onset_env  = librosa.onset.onset_strength(y=y, sr=sr)
         min_frames = int(sr / 512 * min_dur * 0.5)
         peaks = librosa.util.peak_pick(
@@ -263,7 +263,7 @@ def analyze(audio_path: str, suggested_clip_dur: int | None = None) -> dict:
 
         log.info("[song-video] Running librosa analysis on %s", Path(audio_path).name)
         # Load mono, 22050 Hz -- good enough for beat/key analysis, fast to load
-        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 300))
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=min(dur, 900))
 
         # BPM + beat timestamps.
         # beat_track returns a scalar in librosa 0.10+ and a 1-element ndarray in 0.9.x.
