@@ -1237,6 +1237,19 @@ def _do_song_gpu_phase(
     job.meta["clips_generated"] = len(clip_paths)
 
     # -- Phase 2: Concat with xfade transitions
+    # Check every clip is still on disk right before merge -- a clip that
+    # vanished after being generated (seen at least once, root cause not
+    # pinned down -- see SESSION_HANDOFF_2026-08-02_evening.md) otherwise
+    # surfaces only as an opaque ffmpeg concat failure with no indication
+    # of which file, or which clip index, was actually missing.
+    missing = [p for p in clip_paths if not os.path.isfile(p)]
+    if missing:
+        raise RuntimeError(
+            f"Song video failed: {len(missing)}/{len(clip_paths)} clip file(s) "
+            f"went missing before merge (generated but no longer on disk): "
+            f"{', '.join(missing)}"
+        )
+
     # Collect per-clip durations for correct xfade offset math.
     clip_durations = [probe_duration(p) or 4.0 for p in clip_paths]
     concat_path = str(job_dir / f"concat_{job.id[:6]}.mp4")
@@ -1244,7 +1257,10 @@ def _do_song_gpu_phase(
     if not _concat_with_xfade(clip_paths, clip_durations, concat_path, fade_dur=_xfade_dur):
         log.warning("[song-video] xfade concat failed -- falling back to hard cut")
         if not _concat_clips(clip_paths, concat_path):
-            concat_path = clip_paths[0]
+            raise RuntimeError(
+                f"Song video failed: could not concatenate {len(clip_paths)} clips "
+                f"(both xfade and hard-cut concat failed). Clip files are in {job_dir}"
+            )
 
     effective_dur = audio_dur if audio_dur > 0 else (probe_duration(audio_path) or 0.0)
     if effective_dur <= 0:
