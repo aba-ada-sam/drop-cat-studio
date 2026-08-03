@@ -79,27 +79,41 @@ function _apiUrl(offset) {
   return `/api/gallery?${p}`;
 }
 
+// Shared by _load/_loadMore so a filter/search change (or a second load-more)
+// started while an earlier request is still in flight always wins -- without
+// this, a fast filter switch (or fast typing in search) can have an older
+// response resolve after a newer one and silently overwrite it with stale,
+// mismatched results (confirmed live: rapid-fire filter switches could leave
+// the grid showing a different tab's items than the dropdown said).
+let _loadGen = 0;
+
 async function _load() {
+  const myGen = ++_loadGen;
   try {
     const data = await apiFetch(_apiUrl(0), { context: 'gallery.load' });
+    if (myGen !== _loadGen) return;
     _items = data.items || [];
     _totalItems = data.total ?? _items.length;
     _loadedOffset = _items.length;
     _renderGrid();
   } catch (e) {
+    if (myGen !== _loadGen) return;
     console.warn('[gallery] load failed:', e?.message || e);
   }
 }
 
 async function _loadMore() {
+  const myGen = ++_loadGen;
   try {
     const data = await apiFetch(_apiUrl(_loadedOffset), { context: 'gallery.load-more' });
+    if (myGen !== _loadGen) return;
     const more = data.items || [];
     _items = _items.concat(more);
     _totalItems = data.total ?? _items.length;
     _loadedOffset = _items.length;
     _renderGrid();
   } catch (e) {
+    if (myGen !== _loadGen) return;
     console.warn('[gallery] loadMore failed:', e?.message || e);
   }
 }
@@ -112,7 +126,18 @@ function _render() {
         <input type="search" id="gallery-search" placeholder="Search generations..." style="flex:1;min-width:120px;font-size:.82rem">
         <select id="gallery-tab-filter" style="font-size:.82rem">
           <option value="">All tabs</option>
-          <option value="create-videos">Videos</option>
+          <option value="sd-prompts">Image Studio</option>
+          <option value="music-video">Music Video</option>
+          <option value="create-videos">Create Videos</option>
+          <option value="express">Quick Video</option>
+          <option value="bridges">Video Bridges</option>
+          <option value="video-tools">Video Tools</option>
+          <option value="lipsync">Lip Sync</option>
+          <option value="retime">Stretch &amp; Lock</option>
+          <option value="song-video">Song Video (legacy)</option>
+          <option value="fun-videos">Create Videos (legacy)</option>
+          <option value="zoom">Zoom (legacy)</option>
+          <option value="image-gen">Image Gen (legacy)</option>
         </select>
       </div>
     </div>
@@ -228,6 +253,8 @@ function _makeCard(item) {
 
   const TAB_LABELS = {
     'sd-prompts': 'SD', 'image-gen': 'IMG', 'create-videos': 'VID', 'bridges': 'BRG',
+    'music-video': 'MV', 'express': 'QV', 'video-tools': 'TOOL', 'lipsync': 'LIP',
+    'retime': 'RTM', 'song-video': 'SV', 'fun-videos': 'FV', 'zoom': 'ZM',
   };
   const badge = TAB_LABELS[item.tab] || item.tab?.toUpperCase() || '?';
 
