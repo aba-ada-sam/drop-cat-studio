@@ -522,11 +522,11 @@ def _runner() -> None:
                 time.sleep(0.3)
 
         except Exception as e:
-            log.exception("[song-batch][%s] worker crashed: %s", slot_name, e)
-            with _state_lock:
-                _record_error(f"[{slot_name}] Worker crashed: {e}")
-
-        except Exception as e:
+            # Was two identical `except Exception` clauses on this try --
+            # Python only ever matches the first, so the second one (the
+            # only one that also bumped _state["updated_at"]) was dead
+            # code from some earlier edit. Kept the version that updates
+            # the timestamp.
             log.exception("[song-batch][%s] worker crashed: %s", slot_name, e)
             with _state_lock:
                 _record_error(f"[{slot_name}] Worker crashed: {e}")

@@ -178,7 +178,16 @@ def _bridges_worker(job, items, settings):
             image_path=None,
             prompt=item.get("prompt", ""),
             out_path=t2v_out,
-            duration=float(settings.get("image_duration", 4.0)),
+            # "image_duration" is how long a STILL IMAGE displays in the
+            # final compile (compile_with_bridges uses it correctly for
+            # that) -- it has nothing to do with how long an AI-*generated*
+            # text-to-video clip should render for, but this text-clip
+            # pregeneration step was reading it anyway. "duration" is the
+            # actual bridge/video-clip-length setting (default 10s vs
+            # image_duration's default 2.5s) -- if a user tuned
+            # image_duration for quick photo cuts, every text-scene clip
+            # silently got that same, likely-too-short render length.
+            duration=float(settings.get("duration", 10.0)),
             model_name="Wan2.1-T2V-14B",
             resolution=settings.get("resolution", "480p"),
             steps=int(settings.get("steps", 20)),

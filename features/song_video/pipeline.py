@@ -863,6 +863,16 @@ def _do_song_gpu_phase(
         log.info("[song-video] Lip sync ON -- pre-extracting %d audio slices", n_clips)
         for _si, (_st, _arc) in enumerate(zip(_clip_start_times, story_arc)):
             _sdur = float(_arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur)
+            # Clamp identically to `this_dur` below (the ACTUAL rendered clip
+            # duration) -- the LLM-produced per-clip "duration" is asked for
+            # 5-10s in the arc-generation prompt but nothing enforces that
+            # range before it got here. Without this clamp, a clip whose arc
+            # duration falls outside [4, 12] got a pre-cut lip-sync guide
+            # vocal slice of a DIFFERENT length than what WanGP actually
+            # renders for that clip -- real audio/video desync on that clip
+            # (the mouth-conditioning audio runs short or long relative to
+            # the video).
+            _sdur = max(4.0, min(12.0, _sdur))
             _sp = str(_audio_slices_dir / f"slice_{_si:02d}.wav")
             _sr = subprocess.run(
                 ["ffmpeg", "-y", "-ss", f"{_st:.4f}", "-t", f"{_sdur:.4f}",
