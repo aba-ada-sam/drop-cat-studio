@@ -375,12 +375,26 @@ class JobManager:
             return None
 
     def promote(self, job_id: str) -> bool:
-        """Move a queued job to the front of the GPU queue. Returns True if moved."""
+        """Move a queued job to the front of the *wait line*. Returns True if moved.
+
+        Never displaces index 0 -- that slot is the job currently running (or
+        about to be picked up as running). appendleft() used to always jump
+        straight to index 0: if something was actively running there, that
+        job got pushed to index 1+ without being removed from the queue, so
+        when its worker thread finished, the queue-front pop check (which
+        only pops if the just-run job is still at index 0) silently found a
+        mismatch and skipped -- the finished job stayed in the deque and got
+        picked up and *re-run from scratch* once the queue worker cycled back
+        to it. Inserting at index 1 instead means the running job always
+        stays at index 0 until it actually finishes and is popped normally.
+        """
         with self._lock:
             if job_id not in self._gpu_queue:
                 return False
+            if self._gpu_queue[0] == job_id:
+                return True  # already at the front (or already running) -- no-op
             self._gpu_queue.remove(job_id)
-            self._gpu_queue.appendleft(job_id)
+            self._gpu_queue.insert(1, job_id)
             return True
 
     def queue_position(self, job_id: str) -> int | None:

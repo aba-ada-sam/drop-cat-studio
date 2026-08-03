@@ -335,11 +335,13 @@ async def round_(request: Request):
         sess["round"] = 0
         sess["last_seeds"] = []
         sess["last_image_paths"] = []
+        sess["last_seeds_by_slot"] = []
         sess["chat_log"] = []
 
     selected_index = body.get("selected_index")
-    if isinstance(selected_index, int) and 0 <= selected_index < len(sess["last_seeds"]):
-        sess["anchor_seed"] = sess["last_seeds"][selected_index]
+    slots = sess.get("last_seeds_by_slot") or []
+    if isinstance(selected_index, int) and 0 <= selected_index < len(slots) and slots[selected_index] is not None:
+        sess["anchor_seed"] = slots[selected_index]
         explicit_anchor = True
     elif selected_index is not None:
         raise HTTPException(400, "selected_index out of range")
@@ -415,6 +417,12 @@ async def round_(request: Request):
 
     sess["last_seeds"] = [img.get("seed") for img in images if "seed" in img]
     sess["last_image_paths"] = [img.get("image_path") for img in images if "image_path" in img]
+    # Raw-slot-indexed (None for a failed slot, same length/order as `images`)
+    # -- selected_index from the client is always a raw index over the full,
+    # unfiltered batch (admin_review.html renders one tile per `images` entry
+    # including failed ones), so it must not be looked up against last_seeds
+    # above, which silently reindexes past any failed tile.
+    sess["last_seeds_by_slot"] = [img.get("seed") for img in images]
     sess["round"] += 1
 
     log.info("[admin-review] round %s: subject=%s preset=%s anchor=%s llm_used=%s prompt=%r",

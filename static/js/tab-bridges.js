@@ -417,7 +417,8 @@ export function init(panel) {
               clip_count:      _items.length,
             });
             sendCard.style.display = '';
-            toast('Bridge complete!', 'success');
+            if (j.meta?.bridges_failed) toast(j.message || 'Bridge complete, but some bridges failed', 'error');
+            else toast('Bridge complete!', 'success');
           }
         },
         err => { prog.hide(); toast(err, 'error'); },

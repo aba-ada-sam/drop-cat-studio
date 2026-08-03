@@ -523,7 +523,23 @@ function openModal(id)  { document.getElementById(id)?.classList.add('open');   
 function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
 
 // -- Settings ----------------------------------------------------------------
+// _configLoaded gates Save: without it, clicking Save while loadConfig() is
+// still in flight (or after it fails) would POST the fields' HTML-default
+// blank values and silently overwrite real saved paths -- confirmed live,
+// index.html has no value= on wan2gp_root/acestep_root/etc, so an unloaded
+// field really is "".
+let _configLoaded = false;
+// Settings can be opened/closed/reopened faster than a load round-trips
+// (confirmed live in testing this fix). Without a generation guard, an
+// earlier, slower call resolving after a later one would overwrite the
+// later call's state -- same race class already fixed in Chat/Gallery.
+let _configLoadGen = 0;
+
 async function loadConfig() {
+  const myGen = ++_configLoadGen;
+  const saveBtn = document.getElementById('btn-save-settings');
+  _configLoaded = false;
+  if (saveBtn) saveBtn.disabled = true;
   try {
     state.config = await apiFetch('/api/config', { context: 'loadConfig' });
     for (const [key, val] of Object.entries(state.config)) {
@@ -533,11 +549,19 @@ async function loadConfig() {
       else el.value = val;
     }
     const llm = await apiFetch('/api/llm/config', { context: 'loadLLM' });
+    if (myGen !== _configLoadGen) return;
     _applyLLMState(llm);
     _configVideoModel = state.config.wan_model || '';
     _applyVideoPillState(_tabVideoModel || _configVideoModel);
     _applySoundPillState(state.config.audio_provider || 'acestep');
-  } catch (_) {}
+    _configLoaded = true;
+  } catch (_) {
+    if (myGen !== _configLoadGen) return;
+    toast('Could not load current settings -- Save is disabled until this succeeds', 'error');
+  } finally {
+    if (myGen === _configLoadGen && saveBtn) saveBtn.disabled = !_configLoaded;
+    if (myGen === _configLoadGen && saveBtn) saveBtn.disabled = !_configLoaded;
+  }
 }
 
 function _applyLLMState(llm) {
@@ -1074,6 +1098,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
   document.getElementById('btn-restart-app')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-restart-app');
+
+    // Guard: /api/app/restart itself does not check for an active GPU job --
+    // it will happily kill a render in progress. Warn before doing that (same
+    // guard as btn-restart-banner -- this button was missing it).
+    try {
+      const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
+      if (gpu.rendering) {
+        const proceed = confirm(
+          'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
+        );
+        if (!proceed) return;
+      }
+    } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
+
     btn.disabled = true;
     btn.textContent = 'Restarting...';
     try {

@@ -66,8 +66,7 @@ def analyze_media(router, media_path: str, frames_b64: list[str] | None = None) 
                 frames_b64 = [b64]
 
     if not frames_b64:
-        return {"error": "Could not extract frames", "title": "Unknown",
-                "scene_description": "Unknown content", "mood": "neutral"}
+        raise RuntimeError(f"Could not extract any frames from {media_path}")
 
     with _vision_lock:
         text = router.route_vision(
