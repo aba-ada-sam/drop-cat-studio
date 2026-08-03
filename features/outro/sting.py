@@ -165,7 +165,15 @@ def _bass_hit(tmp: Path, freq: int = 62, dur: float = 0.55) -> Path:
          str(out)],
         capture_output=True, timeout=30,
     )
-    return out if r.returncode == 0 and out.exists() else None
+    if r.returncode != 0 or not out.exists():
+        # Every other ffmpeg call site in this file logs stderr on failure;
+        # this one didn't, so a synth failure here was only visible as the
+        # generic "bass-hit synth failed -- falling back to fade-only audio"
+        # message downstream, with zero diagnostic content.
+        log.warning("[outro] bass-hit synth failed (freq=%d): %s", freq,
+                    (r.stderr or b"").decode(errors="replace")[-300:])
+        return None
+    return out
 
 
 # -- tiny expression helpers (ffmpeg eval syntax; commas inside nested calls
@@ -554,30 +562,39 @@ def _concat_two(video_a: str, video_b: str, out_path: str) -> bool:
             fwd = str(p).replace("\\", "/").replace("'", "''")
             f.write(f"file '{fwd}'\n")
         list_path = f.name
+    # delete=False above is required (ffmpeg's concat demuxer reopens this
+    # file by path), but nothing ever removed it afterward -- this small
+    # .txt leaked into the system temp dir on every call (the common case:
+    # append_outro's tail-freeze-extend path calls this whenever there
+    # isn't enough silent runway after the audio ends, which is the normal
+    # case for a freshly generated music video).
     try:
-        r = subprocess.run(
-            [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", list_path,
-             "-c", "copy", "-an", out_path],
-            capture_output=True, timeout=120,
-        )
-        if r.returncode == 0 and Path(out_path).exists() and Path(out_path).stat().st_size > 0:
-            return True
-        log.warning("[outro] stream-copy concat failed, falling back to re-encode: %s",
-                    (r.stderr or b"").decode(errors="replace")[-400:])
-    except Exception as e:
-        log.warning("[outro] concat exception: %s", e)
+        try:
+            r = subprocess.run(
+                [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+                 "-c", "copy", "-an", out_path],
+                capture_output=True, timeout=120,
+            )
+            if r.returncode == 0 and Path(out_path).exists() and Path(out_path).stat().st_size > 0:
+                return True
+            log.warning("[outro] stream-copy concat failed, falling back to re-encode: %s",
+                        (r.stderr or b"").decode(errors="replace")[-400:])
+        except Exception as e:
+            log.warning("[outro] concat exception: %s", e)
 
-    try:
-        r = subprocess.run(
-            [FFMPEG, "-y", "-i", video_a, "-i", video_b,
-             "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[outv]",
-             "-map", "[outv]"] + video_encode_args(crf=16) + ["-an", out_path],
-            capture_output=True, timeout=300,
-        )
-        return r.returncode == 0 and Path(out_path).exists() and Path(out_path).stat().st_size > 0
-    except Exception as e:
-        log.warning("[outro] concat re-encode exception: %s", e)
-        return False
+        try:
+            r = subprocess.run(
+                [FFMPEG, "-y", "-i", video_a, "-i", video_b,
+                 "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[outv]",
+                 "-map", "[outv]"] + video_encode_args(crf=16) + ["-an", out_path],
+                capture_output=True, timeout=300,
+            )
+            return r.returncode == 0 and Path(out_path).exists() and Path(out_path).stat().st_size > 0
+        except Exception as e:
+            log.warning("[outro] concat re-encode exception: %s", e)
+            return False
+    finally:
+        Path(list_path).unlink(missing_ok=True)
 
 
 def append_outro(input_video_path: str | Path, variant_key: str,
@@ -605,7 +622,12 @@ def append_outro(input_video_path: str | Path, variant_key: str,
     info = probe_file(input_video_path)
     w = info["width"] or DEFAULT_W
     h = info["height"] or DEFAULT_H
-    fps = int(round(info["fps"])) or DEFAULT_FPS
+    # Unlike w/h just above (where `or DEFAULT_*` runs on the raw probed
+    # value before any conversion), doing int(round(...)) first meant a
+    # probe that returns fps=None (malformed/exotic source, no video stream
+    # detected cleanly) raised an unhandled TypeError instead of ever
+    # reaching the DEFAULT_FPS fallback this line clearly intends.
+    fps = int(round(info["fps"])) if info["fps"] else DEFAULT_FPS
     w = w if w % 2 == 0 else w + 1
     h = h if h % 2 == 0 else h + 1
     container_dur = info["duration"] or probe_duration(input_video_path)
@@ -782,7 +804,12 @@ def append_outro(input_video_path: str | Path, variant_key: str,
                 mix_labels.append("[song]")
             for i, (t0, _t1) in enumerate(windows):
                 dms = int(max(0.0, t0) * 1000)
-                af_parts.append(f"[{bass_base_idx + i}:a]adelay={dms}|{dms}[bass{i}]")
+                # volume=0.6 -- amix below runs with normalize=0 (see comment),
+                # so without some headroom here a full-scale (volume=0.9 in
+                # _bass_hit) bass thump landing while the song is also near
+                # peak could sum past 0dBFS and hard-clip through the AAC
+                # encode. Still reads as a clear punchy accent at this level.
+                af_parts.append(f"[{bass_base_idx + i}:a]adelay={dms}|{dms},volume=0.6[bass{i}]")
                 mix_labels.append(f"[bass{i}]")
             # amix's own "longest" input is whichever of song/bass-hits ends
             # latest -- NOT necessarily total_duration (the bass hits are
@@ -792,8 +819,20 @@ def append_outro(input_video_path: str | Path, variant_key: str,
             # duration every time (caught via ffprobe on a real render:
             # 28.5s audio vs 31.1s video) -- same root bug as the fallback
             # path, just reached through the bass-mix branch instead.
+            #
+            # normalize=0 -- amix defaults to normalize=1, which scales EVERY
+            # input's gain down based on how many inputs are currently
+            # "active" (not yet at EOF). adelay only delays a bass-hit
+            # stream, it doesn't shorten it, so each one counts as "active"
+            # from t=0 until its own tail ends near the video's end -- with
+            # normalize on, the song was divided by ~4 (~-12dB) for nearly
+            # its ENTIRE length, only recovering in the last second as the
+            # bass streams hit EOF. That's the common/happy path (bass synth
+            # almost always succeeds), so it made every normal render
+            # quieter than the degraded _fallback_remux() path, which
+            # doesn't use amix at all and never had this problem.
             af_parts.append(f"{''.join(mix_labels)}amix=inputs={len(mix_labels)}:"
-                             f"duration=longest:dropout_transition=0,apad[aout]")
+                             f"duration=longest:dropout_transition=0:normalize=0,apad[aout]")
 
             r = subprocess.run(
                 cmd2 + ["-filter_complex", ";".join(af_parts),
