@@ -262,7 +262,19 @@ async def generate_image(request: Request):
     use_preset = isinstance(preset_key, str) and preset_key in image_presets.PRESETS
     preset = image_presets.get_preset(preset_key) if use_preset else None
 
-    if preset and preset["nsfw"]:
+    # Run the safety judge whenever we can't PROVE the render is safe.
+    # image_studio's /generate always resolves to a real preset and always
+    # actively switches Forge to that preset's checkpoint via
+    # build_forge_payload(), so "not nsfw" there is a real guarantee. Here,
+    # "no style override" (the tab's default state -- see the Style <select>
+    # default option) means this request does NOT touch Forge's checkpoint
+    # at all -- it renders on whatever is already loaded, which could be an
+    # NSFW checkpoint left loaded by a prior Image Studio session, and
+    # Chat's own system prompt explicitly allows sexual scene content in
+    # normal conversation. Only skip the judge when an explicit, non-NSFW
+    # preset was chosen -- that's the one case this code path can actually
+    # vouch for.
+    if (not use_preset) or preset["nsfw"]:
         scene_text = f"{prompt}\n{negative_prompt}".strip()
         blocked = await nsfw_render_blocked(scene_text)
         if blocked:
