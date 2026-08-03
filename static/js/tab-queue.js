@@ -67,7 +67,15 @@ function _injectStyles() {
   document.head.appendChild(s);
 }
 
-export function pause()  { _stopPoll(); }
+export function pause()  {
+  _stopPoll();
+  // Leaving the Queue tab doesn't destroy its DOM (app.js inits each tab
+  // once and just hides the panel), so a job detail page left open behind
+  // us would otherwise keep its 1.5s refresh poll + 1s ETA ticker running
+  // in the background for the rest of the session -- close it the same
+  // way Escape/Back would.
+  _closeDetailPage?.();
+}
 export function resume() { _startPoll(); }
 export function openJobModal(job) { _showDetailPage(job); }
 
@@ -147,7 +155,6 @@ function _buildShell() {
     saveBtn.disabled = false;
     if (r?.saved != null) {
       toast(`Saved ${r.saved} job${r.saved !== 1 ? 's' : ''} to disk`, 'info');
-      _checkRestoreBtn();
     } else {
       toast('Save failed', 'error');
     }
@@ -302,13 +309,9 @@ function _render(data) {
   const cancelAllBtn = document.getElementById('queue-cancel-all-btn');
   const clearBtn     = document.getElementById('queue-clear-btn');
   const saveBtn      = document.getElementById('queue-save-btn');
-  const restoreBtn   = document.getElementById('queue-restore-btn');
   if (cancelAllBtn) cancelAllBtn.style.display = queued.length > 0 ? '' : 'none';
   if (clearBtn)     clearBtn.style.display     = visibleCompleted.length > 0 ? '' : 'none';
   if (saveBtn)      saveBtn.style.display      = '';
-  // Hide restore button when jobs are already live; retry check when queue is empty.
-  if (restoreBtn && total > 0) restoreBtn.style.display = 'none';
-  if (total === 0) _checkRestoreBtn();
 
   // Empty state
   if (empty) empty.style.display = total === 0 ? 'flex' : 'none';
@@ -498,7 +501,16 @@ function _jobCard(job, active, idx, total) {
       _dismissedIds.add(job.id);
       _persistDismissed();
       card.remove();
-      await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => {});
+      const r = await api(`/api/jobs/${job.id}`, { method: 'DELETE' }).catch(() => null);
+      if (r === null) {
+        // Server never actually deleted this job -- don't hide it forever
+        // on a transient network error. Un-suppress and let it reappear on
+        // the next render (it's still in _lastData since the server kept it).
+        _dismissedIds.delete(job.id);
+        _persistDismissed();
+        toast('Failed to dismiss -- still in queue', 'error');
+        _render(_lastData);
+      }
     });
     actions.appendChild(xBtn);
   } else if (active) {
@@ -583,6 +595,7 @@ const _STAGE_LABELS = {
 };
 
 let _modalState = null;  // { jobId, refreshTimer, etaTimer, lastEta, ... }
+let _closeDetailPage = null;  // set while a job detail page is open; see pause()
 
 function _stopModalTimers() {
   if (!_modalState) return;
@@ -652,9 +665,11 @@ function _showDetailPage(job) {
     page.querySelector('video')?.pause();
     document.removeEventListener('keydown', _onKey);
     page.remove();
+    _closeDetailPage = null;
   }
   function _onKey(e) { if (e.key === 'Escape') _close(); }
   document.addEventListener('keydown', _onKey);
+  _closeDetailPage = _close;
 
   // -- Back bar (sticky header) --
   const backBar    = el('div', { style: 'display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border-2); flex-shrink:0;' });
