@@ -244,6 +244,19 @@ function _renderGrid() {
   }
 }
 
+// Filesystem-ish path to send to /api/output/delete. metadata.path is set by
+// most push sites, but ~43% of existing rows (checked live against gallery.db)
+// predate that and only have item.url -- without this fallback, deleting those
+// silently removed only the DB row while the file stayed on disk forever, with
+// the UI still reporting "File deleted". /api/output/delete resolves a bare
+// relative path against OUTPUT_DIR, so strip the /output/ URL prefix rather
+// than passing the URL through as-is.
+function _deletablePath(item) {
+  if (item.metadata?.path) return item.metadata.path;
+  const u = item.url || '';
+  return u.startsWith('/output/') ? u.slice('/output/'.length) : null;
+}
+
 function _makeCard(item) {
   const card = document.createElement('div');
   card.className = 'gallery-item';
@@ -319,11 +332,20 @@ function _makeCard(item) {
 
   actions.querySelector('.remove').addEventListener('click', async e => {
     e.stopPropagation();
-    if (!confirm('Delete this generation?')) return;
+    if (!confirm('Delete this file permanently? This cannot be undone.')) return;
+    const filePath = _deletablePath(item);
     try {
-      await apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' });
+      await Promise.all([
+        apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }),
+        filePath ? apiFetch('/api/output/delete', {
+          method: 'POST',
+          body: JSON.stringify({ path: filePath }),
+          context: 'gallery.delete-file',
+        }) : Promise.resolve(),
+      ]);
       _items = _items.filter(i => i.id !== item.id);
       _renderGrid();
+      toast('File deleted', 'success');
     } catch (_) {
       // error already toasted by apiFetch; leave item in grid
     }
@@ -430,18 +452,24 @@ function _openDetail(item) {
   overlay.querySelector('#gd-delete')?.addEventListener('click', async () => {
     if (!confirm('Delete this file permanently? This cannot be undone.')) return;
     _closeOverlay();
-    const filePath = item.metadata?.path;
-    await Promise.all([
-      apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }).catch(() => {}),
-      filePath ? apiFetch('/api/output/delete', {
-        method: 'POST',
-        body: JSON.stringify({ path: filePath }),
-        context: 'gallery.delete-file',
-      }).catch(() => {}) : Promise.resolve(),
-    ]);
-    _items = _items.filter(i => i.id !== item.id);
-    _renderGrid();
-    toast('File deleted', 'success');
+    const filePath = _deletablePath(item);
+    try {
+      await Promise.all([
+        apiFetch(`/api/gallery/${item.id}`, { method: 'DELETE', context: 'gallery.delete' }),
+        filePath ? apiFetch('/api/output/delete', {
+          method: 'POST',
+          body: JSON.stringify({ path: filePath }),
+          context: 'gallery.delete-file',
+        }) : Promise.resolve(),
+      ]);
+      _items = _items.filter(i => i.id !== item.id);
+      _renderGrid();
+      toast('File deleted', 'success');
+    } catch (_) {
+      // error already toasted by apiFetch; item stays in _items until a
+      // successful retry, since we can't be sure what actually got deleted
+      _renderGrid();
+    }
   });
 
   overlay.classList.add('open');
