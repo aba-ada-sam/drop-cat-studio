@@ -16,17 +16,18 @@ import time
 import uuid
 from pathlib import Path
 
-import requests
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import config as cfg
+from core import forge_dispatch
+from core import image_presets
+from core.minor_safety import nsfw_render_blocked
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
-FORGE_TXT2IMG_URL = "http://127.0.0.1:7861/sdapi/v1/txt2img"
 
 
 async def _read_json(request: Request) -> dict:
@@ -248,6 +249,22 @@ async def generate_image(request: Request):
     steps     = max(1, min(80, steps))
     cfg_scale = max(1.0, min(15.0, cfg_scale))
 
+    # Optional illustrative-style preset (same catalog Image Studio uses).
+    # Left unset, generation is unchanged from before this option existed --
+    # whatever checkpoint is already loaded in Forge, no override.
+    preset_key = body.get("preset")
+    use_preset = isinstance(preset_key, str) and preset_key in image_presets.PRESETS
+    preset = image_presets.get_preset(preset_key) if use_preset else None
+
+    if preset and preset["nsfw"]:
+        scene_text = f"{prompt}\n{negative_prompt}".strip()
+        blocked = await nsfw_render_blocked(scene_text)
+        if blocked:
+            return JSONResponse(
+                {"error": "Blocked by safety check -- this request could not be verified as depicting adults only."},
+                403,
+            )
+
     # Forge and WanGP share the same physical GPU -- Forge is not DCS-managed
     # (see core/gpu_orchestrator.py), but a live WanGP render must not be
     # starved of VRAM by a manual image generation.
@@ -256,31 +273,30 @@ async def generate_image(request: Request):
             {"error": "Video render in progress -- image generation waits for the GPU"}, 409,
         )
 
-    payload = {
-        "prompt": prompt,
-        "negative_prompt": negative_prompt,
-        "width": width,
-        "height": height,
-        "steps": steps,
-        "cfg_scale": cfg_scale,
-        "seed": seed,
-        "batch_size": 1,
-        "sampler_name": "DPM++ 3M SDE",
-    }
-    try:
-        r = await asyncio.to_thread(requests.post, FORGE_TXT2IMG_URL, json=payload, timeout=600)
-    except requests.exceptions.ConnectionError:
-        return JSONResponse(
-            {"error": "Forge is not running on :7861 -- start it from its own GUI"}, 503,
+    if use_preset:
+        payload, _, _ = image_presets.build_forge_payload(
+            preset_key, image_presets.clamp_prompt_text(prompt),
+            image_presets.clamp_prompt_text(negative_prompt),
+            width, height, steps, cfg_scale, seed, "auto", False,
         )
-    except requests.exceptions.RequestException as e:
-        return JSONResponse({"error": f"Forge request failed: {e}"}, 502)
-
-    if not r.ok:
-        return JSONResponse({"error": f"Forge returned {r.status_code}: {r.text[:200]}"}, 502)
+    else:
+        payload = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "steps": steps,
+            "cfg_scale": cfg_scale,
+            "seed": seed,
+            "batch_size": 1,
+            "sampler_name": "DPM++ 3M SDE",
+        }
+    try:
+        result = await asyncio.to_thread(forge_dispatch.txt2img, payload)
+    except forge_dispatch.ForgeDispatchError as e:
+        return JSONResponse({"error": str(e)}, e.status)
 
     try:
-        result = r.json()
         images = result.get("images") or []
         img_bytes = base64.b64decode(images[0]) if images else None
     except Exception as e:
@@ -304,11 +320,12 @@ async def generate_image(request: Request):
     out_path = out_dir / fname
     out_path.write_bytes(img_bytes)
 
-    log.info("[chat] generated image -> %s (seed=%s)", out_path, actual_seed)
+    log.info("[chat] generated image (preset=%s) -> %s (seed=%s)", preset_key if use_preset else None, out_path, actual_seed)
     return {
-        "image_url":  f"/output/{ts}/{job_slug}/{fname}",
-        "image_path": str(out_path),
-        "seed":       actual_seed,
+        "image_url":       f"/output/{ts}/{job_slug}/{fname}",
+        "image_path":      str(out_path),
+        "seed":            actual_seed,
+        "checkpoint_used": preset["checkpoint"] if preset else None,
     }
 
 

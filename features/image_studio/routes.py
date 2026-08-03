@@ -15,11 +15,11 @@ import time
 import uuid
 from pathlib import Path
 
-import requests
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import config as cfg
+from core import forge_dispatch
 from core import image_presets
 from core.animate_bridge import animate_image
 from core.minor_safety import nsfw_render_blocked
@@ -28,7 +28,6 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
-FORGE_TXT2IMG_URL = "http://127.0.0.1:7861/sdapi/v1/txt2img"
 
 
 async def _read_json(request: Request) -> dict:
@@ -137,19 +136,11 @@ async def generate(request: Request):
         preset_key, prompt, negative_prompt, width, height, steps, cfg_scale, seed, subject, creature,
     )
     try:
-        r = await asyncio.to_thread(requests.post, FORGE_TXT2IMG_URL, json=payload, timeout=600)
-    except requests.exceptions.ConnectionError:
-        return JSONResponse(
-            {"error": "Forge is not running on :7861 -- start it from its own GUI"}, 503,
-        )
-    except requests.exceptions.RequestException as e:
-        return JSONResponse({"error": f"Forge request failed: {e}"}, 502)
-
-    if not r.ok:
-        return JSONResponse({"error": f"Forge returned {r.status_code}: {r.text[:200]}"}, 502)
+        result = await asyncio.to_thread(forge_dispatch.txt2img, payload)
+    except forge_dispatch.ForgeDispatchError as e:
+        return JSONResponse({"error": str(e)}, e.status)
 
     try:
-        result = r.json()
         images = result.get("images") or []
         img_bytes = base64.b64decode(images[0]) if images else None
     except Exception as e:

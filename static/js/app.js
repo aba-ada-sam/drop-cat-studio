@@ -5,7 +5,7 @@
  */
 
 // tab-imports.js removed -- import is handled per-tab
-import { init as initChat } from './tab-chat.js?v=20260729b';
+import { init as initChat } from './tab-chat.js?v=20260802a';
 import { init as initImageStudio } from './tab-image-studio.js?v=20260801a';
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260730b';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260801c';
@@ -353,11 +353,20 @@ const _svcState = {};
 
 const _SVC_TO_TYPE = { wangp: 'video', acestep: 'sound' };
 
+// Dismissing the indicator hides it until restart_needed next transitions
+// false -> true (a fresh commit landing), not just for this poll cycle --
+// otherwise it would reappear on the very next 15s poll while still true.
+let _restartDismissed = false;
+let _lastRestartNeeded = false;
+
 async function _checkRestartNeeded() {
   try {
     const data = await fetch('/api/system').then(r => r.json());
+    const needed = !!data.restart_needed;
+    if (needed && !_lastRestartNeeded) _restartDismissed = false;
+    _lastRestartNeeded = needed;
     const banner = document.getElementById('restart-banner');
-    if (banner) banner.style.display = data.restart_needed ? 'flex' : 'none';
+    if (banner) banner.style.display = (needed && !_restartDismissed) ? 'flex' : 'none';
   } catch (_) {}
 }
 
@@ -580,7 +589,7 @@ function _applyLLMState(llm) {
 
 async function saveSettings() {
   try {
-    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir'];
+    const fields = ['wan2gp_root','acestep_root','acestep_host','sd_wildcards_dir','image_gpu_backend','runpod_image_endpoint_id'];
     const body = {};
     for (const key of fields) {
       const el = document.getElementById(`cfg-${key}`);
@@ -591,6 +600,9 @@ async function saveSettings() {
       const el = document.getElementById(`cfg-${key}`);
       if (el) body[key] = !!el.checked;
     }
+    // Masked-key convention: blank means "keep existing", never send empty.
+    const runpodKey = document.getElementById('cfg-runpod_api_key')?.value;
+    if (runpodKey) body.runpod_api_key = runpodKey;
     await apiFetch('/api/config', { method: 'POST', body: JSON.stringify(body), context: 'saveSettings' });
     // Uncensored backend (Featherless / KoboldCpp) settings
     const uncensoredBody = {};
@@ -1081,6 +1093,11 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.textContent = 'Restart Server';
       btn.disabled = false;
     }
+  });
+  document.getElementById('btn-restart-banner-dismiss')?.addEventListener('click', () => {
+    _restartDismissed = true;
+    const banner = document.getElementById('restart-banner');
+    if (banner) banner.style.display = 'none';
   });
   document.getElementById('btn-restart-banner')?.addEventListener('click', async () => {
     const btn    = document.getElementById('btn-restart-banner');

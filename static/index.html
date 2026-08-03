@@ -15,12 +15,16 @@
 </head>
 <body>
 
-  <!-- RESTART BANNER -->
-  <div id="restart-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9999;
-    background:#7a2020; color:#f0e6d0; font-size:13px; font-weight:600;
-    padding:8px 16px; display:none; align-items:center; gap:12px; justify-content:center;">
-    <span id="restart-banner-text">Code changes pending -- restart DCS to apply them.</span>
-    <button id="btn-restart-banner" class="btn btn-sm" style="flex-shrink:0;">Restart now</button>
+  <!-- RESTART BANNER (small dismissible indicator -- code changes land
+       constantly from other Claude sessions sharing this repo, so a
+       full-width bar was too naggy; dismiss hides it until the NEXT change) -->
+  <div id="restart-banner" style="display:none; position:fixed; bottom:14px; right:14px; z-index:9999;
+    background:#7a2020; color:#f0e6d0; font-size:12px; font-weight:600; border-radius:20px;
+    padding:6px 10px; align-items:center; gap:8px; box-shadow:0 2px 8px rgba(0,0,0,.35);">
+    <span id="restart-banner-text">Code changes pending</span>
+    <button id="btn-restart-banner" class="btn btn-sm" style="flex-shrink:0; padding:2px 8px;">Restart</button>
+    <button id="btn-restart-banner-dismiss" title="Dismiss until the next change" style="flex-shrink:0;
+      background:none; border:none; color:#f0e6d0; cursor:pointer; font-size:15px; line-height:1; padding:0 2px;">&times;</button>
   </div>
 
   <!-- SPLASH -->
@@ -332,6 +336,25 @@
           </div>
         </div>
         <div class="settings-section">
+          <h4 class="settings-section-label">Image Generation (Forge)</h4>
+          <div class="form-group">
+            <label for="cfg-image_gpu_backend">GPU Backend</label>
+            <select id="cfg-image_gpu_backend">
+              <option value="local">Local (Forge on this PC, :7861)</option>
+              <option value="runpod">RunPod (cloud, scale-to-zero)</option>
+            </select>
+            <span class="hint-text">Applies to Image Studio and Chat Studio. Both backends support NSFW.</span>
+          </div>
+          <div class="form-group">
+            <label for="cfg-runpod_image_endpoint_id">RunPod Endpoint ID <span class="hint-text">-- blank = read from C:\JSON Credentials\runpod.json</span></label>
+            <input type="text" id="cfg-runpod_image_endpoint_id" placeholder="e.g. hktxw0u251f9zz" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="cfg-runpod_api_key">RunPod API Key <span class="hint-text">-- leave blank to use the key file</span></label>
+            <input type="text" id="cfg-runpod_api_key" class="masked-key" placeholder="rpa_... (leave blank to use the key file)" autocomplete="off" data-1p-ignore data-lpignore="true">
+          </div>
+        </div>
+        <div class="settings-section">
           <h4 class="settings-section-label">Music Generation (ACE-Step)</h4>
           <div class="form-group">
             <label for="cfg-acestep_root">ACE-Step Path <span class="hint-text">-- folder containing the ACE-Step .venv</span></label>
@@ -450,6 +473,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/js/app.js?v=20260730c"></script>
+  <script type="module" src="/static/js/app.js?v=20260802a"></script>
 </body>
 </html>

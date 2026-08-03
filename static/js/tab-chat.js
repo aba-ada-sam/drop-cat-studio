@@ -8,6 +8,7 @@ import { el, pathToUrl } from './components.js?v=20260801b';
 import { toast, apiFetch } from './shell/toast.js?v=20260620a';
 
 const HISTORY_KEY = 'dropcat_chat_history';
+const STYLE_KEY = 'dropcat_chat_style';
 const SEND_CAP = 40;
 
 export function init(panel) {
@@ -32,6 +33,14 @@ export function init(panel) {
       el('div', { style: 'font-size:.82rem; color:var(--text-3);', text: 'Talk it through, review the prompt, generate, refine, animate.' }),
     ]),
     clearBtn,
+  ]));
+
+  const styleSel = el('select', { style: 'font-size:.8rem;' });
+  const styleDesc = el('span', { style: 'font-size:.72rem; color:var(--text-3);' });
+  root.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+    el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Style' }),
+    styleSel,
+    styleDesc,
   ]));
 
   const transcript = el('div', {
@@ -75,6 +84,37 @@ export function init(panel) {
 
   const _activePollers = [];
 
+  // -- Style preset (same catalog Image Studio uses) ---------------------------
+  let _presetsCache = [];
+
+  async function _loadStyles() {
+    try {
+      const data = await apiFetch('/api/image-studio/presets', { context: 'chat.presets', silent: true });
+      _presetsCache = data.presets || [];
+    } catch (e) {
+      _presetsCache = [];
+    }
+    styleSel.innerHTML = '';
+    styleSel.appendChild(el('option', { value: '', text: 'Current (no style override)' }));
+    for (const p of _presetsCache) {
+      styleSel.appendChild(el('option', { value: p.id, text: p.label }));
+    }
+    let saved = '';
+    try { saved = localStorage.getItem(STYLE_KEY) || ''; } catch (e) { /* non-fatal */ }
+    if (styleSel.querySelector(`option[value="${saved}"]`)) styleSel.value = saved;
+    _updateStyleDesc();
+  }
+
+  function _updateStyleDesc() {
+    const p = _presetsCache.find(p => p.id === styleSel.value);
+    styleDesc.textContent = p ? p.description : '';
+  }
+
+  styleSel.addEventListener('change', () => {
+    try { localStorage.setItem(STYLE_KEY, styleSel.value); } catch (e) { /* non-fatal */ }
+    _updateStyleDesc();
+  });
+
   function _saveHistory() {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-200))); } catch (e) { /* storage full/unavailable -- non-fatal */ }
   }
@@ -90,7 +130,7 @@ export function init(panel) {
 
   // -- Image bubble (generated result + actions) ------------------------------
   function _addImageBubble(opts) {
-    const { url, path, seed, prompt, negative, width, height, steps, cfgVal } = opts;
+    const { url, path, seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed } = opts;
 
     const img = el('img', {
       src: url,
@@ -99,7 +139,10 @@ export function init(panel) {
     });
     img.addEventListener('click', () => window.open(url, '_blank'));
 
-    const seedNote = el('div', { style: 'font-size:.7rem; color:var(--text-3); margin-top:4px;', text: `seed ${seed}` });
+    const seedNote = el('div', {
+      style: 'font-size:.7rem; color:var(--text-3); margin-top:4px;',
+      text: checkpointUsed ? `seed ${seed}  --  ${checkpointUsed}` : `seed ${seed}`,
+    });
 
     const refineBtn  = el('button', { class: 'btn btn-sm', text: 'Refine' });
     const reseedBtn  = el('button', { class: 'btn btn-sm', text: 'Same prompt, new seed' });
@@ -117,12 +160,12 @@ export function init(panel) {
       try {
         const data = await apiFetch('/api/chat-studio/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1 }),
+          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset }),
           context: 'chat.generate-image',
         });
         _currentPromptText = prompt;
         _currentImagePath = data.image_path;
-        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal });
+        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used });
       } catch (e) {
         // apiFetch already toasted the server error string
       } finally {
@@ -239,15 +282,16 @@ export function init(panel) {
       genBtn.disabled = true;
       const origText = genBtn.textContent;
       genBtn.textContent = 'Generating...';
+      const preset = styleSel.value || '';
       try {
         const data = await apiFetch('/api/chat-studio/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1 }),
+          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset }),
           context: 'chat.generate-image',
         });
         _currentPromptText = prompt;
         _currentImagePath = data.image_path;
-        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal });
+        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used });
       } catch (e) {
         // apiFetch already toasted the server error string (409/503/etc.)
       } finally {
@@ -341,4 +385,6 @@ export function init(panel) {
   for (const h of history) {
     _addTextBubble(h.role === 'assistant' ? 'assistant' : 'user', h.content);
   }
+
+  _loadStyles();
 }

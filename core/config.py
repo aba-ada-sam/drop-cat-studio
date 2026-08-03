@@ -38,6 +38,15 @@ DEFAULTS: dict = {
     "auto_discover_satellite": True,
     "satellite_hostnames": ["study", "study.local", "dcs-satellite", "dcs-satellite.local"],
 
+    # -- Image Generation (Forge, local or RunPod cloud) --------------------
+    # RunPod dispatch reuses the dcg-tiles serverless Forge endpoint (see
+    # project memory) -- same perfection25D checkpoint, same NSFW capability
+    # as local. Blank api_key/endpoint_id fall back to runpod_key_file.
+    "image_gpu_backend": "local",       # local | runpod
+    "runpod_image_endpoint_id": "",     # blank -> read endpoint_id from runpod_key_file
+    "runpod_api_key": "",               # blank -> read api_key from runpod_key_file
+    "runpod_key_file": r"C:\JSON Credentials\runpod.json",
+
     # -- LLM Provider -----------------------------------------------------
     "llm_provider": "anthropic",      # anthropic | openai | featherless | kobold | auto
     "anthropic_key": "",
