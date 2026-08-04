@@ -138,13 +138,19 @@ MODELS = {
     # 16.3GB card). Was being handed out as the "safe 16GB default" by
     # _auto_pick_model, so it deadlocked at Step 0 on essentially every I2V job.
     # Floor per the standard rule (model_size/0.8 + ~5GB headroom): 20.07/0.8+5.
-    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600,  "vram_min_gb": 30},
-    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 25, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 20},
+    # fps 24, not 25: WanGP's own _ARCH_SPECS pins the LTX-2 family at 24, and
+    # rendered files probe at 24/1 (249 frames = exactly 10.375s). The 25 this
+    # table carried since day one made frame planning ask for 4% more frames
+    # than the model emits and stitched 24fps clips onto a 25fps timeline --
+    # a slow audio/video drift on every merged video. (The website's
+    # sing_pipeline found and fixed the same bug independently.)
+    "LTX-2 Dev19B Distilled": {"res": (1032, 580), "fps": 24, "max_sec": 19, "i2v": True,  "steps": 8,  "guidance": 3.0, "default_clips": 2, "default_dur": 6, "motion": "calm",    "poll_timeout_s": 600,  "vram_min_gb": 30},
+    "LTX-2 Dev13B":           {"res": (1032, 580), "fps": 24, "max_sec": 19, "i2v": True,  "steps": 40, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 20},
     # 360P variant: same model, resolution capped to 640x360 so step-0 VRAM
     # drops ~75% vs native 580P -- reliably fits 16GB WanGP budget. Real-ESRGAN
     # 4x post-processing (auto-enabled by DCS) recovers to 2560x1440.
     # If it still deadlocks, halve max_sec to 4 to cut frame count in half.
-    "LTX-2 Dev13B 360P":      {"res": (640, 360),  "fps": 25, "max_sec": 8,  "i2v": True,  "steps": 20, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 10},
+    "LTX-2 Dev13B 360P":      {"res": (640, 360),  "fps": 24, "max_sec": 8,  "i2v": True,  "steps": 20, "guidance": 3.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1200, "vram_min_gb": 10},
     "Wan2.1-T2V-14B":         {"res": (854, 480),  "fps": 16, "max_sec": 16, "i2v": False, "steps": 25, "guidance": 5.5, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 1800, "vram_min_gb": 12},
     "Wan2.1-T2V-1.3B":        {"res": (854, 480),  "fps": 16, "max_sec": 12, "i2v": False, "steps": 20, "guidance": 5.0, "default_clips": 3, "default_dur": 6, "motion": "dynamic", "poll_timeout_s": 900,  "vram_min_gb": 4},
 }

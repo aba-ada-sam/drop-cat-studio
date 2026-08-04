@@ -173,7 +173,11 @@ SITE (dropcatgo-generator) tracked history:
 - c253fba (08-03): BYO-song is a PORT of Studio's upload->isolate->lip-sync, not
   greenfield.
 
-SITE untracked dropcat-video-wan/ (dcg-sing) -- knowledge that was nearly lost:
+SITE dropcat-video-wan/ (dcg-sing) -- CORRECTION 08-04 (helper): this is its OWN git
+repo (aba-ada-sam/dropcat-video-wan), nested inside dropcatgo-generator and gitignored
+by the PARENT -- so it has real history of its own, but `git log` in the parent never
+shows it and a session working the parent repo can miss it entirely. The knowledge-loss
+risk below stands for anyone reading only the parent repo:
 - BUILD_RUNBOOK "RECIPE STATUS: CONFIRMED" (08-04): clean pod (L40S) reproduced native
   LTX-2 audio-conditioning end-to-end; the 08-02 "deadlock -> LTX-2 is video-only"
   ruling was one box's TDR-era driver, NOT the technique. **The tracked handoff docs
