@@ -34,13 +34,42 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   SILENT slice for zero-phrase windows; over-mute breaker >85% only for bad separation).
   NEVER the raw mix -- see 2026-08-04 entry below.
 - Selection: best-of-N (3-4) per sing clip, early-accept on first take that is
-  artifact-clean AND verdict=synced. Gates before ranking: yellow-glyph excess <=0.02%,
-  transient-white (vs clip's own static bright mask) <=2.0%, luma mean drift <=25% of
-  source / peak <1.6x source.
+  artifact-clean AND verdict=synced. Gates before ranking: RIBBON (full-res bright-mask
+  flicker, p95 < 0.30 AND max < 1.0 -- see ribbondet v3 entry), yellow-glyph excess
+  <=0.02%, transient-white (vs clip's own static bright mask) <=2.0%, luma mean drift
+  <=25% of source / peak <1.6x source. The transient-white gate alone is BLIND to thin
+  ribbons (4x downsample) -- it never substitutes for the ribbon gate.
 
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (evening, pending boost A/B) | QUIET GUIDES DON'T DRIVE THE MOUTH: the two
+  windows that refuse to sync are the two quietest slices in the song (01_0 peak
+  -27.7 dBFS frame-RMS, 09_1 -28.9 -> 0-1 synced of 6 takes each) while the windows
+  that synced first-try are louder (03_1 -23.3, 07_0 -25.2). One-variable test
+  running: flat gain to -20 dBFS on the conditioning slice only (mux audio untouched).
+- ACTIVE (evening) | SYNC AND SLOP RISE TOGETHER: high-energy takes that move the mouth
+  also ribbon more (01_1: 4/4 takes ribboned, the 2 synced ones among them; 09_1's only
+  synced take was also its dirtiest). Best-of-N with the full gate stack is how you keep
+  one without the other -- there is no settings knob that trades them.
+- REVERSED (evening) | "sage2-on-Blackwell attention kernel causes the ribbons" --
+  disproven by the sdpa re-roll itself: with wgp_config attention pinned to sdpa,
+  12/16 takes STILL ribboned (01_0 4/6, 09_1 4/6, 01_1 4/4). Ribbons are stochastic
+  per-seed music-video-prior slop on ANY attention backend; window content sets the
+  odds. wgp_config.json left at "sdpa" (no measured slowdown, ~62-70s per 201f take);
+  reverting to "auto" is safe if ever wanted.
+- ACTIVE (evening) | RIBBON DETECTOR v3 (scratchpad ribbondet.py): thin near-white
+  strands that REDRAW every frame; metric = full-res bright mask (min(R,G,B)>190)
+  XOR'd between consecutive frames, % changed. Eye-calibrated both ends on FIXED4:
+  infested p95 1.07 vs clean p95 0.24. Window call: p95>0.50 infested, <0.30 clean,
+  else eye-check. Built AFTER FIXED4 shipped with 4 infested windows that the
+  transient-white gate scored "below baseline" -- downsampled detectors cannot see
+  1-3px flicker. No delivery without ribbondet + full-res eye pass on EVERY window.
+- ACTIVE (evening) | OVER-RETRACTION LESSON: the round-4 bright-streak metric was
+  retracted globally because its CROSS-scene comparisons were garbage (golden file
+  scored worse than a rejected one) -- but its WITHIN-scene flags on the morning
+  windows were real ribbons. A metric that fails across scenes may still be right
+  within one; check both scopes before discarding the signal entirely.
 - ACTIVE | Artifacts are LTX-2's music-video prior leaking under weak conditioning:
   eye-confirmed a hallucinated TITLE CARD (white screen, fake logo text) in a peak-luma
   reject; the yellow 48-55s glyphs in FIXED3 are lyric-text furniture. Strong vocal
@@ -75,7 +104,7 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 - ACTIVE | Best-of-N restored for hero videos: DCMVS v1.0 documented the per-seed
   mouth/eyes/forehead coin flip (one clip, four seeds: 0.77/0.31/0.19/0.03); v2.8
   retired best-of-N for batch throughput -- a tradeoff, not a refutation.
-- ACTIVE (added ~18:15) | THE PROMPT MUST DESCRIBE THE CONDITIONING IMAGE, NEVER
+- ACTIVE (added ~17:10) | THE PROMPT MUST DESCRIBE THE CONDITIONING IMAGE, NEVER
   CONTRADICT IT. Matched-seed A/B, isolated wav, window 01_1: short prompt "a face
   singing, clear mouth, facing camera" -> 1/3 synced, 0.1433; DCMVS's long subject
   template -> 0/3, best 0.0005. The SAME seed scored 0.1433 synced vs 0.0005 static
