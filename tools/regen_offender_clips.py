@@ -68,10 +68,25 @@ def trapezoid_volume_expr(keep_spans, total):
 
 def build_gated_slice(song, stem_intervals, t0, t1, out_wav):
     """Cut [t0,t1) from the song's ISOLATED-STEM timeline with phrase-level
-    soft gating. Spans are shifted into slice-local time."""
+    soft gating. Spans are shifted into slice-local time.
+
+    Three regimes:
+    - phrases present, most survive -> soft-gated slice (the normal case)
+    - phrases present but the gate would mute >85% -> ungated slice (DCMVS's
+      over-mute breaker: that pattern means the SEPARATION is bad, and a bad
+      gate is worse than none)
+    - ZERO phrases in the window (genuinely instrumental, e.g. outro clips)
+      -> SILENT slice, so conditioning drives the mouth to REST. Ungating
+      here would recreate instrument-following -- the breaker is protection
+      against bad separation, not a license to sing to the band."""
     dur = t1 - t0
     local = [(max(0.0, s - t0), min(dur, e - t0))
              for (s, e) in stem_intervals if e > t0 and s < t1]
+    if not local:
+        run([FFMPEG, "-y", "-f", "lavfi", "-i",
+             "anullsrc=r=44100:cl=stereo", "-t", "%.3f" % dur,
+             "-c:a", "pcm_s16le", str(out_wav)])
+        return "silent"
     kept = sum(e - s for s, e in local)
     if dur - kept > OVERMUTE_FRAC * dur:
         vol = None  # over-mute breaker: condition on the ungated slice
@@ -83,7 +98,7 @@ def build_gated_slice(song, stem_intervals, t0, t1, out_wav):
         cmd += ["-af", "volume='%s':eval=frame" % vol]
     cmd += [str(out_wav)]
     run(cmd)
-    return vol is not None
+    return "gated" if vol else "ungated-breaker"
 
 
 def exact_cut(video, approx_t, window=1.5):
