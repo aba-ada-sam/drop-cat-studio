@@ -43,6 +43,24 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- REJECTED same night at 0:17 | FIXED5's real remaining flaw is the WINDOW MAP, not the
+  windows: 'interlude' windows 02/04/06/08 measure 55-68pct voiced on the stem (08 is the
+  DENSEST-vocal window in the song) but were built as unconditioned filler in every cut
+  to date -- 79s / 38pct of runtime sings with an undriven mouth. Every gate verified
+  windows against the map; nothing verified the map against the song. RULE: before any
+  assembly, print the per-window voiced table and require every window above ~20pct
+  voiced to be a CONDITIONED render. Fix: split each 473f interlude into two 236f halves
+  on the rigid grid, condition each (interlude_hunt.py, running).
+- CALIBRATION (night) | GOLDEN AWM00001 measured on the same meter, same song, same grid:
+  ranks average ~0.10 (our banked windows are IN that band), only 7/20 windows verdict
+  'synced' -- but motion runs 2-13 vs our 0.3-1.3, and it is a MULTI-SCENE cut-and-
+  crossfade video (mirror alien, singing cats...), not a single tableau. What reads as
+  'real lip sync' is performance energy + scene variety + sync where vocals are dense,
+  not per-frame viseme lock. Consequences: (a) the rank formula's motion-dampening
+  selects statues -- do not optimize takes solely by it; (b) the 'a face singing, clear
+  mouth, facing camera' prompt invites a static portrait -- an energy-prompt A/B is the
+  next cheap lever; (c) matching AWM00001 ultimately means DCMVS multi-scene, which is a
+  format decision for Andrew, not a repair of this file.
 - DELIVERED (night) | FIXED5 shipped on review_0003.html: FIXED3 base + 6 replacements
   + pod-master tail on an exact 5040-frame grid. 16/16 windows + 9/9 seams eye-passed
   (5 adversarial subagent passes, every flag re-checked senior); full numeric gauntlet
