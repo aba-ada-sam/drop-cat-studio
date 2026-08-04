@@ -606,12 +606,31 @@ def run_song_pipeline(job, photo_path, settings):
     # roots out why generation stalls at that resolution, rather than
     # widening the VRAM gate to "fix" a bug that was never about VRAM.
     _lip_sync_res_active = False
-    if ow and oh:
-        log.warning("[song-video] Ignoring override_width/override_height "
-                    "(%sx%s requested) -- non-model resolutions are hanging "
-                    "on this GPU as of 2026-08-01, forcing model default.", ow, oh)
-    _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
-    tw, th = _native
+    # 2026-08-03: override re-allowed for lip_sync jobs ONLY (manager-approved
+    # A/B). The 08-01 hang that justified force-native was diagnosed inside the
+    # same GPU-TDR/bad-driver window as the native-conditioning "deadlock" that
+    # did NOT reproduce today on the reinstalled driver (jobs 7b73161046fc,
+    # a2e6f1b8510d rendered clean). Conditioning at 1032x580 applies but does
+    # not grip the mouth (frame/RMS anti-correlation, 21:25 board post); the
+    # July recipe that produced AWM00001 rendered 640x360 then upscaled.
+    # Non-lip_sync jobs keep the 83881b3 force-native behavior unchanged.
+    if ow and oh and bool(settings.get("lip_sync", False)):
+        tw, th = int(ow), int(oh)
+        log.info("[song-video] lip_sync override honored: rendering %dx%d "
+                 "(explicit output_width/height on a lip_sync job)", tw, th)
+    else:
+        if ow and oh:
+            log.warning("[song-video] Ignoring override_width/override_height "
+                        "(%sx%s requested) -- non-model resolutions are hanging "
+                        "on this GPU as of 2026-08-01, forcing model default.", ow, oh)
+        _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
+        tw, th = _native
+    log.info("[song-video] effective render params: %dx%d model=%s steps=%s "
+             "guidance=%s lip_sync=%s auto_lipsync=%s best_of_n=%s",
+             tw, th, model_name, steps, guidance,
+             bool(settings.get("lip_sync", False)),
+             bool(settings.get("auto_lipsync", False)),
+             settings.get("best_of_n", 1))
 
     if photo_path and os.path.isfile(photo_path):
         shutil.copy2(photo_path, job_dir / f"source{Path(photo_path).suffix}")
