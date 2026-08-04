@@ -43,6 +43,17 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (evening) | SITE VARIANT OF THE GRID BUG, WORSE (sing-cloud audit, commit
+  832d94c on sing-audio-conditioning, undeployed): trim_boundaries cut 0.28s off every
+  clip AFTER render while conditioning slices were cut at absolute song positions ->
+  0.28s x clip_index cumulative drift (5.3s at the 20-clip ceiling), plus _mux_final
+  looping the video to cover the shortfall. Two transferable lessons: (a) HEADROOM THEN
+  TRIM beats pad-with-clones for fresh renders (clone-pad can freeze a mouth mid-word;
+  Studio's FIXED5 pad is safe only because SE anchoring parks the final frames on the
+  pristine pose); (b) CONTENT budget != RENDER cap: adding render headroom while
+  splitting on the render cap pushes clips past the 249f conditioning-grip ceiling --
+  renders fine, silently stops syncing. Split on a 236f CONTENT budget. Check chain.py
+  for the same trap during the Tier-2 port.
 - ACTIVE (evening) | ASSEMBLY MUST BE A RIGID FRAME GRID -- short splices killed the
   sync mechanically: FIXED4 inserted 233-frame renders (8k+1 rule) into ~236-frame
   slots with no padding, shrinking the video 7 frames total; every splice makes all
