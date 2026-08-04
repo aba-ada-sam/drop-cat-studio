@@ -43,6 +43,27 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (evening) | ASSEMBLY MUST BE A RIGID FRAME GRID -- short splices killed the
+  sync mechanically: FIXED4 inserted 233-frame renders (8k+1 rule) into ~236-frame
+  slots with no padding, shrinking the video 7 frames total; every splice makes all
+  later video play EARLIER against the untouched soundtrack (~0.3s by the tail =
+  visible lip-lead everywhere downstream, on takes that were individually synced).
+  align_probe.py (frame-matching vs pod master in the shared pod windows) measured
+  FIXED3 rigid (-1/0 frames throughout) and confirmed FIXED4's drift. RULE: every
+  segment is cut/padded to its slot's exact integer frame count (tpad stop_mode=clone;
+  SE anchoring makes a 3-frame tail hold invisible) and counts must sum to the master
+  total BEFORE concat. Never trust -t to fix a SHORT clip -- it only trims long ones.
+  Same bug class threatens ANY per-clip stitcher (site sing pipeline flagged X-SILO).
+- ACTIVE (evening) | THIRD ARTIFACT CLASS -- DARK-RED STRANDS: red ribbon/confetti
+  streaks + edge fog + glyph-on-clothing, found by eye in a window BOTH bright-flicker
+  and yellow gates passed (FIXED4 09_0). Red-flicker metric (R-max(G,B)>45 & R>90,
+  XOR between frames) separates it (bad p95 0.157 vs good 0.04-0.07) but fires on
+  legit moving skin (0.124-0.26 on a verified-clean take), so it is a SCREEN not a
+  gate: rank worst frames, send them to the eye. The eye stays the gate for red.
+- ACTIVE (evening) | WINDOW 01_0 (song intro) IS BARELY VOICED: phrase gating hit the
+  ungated-breaker (>85% would mute) and +7.7dB boost still produced 0 synced takes in
+  6 -- there is nothing to lip-sync there. A clean, alive-but-quiet mouth is CORRECT
+  content for the intro; do not burn takes chasing "synced" verdicts on it.
 - ACTIVE (evening, pending boost A/B) | QUIET GUIDES DON'T DRIVE THE MOUTH: the two
   windows that refuse to sync are the two quietest slices in the song (01_0 peak
   -27.7 dBFS frame-RMS, 09_1 -28.9 -> 0-1 synced of 6 takes each) while the windows
