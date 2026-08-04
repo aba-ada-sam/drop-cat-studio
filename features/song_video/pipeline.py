@@ -625,6 +625,17 @@ def run_song_pipeline(job, photo_path, settings):
                         "on this GPU as of 2026-08-01, forcing model default.", ow, oh)
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
+    # lane 3C: on the lip_sync path, clamp video guidance down to the model's
+    # registered value (3.0 for Distilled) -- documented: >3.5 makes text
+    # guidance fight the source identity, and no layer below here clamps it
+    # (video_generator.py:439 passes guidance_scale straight through). Same
+    # lip_sync-only scoping as the resolution override above.
+    if bool(settings.get("lip_sync", False)):
+        _reg_g = video_generator.MODELS.get(model_name, {}).get("guidance")
+        if _reg_g and float(guidance) > float(_reg_g):
+            log.info("[song-video] lip_sync guidance clamp: %s -> %s (model registered)",
+                     guidance, _reg_g)
+            guidance = float(_reg_g)
     log.info("[song-video] effective render params: %dx%d model=%s steps=%s "
              "guidance=%s lip_sync=%s auto_lipsync=%s best_of_n=%s",
              tw, th, model_name, steps, guidance,
