@@ -275,6 +275,17 @@ def _do_generate(params: dict) -> dict:
     wgp.image_save_path = output_dir
     wgp.audio_save_path = output_dir
 
+    # vae_config: force 1 explicitly instead of trusting the box's on-disk
+    # wgp_config.json (ported from DCMVS's worker 2026-08-03, where this is
+    # load-bearing). At output_height > 480 the LTX-2 VAE helper bumps its tile
+    # bracket; with vae_config "auto" (0) on a 12-16GB card that lands on 256px
+    # tiles = more/visible seams that can cross a centered mouth, and a seamed
+    # take still PASSES sync scoring (no sharpness signal). Explicit 1 lands on
+    # 512px tiles. Benign when the on-disk config is already 1 (this box today);
+    # protective the day it drifts.
+    wgp.server_config["vae_config"] = 1
+    wgp.vae_config = 1
+
     wangp_outputs = os.path.join(os.getcwd(), "outputs")
     before_files = (
         set(glob.glob(os.path.join(output_dir, "*.mp4")))

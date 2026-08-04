@@ -100,7 +100,16 @@ SAFE_DEFAULTS: dict = {
     "keep_frames_video_source": "",
     "force_fps": "",
     # WanGP validates these even when sliding window isn't actually needed.
-    "sliding_window_size": 129,   # WanGP UI default; only activates if video > this frame count
+    # sliding_window_size MUST exceed the clip's video_length or WanGP silently
+    # splits the render into ~129-frame sub-windows (wgp.py: `if video_length >
+    # sliding_window_size`), fragmenting the audio<->video cross-attention and
+    # DESTROYING lip-sync. DCMVS root-caused this 2026-05-31 and forces 481 (the
+    # LTX-2 audio-conditioned ceiling, ~20s @ 24fps); this copy stayed at the
+    # 129 UI default from 2026-04-27 (1fb1384) and silently killed sync on every
+    # clip longer than 129 frames rendered through DCS's worker -- including all
+    # 18+ failed seeds on 2026-08-03. Keep in lockstep with
+    # C:\DCMVS-restored\core\wangp_models.py.
+    "sliding_window_size": 481,
     "sliding_window_overlap": 17,
     "sliding_window_discard_last_frames": 0,
     # Keys accessed directly via inputs["key"] in wgp.py -- must be present or KeyError
