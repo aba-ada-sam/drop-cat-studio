@@ -618,6 +618,15 @@ def run_song_pipeline(job, photo_path, settings):
         tw, th = int(ow), int(oh)
         log.info("[song-video] lip_sync override honored: rendering %dx%d "
                  "(explicit output_width/height on a lip_sync job)", tw, th)
+    elif bool(settings.get("lip_sync", False)):
+        # Tier-1 DCMVS port (2026-08-04, verify-after-driver-rollback): lip-sync
+        # jobs DEFAULT to DCMVS's proven 960x544 (worker/VAE emits 960x512).
+        # Sits below the audio-token overflow threshold (580p+ silently degrades
+        # conditioning grip) and well above the old 640x360 workaround in detail;
+        # proven by the 07-29 local A/B and tonight's clean-env pod render.
+        # Explicit overrides above still win; non-lip_sync jobs unchanged below.
+        tw, th = 960, 544
+        log.info("[song-video] lip_sync default resolution: 960x544 (DCMVS proven)")
     else:
         if ow and oh:
             log.warning("[song-video] Ignoring override_width/override_height "
@@ -999,6 +1008,17 @@ def _do_song_gpu_phase(
             # produces a near-static, unsynced clip through this pipeline --
             # confirmed via matched raw-payload A/B testing (see LIPSYNC_HANDOFF_
             # 2026-07-29_night.md), not a seed-lottery or worker-instance issue.
+            #
+            # 2026-08-04 (Tier-1 port, verify-after-driver-rollback): NO CHAINING
+            # on the lip-sync path at all -- start from the PRISTINE source every
+            # clip, exactly DCMVS's SECTION_CLIPS=1 + SE_END_ANCHOR=True shipped
+            # default. Chaining re-encodes an AI-reinterpreted frame each hop and
+            # DCMVS's own milestones call the result "not watchable"; with SE the
+            # boundaries are near-identical frames so hard cuts read as seamless.
+            # (Without this, end=start above anchored to the DRIFTED chain frame,
+            # not the source -- half the fix.)
+            clip_start_image = prepped_photo
+            _is_chained = False
             clip_end_image = clip_start_image
 
         prompt_to_use = clip_prompt
