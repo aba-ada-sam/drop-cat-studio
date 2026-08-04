@@ -836,6 +836,15 @@ def _do_song_gpu_phase(
     # Only enabled when user provided audio that converted successfully in prep.
     _clip_start_times = clip_start_times or []
     _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav) and len(_clip_start_times) == n_clips
+    # auto_lipsync (MuseTalk post-pass) needs the SAME face-forward framing as
+    # native lip_sync -- it drives the mouth of whatever face is in the already-
+    # generated video, so if the source photo isn't framed on the face, WanGP
+    # is free to pan/crop away from it and MuseTalk has nothing to sync. This
+    # used to piggyback on lip_sync defaulting True; now that lip_sync defaults
+    # False (native audio-conditioning deadlocks WanGP -- see routes.py), the
+    # framing step was silently going with it even though auto_lipsync -- the
+    # ONLY lip-sync path that actually runs by default -- still needs it.
+    _want_face_framing = _lip_sync or bool(settings.get("auto_lipsync", False))
     _audio_slices_dir = job_dir / "audio_slices"
 
     # Lip-sync recipe (what actually produces mouth movement, per the DCMVS
@@ -844,12 +853,12 @@ def _do_song_gpu_phase(
     # (audio fits) and best-of-N (best_of_n>1 ranks takes by mouth motion), this
     # is what beats the seed lottery. Both pieces degrade gracefully.
     _guide_audio = audio_wav
+    if _want_face_framing and photo_path and os.path.isfile(photo_path):
+        _face = str(job_dir / "face_framed.png")
+        if _build_face_crop(photo_path, tw, th, _face):
+            prepped_photo = _face
+            log.info("[song-video] Framed source on the face (mouth in lower third)")
     if _lip_sync:
-        if photo_path and os.path.isfile(photo_path):
-            _face = str(job_dir / "face_framed.png")
-            if _build_face_crop(photo_path, tw, th, _face):
-                prepped_photo = _face
-                log.info("[song-video] Lip sync: framed source on the face (mouth in lower third)")
         _vg = _isolate_guide_vocals(audio_wav, job_dir)
         if _vg:
             _guide_audio = _vg
