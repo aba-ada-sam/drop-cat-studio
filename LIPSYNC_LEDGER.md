@@ -75,6 +75,15 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 - ACTIVE | Best-of-N restored for hero videos: DCMVS v1.0 documented the per-seed
   mouth/eyes/forehead coin flip (one clip, four seeds: 0.77/0.31/0.19/0.03); v2.8
   retired best-of-N for batch throughput -- a tradeoff, not a refutation.
+- ACTIVE (added ~18:15) | THE PROMPT MUST DESCRIBE THE CONDITIONING IMAGE, NEVER
+  CONTRADICT IT. Matched-seed A/B, isolated wav, window 01_1: short prompt "a face
+  singing, clear mouth, facing camera" -> 1/3 synced, 0.1433; DCMVS's long subject
+  template -> 0/3, best 0.0005. The SAME seed scored 0.1433 synced vs 0.0005 static
+  (~280x). Cause: the template claims "the only subject in the shot, no other people"
+  while this source image has a man at the bench -- text guidance fights the image and
+  audio grip loses. DCMVS's template worked because ITS subjects really were alone in
+  frame (v2.3 "subject-anchored prompting" was a fix FOR ITS scenes, not a universal).
+  Default: short generic sing prompt; add scene detail only if it is TRUE of the image.
 
 ================================================================================
 HISTORICAL LEDGER -- DropCat-Studio (916 commits mined 2026-08-04; condensed)
