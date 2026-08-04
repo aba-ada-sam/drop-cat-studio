@@ -43,6 +43,21 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (late evening) | BOOST VERDICT -- LOUDER GUIDES RAISE SYNC *AND* SLOP TOGETHER:
+  flat-gaining quiet slices to -20 dBFS lifted reachable sync ranks ~9-75x on the two
+  phrase-bearing 09 windows (0.17-0.18 vs 0.02-0.10 unboosted) but high-rank takes kept
+  arriving slop-dirty; across 18 boosted takes only one clean upgrade banked (09_1
+  0.0190). Boost is a real lever for quiet windows, not a free one -- pair it with the
+  full gate stack and more takes. Intro-type unvoiced windows (01_0) do not respond.
+- ACTIVE (late evening) | RED SCREEN VALIDATED IN ACTION: a rank-0.1802 take passed
+  ribbon+yellow+white+luma and was caught ONLY by the red screen + eye (red graffiti
+  glyphs/drips, p95 0.135 vs 0.124 on verified-clean skin motion). The margin between
+  clean and infested red scores is too thin for an automatic gate -- worst-frame eye
+  review stays mandatory before banking any take.
+- NOTE (late evening) | chain.py checked for the site's content-vs-render cap trap:
+  NOT present -- chain.py:754 derives boundaries so audio-slice == video ==
+  num_frames/fps by construction. Its long-clip 481f default remains the separate,
+  already-ledgered sync killer.
 - ACTIVE (evening) | SITE VARIANT OF THE GRID BUG, WORSE (sing-cloud audit, commit
   832d94c on sing-audio-conditioning, undeployed): trim_boundaries cut 0.28s off every
   clip AFTER render while conditioning slices were cut at absolute song positions ->
