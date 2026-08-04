@@ -77,6 +77,128 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   retired best-of-N for batch throughput -- a tradeoff, not a refutation.
 
 ================================================================================
-HISTORICAL LEDGER (from git archaeology of DCMVS, DropCat-Studio, dropcatgo-generator)
+HISTORICAL LEDGER -- DropCat-Studio (916 commits mined 2026-08-04; condensed)
 ================================================================================
-(being appended from the 2026-08-04 research sweep -- see board posts of that evening)
+THE OSCILLATION CHAIN (the single most important pattern -- read before "fixing" sync):
+  MuseTalk-first f167363 (05-28) -> native-first abb7583 (06-19, the audio_guide-not-
+  audio_source field fix) -> MuseTalk-first again 71c2320 (06-27, "native follows the
+  beat not the words") -> native fixed for real 1920968/87883d5 (07-29/30) -> native
+  disabled for deadlock 2e1a063 (08-02) -> native restored 5d835ab (08-04). Each flip
+  had evidence at the time; most were later reframed. Any future flip needs a ledger
+  entry naming what NEW evidence justifies it.
+
+RESOLUTION FLIP-FLOP: 640x360 (7d5a69e, "580p drops audio tokens") -> native 580p
+  (43d08b1, "360p chained = pox/lesions") -> 360p+keyframes (b247a12) -> 960x544 proven
+  (1920968) -> blocked as "hangs card" (83881b3, 08-02) -> unblocked, hang was the TDR
+  driver window (530e962) -> default (5d835ab). STATUS: 960x544 active; the "580p+
+  drops audio tokens" claim was NEVER re-verified at 960x544 -- it demonstrably syncs.
+
+RECURRING BUG CLASS -- settings silently diverging between planning and render:
+  01370d1/09d4ce0 (05-25, scoping), 64bccfd (08-03, guide-slice length not clamped like
+  the render), 029a4e7 (08-02, a default fixed at ONE call site while three others kept
+  the old value -- grep every call site), 1920968 (gate logic believed 360p while the
+  render was already 960x544). The canary test exists to catch this whole class.
+
+KEY SINGLE LESSONS (still active):
+- 87883d5 (07-30): SE anchor must be on EVERY clip -- but was only half the fix;
+  5d835ab (08-04) added the other half: no chaining, start image = pristine source.
+- 86abbee (08-03): sync_qc MIN_TOTAL_MOTION=1.2 hard floor zeroed every candidate on
+  low-motion takes, blinding best-of-N; now a soft factor (identical scores >=1.2).
+- 8a45f7c (08-02): Dev19B VRAM floor is 30GB not 10GB (20.07GB file); enforcement gate
+  deliberately NOT wired -- mmgp offload makes flat floors false-positive on this card.
+- 2a581bc (07-29): GPU services must raise on CPU fallback, never silently grind.
+- f266be4 (05-25): only ltx2_distilled accepts audio conditioning; ltxv_13B silently
+  renders zero clips on audio_prompt_type=A.
+- e4a832b (05-29): the two MuseTalk engine patches (landmark face box for creatures,
+  contiguous %08d frame writes) live in features/lipsync/musetalk_patches/ -- a Pinokio
+  reinstall wipes C:\MuseTalk hand-patches; restore from there.
+
+TEST-DESIGN TRAPS (paid for in full days; doc-only until this ledger):
+- Verify slice RMS > -35dB before concluding anything -- a benchmark song's 0-6s is
+  instrumental; conditioning on gated silence produces mouth-agape that reads as failure.
+- Never infer an asset by filename pattern -- a seed-number collision put the WRONG
+  source image under test for hours (AWM00001's real source = extracted frame 1).
+- VERIFY IN PIXELS. A numeric "synced" can carry a mouth-box, washout, or title card.
+- Fixed proof seed: 777. Frozen May proof pair re-scores c=0.186 today (scorer stable).
+- AWM00001 was made by DCMVS (C:\DCMVS-restored), NOT DCS -- no DCS job record matches.
+  DCMVS is system of record; DCS adapts to it, never the reverse.
+
+CLOSED 2026-08-04 (were open at archaeology time):
+- Driver theory DEAD: sync proven locally on 610.88 with gated guides + payload fixes;
+  the 08-02 deadlock/hang cluster sat inside the TDR window. 610.47 rollback package =
+  fallback archive only (Desktop/DCS_Review/driver_remediation, STAND DOWN note).
+- ee38f88 sliding-window "smoking gun" was a no-op (settings file had 481 since May 3);
+  kept as parity documentation. The commit message reads as a fix -- it is not one.
+- app.py gpu.acquire lock race: STILL UNPATCHED and bit twice on 08-04 (13:31 wedge sat
+  2.5h silent; 16:08 boot-vs-API double start killed a healthy worker as "stale orphan").
+  Recovery ladder is in the CURRENT RECIPE section above. Needs a real design pass.
+
+STILL OPEN (inherited from archaeology):
+- MuseTalk on creatures: "fundamental paste-box" (07-24, 08-03) vs "clean on fruit/
+  animal faces after alignment patches" (71c2320) -- never reconciled; moot while the
+  native path holds, but do not re-adopt MuseTalk without settling it.
+- The 08-02 eyes-vs-mouth heatmap disagreement (scorer vs human pixels) -- unresolved;
+  today's wrong-region(eyes/upper) verdicts make the scorer's side more credible.
+- ~23% "No clips generated" WanGP failure rate (15/66 jobs, 07-28..08-02) -- standing
+  reliability gap, no root cause on record.
+- PORT_PLAN Tiers 2 (audio-prep parity in DCS proper) and 3 (seams/regen UI): NOT
+  implemented; today's isolation work lives in session tooling, not DCS code yet.
+
+================================================================================
+HISTORICAL LEDGER -- dropcatgo-generator (site) + DCMVS (mined 2026-08-04; condensed)
+================================================================================
+DCMVS (6 commits, all knowledge in _milestones/*/MILESTONE.md + FINDINGS docs):
+- v1.0 (05-31): per-seed mouth/eyes coin flip documented with numbers (one clip, four
+  seeds: 0.77/0.31/0.19/0.03); sync_qc + --seeds-per-clip born. 960x544/249f/8 steps.
+- v2.0 (06-01): vocal isolation + 150Hz HP, beat-band 0.256->0.092 -- sync watchable.
+  5080 parity proven (the "5080 can't sync" README line was day-one, never updated).
+- v2.4/v2.5 (06-02/03): SE keyframes make hard cuts invisible; 481f=20s is the audio-
+  conditioned ceiling (30s request silently clamps); full 3:31 song held together.
+- v2.7 (06-04): vocal-activity gate with hysteresis, muting 30%->21%.
+- v2.8 (06-04): best-of-N RETIRED for render-once + surgical regen -- a THROUGHPUT
+  tradeoff for overnight batches, not a refutation; restored 08-04 for hero videos.
+- v2.9 (06-04): "generation stays 960x512@24 (model rounds 544->512)"; retry regen with
+  drift guard (REGEN_TAKES=3, input_strength 0.73); don't render lower to save time.
+
+SITE (dropcatgo-generator) tracked history:
+- 4dc58bf (07-28) SETTLED, do not re-litigate: Andrew A/B-judged 4 same-seed chains;
+  the shipped baseline BEAT the ported Studio per-clip knobs (cfg-drop, subject-anchor
+  each added fringing by clip 3). Remaining gap vs Studio = story-arc direction layer,
+  not per-clip knobs.
+- 3e305cf (07-28): chain "pox/boils" = anchoring on the blurred TAIL frame; anchor at
+  the 88% mark + trim tail + lock camera. (Same lesson family as DCS 43d08b1.)
+- Vendor video endpoint truths (dc_video.php header): width/height/steps honored,
+  guidance IGNORED (cfg is live), always center-crops to 16:9, clip length FIXED
+  ~5.16s, NO audio input -- native sing cannot run there, period.
+- c253fba (08-03): BYO-song is a PORT of Studio's upload->isolate->lip-sync, not
+  greenfield.
+
+SITE untracked dropcat-video-wan/ (dcg-sing) -- knowledge that was nearly lost:
+- BUILD_RUNBOOK "RECIPE STATUS: CONFIRMED" (08-04): clean pod (L40S) reproduced native
+  LTX-2 audio-conditioning end-to-end; the 08-02 "deadlock -> LTX-2 is video-only"
+  ruling was one box's TDR-era driver, NOT the technique. **The tracked handoff docs
+  still said video-only/spike-LatentSync -- corrected 08-04 evening (helper assigned);
+  without that, the next session re-spikes an answered question.**
+- Same runbook found the SAME raw-mix bug independently: DCMVS_WANGP_ROOT's Windows
+  default doesn't exist on a Linux pod -> isolate_vocals fail-softs -> full-mix
+  conditioning -> instrument-following. Their fix: HARD-FAIL when isolation is missing.
+  Adopt everywhere: the render path must not accept a raw mix (see 08-04 design rule).
+- Their load-bearing constants: fps 24 (corrected from 25 against WanGP source),
+  SING_MAX_FRAMES 249, sliding_window 481, guidance clamp 3.0, best-of-3. All agree
+  with this ledger except SING_WIDTH/HEIGHT=640x360 -- see next entry.
+- OPS RULE (paid ~$8 to learn): every pod self-terminates via on-boot
+  (sleep <budget_s> && shutdown -h now) & disown -- sized to the $ cap, not the task.
+
+THE RESOLUTION WAR, DISSOLVED (hypothesis, A/B pending): site says "above ~580p audio
+tokens overflow" (measured at requested 1032x580); studio/DCMVS prove "960x544" syncs.
+Both are about REQUESTED sizes. LTX-2 ceil-rounds to 64-multiples: "960x544" really
+renders 960x512 (fits budget); "1032x580" really renders 1088x640 -- 33% more pixels
+(plausibly the real overflow). If the A/B confirms, the rule is: think in ROUNDED
+pixels; 960x512 actual is proven; 1024x576 (exact, no rounding) is the candidate step up.
+
+PRODUCTION FACTS (site, live today): DCV_CLIPS=4 flat for everyone incl. admin; ~5.16s
+vendor clips, 4.74c each, ~7min wall per video; $3/day/person, $8/day sitewide, $6/day
+video sub-cap; 1 video in flight per person. A user tier for Andrew's 30s-of-10s-clips
+sing product lives naturally as invites.max_clips next to budget_cents (resolved once
+in dcv_submit, two consumption sites) -- but sing itself needs the dcg-sing worker
+(Dockerfile.sing never built, network volume unprovisioned), NOT the vendor endpoint.
