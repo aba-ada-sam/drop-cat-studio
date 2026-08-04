@@ -43,6 +43,60 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (night, Tier-2 port, helper) | DCS PROPER HAS NEITHER FRAME RULE. Measured
+  while porting, both live in the shipped code: (a) there is NO 8k+1 quantization
+  anywhere in DCS -- video_generator.py:255-257 rounds to the nearest ODD frame,
+  a different convention, so a 9.317s beat-planned clip renders 223f, not a valid
+  LTX-2 count; (b) there is NO conditioning-grip cap -- the only cap is max_sec 19
+  (455f) and the song pipeline clamps clips to 12s = 289f, so EVERY sing clip in
+  DCS can legally render past the ~250f ceiling, with the silent failure mode
+  (renders clean, does not sync). Both are now implemented in
+  features/song_video/sing_grid.py with pure-arithmetic proofs
+  (tests/test_sing_grid.py, 35 assertions, no GPU). These were the two traps this
+  session hit live today from the other direction.
+- ACTIVE (night, Tier-2 port, helper) | THE DRIFT HAS TWO INDEPENDENT SOURCES IN
+  DCS, not one. Beyond the trim-vs-slice mismatch already ledgered for the site:
+  (1) prep lays conditioning-slice start times on (planned_duration - 0.12
+  song-xfade, pipeline.py:480-487) while each clip actually advances the timeline
+  by (duration - 0.28 boundary trim, :1207/1210) and then loses the xfade again
+  -- ~0.28s x clip_index, reproduced as arithmetic at 3.08s by clip 12
+  (test_sing_grid.py group C); (2) slice start times come from the beat plan's
+  clip_durations (:482) but render AND slice LENGTH come from the LLM arc's
+  duration (:912/:1064, default 7.0) -- two lists that are never reconciled, so
+  the drift exists even if the trim were fixed. Fixing only the trim would leave
+  a residual nobody would think to look for.
+- ACTIVE (night, Tier-2 port, helper) | A PERMANENTLY-RED SUITE IS A BROKEN
+  ALARM: tests/smoke.py asserted LTX-2 vram_min_gb 8-12 and had been FAILING on a
+  healthy tree ever since 8a45f7c (08-02) raised the floor to 30GB for a 20.07GB
+  model file -- the test enshrined the value the ledger had already corrected.
+  A suite that is always red is how a REAL failure gets waved through as "the
+  usual one". Assertion updated to the documented floor; suite 20/20 green.
+  General rule: when a known-wrong value is corrected, grep the tests for it in
+  the same commit.
+- ACTIVE (night, Tier-2 port, helper) | DETECTORS PORTED WITH THEIR FALSE
+  POSITIVE PINNED AS A TEST. features/song_video/artifact_screens.py reproduces
+  the recorded calibrations exactly (ribbon known-bad p95 1.067 vs recorded 1.07,
+  clean 0.240 vs 0.24; red known-bad p95 0.157 vs 0.157), and
+  tests/test_artifact_screens.py asserts the RED FALSE POSITIVE on purpose --
+  eye-clean final_07_0 max 0.260 >= known-bad 0.245 -- so any future attempt to
+  promote red from screen to gate fails a test that explains why it must not.
+  Fixture warning found while calibrating: quarantine/final_03_0.mp4 is
+  BYTE-IDENTICAL (same md5) to the promoted final_03_0.mp4, so the quarantine
+  folder's label is NOT reliable as known-bad; only quarantine/final_01_1.mp4 is
+  a distinct file. Same trap the ledger already names ("never infer an asset by
+  filename pattern").
+- ACTIVE (night, Tier-2 port, helper) | THE WINDOW RULE IS NOW MECHANICAL IN DCS:
+  features/song_video/window_energy.py measures per-window energy on the isolated
+  stem; any window above -40 dBFS must be conditioned regardless of map or VAD
+  label, disagreements log loudly (or raise, in strict mode for unattended
+  paths), and UNMEASURABLE audio fails TOWARD conditioning -- None is "no
+  information", never "silent". Validated against the real bug, not a synthetic
+  one: the four windows this session shipped as unconditioned filler re-measure
+  02=-31.0, 04=-32.0, 06=-30.1, 08=-29.6 dBFS and all four are caught, while the
+  genuinely silent intro (-90.3) is still accepted -- it discriminates rather
+  than flagging everything, which is the only thing that makes a gate worth
+  having. Before this, DCS measured voicedness ONCE over the whole song before
+  slicing; nothing ever checked a window against the song.
 - REJECTED same night at 0:17 | FIXED5's real remaining flaw is the WINDOW MAP, not the
   windows: 'interlude' windows 02/04/06/08 measure 55-68pct voiced on the stem (08 is the
   DENSEST-vocal window in the song) but were built as unconditioned filler in every cut
