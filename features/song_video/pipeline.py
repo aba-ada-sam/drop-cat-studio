@@ -866,15 +866,14 @@ def _do_song_gpu_phase(
     # Only enabled when user provided audio that converted successfully in prep.
     _clip_start_times = clip_start_times or []
     _lip_sync = bool(settings.get("lip_sync", True)) and bool(audio_wav) and len(_clip_start_times) == n_clips
-    # auto_lipsync (MuseTalk post-pass) needs the SAME face-forward framing as
-    # native lip_sync -- it drives the mouth of whatever face is in the already-
-    # generated video, so if the source photo isn't framed on the face, WanGP
-    # is free to pan/crop away from it and MuseTalk has nothing to sync. This
-    # used to piggyback on lip_sync defaulting True; now that lip_sync defaults
-    # False (native audio-conditioning deadlocks WanGP -- see routes.py), the
-    # framing step was silently going with it even though auto_lipsync -- the
-    # ONLY lip-sync path that actually runs by default -- still needs it.
-    _want_face_framing = _lip_sync or bool(settings.get("auto_lipsync", False))
+    # Face framing is NATIVE-lip_sync only (rolled back 2026-08-03 late: the
+    # morning change also triggered it for auto_lipsync -- the DEFAULT path --
+    # which silently re-framed Andrew's normal whole-scene music videos into
+    # face close-ups. MuseTalk is the wrong sync engine for creature subjects
+    # anyway (fundamental paste-box, see LIPSYNC_HANDOFF.md), so widening the
+    # crop to its path bought nothing and changed default behavior. Default
+    # path now behaves exactly as before 2026-08-03.)
+    _want_face_framing = _lip_sync
     _audio_slices_dir = job_dir / "audio_slices"
 
     # Lip-sync recipe (what actually produces mouth movement, per the DCMVS
