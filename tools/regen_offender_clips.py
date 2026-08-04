@@ -144,6 +144,40 @@ def mouth_rank(d):
     return max(0.0, d.get("sync_contrast", 0)) * gauss * mw
 
 
+LUMA_DRIFT_MAX = 0.25   # reject takes whose mean luma drifts >25% from source
+LUMA_PEAK_MULT = 1.6    # or whose peak frame blooms past 1.6x source
+
+
+def mean_luma(path, frames_only=False):
+    """Mean and peak per-frame luma (signalstats YAVG). Works on image or video."""
+    import re as _re
+    cmd = [FFMPEG, "-i", str(path), "-vf",
+           "signalstats,metadata=print:key=lavfi.signalstats.YAVG"]
+    if frames_only:
+        cmd += ["-frames:v", "1"]
+    cmd += ["-f", "null", "-"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    vals = [float(m) for m in _re.findall(r"YAVG=([0-9.]+)", r.stderr)]
+    if not vals:
+        return None, None
+    return sum(vals) / len(vals), max(vals)
+
+
+def luma_ok(take_path, src_luma):
+    """Luminance gate: mouth_sync_score is luminance-blind, and a fully bloomed
+    (white-washout) take can pass it -- confirmed live 2026-08-04 when a washed
+    take shipped in a delivered cut (clip-9 window, mean luma 216 vs 86 scene
+    baseline, caught by the manager's QC). Gate every take's exposure against
+    the SOURCE IMAGE before ranking is allowed to keep it."""
+    if src_luma is None:
+        return True  # no baseline -> do not block
+    avg, peak = mean_luma(take_path)
+    if avg is None:
+        return False
+    return (abs(avg - src_luma) / src_luma <= LUMA_DRIFT_MAX
+            and peak < src_luma * LUMA_PEAK_MULT)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -164,6 +198,9 @@ def main():
     wd = Path(a.workdir or tempfile.mkdtemp(prefix="regen_"))
     wd.mkdir(parents=True, exist_ok=True)
     py = sys.executable
+
+    src_luma, _ = mean_luma(a.image, frames_only=True)
+    print("[regen] source luma baseline: %s" % (src_luma and round(src_luma, 1)))
 
     print("[regen] voiced intervals (silero, DCS gate) ...")
     intervals = voiced_intervals_for(a.stem, a.repo_root)
@@ -193,6 +230,9 @@ def main():
                                 "--out", str(out)], capture_output=True, text=True)
             if r.returncode != 0 or not out.exists():
                 print("[regen]   take %d RENDER FAILED" % take)
+                continue
+            if not luma_ok(out, src_luma):
+                print("[regen]   take %d LUMA REJECT (washout/bloom)" % take)
                 continue
             d = score(a.sync_qc, py, out, wav)
             rank = mouth_rank(d)
