@@ -279,13 +279,22 @@ def main() -> int:
         _test("Wan I2V vram_min_gb >= 20 (confirmed deadlock on 15.9 GB)", wan_i2v_threshold_correct)
 
         def ltx_threshold_reasonable():
+            # CORRECTED 2026-08-04: this asserted 8-12 GB and had been FAILING
+            # against the shipped value since 8a45f7c (2026-08-02) raised the
+            # floor to 30 GB -- the 10 GB figure was wrong for a 20.07 GB model
+            # file, and LIPSYNC_LEDGER.md records the correction. The stale
+            # assertion made `python tests/smoke.py` exit non-zero on a healthy
+            # tree, which is how a real future failure gets waved through as
+            # "the usual one". Asserting the documented floor instead.
             r = client.get("/api/fun/models")
             assert r.status_code == 200
             models = r.json()["models"]
             ltx = models.get("LTX-2 Dev19B Distilled", {})
-            assert 8 <= ltx.get("vram_min_gb", 0) <= 12, \
-                f"LTX-2 Distilled vram_min_gb should be 8-12, got {ltx.get('vram_min_gb')}"
-        _test("LTX-2 vram_min_gb reasonable (8-12 GB)", ltx_threshold_reasonable)
+            assert ltx.get("vram_min_gb", 0) >= 30, \
+                f"LTX-2 Distilled vram_min_gb should be >=30 (20.07 GB model file, " \
+                f"see 8a45f7c), got {ltx.get('vram_min_gb')}"
+        _test("LTX-2 vram_min_gb >= 30 (20.07 GB model file, 8a45f7c)",
+              ltx_threshold_reasonable)
 
         def system_endpoint_has_vram():
             r = client.get("/api/system")
