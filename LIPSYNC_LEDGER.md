@@ -43,6 +43,28 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- DELIVERED (night) | FIXED5 shipped on review_0003.html: FIXED3 base + 6 replacements
+  + pod-master tail on an exact 5040-frame grid. 16/16 windows + 9/9 seams eye-passed
+  (5 adversarial subagent passes, every flag re-checked senior); full numeric gauntlet
+  green (probe -1/0, yellow 0.0000%, white 1.62%, luma flat, no spikes). Disclosed,
+  not hidden: w06 baked wall glyph (also in master), w07_0 one-frame prop flicker,
+  modest sync on quiet-backing windows.
+- ACTIVE (night) | FOURTH ARTIFACT CLASS -- CARVED/STAMPED TEXT: ~15s of embossed
+  gibberish lettering on the desk edge across FIXED3's calm window 10 (and closing
+  fog in 11) -- dark text is INVISIBLE to every brightness/color detector; only the
+  full-video eye pass found it. It shipped in ALL prior cuts. Calm/instrumental
+  windows are NOT safe to skip: the music-video prior decorates them with title/
+  credit furniture precisely because nothing else is happening.
+- ACTIVE (night) | CLEAR EYE-DUMP DIRS BETWEEN GAUNTLET RUNS: leftover detector-worst
+  frames from run 1 sat beside run 2's dumps and produced false DEFECTIVE verdicts on
+  already-replaced windows (same filenames as the real defects). 20 minutes of forensic
+  disambiguation via file mtimes + re-extraction. gauntlet_f5.py now rmtree's the dump
+  dir first. General rule: any evidence directory an inspector reads must be born empty.
+- NOTE (night) | sync_qc's sync_y is UNSTABLE on weak-motion clips: the same pixels
+  re-encoded flipped sync_y 0.71 -> 0.26 and crushed rank 0.1027 -> 0.0002 through the
+  position gaussian. In-file regression ranks are only meaningful on motion-rich
+  windows; the assembly-correctness proof is the frame-match probe + pixel-identity
+  check, never the rank.
 - ACTIVE (late evening) | BOOST VERDICT -- LOUDER GUIDES RAISE SYNC *AND* SLOP TOGETHER:
   flat-gaining quiet slices to -20 dBFS lifted reachable sync ranks ~9-75x on the two
   phrase-bearing 09 windows (0.17-0.18 vs 0.02-0.10 unboosted) but high-rank takes kept
