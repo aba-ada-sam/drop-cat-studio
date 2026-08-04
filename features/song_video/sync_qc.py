@@ -160,13 +160,22 @@ def mouth_sync_score(r: dict) -> float:
     """Single scalar for ranking best-of-N candidates. Rewards real motion that
     is audio-correlated (contrast) AND located at the mouth band (gaussian around
     MOUTH_Y_PEAK, so chest motion below the mouth is NOT rewarded over the mouth).
-    0 for static/dead clips."""
+    0 for static/dead clips.
+
+    Motion enters as a SOFT factor, not a hard floor: the 1.2 MIN_TOTAL_MOTION
+    floor was calibrated on the May clips, but 2026-08-03's 6s/360x640 takes all
+    measured 0.62-1.15 -- with the hard zero, every best-of-N candidate scored
+    0.000, ranking never happened, and the picker kept seed #1 blind (verified
+    live: a sync_y=0.83 contrast=0.541 mouth-band take was generated and then
+    discarded). Scores are identical to the old formula whenever total_motion
+    >= MIN_TOTAL_MOTION; only truly dead clips (< 0.15) still hard-zero."""
     if not r or r.get("error"):
         return 0.0
-    if r["total_motion"] < MIN_TOTAL_MOTION:
+    if r["total_motion"] < 0.15:  # static / dead mouth
         return 0.0
+    motion_w = min(1.0, r["total_motion"] / MIN_TOTAL_MOTION)
     mouth_w = math.exp(-(((r["sync_y"] - MOUTH_Y_PEAK) / MOUTH_Y_SIGMA) ** 2))
-    return max(0.0, r["sync_contrast"]) * mouth_w
+    return max(0.0, r["sync_contrast"]) * mouth_w * motion_w
 
 
 def is_synced(r: dict) -> bool:
