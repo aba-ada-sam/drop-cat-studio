@@ -47,10 +47,15 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   windows: 'interlude' windows 02/04/06/08 measure 55-68pct voiced on the stem (08 is the
   DENSEST-vocal window in the song) but were built as unconditioned filler in every cut
   to date -- 79s / 38pct of runtime sings with an undriven mouth. Every gate verified
-  windows against the map; nothing verified the map against the song. RULE: before any
-  assembly, print the per-window voiced table and require every window above ~20pct
-  voiced to be a CONDITIONED render. Fix: split each 473f interlude into two 236f halves
-  on the rigid grid, condition each (interlude_hunt.py, running).
+  windows against the map; nothing verified the map against the song. RULE (hardened per
+  sing-cloud's reciprocal audit, their 04c6ff3): the check is MECHANICAL, not a habit --
+  measure per-window energy on the ISOLATED stem; any window above the floor (~-40 dBFS /
+  ~20pct voiced) MUST be a conditioned render no matter what any map or VAD label says;
+  a label-vs-energy disagreement fails loudly. The site's sibling failure (silero
+  under-detects -> digital-silence conditioning that SCORES FINE because the mouth
+  matches the silence it was handed) is the same invisibility class -- neither gives any
+  signal until human ears hit it. Fix here: split each 473f interlude into two 236f
+  halves on the rigid grid, condition each (interlude_hunt.py, running).
 - CALIBRATION (night) | GOLDEN AWM00001 measured on the same meter, same song, same grid:
   ranks average ~0.10 (our banked windows are IN that band), only 7/20 windows verdict
   'synced' -- but motion runs 2-13 vs our 0.3-1.3, and it is a MULTI-SCENE cut-and-
