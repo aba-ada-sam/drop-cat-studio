@@ -43,6 +43,28 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- REVERSED same night by its own red team (Tier-2 port, helper) | "MEASURE WINDOW
+  ENERGY" IS NOT ENOUGH -- THE STATISTIC IS THE WHOLE RULE. The first cut of
+  window_energy.py used the MEAN dBFS over a window, and a mean is not
+  scale-invariant: at the REAL 19.7s production window size an ~8s sung passage
+  surrounded by digital silence averages -42.6 dBFS, below the -40 floor, and is
+  built as unconditioned filler. The gate written to stop the 79-second
+  undriven-mouth bug REPRODUCED it, on the same song, at the same grid, and
+  passed its own 12-assertion suite while doing so (the suite's only negative
+  control was synthetic -91 dBFS silence, ~50 dB from the boundary, so any floor
+  in a ~60 dB range passed). It was also self-contradicting: a strict SUBSET of
+  a window classified the opposite way. FIX: the ledger's rule already said
+  "~-40 dBFS / ~20pct voiced" -- the PERCENTAGE is load-bearing and had simply
+  not been implemented. Now 0.5s probes, fraction above floor. SECOND FIX,
+  equally important: the rule is ONE-DIRECTIONAL. The draft also enforced the
+  reverse (below floor => do NOT condition), which is not in the ledger and let
+  a measurement override a CORRECT human label while telling the operator the
+  map was stale. Energy may only ever ADD conditioning, never remove it.
+  LESSON, general: when a rule is written as "X above a threshold", the
+  threshold gets all the scrutiny and the STATISTIC gets none -- ask what is
+  being averaged, over what window, and whether the answer changes with window
+  length. And a validation suite whose negative control is synthetic is not a
+  validation suite.
 - ACTIVE (night, Tier-2 port, helper) | DCS PROPER HAS NEITHER FRAME RULE. Measured
   while porting, both live in the shipped code: (a) there is NO 8k+1 quantization
   anywhere in DCS -- video_generator.py:255-257 rounds to the nearest ODD frame,
