@@ -43,6 +43,45 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (night, lipsync) | WE HAVE BEEN MEASURING THE WRONG VARIABLE. THE MOUTH IS
+  NOT DESYNCED, IT IS BARELY MOVING. Evidence: the 60s production run (adam60_v2,
+  6 clips x best-of-4) returned verdict=static on 24 of 24 takes, total_motion
+  0.4-1.1. Golden AWM00001 scored on the SAME meter, grid and song: motion 2-13.
+  The bands do not overlap. Meanwhile our mouth_sync_score ranks (0.016-0.220)
+  straddle the golden's own 0.070 median -- which is exactly why the metric kept
+  reporting "at or above golden" while Andrew kept saying, correctly, that it does
+  not lip sync. A near-still mouth trivially "matches" the audio envelope; rank
+  rewards correlation, not amplitude. This is the same invisibility class as the
+  silent-guide bug: a still mouth scores clean.
+  RULE: total_motion is now a REPORTED, GATED quantity alongside sync rank, and no
+  take is deliverable on rank alone. Validated per the no-ungated-metric rule on
+  both sides BEFORE gating -- known-good = golden AWM00001 (2-13), known-bad = the
+  24 takes Andrew rejected (0.4-1.1). Non-overlapping, so the discriminator is real.
+- ACTIVE (night, lipsync) | FOUR MOTION DAMPERS ARE STACKED IN chain.py, and the
+  code documents two of them against itself. Found by reading for cause instead of
+  re-rolling seeds. (1) SE_END_ANCHOR (chain.py:242, default True) pins each clip's
+  END frame to the SAME pristine source still it STARTS from -- with SECTION_CLIPS=1
+  every clip is bookended by two copies of one image. chain.py's own comment at
+  235-241 concedes "the subject winds back to its neutral pose in the last 1-2s of
+  each clip". No CLI flag exists to disable it, and main() never even threads the
+  se_end_anchor kwarg into chain_video(), so the CLI cannot reach it. (2)
+  input_video_strength defaults to 0.69 (worker fallback), commented at chain.py:256
+  "too high starves the audio-driven mouth motion" -- and ACTION shots deliberately
+  drop to 0.5 (ACTION_INPUT_STRENGTH, chain.py:288) precisely to get more movement,
+  while SING clips, which need mouth movement most, keep the tighter value. (3) The
+  sing prompt itself is a damper: PROMPT_DEFAULT / SUBJECT_PROMPT_TEMPLATE contain
+  "centered and alone in the frame", "Stay in the original scene and setting" and
+  "steady framing", applied to every sing clip with no flag to remove them. (4)
+  motion_amplitude is pinned at its floor value 1 in core/wangp_models.py:93
+  SAFE_DEFAULTS and reaches WanGP only through a generic setdefault loop -- no
+  payload field, no CLI flag, no override path anywhere in either codebase.
+  STATUS: ablation RUNNING (scratchpad/motion_ablation.py) -- one identical audio
+  span, identical seed triple per cell, one-factor-at-a-time A-E over (1)(2)(3);
+  (4) needs a code change to test and is deferred. Verdict lands as its own entry.
+  Note this also CONFOUNDS the pending 144f-vs-233f clip-length A/B: with the end
+  anchor on, a longer clip spends proportionally more of its length pinned between
+  two copies of one still, so a length result measured today measures the anchor.
+  Clip length gets re-measured only after the anchor question is settled.
 - ACTIVE (night, Tier-2 WIRED, helper) | A SAFEGUARD THAT CANNOT FIRE, AND A SCREEN
   THAT INVERTED ITSELF -- both found by rule-6 on the wired path, both live in the
   integration for ~30 minutes before the review. (1) The window-energy check was a
