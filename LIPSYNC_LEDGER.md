@@ -58,6 +58,19 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (late night, helper) | BLIND LABELS OF RECORD -- Andrew judged all 12 clips on
+  the shuffled no-names judge page (labels.json, lipsync's scratchpad): ALL THREE
+  anchor-ON takes GOOD (s101, s202, s303), ALL THREE anchor-OFF takes BAD, all six 60s-
+  run segments SKIP. Perfect 6/6 separation on the anchor condition. This SUPERSEDES the
+  earlier relayed reading ("seed 101 is the only one that does not suck") -- side-by-side
+  framing narrowed his verdict; blind and shuffled he approves every steady take.
+  Consequences: (1) SE_END_ANCHOR fully vindicated, stays TRUE; (2) three usable takes
+  exist on that span, not one; (3) the framing hypothesis SHARPENS rather than dies:
+  A-cell s202/s303 measurably drift (tracker offsets -98,-35 / -120,+75) and are still
+  GOOD -- mild drift is acceptable; the B-cell push-in + identity morph is what gets
+  rejected. "Holds framing" was the wrong variable; "keeps identity/shot integrity" fits
+  all 6. (4) The 60s segments carry audio (verified aac stream) so the skips were not a
+  mux defect -- they remain unlabeled; re-serve only if Andrew wants.
 - ACTIVE (late night, helper, Andrew-delegated ruling) | SYNC-OR-DIE DISARMED: the gate
   was inverted against ground truth on first human contact. Of the six ablation takes
   Andrew approved exactly ONE (seed 101 anchor-ON): verdict=static rank 0.001 -- which
