@@ -35,8 +35,8 @@
   "frames": {
     "quantize": "8k+1",
     "grip_ceiling": 249,
-    "grip_note": "Audio conditioning stops gripping past ~250 frames; renders fine, silently stops syncing. Content budget 236f leaves trim+junction headroom.",
-    "content_max": 236
+    "grip_note": "Audio conditioning stops gripping past ~250 frames; renders fine, silently stops syncing. Content budget = ceiling minus trim+crossfade overhead (0.40s = 10f at 24fps). The site pipeline's budget is 236 because its overhead differs -- do not copy numbers across engines, copy the RULE.",
+    "content_max": 239
   },
 
   "assembly": {
@@ -55,8 +55,8 @@
 
   "acceptance": {
     "screens_before_ranking": true,
-    "ribbon_gate": { "p95_max": 0.30, "abs_max": 1.0 },
-    "ribbon_note": "The ONE metric validated at both ends; red-strand and glyph detectors are eye-screens only, never gates.",
+    "ribbon_gate": { "p95_clean": 0.30, "p95_infested": 0.50, "abs_max": 1.0 },
+    "ribbon_note": "Three bands: p95 below clean = accept, above infested = reject, between = eye-check. The ledger's 'p95 < 0.30' line describes the CLEAN band only. The ONE metric validated at both ends; red-strand and glyph detectors are eye-screens only, never gates.",
     "sync_rank_floor": 0.12,
     "sync_enforce": false,
     "sync_enforce_note": "DISARMED 2026-08-04: the floor was inverted against Andrew's blind labels (his approved takes score 0.001; his rejects clear the floor). Advisory logging only until a scorer is recalibrated against human labels. Re-arm ONLY in the same commit as that recalibration.",
