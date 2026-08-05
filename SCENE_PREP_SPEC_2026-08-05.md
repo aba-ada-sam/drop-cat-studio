@@ -65,6 +65,19 @@ ever comes from the detectors.
 - Precedent: the story-arc LLM already writes per-clip prompts blind; this is
   the same call pattern with eyes.
 
+## Anchor strategy B -- FACE GRAFT (Andrew's face-zoom-mask idea, proven 2026-08-05 ~2:25 PM)
+Strategy A (whole-body transplant) is pose-exact but pose-locked. Strategy B gets
+generation's pose variety with pixel-true identity: generate the body/scene (any
+gist tool -- likeness does not matter below the neck), DINO+SAM the head box on
+BOTH source and generated image ("the creature's head"), scale the source head
+cutout to the target box, paste feathered, then RING-ONLY harmonize.
+Measured parameters (facegraft_final2): ring = dilate(31) minus erode(5) of the
+paste mask, blur 5; denoise 0.45 inside the ring only, face interior at literal
+zero. The first attempt eroded 21 and ATE THE EYE -- the ring must never reach
+a facial feature. Director-owned selection rule: prefer generated bodies whose
+HEAD POSE matches the source (a downward 3/4 gaze on a straight-on body reads
+uncanny); crown/edge quality of the source matte sets the graft's weakest seam.
+
 ## Port note
 Identical module serves the site's Sing worker (its rp_handler can call the
 director via API; DINO/SAM run on the pod). Goes in the port pass AFTER the
