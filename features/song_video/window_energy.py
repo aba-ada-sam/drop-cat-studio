@@ -37,6 +37,8 @@ import math
 import shutil
 import subprocess
 
+from core.ffmpeg_utils import probe_duration
+
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 
 # Strict on purpose: room tone, breath and separation bleed in an isolated stem
@@ -54,6 +56,19 @@ VOICED_FRAC_FLOOR = 0.20
 # Granularity the window is chopped into before measuring. Short enough that a
 # single sung phrase registers inside a long window, long enough to be cheap.
 PROBE_S = 0.5
+
+# Floors for the ENERGY-AT-CREATION hard-fail (assert_stem_energy /
+# assert_slice_energy), deliberately far more permissive than
+# VOICED_FLOOR_DBFS / VOICED_FRAC_FLOOR above. Those two decide "is THIS
+# WINDOW sung, vs instrumental" -- a fine-grained question a real song
+# legitimately sits on both sides of. These decide a coarser question: "does
+# this file carry literally any audio at all". A real, working stem spends
+# long stretches under -40 dBFS on purpose (intros, outros, rests between
+# phrases), so reusing the per-window floor here would flag ordinary, correct
+# songs as silent. -55 dBFS / 2% of probes is calibrated to catch "this file
+# is silence" -- not "this file is quiet" -- and never fire on a real stem.
+GUIDE_MIN_PEAK_DBFS = -55.0
+GUIDE_MIN_VOICED_FRAC = 0.02
 
 
 class WindowLabelDisagreement(RuntimeError):
@@ -234,3 +249,174 @@ def check_plan(stem_wav: str, windows: list[dict], *, strict: bool = False,
         log(f"[sing] {len(forced)} of {len(results)} window(s) will be conditioned "
             f"against their label -- the song disagreed with the plan.")
     return results
+
+
+# -----------------------------------------------------------------------------
+# ENERGY-AT-CREATION HARD-FAIL. Everything above decides "should THIS WINDOW be
+# conditioned" -- it assumes the conditioning audio itself is trustworthy and
+# only argues about how to interpret it. Everything below drops that
+# assumption: it asserts the audio handed to the renderer actually carries
+# sound, checked at the moment each conditioning artifact is CREATED (right
+# after isolation, right after each per-clip slice is cut), before a single
+# GPU cycle is spent on it.
+# -----------------------------------------------------------------------------
+
+
+class GuideSilentError(RuntimeError):
+    """Raised when conditioning audio that is about to drive a render has no
+    measurable energy.
+
+    THE INVISIBILITY CLASS THIS EXISTS FOR: a silent guide does not look like
+    a failure anywhere downstream. Conditioned on silence, MuseTalk/LTX render
+    a mouth that RESTS -- and a resting mouth is the CORRECT output for
+    silence, so every sync metric that runs after the fact agrees the take is
+    fine. It IS fine, judged against the guide it was given. The guide itself
+    was never checked, so nothing ever asks whether the mouth SHOULD have
+    been moving.
+
+    Three separate failures on 2026-08-04 shared exactly this shape and none
+    of them tripped anything until a human caught it by ear: a conditioning
+    excerpt muted by a bad ffmpeg cut, a VAD under-detect that fed a genuinely
+    sung window digital silence, and a window mislabelled "interlude" and
+    built as unconditioned filler. In every case "the mouth matches the
+    audio" was the only thing being measured, and it was true all three
+    times -- the audio was wrong, not the sync, and nothing was positioned to
+    notice the difference.
+
+    The fix is not another downstream sync metric (silence would pass those
+    too, by construction). It is refusing to spend GPU time on a guide that
+    is silent in the first place, checked at the point the guide is created,
+    before anything downstream gets the chance to agree with it.
+    """
+
+
+def _assert_whole_file_energy(path: str, label: str, *, min_peak_dbfs: float,
+                              min_voiced_frac: float, log) -> dict:
+    """Shared implementation behind assert_stem_energy and assert_slice_energy:
+    probe `path` end-to-end and raise GuideSilentError if it is silent or
+    could not be measured at all.
+
+    `label` exists only to make the raised message and the pass-path log line
+    name the right thing ("conditioning stem" vs "clip 3 conditioning slice")
+    -- the two public wrappers below are otherwise running the exact same
+    check against the exact same floors.
+    """
+    dur = probe_duration(path)
+    if dur <= 0:
+        raise GuideSilentError(
+            f"{label} is unmeasurable -- ffprobe found no duration for "
+            f"{path!r}. Refusing to treat 'could not check' as 'probably "
+            f"fine': the file is most likely missing, zero-length, or an "
+            f"output that was never actually written. No information is not "
+            f"evidence of energy.")
+
+    # Probe the WHOLE file with the same 0.5s-grid machinery the per-window
+    # check uses (measure_window), just over [0, dur) instead of one window.
+    prof = measure_window(path, 0.0, dur, floor_dbfs=min_peak_dbfs)
+    if prof["probes"] == 0 or prof["peak_dbfs"] is None:
+        raise GuideSilentError(
+            f"{label} ({path!r}, {dur:.1f}s) produced zero usable probes -- "
+            f"ffmpeg could not measure ANY 0.5s slice of it, most likely "
+            f"because it cannot decode the file. No information is not "
+            f"evidence of energy; refusing to condition on an unmeasurable "
+            f"file rather than assuming it is fine.")
+
+    if prof["peak_dbfs"] < min_peak_dbfs or prof["voiced_frac"] < min_voiced_frac:
+        raise GuideSilentError(
+            f"{label} ({path!r}, {dur:.1f}s, {prof['probes']} probes) is "
+            f"SILENT: loudest probe {prof['peak_dbfs']:.1f} dBFS (floor "
+            f"{min_peak_dbfs:.0f}), only {prof['voiced_frac'] * 100:.1f}% of "
+            f"probes carry any energy (floor {min_voiced_frac * 100:.0f}%). "
+            f"A still mouth conditioned on this will SCORE CLEAN -- a "
+            f"resting mouth correctly matches silence, so nothing "
+            f"downstream will ever flag it; this check is the only thing "
+            f"that will. Likely causes: vocal isolation ran but produced an "
+            f"empty/near-empty stem, the source audio was itself muted, or "
+            f"the ffmpeg cut that produced this file was wrong -- e.g. the "
+            f"real 2026-08-04 incident where an output-seek fade muted 59 of "
+            f"60 seconds of a conditioning excerpt and rendered a video of "
+            f"statues standing over singing. Refusing to spend GPU time on "
+            f"it.")
+
+    log(f"[energy] {label} OK ({dur:.1f}s, {prof['probes']} probes): peak "
+        f"{prof['peak_dbfs']:.1f} dBFS, {prof['voiced_frac'] * 100:.0f}% of "
+        f"probes carry energy -- {path}")
+    return prof
+
+
+def assert_stem_energy(stem_wav: str, *, min_peak_dbfs: float = GUIDE_MIN_PEAK_DBFS,
+                       min_voiced_frac: float = GUIDE_MIN_VOICED_FRAC,
+                       log=print) -> dict:
+    """Whole-file energy assertion on an isolated vocal stem. Call this ONCE,
+    immediately after vocal isolation returns its guide path, before any GPU
+    work touches the result.
+
+    Probes the ENTIRE file (0..duration) with the same measure_window
+    machinery the per-window check uses (0.5s probes via ffmpeg volumedetect)
+    and raises GuideSilentError when either:
+      - the loudest probe anywhere in the file never clears min_peak_dbfs --
+        there is no moment anywhere in the file with real signal, or
+      - fewer than min_voiced_frac of the probes clear it -- a handful of
+        stray clicks or separation bleed does not make a usable guide.
+
+    A file that cannot be measured at all (missing, zero-length, undecodable)
+    also RAISES rather than passing quietly -- same rule measure_window's own
+    None-handling already follows: no information is not evidence of energy,
+    and treating an unmeasurable file as "probably fine" is exactly how a
+    corrupt isolation output would sail through unnoticed.
+
+    Real incident this exists for (2026-08-04): a guide-audio ffmpeg cut used
+    an output-side -ss/-t seek that landed the fade-in past the excerpt's
+    actual audio, muting 59 of a 60-second excerpt. The one second that
+    survived was loud enough that nothing downstream noticed -- the job
+    rendered a full take of statues standing over singing, and it scored
+    clean. This is the check that 59/60 seconds of silence should have failed
+    before the job spent a single GPU minute on it.
+
+    Returns the measurement dict (peak_dbfs/mean_dbfs/voiced_frac/probes) on
+    pass, so a caller can log the numbers that cleared the floor.
+    """
+    return _assert_whole_file_energy(stem_wav, "conditioning stem",
+                                     min_peak_dbfs=min_peak_dbfs,
+                                     min_voiced_frac=min_voiced_frac, log=log)
+
+
+def assert_slice_energy(slice_wav: str, clip_index: int, voiced: bool, *,
+                        log=print) -> dict | None:
+    """Per-clip energy assertion on a pre-cut conditioning slice. Call this
+    right after each clip's slice is cut, before that clip reaches the
+    renderer.
+
+    Catches what assert_stem_energy structurally cannot: the whole-stem check
+    only proves the STEM has signal SOMEWHERE, not that any given slice cut
+    from it does. A per-clip ffmpeg -ss/-t cut can land on a silent span of an
+    otherwise-healthy stem -- a stale start time, a boundary rounding error,
+    the same output-seek-fade class of bug that motivated the whole-stem
+    check in the first place -- and this is the only gate that ever looks at
+    what each individual clip actually received.
+
+    `voiced` is the window-energy verdict already computed for this clip's
+    window (must_condition, from check_window/check_plan) -- it is NOT
+    re-derived here, because that check already looked at the right span with
+    VAD/label context this function does not have.
+
+    voiced=False SKIPS the assertion entirely and returns None: an unvoiced
+    window's slice is SUPPOSED to be quiet or silent (a resting mouth over an
+    instrumental bar is correct content, not a bug), so applying the energy
+    floor there would fail the CORRECT case instead of the one this module
+    exists to catch. This is the one place in the module where silence is not
+    suspicious -- see GuideSilentError's docstring for why that distinction
+    has to be made deliberately rather than assumed.
+
+    voiced=True applies the exact same check, against the exact same floors,
+    as assert_stem_energy (same reasoning: this is asking "is this silence",
+    not "is this quiet") and raises GuideSilentError naming the clip index on
+    failure, so the caller can decide whether that is a hard stop or a
+    single-clip degrade.
+    """
+    if not voiced:
+        return None
+    return _assert_whole_file_energy(
+        slice_wav, f"clip {clip_index} conditioning slice",
+        min_peak_dbfs=GUIDE_MIN_PEAK_DBFS, min_voiced_frac=GUIDE_MIN_VOICED_FRAC,
+        log=log)
