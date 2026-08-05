@@ -119,7 +119,25 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   than flagging everything, which is the only thing that makes a gate worth
   having. Before this, DCS measured voicedness ONCE over the whole song before
   slicing; nothing ever checked a window against the song.
-- REJECTED same night at 0:17 | FIXED5's real remaining flaw is the WINDOW MAP, not the
+- DELIVERED (late night) | FIXED5 v3 shipped on review_0004.html: all 17 vocal-bearing
+  windows now CONDITIONED renders (unconditioned singing time 79s -> 0s), 18-segment
+  rigid grid frame-exact, tail probe -1 sharp, 20/20 windows + 17/17 seams eye-passed
+  (9 adversarial inspector passes tonight; every flag senior-adjudicated). In-file sync:
+  top windows 0.2185 / 0.1753 vs golden's median 0.07 on the same meter; means 0.05 vs
+  golden 0.11 (3 of ours are proven meter-instability zeros). Remaining honest gaps:
+  per-window word-lock varies with stem loudness; golden's edge is performance energy +
+  multi-scene format (Andrew's format call, not a repair item).
+- ACTIVE (late night) | FIFTH ARTIFACT CLASS -- PHANTOM LIMB: a huge hallucinated
+  hand/forearm intruding from the frame edge (candI_06_0, rejected). Red screen caught
+  it via flesh tones (p95 0.2496 vs known-bad 0.157); class added to eye-pass checklists.
+- ACTIVE (late night) | SOURCE IMAGE IS THE FALSE-POSITIVE TIEBREAKER: an inspector
+  flagged all four 02/04 windows for an identical 'strand + maroon blob' on the
+  background man -- identical placement across 4 windows x 56 frames x independent
+  seeds, which is impossible for generation slop and diagnostic of SOURCE CONTENT
+  (it is the tool strap in awm_alien_source.png; matched crops confirmed). Rule: an
+  artifact that repeats at the same coordinates across independently-seeded takes is
+  scene content -- check the conditioning image before rejecting anything.
+- REJECTED same night at 0:17 | FIXED5's real remaining flaw was the WINDOW MAP, not the
   windows: 'interlude' windows 02/04/06/08 measure 55-68pct voiced on the stem (08 is the
   DENSEST-vocal window in the song) but were built as unconditioned filler in every cut
   to date -- 79s / 38pct of runtime sings with an undriven mouth. Every gate verified
