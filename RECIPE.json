@@ -11,7 +11,10 @@
     "crossfade_s": 0.15,
     "crossfade_note": "0.4s dissolve REJECTED June 1 ('obvious fade out/in'); 0.15s with overlapped audio windows ACCEPTED 2026-08-05 -- the fade length was the whole problem, and the overlap renders the same musical instant on both sides.",
     "seam_dip_note": "dip-to-black REJECTED 2026-08-05 ('worse, cuts to black').",
-    "excerpt_rule": "song excerpt cut with INPUT-seek (-ss before -i), no fades, energy-asserted before launch"
+    "excerpt_rule": "song excerpt cut with INPUT-seek (-ss before -i), no fades, energy-asserted before launch",
+    "production_prompt": "A single subject, centered, facing the camera, mouth opening and closing in precise sync with the singing vocals. Behind him, a man in denim overalls stands calmly at the crates, still and relaxed, slowly nodding along with the music. Stay in the original scene and setting, soft cinematic lighting, shallow depth of field, steady framing.",
+    "prompt_notes": "Ratified v11 2026-08-05: background cast gets MINIMAL-motion direction (alive, not performing) -- dance/choreography wording produced distracting slop 3 rounds running (v8/v9/v10). Negative prompt is INERT (distilled forces guidance 1.0) -- never carry one. Background slop that remains is masked by the sigma-3.2 DOF finishing pass.",
+    "dof_finish": "masked gblur sigma 3.2 outside the subject matte (dilate 31 + blur 24), every delivery"
   },
 
   "model": {

@@ -19,6 +19,13 @@ ever comes from the detectors.
                              learned 2026-08-05, three inpaint rounds)
      scene_description    -- truthful describe-the-image prompt text (the ledger
                              rule automated; feeds per-scene prompts)
+     wants_occlusion      -- whether the plate should place foreground elements
+                             IN FRONT of the subject (Andrew 2026-08-05:
+                             "foreground in front of our subject makes it feel
+                             like he's in the pic, not superimposed on top of
+                             it" -- occlusion sells belonging; composites paste
+                             the subject BETWEEN background and a foreground
+                             layer for the same reason)
      background_cast[]    -- per background figure: minimal-motion direction
                              ("stands calmly, slowly nodding"); big moves only
                              where the energy map marks a high point (Andrew:
