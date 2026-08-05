@@ -71,6 +71,47 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   gate (audio going IN, validated against a human-confirmed failure) is a different
   instrument -- still ARMED; distrust is not transitive across instruments. Re-arm only
   in the same commit as a scorer recalibrated against human-labeled takes.
+- ACTIVE (late night, lipsync) | AN EYEBALL MASQUERADING AS A MEASUREMENT -- three
+  sessions built a validation design on a fact none of us measured. We asserted the
+  anchor-ON trio (A_baseline s101/s202/s303) was CAMERA-LOCKED in all three, so framing
+  stability could not explain Andrew's labels. 3060-plan proposed it from a 320px-wide
+  7-frame contact sheet, I refined it, brains RATIFIED it. IT IS FALSE: s202 and s303
+  both reframe mid-clip (measured tracker offsets -98,-35 and -120,+75 on a 36px ROI;
+  overlays at scratchpad/sheets/track_A_baseline_s*.png). Only s101 -- Andrew's pick --
+  actually holds framing. SE_END_ANCHOR REDUCES drift, it does not ELIMINATE it, and we
+  all inferred the stronger claim from the setting's name.
+  CONSEQUENCE: the confound was never removed, and a SIMPLER HYPOTHESIS fits all six
+  human labels -- Andrew accepts the clip that HOLDS ITS FRAMING and rejects every clip
+  that REFRAMES (6 of 6). No mouth metric has any evidence behind it yet. We cannot
+  separate "wants a steady shot" from "wants the mouth to move" with the data we have.
+  RULE: a property that a validation design DEPENDS ON must be MEASURED on every clip
+  and reported per clip, never asserted from a thumbnail or inferred from a setting's
+  name. A contact sheet shows you a hypothesis; it does not test one.
+- ACTIVE (late night, lipsync) | APERTURE-DURING-VOICED: BUILT, RUN, RESULT DISCARDED --
+  and discarded by looking, not by scoring. scratchpad/aperture.py implements Andrew's
+  verbatim spec ("the mouth didn't open while words were being sung") as region + open-
+  ness + voiced-only, headline number = longest run of voiced frames with a closed mouth.
+  It reported core-cell PASS (0.586 vs 0.403/0.575) and full-set FAIL (clip_002 at 0.725
+  above the good clip). BOTH NUMBERS ARE VOID: rendering the ROI box onto the frames
+  showed the tracker sliding off the face -- by mid-clip it sits on the alien's SHOULDER
+  in s303 and on background beside the head in s202. The 0.586-vs-0.575 "pass" was noise
+  between two different body parts. Cause: single-scale template matching cannot survive
+  a push-in or a head turn; needs scale-invariant matching or per-frame head re-detection.
+  METHOD NOTE WORTH KEEPING: the overlay check cost five seconds and caught a result that
+  would otherwise have been posted as a validated pass. Any ROI-based metric must ship
+  with a visual ROI-placement check that a human looks at BEFORE its numbers are believed.
+  Also retired here: I had labelled all six 60s clips BAD by INHERITANCE from Andrew
+  rejecting the assembled video -- inference-as-ground-truth, the exact error this
+  ledger warned against hours earlier. clip_002 outscoring his pick may simply mean
+  clip_002 is fine. Those clips now go to him individually via the judging page.
+- ACTIVE (late night, lipsync) | JUDGING PAGE, the actual unblock: scratchpad/judge.py
+  on :7932. 12 shuffled clips, Good/Bad/Skip, labels written per vote. NO scores and NO
+  filenames reach the browser (the page gets only an integer id) because both would leak
+  the hypothesis under test and bias the label. Framing-stable and framing-drifting clips
+  are deliberately mixed so his labels separate the two live hypotheses. THE STANDING
+  LESSON THIS ENCODES: every metric failure today came from calibrating against a
+  reference we chose ourselves. Rulers are cheap, labels are expensive, and we kept
+  building rulers. Buy labels first.
 - REVERSED same night, BY ANDREW'S EYES | "total_motion is the discriminator" and "the
   end anchor is the motion killer" -- BOTH DEAD. He watched the six-clip A/B and ruled:
   seed 101 ANCHOR-ON is the only one that does not suck. That is the take my meter scored
