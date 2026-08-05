@@ -146,6 +146,38 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   than flagging everything, which is the only thing that makes a gate worth
   having. Before this, DCS measured voicedness ONCE over the whole song before
   slicing; nothing ever checked a window against the song.
+- PRODUCT DECISION (late night, Andrew) | FORMAT IS NOW 60s ADMIN / 30s USERS, built from
+  ~9.7s clips (233 frames). Full-song (210s) is retired: 17 windows spread the take budget
+  so thin that most windows shipped their best CLEAN-but-static take, which is exactly what
+  Andrew rejected twice. Clip length picked from measurement, not taste: grip holds below
+  ~250 frames (4/4 synced at 249f vs 1/21 at 465-473f), tonight's two best in-file scores
+  came from 233f clips (0.2185, 0.1753), and 201f also synced (0.1433) -- so anywhere in
+  ~8-10s works and 233f sits under the cliff instead of on it. 30s = 3 clips, cheap enough
+  to re-roll the whole video. ACCEPTANCE CHANGES WITH IT: sync-or-die on voiced windows
+  (verdict synced AND rank floor), not "best available" -- see the helper's sync-or-die
+  wiring. Site path cannot lip-sync at all yet: its render endpoint takes prompt+image
+  only, no audio input, so 30s there means silent until an audio-capable endpoint exists.
+- ACTIVE (late night) | ASSERT ENERGY WHERE THE CONDITIONING INPUT IS CREATED, NOT WHERE IT
+  IS CONSUMED. Third instance of one invisibility class in one night: (a) the site's silero
+  under-detect -> digital-silence conditioning, (b) my window map labelling sung windows
+  instrumental, (c) my own 60s test excerpt, cut with
+  `ffmpeg -i vid -vn -ss 59 -t 60 -af afade=t=out:st=59.7` -- output-seek preserves stream
+  timestamps at 59+, so the fade fired ~1s in and MUTED THE REST. Slices measured -180 dBFS
+  (digital silence); the model correctly produced a still mouth; chain.py's isolation looked
+  broken (1pct voiced) while faithfully isolating silence; every artifact gate passed. A
+  SILENT GUIDE ALWAYS SCORES CLEAN, because a still mouth genuinely matches no audio.
+  RULE: every conditioning artifact is energy-checked at creation (voiced fraction + peak
+  dBFS logged), a silent guide ABORTS the job loudly, and any hand-cut excerpt is verified
+  before it is used -- source at 59-119s measured 99pct voiced, so the pipeline was never
+  the problem. Cost: one wasted 3-clip run plus an hour of misdirected diagnosis.
+- TOOLING (late night) | DEV DASHBOARD replaces the GPU-thermometer page:
+  C:\Users\andre\GPUWatch\devdash.py (port 7931, "Start Dev Dashboard.bat"). Shows what a
+  decision actually needs -- every seed's score/verdict/motion with the KEPT take marked,
+  the run's settings pinned at top, silent-failure alerts (resolution clamp, worker
+  eviction, step-0 deadlock, suspected silence, "kept best available"), and run history
+  persisted to runs.json so a recipe change is judged against the previous run instead of
+  memory. Andrew on v1: "I can't see a damn thing about what's doing what in any way that
+  would inform a decision" -- utilization and temperature are not decisions.
 - DELIVERED (late night) | FIXED5 v3 shipped on review_0004.html: all 17 vocal-bearing
   windows now CONDITIONED renders (unconditioned singing time 79s -> 0s), 18-segment
   rigid grid frame-exact, tail probe -1 sharp, 20/20 windows + 17/17 seams eye-passed
