@@ -293,11 +293,38 @@ async def generate(request: Request):
         # (e.g. a cloud/satellite worker) does not hit this.
         "lip_sync":        bool(body.get("lip_sync", False)),
         # auto_lipsync = MuseTalk post-pass driven by the isolated vocal stem, so
-        # the mouth tracks the WORDS. Runs AFTER native conditioning -- the two
-        # stack (Andrew: "Native + MuseTalk both"). face-alignment patches handle
+        # the mouth tracks the WORDS. Runs AFTER native conditioning.
+        # ORIGINAL (2026-06-19, abb7583): ON by default -- "the two stack" (Andrew:
+        # "Native + MuseTalk both"), written when native lip_sync usually could NOT
+        # run at all (the step-0 deadlock, see the lip_sync comment above) and
+        # MuseTalk was the only reliable path. face-alignment patches handle
         # fruit + animal faces; on a no-face clip MuseTalk skips and keeps the
-        # natively-conditioned video. ON by default.
-        "auto_lipsync":    bool(body.get("auto_lipsync", True)),
+        # natively-conditioned video. That history is kept here, not deleted --
+        # it is why the flag defaulted ON for seven weeks, and it is still
+        # correct for a job that never runs native conditioning at all.
+        # REVERSED 2026-08-05 (Andrew, ROLLBACK_MAP_2026-08-05.md finding d):
+        # DEFAULT FLIPPED TO OFF -- native + MuseTalk must not stack. Evidence:
+        # (1) the native-only chain.py render Andrew approved THIS MORNING carried
+        # no MuseTalk pass; (2) the 23:27 crash landed INSIDE this exact post-pass;
+        # (3) c134c63 (2026-08-03) found MuseTalk is the wrong sync engine for
+        # creature faces regardless of stacking -- "fundamental paste-box". Native
+        # conditioning now runs RELIABLY when requested (5d835ab, 08-04; still
+        # opt-in via lip_sync, defaulted False above), so the original reason to
+        # stack -- MuseTalk as the only reliable path -- is gone. pipeline.py
+        # additionally SKIPS this post-pass outright whenever the job ran native
+        # conditioning, even if a caller explicitly passes auto_lipsync=true -- see
+        # _should_run_musetalk_postpass in pipeline.py. Still explicitly settable
+        # per-job for the no-native-conditioning case (lip_sync=false, or an
+        # implicit degrade to unconditioned) where MuseTalk remains the only sync
+        # path available.
+        "auto_lipsync":    bool(body.get("auto_lipsync", False)),
+        # Tier deliveries render a WINDOW of the song (e.g. 30s of a 3-minute
+        # upload); with this on, the merge muxes that window and never loops
+        # short video to cover the full track (Andrew 2026-08-05; the overnight
+        # E2E delivered a 210s loop of 39s of material without it). Without
+        # this allowlist line the tiers.job_payload field silently vanished at
+        # the route boundary -- a payload key is only real once a route reads it.
+        "window_delivery": bool(body.get("window_delivery", False)),
         # Best-of-N seed selection for lip-sync clips: 1=Fast (single take),
         # 2=Balanced, 3=Best. Each clip generates N seeds and keeps the one whose
         # audio<->mouth sync score is highest. N>1 multiplies GPU time ~Nx.
@@ -488,9 +515,15 @@ async def batch_start(request: Request):
         # lip_sync = LTX-2 native audio conditioning during diffusion --
         # deterministically deadlocks WanGP's sliding-window denoising at step 0
         # (confirmed via raw logs, 2026-08-02). Defaulted off here too, matching
-        # /generate. auto_lipsync (MuseTalk post-pass) still delivers real lip-sync.
+        # /generate.
         "lip_sync":       bool(body.get("lip_sync", False)),
-        "auto_lipsync":   bool(body.get("auto_lipsync", True)),
+        # auto_lipsync default flipped True -> False 2026-08-05, matching
+        # /generate's reversal (Andrew reversed his June "Native + MuseTalk
+        # both"): the native-only render he approved this morning needed no
+        # MuseTalk, the post-pass crashed the server 2026-08-04 23:27, and
+        # c134c63 found MuseTalk wrong for creature faces. Batch jobs were the
+        # last caller still stacking it -- same ruling applies here.
+        "auto_lipsync":   bool(body.get("auto_lipsync", False)),
     }
     # LTX Distilled sweet spot is 8 steps
     _mn = settings["model_name"]

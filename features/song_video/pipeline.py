@@ -373,9 +373,52 @@ def _merge_video_audio_trim(
     out_path: str,
     audio_duration: float,
     pad_before: float = 0.0,
+    window_delivery: bool = False,
+    first_clip_start: float = 0.0,
 ) -> str | None:
-    """Merge video + audio, looping video if needed. pad_before delays audio onset."""
+    """Merge video + audio, looping video if needed. pad_before delays audio onset.
+
+    window_delivery=True (tiers.py job_payload, Andrew's 2026-08-05 ruling,
+    ROLLBACK_MAP_2026-08-05.md finding a) retargets delivery from the FULL SONG
+    to the RENDERED WINDOW: a tier deliberately renders a slice of a song that
+    may run minutes long (e.g. 30s of clips against a 3+ minute upload), and
+    the trim/freeze/loop logic below exists to close a gap against the FULL
+    song -- for a windowed job that "gap" is the entire untouched remainder of
+    the song, which the old code read as "upstream under-generated" and looped
+    the short render over and over across the back half of the track
+    (a4db7b8/f9fef20, May-era origin of the loop-fill design). Skip that logic
+    entirely: cut the matching song segment and mux it 1:1, so there is never
+    a gap to fill or a shortfall to loop against.
+    """
     video_dur = probe_duration(video_path) or 0.0
+
+    if window_delivery:
+        window_end = first_clip_start + video_dur
+        log.info("[song-video] merge: window_delivery ON -- delivering song[%.2fs-%.2fs] "
+                 "(%.2fs) against the %.2fs assembled video; full song (%.2fs) is NOT the "
+                 "target and is never looped to fill it (Andrew's 2026-08-05 ruling)",
+                 first_clip_start, window_end, video_dur, video_dur, audio_duration)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-ss", f"{first_clip_start:.4f}", "-t", f"{video_dur:.4f}", "-i", audio_path,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=600)
+            if r.returncode == 0 and Path(out_path).exists():
+                log.info("[song-video] window_delivery merge ok: output %.2fs",
+                         probe_duration(out_path) or 0.0)
+                return out_path
+            log.error("[song-video] window_delivery merge failed:\n%s",
+                      r.stderr.decode(errors="replace")[-2000:])
+        except Exception as e:
+            log.error("[song-video] window_delivery merge exception: %s", e)
+        return None
+
     true_audio_dur = probe_duration(audio_path) or audio_duration
     target_dur = max(true_audio_dur + pad_before, audio_duration)
 
@@ -471,6 +514,113 @@ def _merge_video_audio_trim(
     return None
 
 
+def _should_run_musetalk_postpass(auto_lipsync: bool, native_conditioned: bool) -> bool:
+    """Whether the MuseTalk post-pass should run after the native-path merge.
+
+    REVERSED 2026-08-05 (Andrew, ROLLBACK_MAP_2026-08-05.md finding d): native
+    conditioning and MuseTalk must NOT stack, reversing the 2026-06-19 standing
+    instruction ("Native + MuseTalk both", routes.py abb7583) that was correct
+    only while native lip_sync usually could not run at all (the step-0
+    deadlock). Evidence for the reversal: (1) the native-only chain.py render
+    Andrew approved THIS MORNING carried no MuseTalk pass; (2) the 23:27 crash
+    landed INSIDE this exact post-pass; (3) c134c63 (2026-08-03) found MuseTalk
+    is the wrong sync engine for creature faces regardless of stacking --
+    "fundamental paste-box". So: a job that already ran native audio
+    conditioning skips this post-pass even if auto_lipsync=true was explicitly
+    passed -- the explicit flag meant "I want lip sync", which native
+    conditioning already delivered, never "run BOTH engines on the same clip".
+    MuseTalk stays reachable for any job that did NOT run native conditioning
+    (lip_sync=false, or an implicit degrade to unconditioned -- see the
+    explicit-vs-implicit gating around _lip_sync in _do_song_gpu_phase).
+    """
+    if auto_lipsync and native_conditioned:
+        log.info("[song-video] MuseTalk post-pass SKIPPED -- native audio conditioning "
+                 "already drove this job's mouth motion and the two must not stack "
+                 "(Andrew's 2026-08-05 ruling; see routes.py auto_lipsync comment for "
+                 "the evidence). auto_lipsync stays reachable for jobs with no native "
+                 "conditioning.")
+        return False
+    return bool(auto_lipsync)
+
+
+def _song_clip_start_times(clip_durations: list, pad_before: float,
+                           xfade_s: float = 0.12) -> list:
+    """Where each clip's conditioning slice should be cut from the song.
+
+    FIXED 2026-08-05 (ROLLBACK_MAP_2026-08-05.md finding b / action item 2).
+    The old formula (still visible in run_song_prep's T_i comment, kept for
+    history) advanced its cursor by each clip's REQUESTED duration minus only
+    the crossfade. That ignores that assembly ALSO removes boundary trim
+    (head+tail, see the GPU phase's own trim ~line 1656 below) from every clip
+    BEFORE the crossfade concat ever runs, so the slice position drifts
+    further ahead of the clip's true assembled position with every clip --
+    proven arithmetically at 3.08s of drift by clip 12 in
+    tests/test_sing_grid.py group C. Fixed by handing sing_grid's
+    assembled_start_times the ACTUAL post-trim length of every clip (not the
+    requested one), so a clip's conditioning slice start now EQUALS its true
+    position in the assembled output, not an approximation of it.
+
+    The trim is NOT uniform across every clip -- this mirrors the GPU phase's
+    own boundary trim exactly (~line 1656-1695): clip 0 has nothing before it
+    to blend from, so it loses only the TAIL trim; the last clip keeps its
+    natural fade-out, so it loses only the HEAD trim; every clip between
+    loses both; a single clip (n<=1) loses nothing, there is no boundary to
+    trim. Using sing_grid's flat TRIM_OVERHEAD_S for every clip (its
+    documented default, meant for a "typical middle clip") would overshoot
+    clip 0 and undershoot the last clip by TAIL_TRIM_S/HEAD_TRIM_S each -- a
+    fifth of a second, ~5 frames at 24fps, which fails the "exact to 1 frame"
+    bar this fix is held to. Mirror this edge behaviour here exactly, or this
+    function and the GPU phase can silently diverge again -- precisely
+    LIPSYNC_LEDGER's "settings silently diverging between planning and
+    render" recurring-bug-class.
+    """
+    from features.song_video import sing_grid
+    n = len(clip_durations)
+
+    def _actual_len(idx: int, requested: float) -> float:
+        if n <= 1:
+            return requested
+        if idx == 0:
+            return requested - sing_grid.TAIL_TRIM_S
+        if idx == n - 1:
+            return requested - sing_grid.HEAD_TRIM_S
+        return requested - sing_grid.TRIM_OVERHEAD_S
+
+    actual_lengths = [_actual_len(i, d) for i, d in enumerate(clip_durations)]
+    return [pad_before + s
+            for s in sing_grid.assembled_start_times(actual_lengths, xfade_s=xfade_s)]
+
+
+def _resolve_clip_duration(arc_entry, clip_durations: list, i: int, clip_dur: float,
+                           clip_num=None) -> float:
+    """The one number that owns clip length: the REQUEST, never the arc.
+
+    FIXED 2026-08-05 (ROLLBACK_MAP_2026-08-05.md finding c / action item 3).
+    `_arc_entry.get("duration")` used to override `clip_durations[i]` outright
+    -- a ~10-week-old decision (8ba2df2, 2026-05-24) that is the OTHER half of
+    the start-time drift fixed alongside this one (a slice cut for N seconds
+    landing in a slot sized for a DIFFERENT N, because render length and slice
+    position came from two lists that were never reconciled -- ROLLBACK_MAP
+    finding b, source 2). The story arc may still SUGGEST a duration --
+    useful signal for the LLM's own pacing -- but the requested
+    clip_durations[i] (the beat plan / tier) always wins the actual render
+    length now. A disagreement is logged once so it stays visible, never
+    silently honored.
+    """
+    requested = clip_durations[i] if i < len(clip_durations) else clip_dur
+    arc_dur = arc_entry.get("duration") if isinstance(arc_entry, dict) else None
+    try:
+        arc_dur = float(arc_dur) if arc_dur else None
+    except (TypeError, ValueError):
+        arc_dur = None
+    if arc_dur is not None and abs(arc_dur - requested) > 1e-6:
+        log.info("[song-video] Clip %s: story arc asked for %.2fs, requested "
+                 "clip_duration wins -- rendering %.2fs (2026-08-05 ruling, "
+                 "ROLLBACK_MAP finding c: one number owns clip length)",
+                 clip_num if clip_num is not None else i, arc_dur, requested)
+    return max(4.0, min(12.0, requested))
+
+
 # -- Prep phase ----------------------------------------------------------------
 
 def run_song_prep(job, photo_path, settings):
@@ -539,12 +689,16 @@ def run_song_prep(job, photo_path, settings):
     # 0.12s = 3 frames at 24fps -- fast enough to read as a soft cut, not a dissolve.
     # Longer fades (0.5-0.75s) create visible double-exposure "sludge" where the brain
     # perceives two overlaid images. At 0.12s the blend is subliminal.
+    # FIXED 2026-08-05: the T_i formula above (requested duration, xfade-only
+    # correction) was the DRIFT ITSELF -- it never accounted for the boundary
+    # trim (head+tail) that assembly removes from every clip. See
+    # _song_clip_start_times's docstring and ROLLBACK_MAP_2026-08-05.md finding
+    # (b) for the full account; kept the formula in the comment above as
+    # history, not deleted. _song_clip_start_times wires in
+    # sing_grid.assembled_start_times against each clip's ACTUAL post-trim
+    # length, so a slice start now equals the clip's true assembled position.
     _start_t = float(settings.get("pad_before", 1.0))
-    _clip_start_times: list[float] = []
-    for _idx, _d in enumerate(clip_durations):
-        corrected = max(0.0, _start_t - _idx * _SONG_XFADE_DUR)
-        _clip_start_times.append(corrected)
-        _start_t += float(_d)
+    _clip_start_times = _song_clip_start_times(clip_durations, _start_t, xfade_s=_SONG_XFADE_DUR)
     settings["_clip_start_times"] = _clip_start_times
     settings["_song_xfade_dur"]   = _SONG_XFADE_DUR
 
@@ -1284,12 +1438,16 @@ def _do_song_gpu_phase(
             # without a VAD opinion AND without a plan label, every disagreement
             # branch is unreachable and the whole pass is a no-op that logs
             # nothing while looking like a safeguard.
+            # Window length = the RESOLVED duration (request wins over arc),
+            # same precedence as this_dur and _sdur -- measuring energy over an
+            # arc-sized window while rendering a request-sized clip re-opens the
+            # slice/render mismatch this whole 2026-08-05 fix set closes.
             _wins = [{"t0": float(_st),
-                      "t1": float(_st) + max(4.0, min(12.0, float(
-                          _arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur))),
+                      "t1": float(_st) + _resolve_clip_duration(
+                          _arc, clip_durations, _wi, clip_dur),
                       "labelled_sung": None,
                       "intervals": _guide_intervals}
-                     for _st, _arc in zip(_clip_start_times, story_arc)]
+                     for _wi, (_st, _arc) in enumerate(zip(_clip_start_times, story_arc))]
             _we = check_plan(_guide_audio, _wins, log=lambda m: log.info("[song-video] %s", m))
             # The measurement now DRIVES acceptance, not just the log. A window
             # that carries singing is held to SYNC-OR-DIE below; one that does
@@ -1319,7 +1477,7 @@ def _do_song_gpu_phase(
         log.info("[song-video] Lip sync ON -- pre-extracting %d audio slices", n_clips)
         from features.song_video.window_energy import GuideSilentError, assert_slice_energy
         for _si, (_st, _arc) in enumerate(zip(_clip_start_times, story_arc)):
-            _sdur = float(_arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur)
+            _sdur = _resolve_clip_duration(_arc, clip_durations, _si, clip_dur)
             # Clamp identically to `this_dur` below (the ACTUAL rendered clip
             # duration) -- the LLM-produced per-clip "duration" is asked for
             # 5-10s in the arc-generation prompt but nothing enforces that
@@ -1503,9 +1661,7 @@ def _do_song_gpu_phase(
         if not finalized.strip():
             finalized = "Cinematic scene, natural movement, photorealistic, high quality"
         clip_out  = str(job_dir / f"clip_{i:02d}_{job.id[:6]}.mp4")
-        _arc_dur  = _arc_entry.get("duration") if isinstance(_arc_entry, dict) else None
-        this_dur  = float(_arc_dur) if _arc_dur else (clip_durations[i] if i < len(clip_durations) else clip_dur)
-        this_dur  = max(4.0, min(12.0, this_dur))
+        this_dur  = _resolve_clip_duration(_arc_entry, clip_durations, i, clip_dur, clip_num=clip_num)
 
         # Guidance 3.0: enough above the 2.8 near-static floor to produce visible
         # motion, but low enough that the conditioning start_image still dominates
@@ -1815,7 +1971,11 @@ def _do_song_gpu_phase(
 
     model_tag  = model_name.split()[0].lower()
     final_path = str(job_dir / f"songvid_{model_tag}_{time.strftime('%H%M%S')}.mp4")
-    merged     = _merge_video_audio_trim(video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before)
+    merged     = _merge_video_audio_trim(
+        video_to_loop, audio_path, final_path, effective_dur, pad_before=pad_before,
+        window_delivery=bool(settings.get("window_delivery", False)),
+        first_clip_start=(_clip_start_times[0] if _clip_start_times else pad_before),
+    )
 
     if merged:
         # Upscale only when an explicit low-res override was requested (e.g. fast mode).
@@ -1842,7 +2002,12 @@ def _do_song_gpu_phase(
         # default False) so the human-face case can be enabled per-job, while
         # the default music-video output stays clean. The manual "Lip-sync to
         # audio" button on the Queue/Gallery detail still works case-by-case.
-        if bool(settings.get("auto_lipsync", False)) and not _stopped():
+        # AND, as of 2026-08-05, gated OFF outright whenever native audio
+        # conditioning already ran on this job -- see
+        # _should_run_musetalk_postpass for the ruling and its evidence.
+        _native_conditioned = bool(_lip_sync) and bool(_guide_audio)
+        if _should_run_musetalk_postpass(bool(settings.get("auto_lipsync", False)),
+                                         _native_conditioned) and not _stopped():
             try:
                 from features.lipsync.runner import NoVocalsError, lipsync_available, lipsync_video
                 if lipsync_available():

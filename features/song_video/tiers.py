@@ -81,6 +81,14 @@ def job_payload(name: str, audio_path: str, photo_path: str) -> dict:
         "best_of_n": t["best_of_n"],
         "clip_duration": int(t["clip_s"]),
         "num_clips": t["num_clips"],
+        # window_delivery: a tier renders num_clips*clip_s seconds -- a WINDOW
+        # of the song, not the whole thing (e.g. 30s of clips against an
+        # upload that may run minutes). Andrew's 2026-08-05 ruling
+        # (ROLLBACK_MAP_2026-08-05.md finding a): delivery must mux that
+        # rendered window onto the song, never loop the short render trying to
+        # cover the full upload. See pipeline.py's
+        # _merge_video_audio_trim(window_delivery=...).
+        "window_delivery": True,
     }
 
 

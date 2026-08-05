@@ -81,6 +81,12 @@ ok(p["best_of_n"] == admin["best_of_n"] and p["clip_duration"] == int(admin["cli
    "payload numbers match the resolved tier exactly")
 ok(p["audio_path"] == "song.wav" and p["photo_path"] == "photo.png",
    "input paths pass through unchanged")
+# 2026-08-05, ROLLBACK_MAP finding a: a tier renders a WINDOW of the song
+# (num_clips*clip_s seconds), not the whole upload -- window_delivery=True
+# tells the merge stage to mux that window, never loop the short render to
+# try to cover the full song. See pipeline.py's _merge_video_audio_trim.
+ok(p.get("window_delivery") is True,
+   "window_delivery is explicitly True in the payload")
 
 print("\n-- G: a deliberately bad tier is caught by the module's own assertions --")
 # Prove the safety net actually works, not just that the two shipped tiers
