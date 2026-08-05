@@ -302,23 +302,27 @@ def _do_generate(params: dict) -> dict:
     wgp.process_prompt_and_add_tasks(state, 0, model_type)
     queue = wgp.get_gen_info(state).get("queue", [])
 
-    # If audio conditioning caused rejection (high res + audio tokens exceeds context),
-    # retry without audio so the generation still runs.
+    # STRIP-AUDIO FALLBACK REMOVED 2026-08-04 (LIPSYNC_LEDGER hard-fail rule).
+    # This used to retry the job with audio conditioning stripped whenever WanGP
+    # rejected the queue, and report success. That converts a CONFIGURATION error
+    # into a finished video of a motionless face -- the caller asked for lip sync,
+    # got a clip back, and nothing anywhere said the mouth was never driven. It is
+    # the worst of the six raw-mix/no-audio escape hatches precisely because its
+    # output looks like a completed render: no metric flags it, and it surfaces
+    # only when a human watches the whole song and asks why nobody is singing.
+    # The real cause is usually a fixable parameter (resolution too high for the
+    # audio-token budget), so say that and stop instead of silently delivering a
+    # statue.
     if not queue and defaults.get("audio_prompt_type") == "A":
-        print("[worker] Audio conditioning rejected -- retrying without audio (resolution may be too high for audio tokens)", flush=True)
-        defaults["audio_guide"]       = None
-        defaults["audio_source"]      = None
-        defaults["audio_prompt_type"] = ""
-        defaults["audio_scale"]       = 1.0
-        state2 = _build_state(model_type)
-        defaults.setdefault("image_refs", [])
-        wgp.set_model_settings(state2, model_type, defaults)
-        state2["validate_success"] = 1
-        wgp.process_prompt_and_add_tasks(state2, 0, model_type)
-        queue = wgp.get_gen_info(state2).get("queue", [])
-        if queue:
-            state = state2
-            print("[worker] Fallback without audio accepted -- generating without lip sync", flush=True)
+        return {"ok": False, "output": None,
+                "error": "WanGP rejected the AUDIO-CONDITIONED request. Refusing to "
+                         "silently retry without audio -- that returns a finished "
+                         "video with an undriven mouth and no error. Most likely the "
+                         "resolution is too high for the audio-token budget: LTX-2 "
+                         "ceil-rounds to 64-multiples, so 960x544 renders 960x512 "
+                         "(proven to sync) while 1032x580 becomes 1088x640, 33% more "
+                         "pixels. Lower the resolution and retry, or run the job with "
+                         "lip sync off deliberately."}
 
     if not queue:
         return {"ok": False, "output": None,

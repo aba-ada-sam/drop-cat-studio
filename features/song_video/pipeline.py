@@ -705,6 +705,32 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
         if not res_path or not os.path.isfile(res_path):
             log_fn(f"[best-of-{len(seeds)}] seed {sd}: no output -- skipped")
             continue
+        # ARTIFACT SCREEN BEFORE RANKING (LIPSYNC_LEDGER: gates run before the
+        # rank, not after). Sync score and slop RISE TOGETHER -- the takes that
+        # move the mouth most are also the likeliest to ribbon -- so ranking
+        # first and screening later systematically selects the dirtiest take
+        # that scored well. Only the RIBBON verdict rejects here: it is the one
+        # metric validated against both a known-good and a known-bad. Red
+        # strands and dark carved text are surfaced for the eye elsewhere and
+        # must never auto-reject (an eye-clean take once out-scored the
+        # known-bad reference on red).
+        _ribbon = None
+        try:
+            from features.song_video.artifact_screens import screen_window
+            _sc = screen_window(res_path)
+            _ribbon = _sc["ribbon_verdict"]
+            if _ribbon == "infested":
+                log_fn(f"[best-of-{len(seeds)}] seed {sd}: REJECTED -- ribbon artifacts "
+                       f"(p95 {_sc['ribbon']['p95']:.2f}); not ranked")
+                continue
+            if _ribbon == "eye-check":
+                log_fn(f"[best-of-{len(seeds)}] seed {sd}: ribbon p95 "
+                       f"{_sc['ribbon']['p95']:.2f} is in the eye-check band -- "
+                       f"kept, but look at this one before shipping")
+        except Exception as _e:
+            # A screen that cannot run must not silently pass takes: say so, and
+            # let ranking proceed rather than losing the clip entirely.
+            log_fn(f"[best-of-{len(seeds)}] seed {sd}: artifact screen unavailable ({_e})")
         try:
             r = sync_qc.analyze(res_path, audio_path=audio_slice)
             score = sync_qc.mouth_sync_score(r)
@@ -716,8 +742,12 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
             log_fn(f"[best-of-{len(seeds)}] seed {sd}: QC failed ({_e}) -- scored 0")
         if best is None or score > best[0]:
             best = (score, res_path)
-        if r is not None and sync_qc.is_synced(r):
-            log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate -- keeping it")
+        # Early-accept only a take that is BOTH synced and artifact-clean. A
+        # take in the eye-check band keeps the loop running: if a cleaner one
+        # also syncs, take that instead.
+        if r is not None and sync_qc.is_synced(r) and _ribbon == "clean":
+            log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate and is "
+                   f"artifact-clean -- keeping it")
             break
     if best is None:
         return None
@@ -739,46 +769,92 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
     return out_path
 
 
+class GuideIsolationError(RuntimeError):
+    """Vocal isolation failed, so there is no legitimate conditioning audio.
+
+    Exists because the alternative -- quietly conditioning on the full mix -- is
+    the documented "mouth follows the beat, not the words" bug, and it produces a
+    finished video that looks like a lip-sync FAILURE rather than an error. See
+    _isolate_guide_vocals.
+    """
+
+
 def _isolate_guide_vocals(audio_wav, job_dir):
-    """Isolate vocals (+150Hz highpass) from the full mix so the conditioning
-    drives the mouth from WORDS, not the beat. Returns the vocals WAV path, or
-    None to fall back to the full mix. Never raises; reuses the MuseTalk venv's
-    Demucs (the DCS Python has no demucs)."""
+    """Isolate vocals (+150Hz highpass, + phrase gating) for mouth conditioning.
+
+    Returns the guide WAV path. RAISES GuideIsolationError rather than returning
+    the full mix.
+
+    HARD-FAIL, 2026-08-04 (LIPSYNC_LEDGER design rule: "the render path must not
+    ACCEPT a raw-mix wav -- prep produces a stem artifact, renderers take only
+    that"). This function used to return None on five separate paths -- missing
+    venv, Demucs failure, any exception, plus two silent DOWNGRADES (a failed
+    high-pass kept the unfiltered stem, an empty phrase list kept the ungated
+    stem) -- and every one of them landed the caller on `audio_wav`, the raw mix.
+    Measured consequence, twice, on two different codebases: slices come out
+    bass-dominant (+6.9 dB bass over mid, which an isolated vocal physically
+    cannot be), the mouth tracks the drums, and the render is judged as bad
+    lip-sync because nothing anywhere says "this was conditioned on the wrong
+    audio". Isolating properly moved sync rank 10-26x on the same window.
+
+    A job that cannot isolate vocals must fail loudly and early, before spending
+    GPU minutes producing a video whose defect is invisible to every metric.
+    """
+    from features.lipsync.runner import _paths, _separate_vocals
+    _d, _py = _paths()
+    if not _py.is_file():
+        raise GuideIsolationError(
+            "MuseTalk venv not found, so vocals cannot be isolated. Refusing to "
+            "condition on the full mix (that renders a mouth that follows the "
+            "beat instead of the words). Install/repair the venv, or run this "
+            "job with lip_sync off.")
+    _voc = str(job_dir / "guide_vocals.wav")
     try:
-        from features.lipsync.runner import _paths, _separate_vocals
-        _d, _py = _paths()
-        if not _py.is_file():
-            log.info("[song-video] MuseTalk venv not found -- conditioning on full mix")
-            return None
-        _voc = str(job_dir / "guide_vocals.wav")
-        if not _separate_vocals(_py, audio_wav, _voc) or not os.path.isfile(_voc):
-            log.warning("[song-video] Vocal isolation failed -- conditioning on full mix")
-            return None
-        _voc_hp = str(job_dir / "guide_vocals_hp.wav")
-        _hp = subprocess.run(
-            ["ffmpeg", "-y", "-i", _voc, "-af", "highpass=f=150", _voc_hp],
-            capture_output=True, timeout=180,
-        )
-        out = _voc_hp if (_hp.returncode == 0 and os.path.isfile(_voc_hp)) else _voc
-
-        # Isolating the vocals is not enough: the stem still carries bleed through
-        # every instrumental bar, and the conditioning turns that bleed into mouth
-        # movement. Silence everything outside the sung phrases so an instrumental
-        # clip conditions on real silence and the mouth rests.
-        from features.lipsync.vocal_activity import gate_audio, voiced_intervals
-        _iv = voiced_intervals(out)
-        if _iv:
-            _gated = str(job_dir / "guide_vocals_gated.wav")
-            if gate_audio(out, _iv, _gated):
-                out = _gated
-        else:
-            log.info("[song-video] No singing detected -- conditioning on the (silent) stem anyway")
-
-        log.info("[song-video] Lip sync: conditioning on isolated vocals (%s)", os.path.basename(out))
-        return out
+        _ok = _separate_vocals(_py, audio_wav, _voc)
     except Exception as e:
-        log.warning("[song-video] Vocal isolation error (%s) -- conditioning on full mix", e)
-        return None
+        raise GuideIsolationError(f"Demucs vocal separation raised: {e}") from e
+    if not _ok or not os.path.isfile(_voc):
+        raise GuideIsolationError(
+            "Demucs vocal separation produced no stem. Refusing to condition on "
+            "the full mix.")
+
+    # The high-pass is part of the recipe, not a nicety: it removes the bass/beat
+    # bleed the stem still carries. Falling back to the un-high-passed stem is a
+    # silent downgrade of the guide, so it is an error too.
+    _voc_hp = str(job_dir / "guide_vocals_hp.wav")
+    _hp = subprocess.run(
+        ["ffmpeg", "-y", "-i", _voc, "-af", "highpass=f=150", _voc_hp],
+        capture_output=True, timeout=180,
+    )
+    if _hp.returncode != 0 or not os.path.isfile(_voc_hp):
+        raise GuideIsolationError(
+            "150Hz high-pass of the vocal stem failed; the un-filtered stem is "
+            "not an acceptable substitute (it keeps the bass bleed the filter "
+            "exists to remove).")
+    out = _voc_hp
+
+    # Isolating the vocals is not enough: the stem still carries bleed through
+    # every instrumental bar, and the conditioning turns that bleed into mouth
+    # movement. Silence everything outside the sung phrases so an instrumental
+    # clip conditions on real silence and the mouth rests.
+    from features.lipsync.vocal_activity import gate_audio, voiced_intervals
+    _iv = voiced_intervals(out)
+    if _iv:
+        _gated = str(job_dir / "guide_vocals_gated.wav")
+        if gate_audio(out, _iv, _gated):
+            out = _gated
+        else:
+            log.warning("[song-video] Phrase gating failed -- conditioning on the "
+                        "UNGATED stem (still vocals, never the mix)")
+    else:
+        # NOT an error: a genuinely instrumental track has no phrases, and the
+        # correct conditioning for that is the quiet stem (mouth rests). The
+        # per-window energy check is what catches the dangerous version of this
+        # -- a window that IS sung but whose phrases went undetected.
+        log.info("[song-video] No singing detected -- conditioning on the (silent) stem anyway")
+
+    log.info("[song-video] Lip sync: conditioning on isolated vocals (%s)", os.path.basename(out))
+    return out
 
 
 def _build_face_crop(src_path, tw, th, out_path):
@@ -897,9 +973,29 @@ def _do_song_gpu_phase(
             prepped_photo = _face
             log.info("[song-video] Framed source on the face (mouth in lower third)")
     if _lip_sync:
-        _vg = _isolate_guide_vocals(audio_wav, job_dir)
-        if _vg:
-            _guide_audio = _vg
+        # No try/except that swallows this: _isolate_guide_vocals raises rather
+        # than handing back the raw mix, and catching it here to carry on would
+        # restore the exact bug it was changed to prevent. A lip-sync job that
+        # cannot get a vocal stem has to stop before it spends GPU minutes on a
+        # video whose defect no metric can see.
+        _guide_audio = _isolate_guide_vocals(audio_wav, job_dir)
+
+        # The window rule, mechanised (LIPSYNC_LEDGER 2026-08-04): measure each
+        # planned window's energy on the ISOLATED stem and condition anything
+        # above the floor, whatever the plan called it. Measurement only -- it
+        # never silences a window the plan wanted sung.
+        try:
+            from features.song_video.window_energy import check_plan
+            _wins = [{"t0": float(_st),
+                      "t1": float(_st) + max(4.0, min(12.0, float(
+                          _arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur))),
+                      "labelled_sung": None}
+                     for _st, _arc in zip(_clip_start_times, story_arc)]
+            check_plan(_guide_audio, _wins, log=lambda m: log.info("[song-video] %s", m))
+        except Exception as e:
+            # Advisory only: this reports disagreements, it does not gate the
+            # render, so a failure here must not cost the job.
+            log.warning("[song-video] window energy check skipped (%s)", e)
 
     # Pre-extract ALL audio slices before the clip generation loop starts.
     # This runs once upfront so WanGP never waits for an ffmpeg subprocess
