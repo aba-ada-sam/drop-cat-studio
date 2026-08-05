@@ -58,7 +58,15 @@ TAIL_TRIM_S = 0.20            # LTX-2 baked-in fade-out
 TRIM_OVERHEAD_S = HEAD_TRIM_S + TAIL_TRIM_S
 
 # Crossfade consumed at each junction when clips are joined.
-XFADE_S = 0.25
+# MUST TRACK THE LIVE PIPELINE. features/song_video/pipeline.py:476 sets
+# _SONG_XFADE_DUR = 0.12 and evaluator.py:55 defaults xfade_dur=0.12; this
+# module previously carried 0.25 (the fun_videos default) and so computed a
+# different timeline than the one actually assembled. That is verbatim the
+# ledger's "RECURRING BUG CLASS -- settings silently diverging between planning
+# and render... grep every call site". If the pipeline's value changes, change
+# it HERE too, or the drift check silently starts measuring the wrong thing.
+SONG_XFADE_S = 0.12
+XFADE_S = SONG_XFADE_S
 
 # What a clip may actually CONTAIN, once its render headroom is subtracted.
 # Split on THIS, never on SING_MAX_FRAMES -- see rule 2 above.
@@ -113,26 +121,45 @@ def split_content_windows(clip_dur: float, fps: float = SING_FPS,
     the end is a silent hole in the song). A clip that already fits comes back
     as a single unchanged window, which is the common case.
     """
-    total = quantize_8k1(clip_dur * fps)
-    if total <= max_content_frames:
-        return [(0.0, clip_dur)]
+    if clip_dur <= 0:
+        return []
 
-    n_parts = math.ceil(total / max_content_frames)
-    part_frames = quantize_8k1(total / n_parts)
-    # Quantization can round the parts down far enough that n of them no longer
-    # cover the whole clip. Grow the count from the ACTUAL per-part size rather
-    # than trusting the first estimate.
-    while part_frames * n_parts < total:
+    # SOLVE FOR THE INVARIANT THAT ACTUALLY MATTERS, don't estimate it. Two
+    # earlier versions of this got it wrong in opposite ways, both found by
+    # adversarial sweep rather than reasoning:
+    #   - sizing parts from the QUANTIZED total left the remainder on the last
+    #     window (2101f -> a 237f window against a 236f budget -> a 257f render,
+    #     8 frames past the grip ceiling);
+    #   - sizing parts from the TRUE frame count ignores that quantization
+    #     rounds UP (a 237f window quantizes to 241f, over budget again).
+    # Both were silent: the clip renders and simply stops lip-syncing. So grow
+    # the part count until every part SATISFIES the real constraint -- its
+    # quantized content fits the budget AND its render (paying a junction, which
+    # every window may) fits under the ceiling. Bounded by frames so it cannot
+    # spin, and equal parts mean no window is special.
+    def _fits(n: int) -> bool:
+        part = clip_dur / n
+        return (quantize_8k1(part * fps) <= max_content_frames
+                and frames_for_slot(part, with_junction=True, fps=fps) <= SING_MAX_FRAMES)
+
+    true_frames = max(1, int(math.ceil(clip_dur * fps)))
+    n_parts = max(1, math.ceil(true_frames / max_content_frames))
+    while not _fits(n_parts) and n_parts < true_frames:
         n_parts += 1
-    part_dur = part_frames / fps
 
+    # Boundaries from i*clip_dur/n, NOT by accumulating part_dur: repeated
+    # addition drifts, and the drift all lands on the final window, which is
+    # exactly how the last window ends up a few frames over budget while every
+    # other one fits.
     out: list[tuple[float, float]] = []
-    t = 0.0
     for i in range(n_parts):
-        t1 = clip_dur if i == n_parts - 1 else min(clip_dur, t + part_dur)
-        out.append((t, t1))
-        t = t1
-    return out
+        a = clip_dur * i / n_parts
+        b = clip_dur if i == n_parts - 1 else clip_dur * (i + 1) / n_parts
+        # Never emit an empty or negative window: downstream, a zero-length slot
+        # becomes a 17-frame GPU render of nothing and a 1-frame assembly slot.
+        if b - a > 1e-9:
+            out.append((a, b))
+    return out or [(0.0, clip_dur)]
 
 
 def assembled_start_times(clip_lengths_s: list[float],

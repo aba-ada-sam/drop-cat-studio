@@ -63,9 +63,13 @@ RIBBON_MAX_INFESTED = 1.0
 RED_SAT = 45
 RED_FLOOR = 90
 
-# ---- yellow glyphs (lyric-text furniture the music-video prior hallucinates) -
-YELLOW_SAMPLE_FPS = 6.0
-YELLOW_EXCESS_MAX = 0.02      # percent excess over the source image's own yellow
+# NOT IMPLEMENTED HERE, deliberately named so nobody assumes otherwise: the
+# CURRENT RECIPE's pre-ranking stack is ribbon + yellow-glyph (<=0.02% excess
+# over the source image's own yellow) + transient-white (<=2.0%) + luma (mean
+# within 25% of source, peak <1.6x). This module ships the two FLICKER screens
+# only. Yellow needs the source image as a baseline and luma needs signalstats;
+# both live in tools/regen_offender_clips.py today. Do not read screen_window()
+# as "the gate stack" -- it is two of four.
 
 
 def _probe_size(path: str) -> tuple[int, int] | None:
@@ -192,6 +196,39 @@ def screen_window(path: str, ss: float | None = None, t: float | None = None) ->
     }
 
 
+# Written into every dump dir this module creates. Its presence is what
+# authorizes wiping the directory on a later run.
+_DUMP_MARKER = ".artifact_screens_dump"
+
+
+def _prepare_dump_dir(out_dir: str) -> Path:
+    """Return an EMPTY dump dir, without ever deleting someone else's data.
+
+    Dump dirs must be born empty -- leftover worst-frames from an earlier run
+    sat beside a new run's and produced confident DEFECTIVE verdicts on windows
+    that had already been replaced (2026-08-04, 20 minutes lost). But the
+    obvious implementation, rmtree on a caller-supplied path, is a foot-gun: it
+    recursively deletes whatever string it is handed. So a directory is only
+    wiped if it carries this module's own marker file, i.e. we made it. A
+    directory we did not create is required to be empty and is never deleted.
+    """
+    out = Path(out_dir)
+    if out.exists():
+        if not out.is_dir():
+            raise NotADirectoryError(f"dump target exists and is not a directory: {out}")
+        if (out / _DUMP_MARKER).is_file():
+            shutil.rmtree(out, ignore_errors=True)
+        elif any(out.iterdir()):
+            raise FileExistsError(
+                f"refusing to wipe {out}: it has contents but no {_DUMP_MARKER} "
+                f"marker, so this module did not create it. Point at a fresh path "
+                f"or empty it deliberately.")
+    out.mkdir(parents=True, exist_ok=True)
+    (out / _DUMP_MARKER).write_text("artifact_screens dump dir; safe to wipe\n",
+                                    encoding="ascii")
+    return out
+
+
 def dump_worst_frames(path: str, out_dir: str, window_start_s: float,
                        screen: dict, fps: float = 24.0,
                        uniform_every_s: float = 1.0,
@@ -209,10 +246,7 @@ def dump_worst_frames(path: str, out_dir: str, window_start_s: float,
     lettering is invisible to every brightness and color metric here, and was
     only ever found by looking at ordinary frames.
     """
-    out = Path(out_dir)
-    if out.exists():
-        shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True, exist_ok=True)
+    out = _prepare_dump_dir(out_dir)
 
     times: set[float] = set()
     for i in screen.get("worst_ribbon_pairs", []):

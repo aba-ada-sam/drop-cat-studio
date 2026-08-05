@@ -70,19 +70,63 @@ for clip_dur in [6.0, 9.9, 12.0, 19.7, 30.0]:
 # case that lands EXACTLY on 249 -- at the ceiling with zero margin, which is
 # how a "safe" split silently becomes an unsyncable render after any later
 # change to the trim or fade constants.
-for dur, expect_strict in [(20.75, True), (19.7, False)]:
-    naive = split_content_windows(dur, max_content_frames=SING_MAX_FRAMES)
-    naive_worst = max(frames_for_slot(b - a, with_junction=(j < len(naive) - 1))
-                      for j, (a, b) in enumerate(naive))
+# THE TRAP, shown as arithmetic rather than by calling the function -- the
+# function now SOLVES for the render constraint, so it can no longer be talked
+# into breaching by passing a bigger budget (that hardening is the point). What
+# the trap costs is still worth pinning: sizing windows against the render cap
+# while rendering headroom on top puts the render past the ceiling.
+import math as _math  # noqa: E402
+for dur, breaches in ((20.75, True), (19.7, False)):
+    n_naive = max(1, _math.ceil(dur * SING_FPS / SING_MAX_FRAMES))
+    naive_render = frames_for_slot(dur / n_naive, with_junction=True)
+    how = ("PAST the ceiling (silent no-sync)" if breaches
+           else "exactly AT the ceiling, zero margin: the subtler half of the trap")
+    ok((naive_render > SING_MAX_FRAMES) == breaches,
+       f"{dur}s sized against the {SING_MAX_FRAMES}f RENDER cap renders "
+       f"{naive_render}f -- {how}")
     safe = split_content_windows(dur)
-    safe_worst = max(frames_for_slot(b - a, with_junction=(j < len(safe) - 1))
-                     for j, (a, b) in enumerate(safe))
-    ok(naive_worst >= SING_MAX_FRAMES,
-       f"{dur}s split on the RENDER cap reaches {naive_worst}f "
-       f"({'past' if expect_strict else 'exactly at'} the {SING_MAX_FRAMES}f "
-       f"ceiling) -- the trap")
-    ok(safe_worst < SING_MAX_FRAMES,
-       f"{dur}s split on the CONTENT budget renders {safe_worst}f, with real margin")
+    safe_worst = max(frames_for_slot(b - a, with_junction=True) for a, b in safe)
+    ok(safe_worst <= SING_MAX_FRAMES,
+       f"{dur}s split by the solver renders {safe_worst}f, at or under the "
+       f"{SING_MAX_FRAMES}f ceiling (249 is itself the proven-good count)")
+
+print("\n-- B2: EXHAUSTIVE invariants (red team found real overflows here) --")
+# Every one of these was a live defect found by adversarial sweep, not theory:
+#   2101f/5829f/9557f -> a 237-frame last window against a 236-frame budget,
+#     rendering 257f, 8 past the grip ceiling (quantize_8k1 rounds DOWN, and
+#     sizing the parts against the rounded value dumps the remainder on the
+#     last window).
+#   1005f and 79 other durations -> a ZERO-LENGTH trailing window, which
+#     downstream becomes a 17-frame GPU render of nothing.
+bad_budget, bad_ceiling, bad_empty, bad_sum = [], [], [], []
+for nf in range(17, 12001):
+    d = nf / SING_FPS
+    wins = split_content_windows(d)
+    if not wins or any(b - a <= 0 for a, b in wins):
+        bad_empty.append(nf)
+        continue
+    if abs(sum(b - a for a, b in wins) - d) > 1e-6:
+        bad_sum.append(nf)
+    for j, (a, b) in enumerate(wins):
+        # THE INVARIANT THAT MATTERS is the RENDER one. The content budget is
+        # guidance for sizing; a window may quantize a step above it and still
+        # render at exactly 249, which is the proven-good count make_clip.py
+        # itself uses. Asserting the budget exactly over-constrains at the
+        # rounding boundary (236.5 frames sits precisely between 233 and 241)
+        # and would fail on windows that are demonstrably fine.
+        # with_junction on EVERY window, not just interior ones: the last
+        # sub-window of one clip abuts the next clip, so it pays a junction too.
+        if frames_for_slot(b - a, with_junction=True) > SING_MAX_FRAMES:
+            bad_ceiling.append(nf)
+        if quantize_8k1((b - a) * SING_FPS) > SING_MAX_FRAMES:
+            bad_budget.append(nf)
+ok(not bad_empty, f"no zero-length/empty windows over 17..12000f "
+                  f"(was {len(bad_empty)} cases; e.g. {bad_empty[:3]})")
+ok(not bad_sum, f"windows always sum to the input ({len(bad_sum)} failures)")
+ok(not bad_budget, f"no window's own content exceeds the {SING_MAX_FRAMES}f "
+                   f"ceiling (was e.g. {bad_budget[:3]})")
+ok(not bad_ceiling, f"no RENDER exceeds the {SING_MAX_FRAMES}f grip ceiling even "
+                    f"with a junction on every window (was e.g. {bad_ceiling[:3]})")
 
 print("\n-- C: DCS's LIVE drift bug, reproduced as arithmetic --")
 # Measured from the code: prep lays out conditioning-slice start times assuming

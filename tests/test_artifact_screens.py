@@ -99,6 +99,31 @@ empty = summarize(ribbon_series(os.path.join(SCRATCH, "does_not_exist.mp4")))
 ok(empty["p95"] == 999.0 and ribbon_verdict(empty["p95"], empty["max"]) == "infested",
    "an undecodable clip scores 999 and is called infested, not clean")
 
+print("\n-- D2: the verdict THRESHOLDS themselves are pinned --")
+# Red team, 2026-08-04: mutating RIBBON_P95_INFESTED 0.50->5.0 and
+# RIBBON_P95_CLEAN 0.30->3.0 both SURVIVED the original suite -- the known-bad
+# fixture also trips RIBBON_MAX_INFESTED, so the max branch was carrying the
+# assertion and 2 of the 3 constants were free to drift. These pin each branch
+# directly, including the eye-check band that no fixture produced.
+from features.song_video.artifact_screens import (  # noqa: E402
+    RIBBON_MAX_INFESTED, RIBBON_P95_CLEAN, RIBBON_P95_INFESTED,
+)
+ok(RIBBON_P95_CLEAN < RIBBON_P95_INFESTED,
+   f"the clean/infested band is ordered ({RIBBON_P95_CLEAN} < {RIBBON_P95_INFESTED})")
+ok(ribbon_verdict(RIBBON_P95_INFESTED, 0.0) == "infested",
+   f"p95 exactly {RIBBON_P95_INFESTED} is infested (boundary is inclusive)")
+ok(ribbon_verdict(RIBBON_P95_CLEAN - 0.001, 0.0) == "clean",
+   f"p95 just under {RIBBON_P95_CLEAN} is clean")
+ok(ribbon_verdict(0.40, 0.0) == "eye-check",
+   "a p95 between the two thresholds asks for the EYE -- the band exists and is "
+   "reachable, which no fixture in this file happens to produce")
+ok(ribbon_verdict(0.0, RIBBON_MAX_INFESTED) == "infested",
+   f"a single frame at max {RIBBON_MAX_INFESTED} condemns the window even when "
+   f"p95 is clean -- one bad frame is still a bad frame")
+ok(0.3 <= RIBBON_P95_INFESTED <= 0.7 and 0.2 <= RIBBON_P95_CLEAN <= 0.4,
+   "thresholds stay in the eye-calibrated range (0.50 / 0.30); moving them "
+   "outside it needs a new calibration against known-good AND known-bad")
+
 print("\n-- E: pair index -> timestamp lands on the CHANGED frame --")
 # ribbon_series index i is the pair (i, i+1); the artifact is on i+1. Dumping
 # frame i instead shows the frame BEFORE the artifact and reads as clean.

@@ -83,10 +83,46 @@ else:
        f"all {len(INTERLUDES)} mislabelled 'interlude' windows are caught "
        f"({caught}/{len(INTERLUDES)}) -- the 79-second undriven-mouth bug, gated")
 
-    # And the gate must NOT simply flag everything, or it is worthless.
-    quiet_probe = check_window(STEM, 0.0, 4.0, labelled_sung=False)
-    print(f"       song intro 0-4s: {quiet_probe['mean_dbfs']:.1f} dBFS -> "
-          f"{'flagged' if quiet_probe['disagreement'] else 'accepted as quiet'}")
+    # NEGATIVE CONTROLS, ASSERTED not printed. Red team, 2026-08-04: group C
+    # alone is trivially satisfiable -- a gate hardwired to "always condition"
+    # passes it. Without a real-song negative, any floor in a ~60 dB range
+    # passes the suite. These pin the other end against REAL audio.
+    outro = check_window(STEM, 197.0, 209.0, labelled_sung=False)
+    ok(outro["must_condition"] is False and outro["disagreement"] is None,
+       f"the real outro (vocals end ~192s) rests: energy in "
+       f"{outro['energy_voiced_frac'] * 100:.0f}% of it, no false alarm")
+    intro = check_window(STEM, 0.0, 4.0, labelled_sung=False)
+    ok(intro["must_condition"] is False,
+       f"the real song intro rests too ({intro['energy_voiced_frac'] * 100:.0f}% "
+       f"energy) -- the gate discriminates on real audio, not just on silence")
+
+    # THE DILUTION REGRESSION (red team H1). At the real 19.7s production window
+    # size, a mean-based check reads -42.6 dBFS on this window and calls it
+    # instrumental -- rebuilding the exact 79-second undriven-mouth bug this
+    # module exists to prevent. The fraction-based check must catch it.
+    w10 = check_window(STEM, 174.71, 194.42, labelled_sung=False)
+    ok(w10["must_condition"] is True,
+       f"w10 (174.7-194.4s) is CONDITIONED: {w10['energy_voiced_frac'] * 100:.0f}% "
+       f"of it carries energy, peak {w10['peak_dbfs']:.1f} dBFS -- a window mean "
+       f"({w10['mean_dbfs']:.1f}) would have called this instrumental")
+    sub = check_window(STEM, 184.0, 185.0)
+    ok(sub["must_condition"] == w10["must_condition"],
+       "a strict SUBSET of that window agrees with it -- no self-contradiction")
+
+print("\n-- C2: energy may ADD conditioning but must never REMOVE it --")
+if os.path.isfile(STEM):
+    # Ledger rule is one-directional: "any window ABOVE the floor MUST be
+    # conditioned no matter what any map says." The reverse was never
+    # authorized. An earlier draft enforced it and would override a CORRECT
+    # human label, telling the operator the map was stale when it was right.
+    r = check_window(STEM, 197.0, 209.0, labelled_sung=True)
+    ok(r["must_condition"] is True,
+       "a quiet window LABELLED sung is still conditioned -- the label wins")
+    ok(r["disagreement"] is not None,
+       "...and the map/song conflict is still reported rather than swallowed")
+    r2 = check_window(STEM, 197.0, 209.0, intervals=[(197.0, 209.0)])
+    ok(r2["must_condition"] is True,
+       "a quiet window the VAD calls fully voiced is still conditioned")
 
 print("\n-- D: a genuinely instrumental window still conditions on silence --")
 r = check_window(silent, 0.0, 5.0, labelled_sung=False)
@@ -103,6 +139,11 @@ ok(abs(voiced_fraction([(0.0, 5.0)], 0.0, 10.0) - 0.5) < 1e-9, "half-covered win
 ok(voiced_fraction([], 0.0, 10.0) == 0.0, "no intervals = 0.0")
 ok(abs(voiced_fraction([(-5.0, 15.0)], 0.0, 10.0) - 1.0) < 1e-9,
    "an interval overhanging both ends clamps to 1.0, never above")
+# The clamp only actually MATTERS for overlapping intervals -- per-interval
+# clipping already handles overhang, so the assertion above passes even with
+# the clamp deleted (red team L5). This is the case that needs it.
+ok(abs(voiced_fraction([(0.0, 10.0), (0.0, 10.0)], 0.0, 10.0) - 1.0) < 1e-9,
+   "two OVERLAPPING full-coverage intervals still give 1.0, not 2.0")
 
 print("\n-- G: strict mode raises instead of logging (unattended paths) --")
 try:
