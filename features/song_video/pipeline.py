@@ -31,6 +31,50 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 
 
+# Largest REQUESTED frame proven to render on a 16GB card with LTX-2 Dev19B:
+# the DCMVS lip-sync size. Bigger requests round up past what the card carries
+# and hang at step 0 rather than erroring, so this is a hard ceiling, not a
+# preference. Raise it only with a rendered clip as evidence.
+SAFE_REQ_PIXELS = 960 * 544
+SAFE_FALLBACK_RES = (960, 544)
+ROOMY_VRAM_GB = 24.0
+
+
+def _detected_vram_gb() -> float | None:
+    """Total VRAM in GB, or None if it cannot be measured."""
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return round(int(r.stdout.strip().splitlines()[0].strip()) / 1024, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _clamp_res_for_gpu(w: int, h: int, log) -> tuple:
+    """Hold the requested frame to what this GPU can actually finish.
+
+    Fails CLOSED when VRAM is unmeasurable: a smaller render is a recoverable
+    disappointment, a step-0 deadlock hangs the worker until the poll timeout
+    and looks to the user like the app is simply broken.
+    """
+    if w * h <= SAFE_REQ_PIXELS:
+        return w, h
+    vram = _detected_vram_gb()
+    if vram and vram >= ROOMY_VRAM_GB:
+        return w, h
+    sw, sh = SAFE_FALLBACK_RES
+    log.warning(
+        "[song-video] resolution clamp: %dx%d -> %dx%d (VRAM %s GB). LTX-2 rounds "
+        "the frame up to a 64-multiple and anything above %dx%d deadlocks at step 0 "
+        "on this card instead of erroring.",
+        w, h, sw, sh, ("%.1f" % vram) if vram else "unknown", *SAFE_FALLBACK_RES)
+    return sw, sh
+
+
 def _extract_last_frame(video_path: str, out_path: str) -> str | None:
     """Extract the actual last frame of a video as a lossless PNG.
 
@@ -634,6 +678,16 @@ def run_song_pipeline(job, photo_path, settings):
                         "on this GPU as of 2026-08-01, forcing model default.", ow, oh)
         _native = video_generator.MODELS.get(model_name, {}).get("res") or (1032, 580)
         tw, th = _native
+    # 2026-08-04 (Andrew's own studio test, job 92de7ecf7fb4 21:09): the
+    # NON-lip_sync path took the registered native 1032x580 and deadlocked --
+    # "Step 0/8" repeating every 2s forever, GPU pinned, no progress, no error.
+    # LTX-2 rounds the frame UP to a 64-multiple (1032x580 -> 1088x640, 33pct
+    # more pixels than the proven 960x544 -> 960x512) and a 16GB card cannot
+    # carry it. The lip_sync branch above got a proven size months ago; this
+    # branch never did, so every plain song-video job on this box was dead on
+    # arrival. Clamp applies to ALL paths -- an explicit override cannot opt
+    # into a deadlock either.
+    tw, th = _clamp_res_for_gpu(tw, th, log)
     # lane 3C: on the lip_sync path, clamp video guidance down to the model's
     # registered value (3.0 for Distilled) -- documented: >3.5 makes text
     # guidance fight the source identity, and no layer below here clamps it

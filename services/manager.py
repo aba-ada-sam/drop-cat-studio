@@ -743,6 +743,22 @@ def _kill_by_port(port: int, label: str, wait_release: bool = False) -> bool:
     return killed_any
 
 
+def _worker_is_busy(timeout: float = 3.0) -> bool:
+    """True only when the WanGP worker answers AND reports an active job.
+
+    Deliberately conservative: an unreachable, frozen, or malformed responder
+    returns False so a genuinely dead worker still gets evicted. Only a live
+    worker that says "busy" is protected.
+    """
+    try:
+        url = "http://127.0.0.1:%d/health" % WANGP_WORKER_PORT
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        return bool(data.get("busy"))
+    except Exception:
+        return False
+
+
 def kill_orphans_at_startup() -> None:
     """Synchronously evict orphan WanGP / ACE-Step workers on app startup.
 
@@ -752,7 +768,28 @@ def kill_orphans_at_startup() -> None:
 
     Fast path: netstat + taskkill /F /T on ports 7899 and 8020 (~1s).
     Backstop: WMIC command-line scan for orphans on different ports (~10s).
+
+    "Orphan" means LEFT OVER, not "someone else's". Two guards, both added
+    2026-08-04 after this function repeatedly killed LIVE renders:
+
+    1. Under test (DCS_NO_GPU_EVICT / PYTEST_CURRENT_TEST), do nothing. The
+       suite boots the real app in-process, so every test run was executing
+       this and taking down whatever the GPU was doing -- it killed a running
+       DCMVS render mid-clip at 21:02 and again at 21:09.
+    2. If the worker on the port answers /health and reports itself BUSY, it
+       is serving a job right now and is by definition not an orphan. Leave
+       it, log it, let the caller decide. A frozen or unreachable worker is
+       still evicted, which is the case this function was written for.
     """
+    if os.environ.get("DCS_NO_GPU_EVICT") or os.environ.get("PYTEST_CURRENT_TEST"):
+        log.info("Startup GPU eviction SKIPPED (test environment) -- "
+                 "a live render would otherwise be killed by this boot")
+        return
+    if _worker_is_busy():
+        log.warning("Startup GPU eviction SKIPPED -- the WanGP worker on port %s "
+                    "is serving a job right now (not an orphan). Leaving it alone.",
+                    WANGP_WORKER_PORT)
+        return
     log.info("Evicting any orphan GPU workers from prior session...")
     _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
     _kill_by_port(ACESTEP_PORT, "ACE-Step", wait_release=True)
