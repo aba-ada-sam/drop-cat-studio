@@ -1,5 +1,19 @@
 # Scene-prep pass -- per-run vision director + deterministic executors
 
+## PRIME RULE (Andrew, 2026-08-05 ~2:18 PM): CHARACTER-GENERAL, NEVER
+## CHARACTER-CODED. "Stop hardcoding around this character, we're going to be
+## creating lots of different characters doing lots of different things."
+## Identity is NEVER a generation problem: scene anchors are built by
+## TRANSPLANT (matte the user's subject pixels, paste onto an EMPTY generated
+## plate, harmonize with the face frozen, occlude with plate foreground) --
+## the generator only ever renders empty plates, and the video model carries
+## identity from the anchor by conditioning. Measured basis, same day: every
+## generative identity channel failed on a novel character (prompt cousins,
+## reference-only, IP-Adapter -- CLIP gist compresses away brow folds and
+## irises; the checkpoint prior fills them wrong), while the transplant
+## preserved the face exactly. Per-character LoRAs are demoted to optional
+## admin polish -- never load-bearing, never required per user.
+
 Andrew's ruling 2026-08-05 (~1:55 PM), after watching hand-placed masks fail to
 generalize: "hardcoding coordinates and instructions for a single image isn't
 going to work, you'll need some sort of API to help you make these decisions
