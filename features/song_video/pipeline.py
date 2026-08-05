@@ -698,7 +698,8 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
     from features.song_video import sync_qc
     seeds = _seed_pool(base_seed, n, clip_index)
     base, ext = os.path.splitext(out_path)
-    best = None  # (score, path)
+    best = None            # (score, path) -- artifact-clean takes only
+    worst_fallback = None  # (score, path) -- screened-out takes, last resort
     for sd in seeds:
         attempt = f"{base}_s{sd}{ext}"
         res_path = gen_fn(sd, attempt)
@@ -719,9 +720,35 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
             from features.song_video.artifact_screens import screen_window
             _sc = screen_window(res_path)
             _ribbon = _sc["ribbon_verdict"]
-            if _ribbon == "infested":
-                log_fn(f"[best-of-{len(seeds)}] seed {sd}: REJECTED -- ribbon artifacts "
-                       f"(p95 {_sc['ribbon']['p95']:.2f}); not ranked")
+            # DECODE FAILURE IS NOT AN ARTIFACT VERDICT. An empty series scores
+            # p95=999 and reads as "infested", so a missing/zero-byte/truncated
+            # /audio-only file was being reported to the operator as "ribbon
+            # artifacts (p95 999.00)" -- a confidently wrong diagnosis of a
+            # file ffprobe simply could not read. Say what actually happened and
+            # let ranking decide, matching how an exception in the screen behaves.
+            if _sc["ribbon"]["n"] == 0:
+                log_fn(f"[best-of-{len(seeds)}] seed {sd}: artifact screen could not "
+                       f"decode this take (0 frame-pairs) -- not an artifact verdict")
+                _ribbon = None
+            elif _ribbon == "infested":
+                # HELD BACK, not discarded. Returning None when every take is
+                # infested makes the caller read the clip as a DEAD RENDER: it
+                # restarts the WanGP worker, waits up to 90s, and re-renders
+                # once with no screen at all -- so the screen throws away N real
+                # takes and then ships an unscreened one. Measured on this
+                # session's own output, 41% of takes are infested, so at
+                # best_of_n=3 roughly 7% of clips would take that path and a
+                # 12-clip job would hit it more often than not. Keep the take as
+                # a last resort instead; a screened-and-flagged clip beats a
+                # pointless service restart followed by an unscreened one.
+                _p95 = _sc["ribbon"]["p95"]
+                log_fn(f"[best-of-{len(seeds)}] seed {sd}: ribbon artifacts "
+                       f"(p95 {_p95:.2f}) -- held back")
+                # Ranked by ribbon score, not sync score: this take has not been
+                # scored yet, and among takes we would rather not ship, the
+                # least-infested one is the right last resort.
+                if worst_fallback is None or _p95 < worst_fallback[0]:
+                    worst_fallback = (_p95, res_path)
                 continue
             if _ribbon == "eye-check":
                 log_fn(f"[best-of-{len(seeds)}] seed {sd}: ribbon p95 "
@@ -742,13 +769,28 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
             log_fn(f"[best-of-{len(seeds)}] seed {sd}: QC failed ({_e}) -- scored 0")
         if best is None or score > best[0]:
             best = (score, res_path)
-        # Early-accept only a take that is BOTH synced and artifact-clean. A
-        # take in the eye-check band keeps the loop running: if a cleaner one
-        # also syncs, take that instead.
-        if r is not None and sync_qc.is_synced(r) and _ribbon == "clean":
-            log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate and is "
-                   f"artifact-clean -- keeping it")
+        # Early-accept a take that is synced AND not known-dirty. `_ribbon is
+        # None` means the screen could not run or could not decode -- treated as
+        # NO INFORMATION, not as a failure, because requiring == "clean" made
+        # early-accept structurally impossible whenever the screen was
+        # unavailable: every job silently burned all N seeds (~2-3x the GPU
+        # time, ~+28 min on a 12-clip best-of-3) with nothing in the log to
+        # explain it. Only the eye-check band deliberately keeps looking, in
+        # case a cleaner take also syncs.
+        if r is not None and sync_qc.is_synced(r) and _ribbon in (None, "clean"):
+            log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate"
+                   f"{' and is artifact-clean' if _ribbon == 'clean' else ''} -- keeping it")
             break
+    if best is None and worst_fallback is not None:
+        # Every take was screened out. Ship the least-dirty one rather than
+        # returning None: the caller treats None as a dead render and answers
+        # with a WanGP restart plus an UNSCREENED retry, so returning None here
+        # both wastes the renders we already paid for and defeats the screen.
+        _p95, _fb = worst_fallback
+        log_fn(f"[best-of-{len(seeds)}] every take showed ribbon artifacts -- "
+               f"shipping the least-affected (p95 {_p95:.2f}). LOOK AT THIS CLIP: "
+               f"the screen wanted to reject all {len(seeds)} of them.")
+        best = (0.0, _fb)
     if best is None:
         return None
     score, best_path = best
@@ -854,7 +896,13 @@ def _isolate_guide_vocals(audio_wav, job_dir):
         log.info("[song-video] No singing detected -- conditioning on the (silent) stem anyway")
 
     log.info("[song-video] Lip sync: conditioning on isolated vocals (%s)", os.path.basename(out))
-    return out
+    # The intervals go BACK to the caller. They used to be computed here and
+    # thrown away, which made the per-window energy check downstream a measured
+    # no-op: with no VAD opinion and no plan label to compare against, it could
+    # never report a disagreement, so the check written to catch the
+    # 79-second undriven-mouth bug could not have detected it. Handing the
+    # intervals over is what makes the "VAD under-read this window" branch live.
+    return out, _iv
 
 
 def _build_face_crop(src_path, tw, th, out_path):
@@ -916,8 +964,19 @@ def _do_song_gpu_phase(
     from app import gallery_push
     from features.fun_videos import video_generator
 
+    # Declared before _log because _log writes to it (closure over this list).
+    _last_error: list[str | None] = [None]
+
     def _log(msg):
         log.info(msg)
+        # Keep the last real error the generator reported. video_generator
+        # LOGS the worker's message and then returns None, so without this the
+        # specific diagnosis (e.g. the worker refusing an audio-conditioned
+        # request and naming the resolution/audio-token cause) never reaches
+        # the job's final error and everything collapses into the generic
+        # "No clips generated" bucket.
+        if isinstance(msg, str) and msg.startswith("[error] Generation failed:"):
+            _last_error[0] = msg.removeprefix("[error] ").strip()
         display = msg.removeprefix("[info] ").removeprefix("[error] ").removeprefix("[warning] ").removeprefix("[success] ")
         job.update(message=display)
 
@@ -942,7 +1001,6 @@ def _do_song_gpu_phase(
     else:
         log.info("[song-video] No keyframes available -- using chain frame approach")
 
-    _last_error: list[str | None] = [None]
     _chain_frame: str | None = None   # last frame of previous clip -> first frame of next
     _clip_secs: list[float] = []      # per-clip wall-clock times for ETA
 
@@ -967,9 +1025,11 @@ def _do_song_gpu_phase(
     # (audio fits) and best-of-N (best_of_n>1 ranks takes by mouth motion), this
     # is what beats the seed lottery. Both pieces degrade gracefully.
     _guide_audio = audio_wav
+    _orig_prepped_photo = None
     if _want_face_framing and photo_path and os.path.isfile(photo_path):
         _face = str(job_dir / "face_framed.png")
         if _build_face_crop(photo_path, tw, th, _face):
+            _orig_prepped_photo = prepped_photo   # so a later degrade can undo this
             prepped_photo = _face
             log.info("[song-video] Framed source on the face (mouth in lower third)")
     if _lip_sync:
@@ -984,18 +1044,32 @@ def _do_song_gpu_phase(
         # to an unconditioned render and says so. Neither path ever conditions
         # on the full mix, which is the rule that actually matters.
         _lip_sync_explicit = "lip_sync" in settings
+        _guide_intervals: list = []
         try:
-            _guide_audio = _isolate_guide_vocals(audio_wav, job_dir)
-        except GuideIsolationError as e:
+            _guide_audio, _guide_intervals = _isolate_guide_vocals(audio_wav, job_dir)
+        # Catch Exception, not just GuideIsolationError: isolation reaches into
+        # the MuseTalk venv and soundfile, and a plain ImportError or a CUDA OOM
+        # inside Demucs is exactly as fatal to an implicit-default job as a
+        # clean GuideIsolationError. Catching only our own type left those
+        # escaping uncaught and killing the very jobs this branch protects.
+        except Exception as e:
             if _lip_sync_explicit:
                 raise
             log.warning("[song-video] Lip sync was not explicitly requested and vocal "
-                        "isolation is unavailable (%s) -- rendering WITHOUT audio "
+                        "isolation is unavailable (%s: %s) -- rendering WITHOUT audio "
                         "conditioning. The mouth will not be driven. Pass "
-                        "lip_sync=false to make this explicit, or fix isolation.", e)
+                        "lip_sync=false to make this explicit, or fix isolation.",
+                        type(e).__name__, e)
             _lip_sync = False
-            _want_face_framing = False
             _guide_audio = None
+            # prepped_photo was ALREADY replaced with the tight face crop above
+            # (framing runs before isolation), and face framing exists only to
+            # serve conditioning. Undo it, or an unconditioned render ships as a
+            # face close-up -- the exact default-behaviour change the
+            # 2026-08-03 rollback comment above was written to prevent.
+            _want_face_framing = False
+            if _orig_prepped_photo is not None:
+                prepped_photo = _orig_prepped_photo
 
         # The window rule, mechanised (LIPSYNC_LEDGER 2026-08-04): measure each
         # planned window's energy on the ISOLATED stem and condition anything
@@ -1007,10 +1081,15 @@ def _do_song_gpu_phase(
             if _guide_audio is None:
                 raise RuntimeError("no vocal stem (unconditioned render)")
             from features.song_video.window_energy import check_plan
+            # `intervals` is what makes this check able to say anything at all:
+            # without a VAD opinion AND without a plan label, every disagreement
+            # branch is unreachable and the whole pass is a no-op that logs
+            # nothing while looking like a safeguard.
             _wins = [{"t0": float(_st),
                       "t1": float(_st) + max(4.0, min(12.0, float(
                           _arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur))),
-                      "labelled_sung": None}
+                      "labelled_sung": None,
+                      "intervals": _guide_intervals}
                      for _st, _arc in zip(_clip_start_times, story_arc)]
             check_plan(_guide_audio, _wins, log=lambda m: log.info("[song-video] %s", m))
         except Exception as e:
@@ -1246,6 +1325,17 @@ def _do_song_gpu_phase(
             break
 
         if not clip_path:
+            # RECORD WHY. This branch previously left _last_error[0] as None, so
+            # any generator failure that returned None instead of raising -- the
+            # worker's own explanatory refusals included -- was laundered into
+            # the job's generic "No clips generated -- check WanGP is running".
+            # That string is the ledger's standing unsolved item (~23% of jobs,
+            # no root cause on record) precisely because it is where specific
+            # diagnoses go to die. Keep whatever the generator last said.
+            _last_error[0] = _last_error[0] or (
+                f"Clip {clip_num} produced no output. If the job is audio-conditioned, "
+                f"check the worker log for a refusal (resolution vs audio-token budget) "
+                f"before assuming WanGP is down.")
             # Timeout or copy failure -- restart WanGP to clear degraded state
             # and retry once. After ~20 clips WanGP can hang at Step 0 due to
             # VRAM fragmentation; a restart clears it in ~35 seconds.
