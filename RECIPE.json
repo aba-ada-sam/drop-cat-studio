@@ -1,0 +1,83 @@
+{
+  "_what": "THE shared lip-sync recipe -- single source of truth for DropCat-Studio (features/song_video) and DCMVS-restored (chain.py). Change values ONLY with a LIPSYNC_LEDGER.md entry + evidence, per the ledger's own rule.",
+  "_provenance": "Assembled 2026-08-04 late night from LIPSYNC_LEDGER.md CURRENT RECIPE (verified against live code the same night) after the blind-label session vindicated end_anchor=true 6/6. DCS enforces parity via tests/test_recipe.py; DCMVS wiring is a flagged next step (see dcmvs section).",
+  "version": 1,
+
+  "model": {
+    "name": "ltx2_distilled",
+    "checkpoint": "ltx-2-19b-distilled-fp8_diffusion_model.safetensors",
+    "wangp_commit": "3ba3863",
+    "wangp_path_5080": "C:/pinokio/api/wan.git/app",
+    "local_patch_files": [
+      "models/ltx2/ltx2_handler.py",
+      "models/ltx_video/configs/ltxv-13b-0.9.8-dev.yaml",
+      "defaults/ltx2_distilled.json"
+    ],
+    "local_patch_note": "THREE dirty files, not two -- the third (TeaCache keys) is inert for LTX-2 but must be copied for true parity. Folder names are INVERTED between boxes; never reason by path name."
+  },
+
+  "render": {
+    "width": 960,
+    "height": 544,
+    "actual_note": "LTX-2 ceil-rounds to 64-multiples: 960x544 RENDERS AS 960x512. 1024x576 is the untested exact-16:9 candidate.",
+    "fps": 24,
+    "steps": 8,
+    "guidance_scale": 3.0,
+    "guidance_note": "Distilled FORCES guidance to 1.0 internally -- 3.0 is passed because audio_cfg mirrors it, and THAT passes through.",
+    "audio_cfg_scale": 3.0,
+    "audio_scale": 0.6,
+    "input_video_strength": 0.69,
+    "end_anchor": true,
+    "end_anchor_note": "Blind-labeled 6/6 on 2026-08-04: all three anchor-ON takes GOOD, all three anchor-OFF BAD (camera push-in + identity morph). Vindicated; do not flip without new human labels.",
+    "sliding_window_size": 481
+  },
+
+  "frames": {
+    "quantize": "8k+1",
+    "grip_ceiling": 249,
+    "grip_note": "Audio conditioning stops gripping past ~250 frames; renders fine, silently stops syncing. Content budget 236f leaves trim+junction headroom.",
+    "content_max": 236
+  },
+
+  "assembly": {
+    "head_trim_s": 0.08,
+    "tail_trim_s": 0.20,
+    "crossfade_s": 0.12,
+    "rule": "headroom-then-trim for fresh renders; pad-with-clones only for SE-anchored already-rendered material"
+  },
+
+  "conditioning_audio": {
+    "source": "isolated vocal stem, NEVER the raw mix",
+    "highpass_hz": 150,
+    "phrase_gate": "silero, 0.18s soft ramps, SILENT slice for zero-phrase windows, over-mute breaker >85%",
+    "energy_assert": "every conditioning input asserts energy AT CREATION -- whole stem and per slice; a silent guide aborts loudly (2026-08-04 rule, three incidents)"
+  },
+
+  "acceptance": {
+    "screens_before_ranking": true,
+    "ribbon_gate": { "p95_max": 0.30, "abs_max": 1.0 },
+    "ribbon_note": "The ONE metric validated at both ends; red-strand and glyph detectors are eye-screens only, never gates.",
+    "sync_rank_floor": 0.12,
+    "sync_enforce": false,
+    "sync_enforce_note": "DISARMED 2026-08-04: the floor was inverted against Andrew's blind labels (his approved takes score 0.001; his rejects clear the floor). Advisory logging only until a scorer is recalibrated against human labels. Re-arm ONLY in the same commit as that recalibration.",
+    "scorer_status": "mouth_sync_score + total_motion are whole-frame, unmasked, no ROI -- neither may gate or auto-select. Replacement metric (aperture-during-voiced) v1 discarded for ROI drift; needs per-frame head re-detection."
+  },
+
+  "tiers": {
+    "format_s": 30.0,
+    "format_note": "Andrew 2026-08-04 ~22:55: 30 seconds for EVERYONE -- superseded his own 60s-admin spec from ~21:00. Tiers differ only in take budget.",
+    "clip_s": 6.0,
+    "num_clips": 5,
+    "admin_best_of_n": 6,
+    "user_best_of_n": 3
+  },
+
+  "per_device": {
+    "5080": { "vram_gb": 16, "max_safe_pixels": 522240, "safe_fallback": [960, 544] },
+    "3060": { "vram_gb": 12, "max_safe_pixels": null, "note": "UNMEASURED -- fit test (144f, production recipe, anchor ON) pending; fill max_safe_pixels from its result, enforce via _clamp_res_for_gpu" }
+  },
+
+  "dcmvs": {
+    "status": "NOT YET WIRED -- chain.py still carries its own constants. Known divergences to reconcile when wired: FRAMES_PER_CLIP=481 (predates the 249 grip ceiling; runs override per-call), CROSSFADE_SEC=0.0 (DCS assembles at 0.12), INPUT_VIDEO_STRENGTH=None (worker falls back to 0.69), SEEDS_PER_CLIP=1 (best-of driven by CLI). Wiring rule: additive loader, default-off env flag, parity test first, never a silent behavior change on the production system of record."
+  }
+}

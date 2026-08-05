@@ -69,8 +69,16 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   A-cell s202/s303 measurably drift (tracker offsets -98,-35 / -120,+75) and are still
   GOOD -- mild drift is acceptable; the B-cell push-in + identity morph is what gets
   rejected. "Holds framing" was the wrong variable; "keeps identity/shot integrity" fits
-  all 6. (4) The 60s segments carry audio (verified aac stream) so the skips were not a
-  mux defect -- they remain unlabeled; re-serve only if Andrew wants.
+  all 6. (4) CORRECTED same night by 3060-plan: my "audio present so not a mux defect"
+  was STREAM-EXISTS-NOT-CONTENT-CORRECT -- the judge page served RAW PRE-MUX work2/
+  intermediates whose aac track is the isolated 150Hz-high-passed vocal GUIDE (measured
+  7-9dB quieter, low end gone), i.e. Andrew was asked to judge a music video with no
+  music. The six skips are VOID as evidence. Fixed: six clips re-muxed against the
+  assembled cut's healthy audio at verified 10s offsets (re-mux profile -20.8/-24.5
+  matches the good clips), originals in work2/premux_backup/, void skip labels cleared
+  so the page re-offers them. RULE (3060-plan's, best lesson of the night): VERIFY THE
+  STIMULUS BEFORE THE PROTOCOL -- four careful blinding rules, zero checks that the
+  thing being judged was fit to judge; ceremony made a broken stimulus look rigorous.
 - ACTIVE (late night, helper, Andrew-delegated ruling) | SYNC-OR-DIE DISARMED: the gate
   was inverted against ground truth on first human contact. Of the six ablation takes
   Andrew approved exactly ONE (seed 101 anchor-ON): verdict=static rank 0.001 -- which
