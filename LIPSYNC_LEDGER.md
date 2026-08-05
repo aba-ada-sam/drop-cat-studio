@@ -58,6 +58,16 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
 ================================================================================
+- ACTIVE (evening ~20:15) | V15 SHIPPED -- the full new stack in one cut: judge
+  v2 selection (all 7 clips judge-kept; scores 0.85-6.75; the two low winners
+  had thin pools, frame-checked alive), SMART seams live (7 variable clips at
+  vocal gaps: 9.0/10.0/8.0/9.0/9.7/10.0/5.0s, no end stub), scene pattern
+  A-B-B-A-A-B-A (bookend rule holds), 4 seeds/clip, 85 min wall (judge v2
+  double-window + per-take SAM adds ~2x -- optimization queued). Per-scene
+  DOF followed the VARIABLE seam map (5 consolidated mask segments -- same-
+  scene neighbors share one segment). Pixel check: 7/7 clips articulate.
+  First MOBILE aesthetic decision: page published to the site /decide/v15
+  (warehouse two-hop), Telegram link to Andrew, answer rides the Buddy chat.
 - CLOSED by Andrew ~18:50 | 'oon/oom' RESOLVED -- HP150 STAYS: after the
   pinned-seed A-B (oon2 pair, seed 314159), Andrew: "stick with current
   recipe and consider the 'oon' problem solved." No recipe change; the

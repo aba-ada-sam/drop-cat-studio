@@ -87,6 +87,21 @@ DCS repo commit 379d77d (pushed).
   done at close-out)
 - dropcat-video-wan: c6efbcd on sing-audio-conditioning (pushed)
 
+## Late-evening delta (~20:20)
+
+v14 FAILED Andrew's eye on B clips -> judge v1 was blind (crop divergence,
+see ledger) -> judge v2 (per-take crops + sync contrast) built, validated,
+and v15 rendered with the FULL new stack: judge v2 + smart seams (7 variable
+clips at vocal gaps) + scene pattern A-B-B-A-A-B-A + 4 seeds. Pixel check
+7/7 clips articulate. Local page review_0805_12.html; mobile decision page
+at the site /decide/v15/ + Telegram link (Andrew is out; his reply rides
+the Buddy chat -> board pipe). oon CLOSED by Andrew (HP150 stays). Engine
+commits through 2dac2d0/f9e8876; scene_prep director module built+validated
+(1839b76); parity tests 19/19 (aaffedf). DC probe agent still hunting
+serverless placement; per-job PODS recommended to Andrew as the primary
+path (his 'open to ideas' answered ~19:59; awaiting his pick; volume cost
+answer: ~7/mo per copy, shrink to 50GB planned).
+
 ## The queue (if resuming cold)
 
 1. v14 done? -> per-scene DOF (scratchpad dof_v14.sh) -> extract frames,
