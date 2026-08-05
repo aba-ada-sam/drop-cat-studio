@@ -108,7 +108,7 @@ SAFE_DEFAULTS: dict = {
     # 129 UI default from 2026-04-27 (1fb1384) and silently killed sync on every
     # clip longer than 129 frames rendered through DCS's worker -- including all
     # 18+ failed seeds on 2026-08-03. Keep in lockstep with
-    # C:\DCMVS-restored\core\wangp_models.py.
+    # C:\DropCat-Studio\engine\core\wangp_models.py.
     "sliding_window_size": 481,
     "sliding_window_overlap": 17,
     "sliding_window_discard_last_frames": 0,

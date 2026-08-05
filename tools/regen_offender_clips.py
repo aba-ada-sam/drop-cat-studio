@@ -18,8 +18,8 @@ Usage (local or pod; only stdlib + ffmpeg + the DCS repo on sys.path):
     --image uploads/awm_alien_source.png \
     --offenders 2:17.05:36.76 7:115.58:135.29 \
     --worker http://127.0.0.1:7899 \
-    --make-clip C:/DCMVS-restored/make_clip.py \
-    --sync-qc  C:/DCMVS-restored/sync_qc.py \
+    --make-clip C:/DropCat-Studio/engine/make_clip.py \
+    --sync-qc  C:/DropCat-Studio/engine/sync_qc.py \
     --takes 3 --out final_fixed.mp4
 
 --offenders entries are INDEX:START:END in seconds (from the offender report).

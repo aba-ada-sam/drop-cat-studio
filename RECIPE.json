@@ -4,7 +4,7 @@
   "version": 3,
 
   "production": {
-    "engine": "DCMVS chain.py (C:/DCMVS-restored) -- Andrew's 2026-08-05 rollback ruling returned production to the golden engine; DCS song_video = safety wiring + future UI wrapper",
+    "engine": "chain.py at C:/DropCat-Studio/engine (its own git repo, dcmvs-lipsync; moved from C:/DCMVS-restored 2026-08-05 evening, Andrew's folder-confusion fix) -- Andrew's 2026-08-05 rollback ruling returned production to the golden engine; DCS song_video = safety wiring + future UI wrapper",
     "ratified_command": "python chain.py --image <src> --song <30s excerpt> --output <mp4> --worker http://127.0.0.1:7899 --seeds-per-clip 3 --frames-per-clip 241 --crossfade 0.15",
     "ratified_chain": "v3 engine win -> v4 clip cap (identity, eyes hold) -> v5b seams (0.15s dissolve, overlapped audio) -> v12 alternating scenes (A-B-A, Andrew: 'looks and sounds good' 2026-08-05 ~14:55) -- each step human-judged",
     "multi_scene": {
@@ -69,7 +69,7 @@
   "conditioning_audio": {
     "source": "isolated vocal stem, NEVER the raw mix",
     "highpass_hz": 150,
-    "highpass_change_candidate": "HP80. Measured 2026-08-05 (envelope diagnostic, adam30): HP150 SPLITS 4/29 sung spans into extra energy humps (the 'oon/oom' double-articulation Andrew flagged in v6) -- those spans keep only 16-29% of their energy at 150. 3 of 4 heal at 80, which still cuts the sub-80Hz beat band. Change ONLY via pinned-seed A-B render + Andrew's ear + ledger entry.",
+    "highpass_note": "150 RE-RATIFIED by Andrew 2026-08-05 evening after a pinned-seed A-B (oon2 pair, seed 314159, HP150 vs HP80): 'stick with current recipe and consider the oon problem solved.' The HP80 candidate is CLOSED; the envelope diagnosis (150 splits 4/29 sung spans) stands as documentation, and chain.py's --vocal-highpass stays as a diagnostic knob only.",
     "phrase_gate": "silero, 0.18s soft ramps, SILENT slice for zero-phrase windows, over-mute breaker >85%",
     "energy_assert": "every conditioning input asserts energy AT CREATION -- whole stem and per slice; a silent guide aborts loudly (2026-08-04 rule, three incidents)"
   },

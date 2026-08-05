@@ -58,6 +58,11 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
 ================================================================================
+- CLOSED by Andrew ~18:50 | 'oon/oom' RESOLVED -- HP150 STAYS: after the
+  pinned-seed A-B (oon2 pair, seed 314159), Andrew: "stick with current
+  recipe and consider the 'oon' problem solved." No recipe change; the
+  diagnosis below stands as documentation; --vocal-highpass remains a
+  diagnostic knob only.
 - OPEN->DIAGNOSED (afternoon; envelope diagnostic run ~15:05) | DOUBLE MOUTH
   MOVEMENT on 'oon'/'oom' words: SUSPECT 1 CONFIRMED AT THE AUDIO LAYER. Reused
   chain.py's own isolate_vocals+highpass on adam30, compared syllable-envelope hump
