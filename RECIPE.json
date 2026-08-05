@@ -1,12 +1,18 @@
 {
   "_what": "THE shared lip-sync recipe -- single source of truth for DropCat-Studio (features/song_video) and DCMVS-restored (chain.py). Change values ONLY with a LIPSYNC_LEDGER.md entry + evidence, per the ledger's own rule.",
   "_provenance": "Assembled 2026-08-04 late night from LIPSYNC_LEDGER.md CURRENT RECIPE (verified against live code the same night) after the blind-label session vindicated end_anchor=true 6/6. DCS enforces parity via tests/test_recipe.py; DCMVS wiring is a flagged next step (see dcmvs section).",
-  "version": 2,
+  "version": 3,
 
   "production": {
     "engine": "DCMVS chain.py (C:/DCMVS-restored) -- Andrew's 2026-08-05 rollback ruling returned production to the golden engine; DCS song_video = safety wiring + future UI wrapper",
     "ratified_command": "python chain.py --image <src> --song <30s excerpt> --output <mp4> --worker http://127.0.0.1:7899 --seeds-per-clip 3 --frames-per-clip 241 --crossfade 0.15",
-    "ratified_chain": "v3 engine win -> v4 clip cap (identity, eyes hold) -> v5b seams (0.15s dissolve, overlapped audio) -- each step human-judged same morning",
+    "ratified_chain": "v3 engine win -> v4 clip cap (identity, eyes hold) -> v5b seams (0.15s dissolve, overlapped audio) -> v12 alternating scenes (A-B-A, Andrew: 'looks and sounds good' 2026-08-05 ~14:55) -- each step human-judged",
+    "multi_scene": {
+      "flags": "--images <imgA,imgB,...> --scene-prompts \"promptA||promptB\" (paired, cycled by clip index; each clip SE-anchors start AND end on ITS OWN scene image)",
+      "anchor_build": "scene anchors are TRANSPLANT/GRAFT composites of the user's subject pixels onto empty generated plates -- NEVER generative identity (SCENE_PREP_SPEC_2026-08-05.md PRIME RULE)",
+      "tail_stub_rule": "final clip contributing <2.5s of screen time inherits the PREVIOUS clip's scene (v12 shipped a 0.33s scene-B flash at 30.0s before this fix; fixed in chain.py same day)",
+      "scene_prompt_rule": "per-scene prompts stay truthful to their anchor image; background-cast wording follows the v11 minimal-motion rule in every scene"
+    },
     "frames_per_clip": 241,
     "crossfade_s": 0.15,
     "crossfade_note": "0.4s dissolve REJECTED June 1 ('obvious fade out/in'); 0.15s with overlapped audio windows ACCEPTED 2026-08-05 -- the fade length was the whole problem, and the overlap renders the same musical instant on both sides.",
@@ -14,7 +20,7 @@
     "excerpt_rule": "song excerpt cut with INPUT-seek (-ss before -i), no fades, energy-asserted before launch",
     "production_prompt": "A single subject, centered, facing the camera, mouth opening and closing in precise sync with the singing vocals. Behind him, a man in denim overalls stands calmly at the crates, still and relaxed, slowly nodding along with the music. Stay in the original scene and setting, soft cinematic lighting, shallow depth of field, steady framing.",
     "prompt_notes": "Ratified v11 2026-08-05: background cast gets MINIMAL-motion direction (alive, not performing) -- dance/choreography wording produced distracting slop 3 rounds running (v8/v9/v10). Negative prompt is INERT (distilled forces guidance 1.0) -- never carry one. Background slop that remains is masked by the sigma-3.2 DOF finishing pass.",
-    "dof_finish": "masked gblur sigma 3.2 outside the subject matte (dilate 31 + blur 24), every delivery"
+    "dof_finish": "masked gblur sigma 3.2 outside the subject matte (dilate 31 + blur 24), every delivery. PER-SCENE since 2026-08-05 (Andrew: 'make sure it's not blurring the subject of each scene'): one matte per scene anchor (DINO+SAM on a real rendered frame of that scene), time-gated maskedmerge segments switched at each dissolve midpoint (trim+concat, the v5b-proven pattern)"
   },
 
   "model": {
@@ -63,6 +69,7 @@
   "conditioning_audio": {
     "source": "isolated vocal stem, NEVER the raw mix",
     "highpass_hz": 150,
+    "highpass_change_candidate": "HP80. Measured 2026-08-05 (envelope diagnostic, adam30): HP150 SPLITS 4/29 sung spans into extra energy humps (the 'oon/oom' double-articulation Andrew flagged in v6) -- those spans keep only 16-29% of their energy at 150. 3 of 4 heal at 80, which still cuts the sub-80Hz beat band. Change ONLY via pinned-seed A-B render + Andrew's ear + ledger entry.",
     "phrase_gate": "silero, 0.18s soft ramps, SILENT slice for zero-phrase windows, over-mute breaker >85%",
     "energy_assert": "every conditioning input asserts energy AT CREATION -- whole stem and per slice; a silent guide aborts loudly (2026-08-04 rule, three incidents)"
   },
@@ -79,7 +86,7 @@
 
   "tiers": {
     "format_s": 30.0,
-    "format_note": "Andrew 2026-08-04 ~22:55: 30 seconds for EVERYONE -- superseded his own 60s-admin spec from ~21:00. Tiers differ only in take budget.",
+    "format_note": "Andrew 2026-08-04 ~22:55: 30 seconds for EVERYONE -- superseded his own 60s-admin spec from ~21:00. Tiers differ only in take budget. 2026-08-05 update: LOCAL production (DCGS) is open to LONGER videos (60s validation = v13); DCG.com stays 30s until Andrew says otherwise.",
     "clip_s": 6.0,
     "num_clips": 5,
     "admin_best_of_n": 6,

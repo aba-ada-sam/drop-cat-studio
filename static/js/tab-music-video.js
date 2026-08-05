@@ -43,7 +43,7 @@ export function init(panel) {
   // ── Song upload ────────────────────────────────────────────────────────────
 
   const songHintText  = el('div', { style: 'font-size:13px; color:var(--text-3);', text: 'Drop your song here or click to browse' });
-  const songHintSub   = el('div', { style: 'font-size:11px; color:var(--text-4); margin-top:4px;', text: 'mp3 · wav · flac · m4a · aac' });
+  const songHintSub   = el('div', { style: 'font-size:11px; color:var(--text-4); margin-top:4px;', text: 'mp3 / wav / flac / m4a / aac -- optional: skip this and AI writes one to your Video length below' });
   const songHintArea  = el('div', { style: 'display:flex; flex-direction:column; align-items:center; padding:20px 0; gap:2px;' }, [songHintText, songHintSub]);
   const songPreview   = el('audio', { style: 'display:none; width:100%; margin:8px 0;' });
   songPreview.controls = true;
@@ -88,6 +88,7 @@ export function init(panel) {
       _songDur  = f.duration || 0;
       _updateButtons();
       _updateSingleBtn();
+      _syncLengthControl();
       _analyzeAudio(f.path);
     } catch (err) {
       toast('Song upload failed: ' + err.message, 'error');
@@ -106,6 +107,7 @@ export function init(panel) {
     analysisCard.innerHTML = '';
     _updateButtons();
     _updateSingleBtn();
+    _syncLengthControl();
   }
 
   async function _analyzeAudio(path) {
@@ -119,6 +121,7 @@ export function init(panel) {
       _songDur = a.duration || _songDur;
       _renderAnalysis(a);
       _updateButtons();
+      _syncLengthControl();
     } catch (e) {
       if (seq !== _analyzeSeq) return;
       analysisCard.innerHTML = '';
@@ -261,6 +264,48 @@ export function init(panel) {
   const { wrap: padBeforeWrap, input: padBeforeSlider } = _numRow('Video before song starts', 0, 10, 1, 0, 's');
   const { wrap: padAfterWrap,  input: padAfterSlider  } = _numRow('Video after song ends',    0, 10, 1, 0, 's');
 
+  // Video length: with a song loaded the real length is fixed by
+  // audio_dur + pad_before + pad_after (routes.py /generate), so this
+  // control mirrors that total and edits push the difference into
+  // pad_after. With NO song this is the only length signal DCS has, and
+  // it sizes the ACE-Step track routes.py writes to fill the gap --
+  // Andrew's spec: no song -> follow the length setting, generate one.
+  const ACE_MAX_LEN = 120;  // mirrors audio_generator.MAX_DURATION
+  const { wrap: lengthWrap, input: lengthSlider, val: lengthVal } = _numRow('Video length', 5, ACE_MAX_LEN, 1, 30, 's');
+  const lengthHint = el('div', { style: 'font-size:11px; color:var(--text-3);' });
+  lengthWrap.appendChild(lengthHint);
+
+  function _syncLengthControl() {
+    if (_songPath && _songDur > 0) {
+      const songSecs = Math.round(_songDur);
+      const padB = parseInt(padBeforeSlider.value, 10) || 0;
+      const padA = parseInt(padAfterSlider.value, 10) || 0;
+      lengthSlider.min      = String(songSecs + padB);
+      lengthSlider.max      = String(songSecs + padB + 10);  // pad_after tops out at 10s
+      lengthSlider.value    = String(songSecs + padB + padA);
+      lengthVal.textContent = `${songSecs + padB + padA}s`;
+      lengthHint.textContent = `From song: ${songSecs}s -- drag to add trailing padding (up to 10s).`;
+    } else {
+      lengthSlider.min = '5';
+      lengthSlider.max = String(ACE_MAX_LEN);
+      lengthHint.textContent = `No song yet -- AI writes one to fit this length (ACE-Step, max ${ACE_MAX_LEN}s).`;
+    }
+  }
+  lengthSlider.addEventListener('input', () => {
+    lengthVal.textContent = `${lengthSlider.value}s`;
+    if (_songPath && _songDur > 0) {
+      const songSecs = Math.round(_songDur);
+      const padB = parseInt(padBeforeSlider.value, 10) || 0;
+      const padA = Math.max(0, Math.min(10, Number(lengthSlider.value) - songSecs - padB));
+      padAfterSlider.value = String(padA);
+      padAfterSlider.dispatchEvent(new Event('input'));
+      _syncLengthControl();
+    }
+  });
+  padBeforeSlider.addEventListener('input', _syncLengthControl);
+  padAfterSlider.addEventListener('input', _syncLengthControl);
+  _syncLengthControl();
+
   // ── Batch controls ─────────────────────────────────────────────────────────
 
   const batchStatus = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:16px;' });
@@ -271,7 +316,8 @@ export function init(panel) {
   });
 
   function _updateButtons() {
-    const hasAll = _folderFiles.length > 0 && !!_songPath;
+    // Song is optional -- routes.py writes one via ACE-Step when absent.
+    const hasAll = _folderFiles.length > 0;
     batchBtn.disabled = !hasAll;
     batchBtn.style.display  = hasAll ? '' : 'none';
     batchBtn.style.cursor   = hasAll ? 'pointer' : 'not-allowed';
@@ -347,15 +393,17 @@ export function init(panel) {
       return;
     }
 
-    if (!_songPath) { toast('Upload a song first', 'error'); return; }
     if (!_folderFiles.length) { toast('Choose a folder first', 'error'); return; }
 
     batchBtn.disabled = true;
-    batchStatus.textContent = 'Analyzing song and starting batch...';
+    batchStatus.textContent = _songPath
+      ? 'Analyzing song and starting batch...'
+      : 'Writing a song with AI (ACE-Step), then starting batch -- can take a minute or two...';
 
     try {
       const body = {
-        audio_path:    _songPath,
+        audio_path:    _songPath || '',
+        target_length: parseInt(lengthSlider.value, 10),
         folder:        _folderPath,
         images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        loopCheck.checked,
@@ -471,7 +519,8 @@ export function init(panel) {
 
   function _updateSingleBtn() {
     const n = singleImages.list.length;
-    const ready = !!_songPath && !_submitting;
+    // Song is optional -- routes.py writes one via ACE-Step when absent.
+    const ready = !_submitting;
     singleBtn.disabled = !ready;
     singleBtn.style.opacity = ready ? '1' : '.45';
     singleBtn.style.cursor  = ready ? 'pointer' : 'not-allowed';
@@ -484,8 +533,6 @@ export function init(panel) {
   let _singlePoll  = null;
 
   singleBtn.onclick = async () => {
-    if (!_songPath) { toast('Upload a song first', 'error'); return; }
-
     // One job per starter image, same song. No image at all -> a single
     // job with no anchor, which is what the server does with photo_path ''.
     const shots = singleImages.list.length ? singleImages.list : [{ path: '' }];
@@ -499,13 +546,15 @@ export function init(panel) {
     let failure = null;
 
     for (const [i, shot] of shots.entries()) {
+      const noSongMsg = 'Writing a song with AI (ACE-Step) -- can take a minute or two...';
       singleBtn.textContent = shots.length > 1 ? `Queueing ${i + 1}/${shots.length}...` : 'Submitting...';
       singleStatus.textContent = shots.length > 1
         ? `Queueing ${i + 1} of ${shots.length}: ${shot.name || 'no anchor image'}`
-        : 'Submitting...';
+        : (_songPath ? 'Submitting...' : noSongMsg);
 
       const body = {
-        audio_path:     _songPath,
+        audio_path:     _songPath || '',
+        target_length:  parseInt(lengthSlider.value, 10),
         photo_path:     shot.path || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
@@ -621,6 +670,7 @@ export function init(panel) {
       LABEL('Song'),
       songDrop,
       analysisCard,
+      lengthWrap,
     ]),
 
     // Batch: folder of images

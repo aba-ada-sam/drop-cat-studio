@@ -181,14 +181,43 @@ async def generate(request: Request):
     audio_path = body.get("audio_path", "")
     photo_path = body.get("photo_path", "") or ""
 
-    if not audio_path or not os.path.isfile(audio_path):
-        raise HTTPException(400, "Audio file not found -- please re-upload the song")
+    if audio_path and not os.path.isfile(audio_path):
+        raise HTTPException(400, f"Audio file not found: {audio_path}")
     if photo_path and not os.path.isfile(photo_path):
         raise HTTPException(400, f"Image not found: {photo_path}")
 
     config    = cfg.load()
     clip_dur  = max(4, min(15, int(body.get("clip_duration", 6))))
     analysis  = body.get("audio_analysis") or {}
+
+    # No song provided -- Andrew's spec: fall back to the user's length
+    # setting and write a song to fit it, via the SAME ACE-Step client
+    # fun_videos already uses (features/fun_videos/audio_generator.py) --
+    # not a new client. The generated file then flows through every line
+    # below exactly like an upload; pipeline.py never sees the difference.
+    if not audio_path:
+        from features.fun_videos import audio_generator
+        target_length = max(5.0, min(float(body.get("target_length", 30)),
+                                      float(audio_generator.MAX_DURATION)))
+        lyrics_text  = (body.get("lyrics_text") or "").strip()
+        music_prompt = (body.get("video_prompt") or body.get("user_direction") or "").strip()
+        music_prompt = music_prompt or "music video, energetic, bold"
+        log.info("[song-video] No song provided -- generating one via ACE-Step (%.0fs target)",
+                 target_length)
+        gen_path, gen_err = await asyncio.to_thread(
+            audio_generator.generate_audio,
+            music_prompt,
+            duration=target_length,
+            output_dir=str(UPLOADS_DIR),
+            bpm=body.get("bpm"),
+            steps=int(config.get("fun_audio_steps", 27)),
+            guidance=float(config.get("fun_audio_guidance", 7.0)),
+            lyrics=lyrics_text,
+            instrumental=not bool(lyrics_text),
+        )
+        if not gen_path:
+            raise HTTPException(502, f"No song provided and ACE-Step generation failed: {gen_err}")
+        audio_path = gen_path
 
     # If analysis not provided, run a fast probe for duration
     if not analysis:
@@ -442,13 +471,41 @@ async def batch_start(request: Request):
     images     = body.get("images", [])
     repeat     = bool(body.get("repeat", False))
 
-    if not audio_path or not os.path.isfile(audio_path):
-        raise HTTPException(400, "Audio file not found -- please re-upload the song")
+    if audio_path and not os.path.isfile(audio_path):
+        raise HTTPException(400, f"Audio file not found: {audio_path}")
     if not images:
         raise HTTPException(400, "No images provided")
 
     config   = cfg.load()
     clip_dur = max(8, min(15, int(body.get("clip_duration", 10))))
+
+    # No song provided -- same ACE-Step fallback as /generate: write a song
+    # to the user's length setting instead of forcing an upload. Reuses
+    # fun_videos' existing client; the batch runner then treats the
+    # generated file exactly like an uploaded one.
+    if not audio_path:
+        from features.fun_videos import audio_generator
+        target_length = max(5.0, min(float(body.get("target_length", 30)),
+                                      float(audio_generator.MAX_DURATION)))
+        lyrics_text  = (body.get("lyrics_text") or "").strip()
+        music_prompt = (body.get("video_prompt") or body.get("user_direction") or "").strip()
+        music_prompt = music_prompt or "music video, energetic, bold"
+        log.info("[song-batch] No song provided -- generating one via ACE-Step (%.0fs target)",
+                 target_length)
+        gen_path, gen_err = await asyncio.to_thread(
+            audio_generator.generate_audio,
+            music_prompt,
+            duration=target_length,
+            output_dir=str(UPLOADS_DIR),
+            bpm=body.get("bpm"),
+            steps=int(config.get("fun_audio_steps", 27)),
+            guidance=float(config.get("fun_audio_guidance", 7.0)),
+            lyrics=lyrics_text,
+            instrumental=not bool(lyrics_text),
+        )
+        if not gen_path:
+            raise HTTPException(502, f"No song provided and ACE-Step generation failed: {gen_err}")
+        audio_path = gen_path
 
     # Analyze audio once up-front so every image job skips re-analysis.
     from features.song_video.audio_analyzer import analyze as _analyze

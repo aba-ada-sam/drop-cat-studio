@@ -78,7 +78,49 @@ a facial feature. Director-owned selection rule: prefer generated bodies whose
 HEAD POSE matches the source (a downward 3/4 gaze on a straight-on body reads
 uncanny); crown/edge quality of the source matte sets the graft's weakest seam.
 
+## Scene-sequence rules (Andrew, 2026-08-05 ~15:55-16:05)
+
+Two rulings, verbatim intent:
+1. ">3 clips: mix up the A,B,A,B for better effect so it's not so predictable.
+   ABBA, AABA, ABAA are all legit -- we want to START AND END ON THE SAME
+   CONTEXT." Bookend rule: first clip = scene A, last FULL clip = scene A
+   (the tail stub then inherits A via the chain.py stub rule).
+2. "DCGS + user-supplied music at a length requiring 6+ clips: add a clip C
+   -- a NEW context with the same subject. ABCBCA and ACBBCA both acceptable."
+
+Planner contract (chain.py sequence generator, feeds --images cycling):
+- n_clips <= 3: A B A (the ratified v12 shape)
+- 4-5 clips: bookend A...A, interior drawn from {A,B}, not strictly
+  alternating (ABBA / AABA / ABAA class), seeded by the render seed so a
+  given job is reproducible
+- >= 6 clips AND user-supplied music (DCGS flow): three contexts {A,B,C},
+  bookend A...A, interior varied (ABCBCA / ACBBCA class); C is one more
+  transplant/graft anchor in a new setting -- the director owns picking the
+  setting, same PRIME RULE (identity from user pixels, never generated)
+
+## Vocal-aware seam planner (design, 2026-08-05 -- answers Andrew's
+## "are you performing waveform analysis to select seam locations?" -- today: NO)
+
+Today's seams are FIXED ARITHMETIC: stride = clip_len - crossfade (9.892s),
+zero audio awareness. chain.py's --musical-seams mode exists but is mutually
+exclusive with crossfade (uniform-length assumption -- an engineering
+shortcut, not physics). The build:
+1. Vocal spans already exist (silero, computed for the activity gate).
+2. Place each seam inside a vocal GAP nearest the nominal stride point
+   (search window nominal +/- ~2s); a cut lands BETWEEN phrases, never
+   mid-word. Fallback when no gap exists in-window: the quietest 0.3s of
+   the isolated stem in-window.
+3. Clip lengths go VARIABLE (min_clip_frames .. 241-frame cap); crossfade
+   overlap math per-seam, not per-uniform-stride.
+4. The LAST clip is sized to end exactly at song end -- kills the orphan-stub
+   class entirely (no more 0.65s tails; the 2.5s stub rule remains as a
+   safety net).
+5. Scene-sequence rules above apply AFTER seam placement (patterns index
+   clips, seams index time).
+
 ## Port note
 Identical module serves the site's Sing worker (its rp_handler can call the
 director via API; DINO/SAM run on the pod). Goes in the port pass AFTER the
-local app is done, per Andrew's sequencing ruling 2026-08-05.
+local app is done, per Andrew's sequencing ruling 2026-08-05. The site's
+30s format = 4 clips max, so the site uses the {A,B} patterns only; scene C
+is a DCGS long-format feature.

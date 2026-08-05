@@ -58,18 +58,50 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
 ================================================================================
-- OPEN (afternoon, Andrew's observation, first documented sighting) | DOUBLE MOUTH
-  MOVEMENT on words ending in 'oon'/'oom' (e.g. "waiting room"): an extra quick
-  open-close right at the word's end. Not previously recorded anywhere. Mechanism
-  suspects, ranked: (1) the 150Hz high-pass -- sung /u/ + nasal codas carry the
-  fundamental near the cutoff; vibrato wobbles the note across the filter edge ->
-  envelope dip-then-pulse -> model mouths an extra articulation; (2) phrase-gate
-  0.18s ramps interacting with long nasal tails; (3) LTX-2 reading the nasal release
-  as a new syllable onset. DIAGNOSTIC when picked up: extract the conditioning slice
-  around an offending word and LOOK at its envelope -- double pulse in the audio =
-  prep bug (test HP 150 vs 80Hz, ramps 0.18 vs 0.30); smooth envelope = model prior.
-  Severity per Andrew: not a deal breaker. Also noted same pass: v6 (60s, 7 clips)
-  seams read slightly more obvious than v5b -- six uniform seams vs three; passable.
+- OPEN->DIAGNOSED (afternoon; envelope diagnostic run ~15:05) | DOUBLE MOUTH
+  MOVEMENT on 'oon'/'oom' words: SUSPECT 1 CONFIRMED AT THE AUDIO LAYER. Reused
+  chain.py's own isolate_vocals+highpass on adam30, compared syllable-envelope hump
+  counts clean vs HP150 vs HP80 (scratchpad oon_diag.py): HP150 SPLITS 4/29 voiced
+  spans into an extra hump that the clean stem does not have; the split spans keep
+  only 16-29% of their energy at 150Hz (fundamental-heavy sustained syllables --
+  exactly the /u/+nasal class). 3 of the 4 heal at HP80 (energy kept 67-84%), which
+  still cuts the sub-80Hz beat band; one span (20.7-22.9s) stays split even at 80
+  -- so HP80 is a big improvement, not a cure. RECIPE.json carries HP80 as
+  highpass_change_candidate; NEXT STEP: pinned-seed A-B render (only cutoff moves),
+  Andrew's ear decides. Suspects 2 (gate ramps) and 3 (model prior) remain for the
+  residual span. Severity per Andrew: not a deal breaker. Also noted same pass: v6
+  (60s, 7 clips) seams read slightly more obvious than v5b -- six uniform seams vs
+  three; passable.
+- ACTIVE (evening ~17:00) | V13 DEAD-TAIL ROOT CAUSE + VISION-JUDGE SELECTOR: the
+  60s v13's last clip had no lip sync (Andrew); isolation test (same content,
+  6 fresh seeds, keep-workdir) proved 4+/6 articulate -- NOT machinery: seed
+  variance plus the blind whole-frame scorer (it labeled EVERY take of EVERY
+  v13 clip "static", so frozen takes sailed through on clips 4-6 while the
+  50-55s window is the song's DENSEST vocal stretch). Dead ends first: sparse-
+  vocals theory (envelope profile disproved), slice-offset drift (slices are
+  input-seek pre-cut files), three hand-rolled pixel metrics (fixed-ROI,
+  per-take DINO ROI, brow-normalized -- all flattened by global sway; v1's
+  ROI-drift death repeated across TAKES). What works: VISION JUDGE -- 8 frames
+  sampled at the conditioning slice's loudest vocal second (center on the
+  ISOLATED stem; centering on the mix picked an instrumental swell where every
+  take legitimately holds still), per-scene head crop from the anchor via
+  DINO+SAM scaled anchor->video coords (unscaled crop overflowed and failed
+  silently), haiku labels each frame's mouth open/part/closed; score =
+  transitions + 2*open_frac; artifact (glyph text/deformity) rejects.
+  VALIDATED per the scorer doctrine on known-good AND known-bad: articulating
+  takes 4.25-5.0, weak take 2.25, v13's frozen clip 6 exactly 0.0. Per-frame
+  LABELING beats 0-10 rating (haiku rated everything flat 2/10; labels+my
+  arithmetic discriminate). chain.py --judge-select (default OFF), selector
+  never a gate: no judgeable take -> falls back to QC best. Ratification run =
+  v14 (60s regen, judge ON). Engine commit 4b45803.
+- ACTIVE (afternoon ~15:05) | ALTERNATING SCENES + PER-SCENE DOF RATIFIED: v12
+  A-B-A (workshop/field/workshop, --images + --scene-prompts, scene anchors =
+  transplant/graft composites) approved "looks and sounds good"; then per-scene
+  depth blur (one DINO+SAM matte per scene from a REAL rendered frame, time-gated
+  maskedmerge switched at dissolve midpoints) approved "that's the best". Reference
+  artifact: chain30_v12_aba_dof.mp4. Tail-stub planner rule added to chain.py the
+  same hour (v12's raw cut had 0.33s of scene B at 30.0s -- a sub-2.5s tail clip
+  now inherits the previous scene). RECIPE.json v3 carries all of it.
 - ACTIVE (morning, helper) | PRODUCTION RECIPE HUMAN-RATIFIED, three verdicts in 90
   minutes, one variable each: v3 chain.py beats the DCS assembly ("much better") ->
   v4 frames-per-clip 241 fixes eye drift ("better consistency") -> v5b crossfade
