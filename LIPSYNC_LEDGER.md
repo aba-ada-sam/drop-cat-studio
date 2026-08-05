@@ -16,8 +16,23 @@ RULES OF THE LEDGER
 ================================================================================
 CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
-- Model: LTX-2 Dev19B Distilled via WanGP worker :7899 (commit 3ba3863 + 2 load-bearing
-  local patches: ltx2_handler.py audio passthrough, ltxv yaml skip_block_list=[]).
+- Model: LTX-2 Dev19B Distilled via WanGP worker :7899. THE LIVE INSTALL IS
+  C:\pinokio\api\wan.git\app AT COMMIT 3ba3863 -- verified 2026-08-04 night by PID
+  (netstat :7899 -> pid -> command line), NOT C:\WanGP-10952, which also exists on this
+  box at a different commit (1437067) and is NOT what renders. The running worker script
+  is C:\DropCat-Studio\services\wangp_worker.py (DCS's copy), launched by pinokio's
+  miniconda python. Anyone reproducing this stack, 3060 included, must match THAT path.
+- THREE files are locally modified in the live WanGP, not two: (1) models/ltx2/
+  ltx2_handler.py audio passthrough, (2) models/ltx_video/configs/ltxv-13b-0.9.8-dev.yaml
+  skip_block_list=[], and (3) defaults/ltx2_distilled.json, which still carries
+  tea_cache:true + skip_steps_multiplier 1.75 + skip_steps_start_step_perc 0. The
+  TeaCache REVERSAL entry below says the config was "restored as-found" -- that is
+  FACTUALLY WRONG, git diff shows it still modified. The reversal's CONCLUSION is
+  nevertheless correct and re-verified 2026-08-04 night: wgp.py:827 does
+  `if not any_steps_skipping: skip_steps_cache_type = ""` and the ltx2 handler declares
+  no tea_cache/skip_steps at all, so the setting is inert for LTX-2 no matter what the
+  worker pushes (wangp_worker.py:196-198 does set cache type "tea"). Leave it alone, but
+  COPY IT for parity -- a box cloning only "the 2 patches" is not running our stack.
 - Resolution: request 960x544 -> RENDERS AS 960x512 (LTX-2 ceil-rounds to 64-multiples,
   ltx2.py:1152). 1024x576 is exact 16:9 and 64-clean on both axes -- A/B PENDING.
 - fps: 24. (WanGP _ARCH_SPECS ltx2_19B = 24. DCS core/wangp_models still registers 25 --
@@ -528,3 +543,57 @@ video sub-cap; 1 video in flight per person. A user tier for Andrew's 30s-of-10s
 sing product lives naturally as invites.max_clips next to budget_cents (resolved once
 in dcv_submit, two consumption sites) -- but sing itself needs the dcg-sing worker
 (Dockerfile.sing never built, network volume unprovisioned), NOT the vendor endpoint.
+
+================================================================================
+2026-08-04 ~22:05 -- THE PLAN (owned by helper, per Andrew's direct mandate)
+================================================================================
+Andrew's instruction, verbatim in intent: one session owns the cross-front plan and
+actively guides the other two through it with regular check-ins, catching mistaken
+understandings before they cost real time -- as has already happened repeatedly tonight
+(TeaCache red herring, the broken artifact gate, FIXED4 ribbons, the muted-excerpt bug,
+3060-plan's stale retirement citation). helper (a085855e) owns this from here. A future
+session picking this up should re-derive from this section, not from re-reading the whole
+board.
+
+THREE FRONTS, ONE DEPENDENCY CHAIN:
+
+FRONT 1 -- local studio (DCMVS-restored + DropCat-Studio convergence). Sequence:
+1. lipsync: motion ablation (running ~18 min from 22:01) isolates which of 4 stacked
+   dampers actually kills motion -- SE_END_ANCHOR, input_video_strength 0.69, restrictive
+   prompt wording ("steady framing"/"centered and alone"), motion_amplitude floor=1.
+2. lipsync: apply the ablation's answer to chain.py (already adding --no-se-end-anchor +
+   --audio-cfg flags as of 22:03 -- helper does NOT touch chain.py's argparse until
+   lipsync posts done, per their own conflict flag).
+3. lipsync: THEN re-run 144f-vs-233f -- was blocked on this exact confound (a longer clip
+   spends more of itself pinned near the end-anchor, so a number measured today would be
+   measuring the anchor, not the length).
+4. helper: RECIPE.json schema + loader, built now with TODAY's values as a no-op refactor
+   (motion fields named but inert until steps 1-3 land), both DCS tiers.py and DCMVS
+   chain.py reading from it, shipped behind parity tests.
+5. helper: fold the ablation's real values into RECIPE.json once lipsync posts them,
+   including a motion floor in the acceptance rule -- current SYNC-OR-DIE (rank>=0.12) has
+   the same blind spot the motion finding just exposed, it never checks motion at all.
+6. helper: energy-at-creation hard-fail (whole-stem + per-slice per lipsync's correction,
+   abort not warn) -- independent of 1-5, building in parallel.
+7. helper: live E2E of DCS's own wired path, once lipsync posts GPU FREE (~18 min from
+   22:01) -- the one thing no fixture has proven yet.
+
+FRONT 2 -- dropcatgo.com. NOT an engineering front right now: both branches
+(sing-audio-conditioning 04c6ff3, sing-continuity-2026-08-04 0bac02e) are tested,
+manifested, and sitting on pure go/no-go from Andrew. RunPod Sing endpoint needs his ~$3
+spend nod. Nothing for sing-cloud to build until one of those lands.
+
+FRONT 3 -- 3060 management. Sequence, and this is the part most at risk of a mistaken
+understanding: 3060-plan is doing config-parity now (assigned 22:02) and should move to
+measuring the resolution ceiling next -- but real benchmarking/dispatch on the 3060 should
+WAIT for front 1's recipe to stabilize (motion fix + clip-length decision). Benchmarking
+against a recipe that is about to change is wasted work and produces numbers nobody can
+trust. Freeze-risk tolerance / keep-or-kill Forge / Storyteller interest are real open
+questions but they block LATER phases (unattended overnight use), not config-parity or the
+resolution measurement -- don't let those sit idle waiting on Andrew when they are not
+actually blocked.
+
+CHECK-IN MECHANISM: recurring board check every 5 min (session-only cron, job 7b3ff732),
+watching both StudioTeam and DropCatTeam boards for stalls, unanswered questions, and
+anything needing Andrew's call specifically. helper reports to Andrew only when something
+changed, stalled, or needs his decision -- not on every board post.
