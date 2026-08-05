@@ -113,6 +113,46 @@ ok(any("could not decode" in m for m in logs),
 ok(not any("ribbon artifacts" in m for m in logs),
    "...and is never given a confident artifact diagnosis it cannot support")
 
+print("\n-- E: SYNC-OR-DIE on a voiced window (2026-08-04 product rule) --")
+# "Best available" is exactly how 79s of statue-over-a-sung-verse shipped in
+# every cut of the night: each clip WAS the best of its batch. On a window the
+# stem says is sung, a take must be verdict=synced AND rank >= the floor, or the
+# clip fails loudly rather than banking a dead mouth.
+from features.song_video.pipeline import SYNC_RANK_FLOOR, SyncFloorNotMet  # noqa: E402
+
+logs.clear()
+out = os.path.join(tmp, "clipE.mp4")
+gen, calls = make_gen(CLEAN)   # clean, but with audio_slice=None it cannot sync
+try:
+    pipeline._pick_best_seed(3, out, gen, None, 4242, 3,
+                             log_fn=logs.append, require_sync=True)
+    ok(False, "a voiced window with no synced take must NOT bank a clip")
+except SyncFloorNotMet as e:
+    ok("VOICED" in str(e) and "still mouth" in str(e),
+       "raises SyncFloorNotMet and says it is refusing to bank a still mouth "
+       "over singing")
+    ok(calls["n"] == 3, f"it spent its whole take budget first ({calls['n']}/3)")
+ok(any("below the sync floor" in m for m in logs),
+   "each rejected take says WHY (synced flag + rank vs floor), so the operator "
+   "can tell 'never synced' from 'synced but ranked low'")
+
+print("\n-- E2: the SAME takes are acceptable on an INSTRUMENTAL window --")
+logs.clear()
+out = os.path.join(tmp, "clipE2.mp4")
+gen, calls = make_gen(CLEAN)
+res = pipeline._pick_best_seed(4, out, gen, None, 4242, 3,
+                              log_fn=logs.append, require_sync=False)
+ok(res is not None and os.path.isfile(res),
+   "an unvoiced window banks the clean static take -- a resting mouth through "
+   "an instrumental bar is the CORRECT content, not a failure")
+
+print("\n-- E3: SyncFloorNotMet is distinct from a dead renderer --")
+ok(SyncFloorNotMet is not None and issubclass(SyncFloorNotMet, RuntimeError),
+   "it is a real exception type, not a None return -- so the caller cannot "
+   "mistake it for a dead render and answer with a worker restart plus an "
+   "unscreened re-render")
+ok(0.0 < SYNC_RANK_FLOOR < 1.0, f"the floor is a sane rank ({SYNC_RANK_FLOOR})")
+
 print("\n-- D: attempts are cleaned up, winner survives --")
 leftovers = [f for f in os.listdir(tmp) if "_s" in f and f.endswith(".mp4")]
 ok(len(leftovers) <= 3,

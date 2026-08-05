@@ -690,11 +690,40 @@ def _seed_pool(base_seed, n, clip_index):
     return seeds[:max(1, n)]
 
 
-def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log_fn=print):
-    """Generate `n` seeds for one clip, score each take with the audio<->mouth
-    sync QC, and keep the BEST by mouth_sync_score. Early-accepts the first take
-    that clears the sync gate (saves GPU). Returns the chosen clip path (==
-    out_path), or None if every take failed."""
+class SyncFloorNotMet(RuntimeError):
+    """A VOICED window produced no take that actually lip-syncs.
+
+    Deliberately NOT a None return: the caller reads None as a dead renderer and
+    answers with a WanGP restart plus an unscreened re-render. This says
+    something different -- the renderer worked fine, and every take it produced
+    has a dead mouth over singing.
+    """
+
+
+# Acceptance floor for a window that carries real vocal energy. 2026-08-04:
+# shipping "best available" on such windows is exactly how 79 seconds of
+# undriven mouth reached delivery in every cut of the night -- each clip was the
+# best of its batch, and every one of them was a statue over a sung verse.
+SYNC_RANK_FLOOR = 0.12
+
+
+def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log_fn=print,
+                    require_sync=False, min_rank=SYNC_RANK_FLOOR):
+    """Generate up to `n` seeds for one clip, screen them, rank the survivors by
+    audio<->mouth sync, and keep the best.
+
+    require_sync=True is SYNC-OR-DIE, and it is set for windows measured to carry
+    vocal energy. Such a window may only bank a take that is verdict=synced AND
+    ranks >= min_rank; if none of the `n` takes clears that bar it raises
+    SyncFloorNotMet rather than banking a statue. require_sync=False (a window
+    with no real singing in it) keeps the older behaviour, where a clean but
+    static take is the CORRECT content -- a resting mouth through an
+    instrumental bar is right, and burning takes chasing a "synced" verdict on
+    silence is waste (measured: window 01_0, 0 synced in 6 takes, nothing to
+    sync to).
+
+    Returns the chosen clip path (== out_path), or None if every take failed to
+    produce a file at all."""
     from features.song_video import sync_qc
     seeds = _seed_pool(base_seed, n, clip_index)
     base, ext = os.path.splitext(out_path)
@@ -767,25 +796,53 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
         except Exception as _e:
             r, score = None, 0.0
             log_fn(f"[best-of-{len(seeds)}] seed {sd}: QC failed ({_e}) -- scored 0")
-        if best is None or score > best[0]:
-            best = (score, res_path)
-        # Early-accept a take that is synced AND not known-dirty. `_ribbon is
-        # None` means the screen could not run or could not decode -- treated as
-        # NO INFORMATION, not as a failure, because requiring == "clean" made
-        # early-accept structurally impossible whenever the screen was
-        # unavailable: every job silently burned all N seeds (~2-3x the GPU
-        # time, ~+28 min on a 12-clip best-of-3) with nothing in the log to
-        # explain it. Only the eye-check band deliberately keeps looking, in
-        # case a cleaner take also syncs.
-        if r is not None and sync_qc.is_synced(r) and _ribbon in (None, "clean"):
+        _synced = bool(r is not None and sync_qc.is_synced(r))
+        _clears_floor = _synced and score >= min_rank
+        if _clears_floor:
+            # On a voiced window this is the ONLY thing that may be banked, so
+            # rank only among takes that actually sync.
+            if best is None or score > best[0]:
+                best = (score, res_path)
+        elif not require_sync:
+            # Unvoiced window: a clean static take is correct content here.
+            if best is None or score > best[0]:
+                best = (score, res_path)
+        else:
+            log_fn(f"[best-of-{len(seeds)}] seed {sd}: below the sync floor "
+                   f"(synced={_synced} rank={score:.3f} < {min_rank}) -- not bankable "
+                   f"on a window that carries singing")
+        # Early-accept a take that clears the bar AND is not known-dirty.
+        # `_ribbon is None` means the screen could not run or could not decode --
+        # treated as NO INFORMATION, not as a failure, because requiring
+        # == "clean" made early-accept structurally impossible whenever the
+        # screen was unavailable (silently burning all N seeds). Only the
+        # eye-check band deliberately keeps looking for a cleaner take.
+        _good_enough = _clears_floor if require_sync else _synced
+        if _good_enough and _ribbon in (None, "clean"):
             log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate"
+                   f"{f' (rank {score:.3f})' if require_sync else ''}"
                    f"{' and is artifact-clean' if _ribbon == 'clean' else ''} -- keeping it")
             break
+    if best is None and require_sync:
+        # SYNC-OR-DIE. This window carries real singing and not one of the
+        # takes drove the mouth. Banking "the best available" here is exactly
+        # how 79 seconds of statue-over-a-sung-verse reached delivery in every
+        # cut of 2026-08-04: each clip WAS the best of its batch. Raise a
+        # DISTINCT error rather than returning None, so the caller does not
+        # mistake this for a dead renderer and answer with a pointless worker
+        # restart plus an unscreened re-render.
+        raise SyncFloorNotMet(
+            f"clip {clip_index}: none of {len(seeds)} takes lip-synced this VOICED "
+            f"window (needed verdict=synced and rank >= {min_rank}). Refusing to "
+            f"bank a still mouth over singing. Raise best_of_n, check the "
+            f"conditioning slice actually contains the vocal, or mark this window "
+            f"as instrumental if it genuinely is.")
     if best is None and worst_fallback is not None:
-        # Every take was screened out. Ship the least-dirty one rather than
-        # returning None: the caller treats None as a dead render and answers
-        # with a WanGP restart plus an UNSCREENED retry, so returning None here
-        # both wastes the renders we already paid for and defeats the screen.
+        # Every take was screened out on an UNVOICED window. Ship the least-dirty
+        # one rather than returning None: the caller treats None as a dead render
+        # and answers with a WanGP restart plus an UNSCREENED retry, so returning
+        # None here both wastes the renders we already paid for and defeats the
+        # screen. (On a voiced window the sync floor above has already fired.)
         _p95, _fb = worst_fallback
         log_fn(f"[best-of-{len(seeds)}] every take showed ribbon artifacts -- "
                f"shipping the least-affected (p95 {_p95:.2f}). LOOK AT THIS CLIP: "
@@ -1026,6 +1083,10 @@ def _do_song_gpu_phase(
     # is what beats the seed lottery. Both pieces degrade gracefully.
     _guide_audio = audio_wav
     _orig_prepped_photo = None
+    # Per-clip "this window carries singing" flags, filled by the energy check
+    # below. Empty means UNKNOWN (no lip sync, or the check could not run), and
+    # unknown must not enforce the sync floor -- see the check's own comment.
+    _voiced_window: list[bool] = []
     if _want_face_framing and photo_path and os.path.isfile(photo_path):
         _face = str(job_dir / "face_framed.png")
         if _build_face_crop(photo_path, tw, th, _face):
@@ -1091,11 +1152,25 @@ def _do_song_gpu_phase(
                       "labelled_sung": None,
                       "intervals": _guide_intervals}
                      for _st, _arc in zip(_clip_start_times, story_arc)]
-            check_plan(_guide_audio, _wins, log=lambda m: log.info("[song-video] %s", m))
+            _we = check_plan(_guide_audio, _wins, log=lambda m: log.info("[song-video] %s", m))
+            # The measurement now DRIVES acceptance, not just the log. A window
+            # that carries singing is held to SYNC-OR-DIE below; one that does
+            # not may bank a clean static take, because a resting mouth through
+            # an instrumental bar is the correct content and burning takes
+            # chasing a "synced" verdict on silence is pure waste.
+            _voiced_window = [bool(w.get("must_condition")) for w in _we]
+            log.info("[song-video] sync-or-die applies to %d/%d windows "
+                     "(the rest are instrumental and may rest the mouth)",
+                     sum(_voiced_window), len(_voiced_window))
         except Exception as e:
-            # Advisory only: this reports disagreements, it does not gate the
-            # render, so a failure here must not cost the job.
-            log.warning("[song-video] window energy check skipped (%s)", e)
+            # The LOG is advisory; the ACCEPTANCE decision is not. If the
+            # measurement could not run we cannot tell singing from silence, so
+            # fall back to not enforcing the floor -- enforcing it blindly would
+            # fail instrumental windows that are correctly static, which is a
+            # worse failure than the one being guarded against.
+            log.warning("[song-video] window energy check skipped (%s) -- sync floor "
+                        "NOT enforced this run (cannot tell voiced from instrumental)", e)
+            _voiced_window = []
 
     # Pre-extract ALL audio slices before the clip generation loop starts.
     # This runs once upfront so WanGP never waits for an ffmpeg subprocess
@@ -1310,8 +1385,11 @@ def _do_song_gpu_phase(
             # several seeds and keep the highest audio<->mouth sync score.
             # best_of_n=1 (default) -> single generation, identical to before.
             if _best_of_n > 1 and _audio_slice and _sync_qc is not None and not _use_keyframes:
+                # SYNC-OR-DIE only where the stem says someone is singing.
+                _needs_sync = bool(_voiced_window[i]) if i < len(_voiced_window) else False
                 clip_path = _pick_best_seed(i, clip_out, _gen_one, _audio_slice,
-                                            seed, _best_of_n, log_fn=_log)
+                                            seed, _best_of_n, log_fn=_log,
+                                            require_sync=_needs_sync)
             else:
                 clip_path = _gen_one(seed, clip_out)
         except Exception as e:

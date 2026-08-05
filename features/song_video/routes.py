@@ -301,7 +301,11 @@ async def generate(request: Request):
         # Best-of-N seed selection for lip-sync clips: 1=Fast (single take),
         # 2=Balanced, 3=Best. Each clip generates N seeds and keeps the one whose
         # audio<->mouth sync score is highest. N>1 multiplies GPU time ~Nx.
-        "best_of_n":       max(1, min(5, int(body.get("best_of_n", 1) or 1))),
+        # Cap raised 5 -> 10 on 2026-08-04: with SYNC-OR-DIE, a voiced window
+        # that never clears the sync floor FAILS rather than banking a statue,
+        # so the take budget is what buys a usable clip on a hard window. 10 is
+        # ~11 min/clip at ~65s/take -- deliberate, and only reachable by asking.
+        "best_of_n":       max(1, min(10, int(body.get("best_of_n", 1) or 1))),
     }
     # VRAM safety net: this route picks its model independently of
     # /api/fun/make-it and make-it-multi, and previously had NO check at all --
