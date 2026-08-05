@@ -1,7 +1,18 @@
 {
   "_what": "THE shared lip-sync recipe -- single source of truth for DropCat-Studio (features/song_video) and DCMVS-restored (chain.py). Change values ONLY with a LIPSYNC_LEDGER.md entry + evidence, per the ledger's own rule.",
   "_provenance": "Assembled 2026-08-04 late night from LIPSYNC_LEDGER.md CURRENT RECIPE (verified against live code the same night) after the blind-label session vindicated end_anchor=true 6/6. DCS enforces parity via tests/test_recipe.py; DCMVS wiring is a flagged next step (see dcmvs section).",
-  "version": 1,
+  "version": 2,
+
+  "production": {
+    "engine": "DCMVS chain.py (C:/DCMVS-restored) -- Andrew's 2026-08-05 rollback ruling returned production to the golden engine; DCS song_video = safety wiring + future UI wrapper",
+    "ratified_command": "python chain.py --image <src> --song <30s excerpt> --output <mp4> --worker http://127.0.0.1:7899 --seeds-per-clip 3 --frames-per-clip 241 --crossfade 0.15",
+    "ratified_chain": "v3 engine win -> v4 clip cap (identity, eyes hold) -> v5b seams (0.15s dissolve, overlapped audio) -- each step human-judged same morning",
+    "frames_per_clip": 241,
+    "crossfade_s": 0.15,
+    "crossfade_note": "0.4s dissolve REJECTED June 1 ('obvious fade out/in'); 0.15s with overlapped audio windows ACCEPTED 2026-08-05 -- the fade length was the whole problem, and the overlap renders the same musical instant on both sides.",
+    "seam_dip_note": "dip-to-black REJECTED 2026-08-05 ('worse, cuts to black').",
+    "excerpt_rule": "song excerpt cut with INPUT-seek (-ss before -i), no fades, energy-asserted before launch"
+  },
 
   "model": {
     "name": "ltx2_distilled",

@@ -56,6 +56,35 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
   ribbons (4x downsample) -- it never substitutes for the ribbon gate.
 
 ================================================================================
+2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
+================================================================================
+- ACTIVE (morning, helper) | PRODUCTION RECIPE HUMAN-RATIFIED, three verdicts in 90
+  minutes, one variable each: v3 chain.py beats the DCS assembly ("much better") ->
+  v4 frames-per-clip 241 fixes eye drift ("better consistency") -> v5b crossfade
+  0.15s with overlapped audio solves seams ("I'd call that issue solved"). Full
+  command in RECIPE.json "production". Seam lessons: dip-to-black REJECTED; the
+  June 0.4s-dissolve rejection was about LENGTH, not dissolves -- 0.15s inside the
+  anchor zone reads clean. Rollback map verdict stands: nothing reverted, all four
+  failure mechanisms were May-era, exposed (not created) by the week's E2E work.
+- ACTIVE (morning, helper) | MUSETALK STACKING DEAD ON ALL ROUTES (Andrew reversed
+  his June 19 "Native + MuseTalk both" on today's evidence: native-only render
+  approved, post-pass crashed the server 23:27, c134c63 creature finding). Both
+  route defaults False; pipeline gates the post-pass off whenever native
+  conditioning ran, even if explicitly requested. MuseTalk remains reachable for
+  unconditioned jobs only.
+- ACTIVE (morning, helper) | MAY-ERA TIMELINE BUGS FIXED FORWARD (2d5612a):
+  _clip_start_times now uses sing_grid's assembled-position math (0.000ms drift
+  across N=1..10, vs +3.00s by clip 12 on the old formula); requested clip
+  duration WINS over the arc's everywhere (render, slice cut, energy window --
+  one resolver, three call sites); window_delivery real end to end (tier jobs mux
+  the rendered window, never loop short video across the full song).
+- LESSON (morning, helper) | STREAM-EXISTS IS NOT CONTENT-CORRECT, twice in 12
+  hours: the judge page served guide-audio clips ("has audio" checked, WHAT audio
+  did not), then my dip build shipped all-black video ("has video stream" checked,
+  pixels did not). Standing rule now: any artifact reaching Andrew's page gets a
+  frame extracted and LOOKED AT, and audio identified (music vs guide), first.
+
+================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
 - ACTIVE (23:15, helper, overnight) | 60s FAILURE: CONDITIONING EXONERATED, SELECTION
