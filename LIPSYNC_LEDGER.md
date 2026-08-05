@@ -43,6 +43,33 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (night, Tier-2 WIRED, helper) | A SAFEGUARD THAT CANNOT FIRE, AND A SCREEN
+  THAT INVERTED ITSELF -- both found by rule-6 on the wired path, both live in the
+  integration for ~30 minutes before the review. (1) The window-energy check was a
+  MEASURED NO-OP: every window went in with labelled_sung=None and no intervals, and
+  all three disagreement branches require one or the other, so 12 windows and 5.95s of
+  real measurement produced ZERO log lines while the energy data (0.36-0.86 voiced) was
+  computed and discarded. The check written to catch THIS FILE'S 79-second
+  undriven-mouth bug could not have detected it. Cause: _isolate_guide_vocals already
+  computed voiced_intervals and threw them away. Verified after: 0 disagreements
+  before, 4 after, same stem. (2) The artifact screen INVERTED where it mattered most:
+  all-takes-infested returned None, and pipeline.py:1248 reads None as a dead render --
+  restart WanGP, wait 90s, re-render ONCE WITH NO SCREEN. So it discarded N real takes
+  and shipped an unscreened one. Rate is not hypothetical: 41pct of this session's own
+  takes screen infested (37/90 sampled), so at best_of_n=3 a 12-clip job is
+  better-than-even to trigger a needless worker restart -- this ledger's own "01_1: 4/4
+  ribboned" predicted it. Now held back as a ranked last resort with a loud
+  LOOK-AT-THIS-CLIP. (3) The worker's explanatory refusal never reached the user
+  (video_generator logs it and returns None; the not-clip_path branch never set
+  _last_error), so the new hard-fail was feeding MORE traffic into the standing
+  "No clips generated" bucket -- the ~23pct unsolved item in STILL OPEN below is where
+  specific diagnoses go to die. LESSON: an integration needs its own adversarial pass.
+  Every module was individually correct and separately tested; all three defects lived
+  in the WIRING between them, where no unit test looks. USEFUL NEGATIVE RESULT from the
+  same pass: full-res screening costs ~2.3s/take, 3-4pct of render time -- screening in
+  the best-of-N loop is cheap, and the expensive mistakes were the restart path and an
+  early-accept condition that silently burned all N seeds whenever the screen was
+  unavailable.
 - REVERSED same night by its own red team (Tier-2 port, helper) | "MEASURE WINDOW
   ENERGY" IS NOT ENOUGH -- THE STATISTIC IS THE WHOLE RULE. The first cut of
   window_energy.py used the MEAN dBFS over a window, and a mean is not
