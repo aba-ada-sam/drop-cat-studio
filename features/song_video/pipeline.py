@@ -54,12 +54,22 @@ def _detected_vram_gb() -> float | None:
     return None
 
 
-def _clamp_res_for_gpu(w: int, h: int, log) -> tuple:
+def _clamp_res_for_gpu(w: int, h: int, log, job=None) -> tuple:
     """Hold the requested frame to what this GPU can actually finish.
 
     Fails CLOSED when VRAM is unmeasurable: a smaller render is a recoverable
     disappointment, a step-0 deadlock hangs the worker until the poll timeout
     and looks to the user like the app is simply broken.
+
+    `job`, if given, gets the clamp recorded in job.meta -- otherwise it is
+    ONLY a server log line. That matters most on the lip_sync path
+    (run_song_pipeline:661), where an EXPLICIT output_width/output_height
+    override still gets silently downgraded here: the caller asked for a
+    specific resolution, got a different one, and had no way to find out
+    short of reading the server's own log file. Same principle as the
+    sync-or-die truncation surfacing a few lines away in this file -- a
+    request that came back different from what was asked must say so
+    somewhere the caller can actually see.
     """
     if w * h <= SAFE_REQ_PIXELS:
         return w, h
@@ -72,6 +82,14 @@ def _clamp_res_for_gpu(w: int, h: int, log) -> tuple:
         "the frame up to a 64-multiple and anything above %dx%d deadlocks at step 0 "
         "on this card instead of erroring.",
         w, h, sw, sh, ("%.1f" % vram) if vram else "unknown", *SAFE_FALLBACK_RES)
+    if job is not None:
+        try:
+            job.meta["resolution_clamped"] = {
+                "requested": [w, h], "delivered": [sw, sh],
+                "vram_gb": vram, "reason": "conditioning-grip ceiling for this GPU",
+            }
+        except Exception:
+            pass   # meta is a convenience surface; never let it break the render
     return sw, sh
 
 
@@ -687,7 +705,7 @@ def run_song_pipeline(job, photo_path, settings):
     # branch never did, so every plain song-video job on this box was dead on
     # arrival. Clamp applies to ALL paths -- an explicit override cannot opt
     # into a deadlock either.
-    tw, th = _clamp_res_for_gpu(tw, th, log)
+    tw, th = _clamp_res_for_gpu(tw, th, log, job=job)
     # lane 3C: on the lip_sync path, clamp video guidance down to the model's
     # registered value (3.0 for Distilled) -- documented: >3.5 makes text
     # guidance fight the source identity, and no layer below here clamps it

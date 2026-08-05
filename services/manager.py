@@ -749,14 +749,40 @@ def _worker_is_busy(timeout: float = 3.0) -> bool:
     Deliberately conservative: an unreachable, frozen, or malformed responder
     returns False so a genuinely dead worker still gets evicted. Only a live
     worker that says "busy" is protected.
+
+    RUNS ON A HARD WALL-CLOCK DEADLINE, not just a socket timeout. `timeout`
+    passed to urlopen() bounds each individual blocking I/O call (connect,
+    each recv), not the call as a whole -- measured empirically: a responder
+    that trickles its body a few bytes at a time, each gap under the socket
+    timeout, held this function open for 16s against a nominal timeout=3.0 and
+    resolved to False. False is the DANGEROUS direction here: it means
+    "orphan, safe to kill" for a worker that may in fact be busy, defeating the
+    entire reason this function exists. Run the request in a daemon thread and
+    join with a real deadline instead -- a thread that hasn't reported back by
+    the deadline is treated exactly like any other unreachable/frozen
+    responder (not busy, still conservative, but now actually bounded).
     """
-    try:
-        url = "http://127.0.0.1:%d/health" % WANGP_WORKER_PORT
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8", "replace"))
-        return bool(data.get("busy"))
-    except Exception:
+    result: list[bool] = [False]
+
+    def _fetch():
+        try:
+            url = "http://127.0.0.1:%d/health" % WANGP_WORKER_PORT
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                data = json.loads(r.read().decode("utf-8", "replace"))
+            result[0] = bool(data.get("busy"))
+        except Exception:
+            result[0] = False
+
+    t = threading.Thread(target=_fetch, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        log.warning("_worker_is_busy: no answer within %.1fs (a slow/trickling "
+                    "responder can otherwise defeat urlopen's own timeout) -- "
+                    "treating as not-busy, same as any other unreachable worker.",
+                    timeout)
         return False
+    return result[0]
 
 
 def kill_orphans_at_startup() -> None:
