@@ -1,9 +1,11 @@
-"""Product tiers for sing videos: 60s admin, 30s user.
+"""Product tiers for sing videos: 30 seconds for everyone.
 
-Andrew, 2026-08-04: the full-song format is dead. Videos are 60 seconds for
-admin and 30 seconds for users. This module is the ONE place those shapes are
-defined, so a tier change is a constant edit rather than a hunt through the
-route, the pipeline and whatever script last hard-coded a clip count.
+Andrew, 2026-08-04 (~22:55, superseding his own 60s-admin spec from ~21:00 the
+same night): "why are we still doing 60s when 30s is good enough?" -- so 30s IS
+the format, for admin and users both. The tiers still differ, but only in TAKE
+BUDGET now, not length. This module is the ONE place those shapes are defined,
+so a tier change is a constant edit rather than a hunt through the route, the
+pipeline and whatever script last hard-coded a clip count.
 
 WHY THE CLIP LENGTH IS WHAT IT IS. Clip duration is not a free knob:
   * LTX-2 frame counts are 8k+1, and audio conditioning stops gripping past
@@ -30,16 +32,17 @@ from features.song_video.sing_grid import (
 )
 
 TIERS: dict[str, dict] = {
-    # Admin: the format Andrew reviews. Deeper take budget because a failed
-    # window is worth more GPU than a shipped statue.
+    # Admin: same 30s length as users -- the difference is the take budget.
+    # A supervised render can afford more GPU per hard window than an
+    # unattended one; it should not be a longer video, per Andrew's 22:55 call.
     "admin": {
-        "target_s": 60.0,
-        "clip_s": 6.0,        # 10 clips, 153f render each -- well under the ceiling
+        "target_s": 30.0,
+        "clip_s": 6.0,        # 5 clips, 153f render each -- well under the ceiling
         "best_of_n": 6,
-        "label": "60s admin",
+        "label": "30s admin",
     },
-    # User tier: half the length, shallower budget so an unsupervised job cannot
-    # spend an admin-sized amount of GPU on one hard window.
+    # User tier: shallower budget so an unsupervised job cannot spend an
+    # admin-sized amount of GPU on one hard window.
     "user": {
         "target_s": 30.0,
         "clip_s": 6.0,        # 5 clips

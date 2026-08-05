@@ -35,9 +35,12 @@ ok(True, "module imported without an AssertionError -- both tiers fit under "
         "the conditioning-grip ceiling")
 
 print("\n-- B: the two shapes are what Andrew actually asked for --")
+# 2026-08-04 ~22:55: Andrew superseded his own 60s-admin spec -- "why are we
+# still doing 60s when 30s is good enough?" 30s is the format for BOTH tiers;
+# only the take budget differs.
 admin = tiers_mod.tier("admin")
 user = tiers_mod.tier("user")
-ok(admin["target_s"] == 60.0, f"admin targets 60s (got {admin['target_s']})")
+ok(admin["target_s"] == 30.0, f"admin targets 30s (got {admin['target_s']}) -- length parity per the 22:55 ruling")
 ok(user["target_s"] == 30.0, f"user targets 30s (got {user['target_s']})")
 ok(admin["num_clips"] * admin["clip_s"] == admin["target_s"],
    f"admin: {admin['num_clips']} x {admin['clip_s']}s = exactly {admin['target_s']}s, no remainder")
