@@ -58,7 +58,18 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
-- ACTIVE (late night, helper) | BLIND LABELS OF RECORD -- Andrew judged all 12 clips on
+- ACTIVE (23:15, helper, overnight) | 60s FAILURE: CONDITIONING EXONERATED, SELECTION
+  IS THE PRIME SUSPECT. Measured all six work2 slices of the rejected adam60_v2 run:
+  every one carries real vocal energy (mean -28.6..-32.8 dBFS, peak -9.8..-13.9,
+  matching the healthy stem profile -30.6/-9.8). So the "were the sung windows even
+  conditioned" question closes: YES, all of them. With inputs clean and the same
+  recipe/span producing blind-labeled GOOD takes, what distinguishes the failed cut is
+  that its clips were CHOSEN from 4 takes each by mouth_sync_score -- the scorer since
+  proven not to track Andrew's judgement (his approved takes score 0.001-0.134; drift/
+  morph takes clear the floor). A broken ranker given 4 candidates per clip does not
+  merely fail to help, it plausibly ANTI-SELECTS. Third eliminated cause tonight
+  (VAD under-detect, muted excerpt, now conditioning); the overnight 30s renders keep
+  per-take artifacts so the morning page can show Andrew alternatives, not just picks. -- Andrew judged all 12 clips on
   the shuffled no-names judge page (labels.json, lipsync's scratchpad): ALL THREE
   anchor-ON takes GOOD (s101, s202, s303), ALL THREE anchor-OFF takes BAD, all six 60s-
   run segments SKIP. Perfect 6/6 separation on the anchor condition. This SUPERSEDES the
