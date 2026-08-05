@@ -1585,6 +1585,19 @@ def _do_song_gpu_phase(
         raw = _last_error[0] or "No clips generated -- check WanGP is running"
         raise RuntimeError(f"Song video failed: {raw}")
 
+    # A SyncFloorNotMet (or any clip exception) breaks the render loop, which
+    # SHORTENS the delivered video to whatever synced before the failure --
+    # this codebase's existing philosophy that N clips beats zero, now paired
+    # with the new rule that a clip must never be a statue. That is a real,
+    # visible product outcome (a "60s" video that plays 30s), and it must not
+    # be reported as an unremarkable "complete". Record it in the job meta so
+    # the truncation and its cause survive past this function, not just the log.
+    if len(clip_paths) < n_clips:
+        job.meta["clips_requested"] = n_clips
+        job.meta["truncated_reason"] = _last_error[0] or "unknown"
+        _log(f"[warning] Delivering {len(clip_paths)}/{n_clips} clips -- stopped "
+             f"early ({job.meta['truncated_reason']})")
+
     job.meta["stage"] = "concatenating"
     job.update(progress=79, message=f"Concatenating {len(clip_paths)} clips...")
     job.meta["clips_generated"] = len(clip_paths)
