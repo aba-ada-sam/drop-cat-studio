@@ -1,5 +1,12 @@
 # Overnight state -- helper/brains (a085855e), written 23:05 2026-08-04
 
+## SELF-CHECK FIRST, EVERY WAKEUP (Andrew, 23:26, standing): do not get
+## rabbit-holed by rabbit-hole analysis -- the management failure mode.
+## Ask: did the last hour produce an artifact Andrew can watch or use
+## (a video, a fix, a page)? If not, CUT the current analysis thread and
+## return to producing. Diagnosing the diagnosis is how tonight's first
+## half was lost. Meta-work gets one paragraph, never a workstream.
+
 Andrew authorized an overnight autonomous run and went to bed. This doc is the
 re-anchor point after any context compaction: read it INSTEAD of re-deriving
 from the board scrollback. Both sibling sessions are DEAD (lipsync b0293762
@@ -16,6 +23,15 @@ its resume steps).
 - Site branch sing-continuity is DEPLOYED (evidence on DropCat board 22:47).
 - Sing endpoint nx5ibws5im4vxx exists; smoke job c7cf7dc3-...-u1 queued on
   US-TX-3 capacity (worker throttled). Costs nothing queued.
+
+## MANDATE EXPANDED 23:10 (Andrew's last words before leaving for 8-9 hours):
+"You can gen more than one, whatever... use your intelligence to fix both
+paths without more feedback from me." So: MULTIPLE renders authorized; the
+goal is BOTH paths (local DCS/DCMVS + cloud site Sing) actually producing
+good 30s lip-synced videos by morning. Spend cap for the cloud path stays the
+~$3 he nodded to (smoke + one or two real 30s jobs + at most one CI-fix
+retry). Morning deliverable: ONE review page with the best finished videos
+from each path plus a plain accounting of what failed and why.
 
 ## Overnight job list, in order
 1. E2E: ONE user-tier job (30s, 5x6s, best_of_n=3, lip_sync explicit true)
