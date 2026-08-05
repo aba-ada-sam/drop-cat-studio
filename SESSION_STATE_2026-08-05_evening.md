@@ -97,10 +97,16 @@ clips at vocal gaps) + scene pattern A-B-B-A-A-B-A + 4 seeds. Pixel check
 at the site /decide/v15/ + Telegram link (Andrew is out; his reply rides
 the Buddy chat -> board pipe). oon CLOSED by Andrew (HP150 stays). Engine
 commits through 2dac2d0/f9e8876; scene_prep director module built+validated
-(1839b76); parity tests 19/19 (aaffedf). DC probe agent still hunting
-serverless placement; per-job PODS recommended to Andrew as the primary
-path (his 'open to ideas' answered ~19:59; awaiting his pick; volume cost
-answer: ~7/mo per copy, shrink to 50GB planned).
+(1839b76); parity tests 19/19 (aaffedf). CLOUD, final for the night (~21:00): 14 DCs probed, ZERO genuine 48GB
+serverless placements (fleet-wide crunch; the one transient signal was a
+5090 artifact -- a card the image cannot run, measured tonight: dies at
+WanGP launch on 32GB, twice; 5090 REMOVED from the endpoint GPU list).
+Pod smoke on Iceland proved boot+checkpoint+handler AND the external
+deadline-kill discipline, but no render (only 5090 pods there by then).
+Total mission spend ~$1.05 of the $3 cap; zero pods; both volumes intact
+(~$7/mo each, shrink planned). ANDREW'S PICK PENDING: per-job pods in a
+48GB-stock DC (survey = step 1 if picked) vs Novita vs wait out the
+crunch. Also pending: his v15 verdict (phone page /decide/v15).
 
 ## The queue (if resuming cold)
 
