@@ -58,8 +58,41 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
-- ACTIVE (night, lipsync) | WE HAVE BEEN MEASURING THE WRONG VARIABLE. THE MOUTH IS
-  NOT DESYNCED, IT IS BARELY MOVING. Evidence: the 60s production run (adam60_v2,
+- REVERSED same night, BY ANDREW'S EYES | "total_motion is the discriminator" and "the
+  end anchor is the motion killer" -- BOTH DEAD. He watched the six-clip A/B and ruled:
+  seed 101 ANCHOR-ON is the only one that does not suck. That is the take my meter scored
+  WORST (motion 0.52, verdict static, score 0.001); the three anchor-OFF takes I called
+  SYNCED at motion 3.36-3.71 he rejects. CAUSE, found by pulling contact sheets and
+  LOOKING instead of scoring: the anchor-OFF take PUSHES THE CAMERA IN, dollying from the
+  source framing to a head-and-shoulders close-up, and the skull MORPHS on the way --
+  rounder, larger, different facial structure, arguably a different creature by the end.
+  The end anchor was never a motion damper. It HOLDS FRAMING AND IDENTITY, exactly as
+  named. Removing it freed the CAMERA and the FACE, not the mouth. total_motion counts
+  whole-frame pixel change, so a slow push-in plus a morphing head scores enormous while
+  a steady shot with a moving mouth scores near zero -- I ranked camera drift and identity
+  collapse as lip sync.
+  THE ERROR UNDERNEATH, and it is the reusable lesson: I calibrated the 2-13 "golden band"
+  against AWM00001 -- which THIS LEDGER ALREADY RECORDS AS A MULTI-SCENE CUT VIDEO. A cut
+  video's frame-to-frame change is dominated by its cuts. I compared single-shot 10s clips
+  to a montage and read the gap as a quality deficit, having personally written down the
+  fact that made the reference invalid. RULE, strengthening the no-ungated-metric rule:
+  a metric is NOT validated against a known-bad reference unless a HUMAN STATED why that
+  reference is bad. Inferring the reason, then measuring the inference, is circular -- the
+  24 rejected takes were rejected for "does not lip sync", and I ASSUMED low motion was
+  the cause rather than a correlate. Also: a reference must match the FORM of what it
+  scores (single shot vs cut montage) or the comparison is meaningless.
+  CONSEQUENCES: SE_END_ANCHOR STAYS TRUE in both codebases. The four-damper entry below is
+  dead as a diagnosis -- input_video_strength 0.69 and the "steady framing" prompt wording
+  are IDENTITY/FRAMING HOLDS TOO, so loosening them would likely produce MORE of what
+  Andrew just rejected. The 144f-vs-233f A/B is UNBLOCKED (the confound I claimed does not
+  exist). chain.py CLI flags 10c2a80 stay (additive, default-preserving) but nothing should
+  USE the off setting. STILL UNEXPLAINED and where to start next: he rejected the 60s cut
+  for losing sync after ~10s while calling a single anchor-ON clip acceptable, so the fault
+  is more likely ASSEMBLY, per-clip variance across a 6-clip run, or later-clip
+  conditioning -- NOT the base render settings.
+- SUPERSEDED, see the reversal directly above -- kept because the reasoning shows how a
+  plausible metric became a false diagnosis | WE HAVE BEEN MEASURING THE WRONG VARIABLE.
+  THE MOUTH IS NOT DESYNCED, IT IS BARELY MOVING. Evidence: the 60s production run (adam60_v2,
   6 clips x best-of-4) returned verdict=static on 24 of 24 takes, total_motion
   0.4-1.1. Golden AWM00001 scored on the SAME meter, grid and song: motion 2-13.
   The bands do not overlap. Meanwhile our mouth_sync_score ranks (0.016-0.220)
