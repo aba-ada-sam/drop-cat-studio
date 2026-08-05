@@ -58,6 +58,18 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
 ================================================================================
+- OPEN (afternoon, Andrew's observation, first documented sighting) | DOUBLE MOUTH
+  MOVEMENT on words ending in 'oon'/'oom' (e.g. "waiting room"): an extra quick
+  open-close right at the word's end. Not previously recorded anywhere. Mechanism
+  suspects, ranked: (1) the 150Hz high-pass -- sung /u/ + nasal codas carry the
+  fundamental near the cutoff; vibrato wobbles the note across the filter edge ->
+  envelope dip-then-pulse -> model mouths an extra articulation; (2) phrase-gate
+  0.18s ramps interacting with long nasal tails; (3) LTX-2 reading the nasal release
+  as a new syllable onset. DIAGNOSTIC when picked up: extract the conditioning slice
+  around an offending word and LOOK at its envelope -- double pulse in the audio =
+  prep bug (test HP 150 vs 80Hz, ramps 0.18 vs 0.30); smooth envelope = model prior.
+  Severity per Andrew: not a deal breaker. Also noted same pass: v6 (60s, 7 clips)
+  seams read slightly more obvious than v5b -- six uniform seams vs three; passable.
 - ACTIVE (morning, helper) | PRODUCTION RECIPE HUMAN-RATIFIED, three verdicts in 90
   minutes, one variable each: v3 chain.py beats the DCS assembly ("much better") ->
   v4 frames-per-clip 241 fixes eye drift ("better consistency") -> v5b crossfade
