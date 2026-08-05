@@ -88,6 +88,25 @@ finally:
     _runner._paths = _orig_paths
     _runner._separate_vocals = _orig_sep
 
+print("\n-- A2: EXPLICIT request hard-fails; the mere DEFAULT degrades --")
+# lip_sync DEFAULTS TO TRUE in _do_song_gpu_phase, so an ordinary song-video job
+# on a box with no MuseTalk venv reaches the isolation call without anyone
+# having asked for lip sync. Hard-failing those would break working jobs -- a
+# worse regression than the bug being fixed. Caught while wiring, before ship.
+psrc = open(os.path.join(os.path.dirname(__file__), "..", "features", "song_video",
+                         "pipeline.py"), encoding="utf-8").read()
+ok('_lip_sync_explicit = "lip_sync" in settings' in psrc,
+   "the code distinguishes an EXPLICIT lip_sync request from the default")
+ok("if _lip_sync_explicit:\n                raise" in psrc,
+   "an EXPLICIT request re-raises -- the user asked for it and must not get a "
+   "silent statue")
+_deg = psrc.split("_lip_sync_explicit", 1)[1][:1200]
+ok("_guide_audio = None" in _deg and "_lip_sync = False" in _deg,
+   "the implicit default degrades to an UNCONDITIONED render (guide=None), "
+   "not to the raw mix")
+ok("_guide_audio = audio_wav" not in _deg,
+   "the degrade path never reassigns the raw mix as the guide")
+
 print("\n-- B: no silent-fallback language survives in the render path --")
 src = open(os.path.join(os.path.dirname(__file__), "..", "features", "song_video",
                         "pipeline.py"), encoding="utf-8").read()

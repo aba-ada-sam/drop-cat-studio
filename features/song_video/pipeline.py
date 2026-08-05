@@ -973,18 +973,39 @@ def _do_song_gpu_phase(
             prepped_photo = _face
             log.info("[song-video] Framed source on the face (mouth in lower third)")
     if _lip_sync:
-        # No try/except that swallows this: _isolate_guide_vocals raises rather
-        # than handing back the raw mix, and catching it here to carry on would
-        # restore the exact bug it was changed to prevent. A lip-sync job that
-        # cannot get a vocal stem has to stop before it spends GPU minutes on a
-        # video whose defect no metric can see.
-        _guide_audio = _isolate_guide_vocals(audio_wav, job_dir)
+        # THE FALLBACK IS "NO CONDITIONING", NEVER "THE RAW MIX" -- but whether
+        # that is an error or a graceful degrade depends on who asked.
+        # `lip_sync` DEFAULTS TO TRUE (above), so an ordinary song-video job on
+        # a box without the MuseTalk venv reaches this line without anyone
+        # having requested lip sync at all. Hard-failing those would break
+        # working jobs, which is a worse regression than the bug being fixed.
+        # So: an EXPLICIT request fails loudly (the user asked for lip sync and
+        # must not be handed a silent statue), while the implicit default drops
+        # to an unconditioned render and says so. Neither path ever conditions
+        # on the full mix, which is the rule that actually matters.
+        _lip_sync_explicit = "lip_sync" in settings
+        try:
+            _guide_audio = _isolate_guide_vocals(audio_wav, job_dir)
+        except GuideIsolationError as e:
+            if _lip_sync_explicit:
+                raise
+            log.warning("[song-video] Lip sync was not explicitly requested and vocal "
+                        "isolation is unavailable (%s) -- rendering WITHOUT audio "
+                        "conditioning. The mouth will not be driven. Pass "
+                        "lip_sync=false to make this explicit, or fix isolation.", e)
+            _lip_sync = False
+            _want_face_framing = False
+            _guide_audio = None
 
         # The window rule, mechanised (LIPSYNC_LEDGER 2026-08-04): measure each
         # planned window's energy on the ISOLATED stem and condition anything
         # above the floor, whatever the plan called it. Measurement only -- it
-        # never silences a window the plan wanted sung.
+        # never silences a window the plan wanted sung. Skipped entirely when we
+        # degraded above: there is no stem to measure, and "checked it, found
+        # nothing" must not be mistaken for "there was nothing to find".
         try:
+            if _guide_audio is None:
+                raise RuntimeError("no vocal stem (unconditioned render)")
             from features.song_video.window_energy import check_plan
             _wins = [{"t0": float(_st),
                       "t1": float(_st) + max(4.0, min(12.0, float(
