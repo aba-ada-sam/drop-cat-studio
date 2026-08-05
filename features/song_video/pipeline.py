@@ -835,7 +835,9 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
         # known-bad reference on red).
         _ribbon = None
         try:
-            from features.song_video.artifact_screens import screen_window
+            from features.song_video.artifact_screens import (
+                RIBBON_MAX_INFESTED, RIBBON_P95_INFESTED, screen_window,
+            )
             _sc = screen_window(res_path)
             _ribbon = _sc["ribbon_verdict"]
             # DECODE FAILURE IS NOT AN ARTIFACT VERDICT. An empty series scores
@@ -860,8 +862,15 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
                 # a last resort instead; a screened-and-flagged clip beats a
                 # pointless service restart followed by an unscreened one.
                 _p95 = _sc["ribbon"]["p95"]
+                _mx = _sc["ribbon"]["max"]
+                # Name WHICH criterion fired: a p95 deep in the clean band with
+                # max >= 1.0 is a single-frame flash, and logging p95 alone made
+                # that correct rejection read as a broken screen (2026-08-04).
+                _why = ("single-frame flash: max "
+                        f"{_mx:.2f} >= {RIBBON_MAX_INFESTED}" if _p95 < RIBBON_P95_INFESTED
+                        else f"sustained: p95 {_p95:.2f} >= {RIBBON_P95_INFESTED}")
                 log_fn(f"[best-of-{len(seeds)}] seed {sd}: ribbon artifacts "
-                       f"(p95 {_p95:.2f}) -- held back")
+                       f"({_why}) -- held back")
                 # Ranked by ribbon score, not sync score: this take has not been
                 # scored yet, and among takes we would rather not ship, the
                 # least-infested one is the right last resort.
@@ -1229,6 +1238,38 @@ def _do_song_gpu_phase(
             if _orig_prepped_photo is not None:
                 prepped_photo = _orig_prepped_photo
 
+        # ENERGY-AT-CREATION HARD-FAIL (2026-08-04): isolation above can
+        # SUCCEED and still hand back a SILENT stem -- an empty/near-empty
+        # Demucs output, a muted source, a bad upstream cut -- and a silent
+        # guide renders a still mouth that SCORES CLEAN, because a resting
+        # mouth correctly matches the silence it was handed (see
+        # GuideSilentError's docstring for the 2026-08-04 incidents this
+        # covers). Checked here, right after isolation settles and before any
+        # GPU spend, with the SAME explicit-vs-implicit gate as the isolation
+        # failure just above -- a silent guide is exactly as unusable as a
+        # missing one. Mirrors that gate rather than sharing its except block,
+        # so a future edit to either cannot silently desync the other.
+        # Skipped when isolation already degraded above (_guide_audio is
+        # already None): nothing is left to measure, and re-checking would
+        # only produce a second, confusing failure for the same root cause.
+        if _guide_audio is not None:
+            from features.song_video.window_energy import GuideSilentError, assert_stem_energy
+            try:
+                assert_stem_energy(_guide_audio, log=lambda m: log.info("[song-video] %s", m))
+            except GuideSilentError as e:
+                if _lip_sync_explicit:
+                    raise
+                log.warning("[song-video] Lip sync was not explicitly requested and the "
+                            "isolated guide is silent (%s) -- rendering WITHOUT audio "
+                            "conditioning rather than on a guide that cannot drive a "
+                            "mouth. Pass lip_sync=false to make this explicit, or fix "
+                            "the guide audio.", e)
+                _lip_sync = False
+                _guide_audio = None
+                _want_face_framing = False
+                if _orig_prepped_photo is not None:
+                    prepped_photo = _orig_prepped_photo
+
         # The window rule, mechanised (LIPSYNC_LEDGER 2026-08-04): measure each
         # planned window's energy on the ISOLATED stem and condition anything
         # above the floor, whatever the plan called it. Measurement only -- it
@@ -1276,6 +1317,7 @@ def _do_song_gpu_phase(
     if _lip_sync:
         _audio_slices_dir.mkdir(exist_ok=True)
         log.info("[song-video] Lip sync ON -- pre-extracting %d audio slices", n_clips)
+        from features.song_video.window_energy import GuideSilentError, assert_slice_energy
         for _si, (_st, _arc) in enumerate(zip(_clip_start_times, story_arc)):
             _sdur = float(_arc.get("duration", clip_dur) if isinstance(_arc, dict) else clip_dur)
             # Clamp identically to `this_dur` below (the ACTUAL rendered clip
@@ -1295,7 +1337,40 @@ def _do_song_gpu_phase(
                 capture_output=True, timeout=30,
             )
             if _sr.returncode == 0 and Path(_sp).exists():
-                _audio_slices[_si] = _sp
+                # ENERGY-AT-CREATION HARD-FAIL (2026-08-04), per-slice: the
+                # whole-stem check above only proves the STEM has signal
+                # somewhere, not that THIS clip's cut of it does -- a per-clip
+                # ffmpeg -ss/-t cut can land on a silent span of an otherwise
+                # healthy stem (stale start time, boundary rounding, the same
+                # output-seek-fade class of bug that motivated the whole-stem
+                # check). voiced=False windows are skipped on purpose: silence
+                # is the CORRECT content there (a resting mouth over an
+                # instrumental bar), and asserting energy on it would fail the
+                # correct case instead of the bug. Unknown (_voiced_window
+                # empty/short because the plan-level check couldn't run) is
+                # treated the same as "not voiced" -- same reasoning as the
+                # sync-or-die gate just above: enforcing a floor blindly would
+                # fail correctly-static instrumental clips too.
+                _slice_voiced = bool(_voiced_window[_si]) if _si < len(_voiced_window) else False
+                try:
+                    assert_slice_energy(_sp, _si, voiced=_slice_voiced,
+                                        log=lambda m: log.info("[song-video] %s", m))
+                    _audio_slices[_si] = _sp
+                except GuideSilentError as e:
+                    # Same explicit-vs-implicit gating as the whole-stem check:
+                    # the user who explicitly asked for lip_sync must not get a
+                    # silent statue on this clip either. The implicit default
+                    # degrades ONLY this one clip to unconditioned (leaving
+                    # _audio_slices[_si] as None) rather than failing the whole
+                    # job over one bad slice, and NEVER falls back to the raw
+                    # mix -- there was never a code path here that did.
+                    if _lip_sync_explicit:
+                        raise
+                    log.warning("[song-video] Lip sync was not explicitly requested and "
+                                "clip %d's conditioning slice is silent (%s) -- rendering "
+                                "that clip WITHOUT audio conditioning rather than on a "
+                                "guide that cannot drive a mouth. Pass lip_sync=false to "
+                                "make this explicit, or fix the guide audio.", _si, e)
         log.info("[song-video] Audio slices ready: %d/%d", sum(1 for s in _audio_slices if s), n_clips)
     elif settings.get("lip_sync") and not audio_wav:
         log.warning("[song-video] Lip sync requested but audio WAV conversion failed -- skipping")
