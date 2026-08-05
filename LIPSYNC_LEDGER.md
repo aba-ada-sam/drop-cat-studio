@@ -58,6 +58,19 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-04 -- THE BROKEN-RULER DAY (all entries same day, ordered newest first)
 ================================================================================
+- ACTIVE (late night, helper, Andrew-delegated ruling) | SYNC-OR-DIE DISARMED: the gate
+  was inverted against ground truth on first human contact. Of the six ablation takes
+  Andrew approved exactly ONE (seed 101 anchor-ON): verdict=static rank 0.001 -- which
+  the floor REFUSES to bank -- while all three takes that CLEAR the floor (synced,
+  0.15-0.18) he rejected. His stated reason, verbatim, now the calibration label of
+  record: "the mouth didn't open while words were being sung." Under the standing
+  no-validation-no-gating rule the floor's refusal authority is suspended:
+  SYNC_ENFORCE=False in pipeline.py, verdict+rank still measured, WOULD-HAVE-REFUSED
+  logged per take so evidence accumulates, SyncFloorNotMet unreachable, enforcement
+  path kept and covered by an explicitly re-armed test. The WINDOW-ENERGY conditioning
+  gate (audio going IN, validated against a human-confirmed failure) is a different
+  instrument -- still ARMED; distrust is not transitive across instruments. Re-arm only
+  in the same commit as a scorer recalibrated against human-labeled takes.
 - REVERSED same night, BY ANDREW'S EYES | "total_motion is the discriminator" and "the
   end anchor is the motion killer" -- BOTH DEAD. He watched the six-clip A/B and ruled:
   seed 101 ANCHOR-ON is the only one that does not suck. That is the take my meter scored

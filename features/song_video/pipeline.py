@@ -778,6 +778,20 @@ class SyncFloorNotMet(RuntimeError):
 # best of its batch, and every one of them was a statue over a sung verse.
 SYNC_RANK_FLOOR = 0.12
 
+# DISARMED 2026-08-04 ~22:30 (Andrew-delegated ruling): the floor's right to
+# REFUSE is suspended. The first time a human judged takes side by side, the
+# gate was inverted: of six A/B takes Andrew approved exactly one -- verdict
+# static, rank 0.001, which this gate refuses to bank -- and rejected all three
+# takes that clear it (verdict synced, rank 0.15-0.18; the scorer was rewarding
+# camera push-in and identity morph, not mouth performance). Under the standing
+# no-validation-no-gating rule a metric with a broken calibration story may not
+# reject: verdict + rank are still measured and logged (WOULD-HAVE-REFUSED
+# lines) so evidence accumulates, but nothing is refused and SyncFloorNotMet
+# cannot fire. Re-arm ONLY with a scorer recalibrated against human-labeled
+# takes -- flip this to True in the same commit as that recalibration, never
+# alone.
+SYNC_ENFORCE = False
+
 
 def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log_fn=print,
                     require_sync=False, min_rank=SYNC_RANK_FLOOR):
@@ -787,7 +801,10 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
     require_sync=True is SYNC-OR-DIE, and it is set for windows measured to carry
     vocal energy. Such a window may only bank a take that is verdict=synced AND
     ranks >= min_rank; if none of the `n` takes clears that bar it raises
-    SyncFloorNotMet rather than banking a statue. require_sync=False (a window
+    SyncFloorNotMet rather than banking a statue. NOTE: refusal authority is
+    gated by SYNC_ENFORCE (see the flag's comment) -- while it is False,
+    require_sync=True is ADVISORY: everything is measured and logged, nothing
+    is refused, SyncFloorNotMet cannot fire. require_sync=False (a window
     with no real singing in it) keeps the older behaviour, where a clean but
     static take is the CORRECT content -- a resting mouth through an
     instrumental bar is right, and burning takes chasing a "synced" verdict on
@@ -870,13 +887,21 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
             log_fn(f"[best-of-{len(seeds)}] seed {sd}: QC failed ({_e}) -- scored 0")
         _synced = bool(r is not None and sync_qc.is_synced(r))
         _clears_floor = _synced and score >= min_rank
+        _enforce = require_sync and SYNC_ENFORCE
         if _clears_floor:
-            # On a voiced window this is the ONLY thing that may be banked, so
-            # rank only among takes that actually sync.
+            # On an enforced voiced window this is the ONLY thing that may be
+            # banked, so rank only among takes that actually sync.
             if best is None or score > best[0]:
                 best = (score, res_path)
-        elif not require_sync:
-            # Unvoiced window: a clean static take is correct content here.
+        elif not _enforce:
+            # Unvoiced window -- or the floor is disarmed. A voiced window in
+            # advisory mode still says what enforcement WOULD have done, so the
+            # evidence keeps accumulating while the scorer is uncalibrated.
+            if require_sync and not SYNC_ENFORCE:
+                log_fn(f"[best-of-{len(seeds)}] seed {sd}: WOULD-HAVE-REFUSED under "
+                       f"the sync floor (synced={_synced} rank={score:.3f} < "
+                       f"{min_rank}) -- banked anyway, floor is ADVISORY while its "
+                       f"scorer is uncalibrated (SYNC_ENFORCE)")
             if best is None or score > best[0]:
                 best = (score, res_path)
         else:
@@ -889,13 +914,13 @@ def _pick_best_seed(clip_index, out_path, gen_fn, audio_slice, base_seed, n, log
         # == "clean" made early-accept structurally impossible whenever the
         # screen was unavailable (silently burning all N seeds). Only the
         # eye-check band deliberately keeps looking for a cleaner take.
-        _good_enough = _clears_floor if require_sync else _synced
+        _good_enough = _clears_floor if _enforce else _synced
         if _good_enough and _ribbon in (None, "clean"):
             log_fn(f"[best-of-{len(seeds)}] seed {sd} cleared the sync gate"
                    f"{f' (rank {score:.3f})' if require_sync else ''}"
                    f"{' and is artifact-clean' if _ribbon == 'clean' else ''} -- keeping it")
             break
-    if best is None and require_sync:
+    if best is None and require_sync and SYNC_ENFORCE:
         # SYNC-OR-DIE. This window carries real singing and not one of the
         # takes drove the mouth. Banking "the best available" here is exactly
         # how 79 seconds of statue-over-a-sung-verse reached delivery in every

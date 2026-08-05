@@ -113,28 +113,46 @@ ok(any("could not decode" in m for m in logs),
 ok(not any("ribbon artifacts" in m for m in logs),
    "...and is never given a confident artifact diagnosis it cannot support")
 
-print("\n-- E: SYNC-OR-DIE on a voiced window (2026-08-04 product rule) --")
-# "Best available" is exactly how 79s of statue-over-a-sung-verse shipped in
-# every cut of the night: each clip WAS the best of its batch. On a window the
-# stem says is sung, a take must be verdict=synced AND rank >= the floor, or the
-# clip fails loudly rather than banking a dead mouth.
-from features.song_video.pipeline import SYNC_RANK_FLOOR, SyncFloorNotMet  # noqa: E402
+print("\n-- E: sync floor is ADVISORY by default (disarmed 2026-08-04 late) --")
+# Ground truth inverted the gate on first human contact: Andrew's one approved
+# take (static, rank 0.001) is refused by it, and the three takes that clear it
+# he rejected. While the scorer is uncalibrated, require_sync=True must bank
+# the best take anyway and log what enforcement WOULD have done -- evidence
+# accumulates, nothing is refused, no raise.
+from features.song_video.pipeline import (  # noqa: E402
+    SYNC_ENFORCE, SYNC_RANK_FLOOR, SyncFloorNotMet,
+)
 
+ok(SYNC_ENFORCE is False,
+   "SYNC_ENFORCE ships False -- re-arming requires a recalibrated scorer in the "
+   "same commit, never a lone flag flip")
 logs.clear()
 out = os.path.join(tmp, "clipE.mp4")
 gen, calls = make_gen(CLEAN)   # clean, but with audio_slice=None it cannot sync
+res = pipeline._pick_best_seed(3, out, gen, None, 4242, 3,
+                               log_fn=logs.append, require_sync=True)
+ok(res is not None and os.path.isfile(res),
+   "advisory mode BANKS the take on a voiced window instead of raising")
+ok(any("WOULD-HAVE-REFUSED" in m for m in logs),
+   "and logs what enforcement would have done, so the evidence keeps building")
+
+print("\n-- E-armed: enforcement still works when explicitly re-armed --")
+logs.clear()
+out = os.path.join(tmp, "clipEarmed.mp4")
+gen, calls = make_gen(CLEAN)
+pipeline.SYNC_ENFORCE = True
 try:
-    pipeline._pick_best_seed(3, out, gen, None, 4242, 3,
+    pipeline._pick_best_seed(5, out, gen, None, 4242, 3,
                              log_fn=logs.append, require_sync=True)
-    ok(False, "a voiced window with no synced take must NOT bank a clip")
+    ok(False, "armed: a voiced window with no synced take must NOT bank a clip")
 except SyncFloorNotMet as e:
     ok("VOICED" in str(e) and "still mouth" in str(e),
-       "raises SyncFloorNotMet and says it is refusing to bank a still mouth "
-       "over singing")
-    ok(calls["n"] == 3, f"it spent its whole take budget first ({calls['n']}/3)")
+       "armed: raises SyncFloorNotMet, refusing to bank a still mouth over singing")
+    ok(calls["n"] == 3, f"armed: it spent its whole take budget first ({calls['n']}/3)")
+finally:
+    pipeline.SYNC_ENFORCE = False
 ok(any("below the sync floor" in m for m in logs),
-   "each rejected take says WHY (synced flag + rank vs floor), so the operator "
-   "can tell 'never synced' from 'synced but ranked low'")
+   "armed: each rejected take says WHY (synced flag + rank vs floor)")
 
 print("\n-- E2: the SAME takes are acceptable on an INSTRUMENTAL window --")
 logs.clear()
