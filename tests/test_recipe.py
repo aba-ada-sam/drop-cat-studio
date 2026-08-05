@@ -76,6 +76,19 @@ ok(abs(-40.0 - window_energy.VOICED_FLOOR_DBFS) < 1e-9
    and abs(0.20 - window_energy.VOICED_FRAC_FLOOR) < 1e-9,
    "voiced floor constants unchanged from the validated values")
 
+print("\n-- E2: v3 multi-scene contract present and coherent --")
+ms = r["production"].get("multi_scene") or {}
+ok(all(k in ms for k in ("flags", "anchor_build", "tail_stub_rule", "scene_prompt_rule")),
+   "multi_scene block carries all four contract keys")
+ok("2.5" in ms.get("tail_stub_rule", ""),
+   "tail-stub threshold documented (chain.py uses 2.5s)")
+ok("TRANSPLANT" in ms.get("anchor_build", "").upper(),
+   "anchor rule stays transplant-first (PRIME RULE)")
+ok("PER-SCENE" in r["production"].get("dof_finish", "").upper(),
+   "dof_finish records the per-scene mask rule")
+ok("150" in str(r["conditioning_audio"].get("highpass_hz", "")),
+   "highpass stays 150 (Andrew's oon closure ruling)")
+
 print("\n-- F: a corrupted recipe fails loudly --")
 import json, tempfile  # noqa: E402
 bad = dict(r)
