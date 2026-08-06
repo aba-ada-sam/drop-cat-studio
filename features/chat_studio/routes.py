@@ -255,6 +255,17 @@ async def generate_image(request: Request):
     steps     = max(1, min(80, steps))
     cfg_scale = max(1.0, min(15.0, cfg_scale))
 
+    # C6 fix (2026-08-05): this used to hardcode subject="auto", creature=False
+    # below and never echo what was actually resolved -- silently stripping the
+    # NSFW subject/creature controls the Chat UI now sends. Read + validate them
+    # the same way image_studio/routes.py:81-87 does.
+    subject = body.get("subject")
+    if subject is None:
+        subject = "auto"
+    elif not isinstance(subject, str) or subject not in image_presets.SUBJECT_CHOICES:
+        raise HTTPException(400, f"subject must be one of {image_presets.SUBJECT_CHOICES}")
+    creature = bool(body.get("creature") is True)
+
     # Optional illustrative-style preset (same catalog Image Studio uses).
     # Left unset, generation is unchanged from before this option existed --
     # whatever checkpoint is already loaded in Forge, no override.
@@ -292,10 +303,10 @@ async def generate_image(request: Request):
         )
 
     if use_preset:
-        payload, _, _ = image_presets.build_forge_payload(
+        payload, resolved_subject, creature_applied = image_presets.build_forge_payload(
             preset_key, image_presets.clamp_prompt_text(prompt),
             image_presets.clamp_prompt_text(negative_prompt),
-            width, height, steps, cfg_scale, seed, "auto", False,
+            width, height, steps, cfg_scale, seed, subject, creature,
         )
     else:
         payload = {
@@ -309,6 +320,10 @@ async def generate_image(request: Request):
             "batch_size": 1,
             "sampler_name": "DPM++ 3M SDE",
         }
+        # No preset wrap touched Forge's checkpoint (see the safety-judge
+        # comment above) -- subject/creature have nothing to resolve against,
+        # so echo "n/a" rather than silently implying they were honored.
+        resolved_subject, creature_applied = "n/a", False
     try:
         result = await asyncio.to_thread(forge_dispatch.txt2img, payload)
     except forge_dispatch.ForgeDispatchError as e:
@@ -338,12 +353,27 @@ async def generate_image(request: Request):
     out_path = out_dir / fname
     out_path.write_bytes(img_bytes)
 
-    log.info("[chat] generated image (preset=%s) -> %s (seed=%s)", preset_key if use_preset else None, out_path, actual_seed)
+    # H10 fix (2026-08-05): still images from Chat/Image Studio never got
+    # registered with the session, so they never appeared anywhere the
+    # session picker feeds (e.g. "From Session" in other tabs) even though
+    # their animated-video outputs do (via the shared fun_videos pipeline).
+    # Mirrors the call fun_videos/pipeline.py:624-627 already makes.
+    try:
+        from core.session import get_current as get_session
+        get_session().add_file(fname, "image", "chat_studio", path=str(out_path))
+    except Exception as e:
+        log.warning("[chat] session add_file failed: %s", e)
+
+    log.info("[chat] generated image (preset=%s, subject=%s, creature=%s/%s) -> %s (seed=%s)",
+              preset_key if use_preset else None, resolved_subject, creature, creature_applied, out_path, actual_seed)
     return {
-        "image_url":       f"/output/{ts}/{job_slug}/{fname}",
-        "image_path":      str(out_path),
-        "seed":            actual_seed,
-        "checkpoint_used": preset["checkpoint"] if preset else None,
+        "image_url":        f"/output/{ts}/{job_slug}/{fname}",
+        "image_path":       str(out_path),
+        "seed":             actual_seed,
+        "checkpoint_used":  preset["checkpoint"] if preset else None,
+        "subject_used":     resolved_subject,
+        "creature":         creature,
+        "creature_applied": creature_applied,
     }
 
 
