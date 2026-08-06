@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DropCat Studio V2 -- Overnight Plan</title>
+<style>
+  :root { --bg:#14100d; --card:#1e1813; --ink:#e8e0d4; --dim:#9a8f80; --gold:#e0a93e; --teal:#3ec9c4; --red:#e06c5a; --green:#7fbf6a; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--ink); font:16px/1.55 "Segoe UI",system-ui,sans-serif; padding:32px 18px 80px; }
+  .wrap { max-width:880px; margin:0 auto; }
+  h1 { font-size:30px; margin-bottom:4px; } h1 .v2 { color:var(--teal); }
+  .sub { color:var(--dim); margin-bottom:28px; }
+  h2 { font-size:20px; margin:34px 0 12px; color:var(--gold); border-bottom:1px solid #3a3026; padding-bottom:6px; }
+  h2.teal { color:var(--teal); }
+  .card { background:var(--card); border:1px solid #322a20; border-radius:10px; padding:14px 18px; margin-bottom:10px; }
+  .card b.t { display:block; margin-bottom:2px; }
+  .done { color:var(--green); font-weight:600; }
+  .p0 { color:var(--red); font-weight:700; } .p1 { color:var(--gold); font-weight:700; } .p2 { color:var(--dim); font-weight:700; }
+  ul { margin:8px 0 8px 22px; } li { margin-bottom:6px; }
+  .dim { color:var(--dim); }
+  .pill { display:inline-block; background:#2a2218; border:1px solid #40362a; border-radius:20px; padding:1px 10px; font-size:13px; color:var(--dim); margin:2px 4px 2px 0; }
+  code { background:#2a2420; padding:1px 6px; border-radius:4px; font-size:14px; }
+  .ask { background:#241c2a; border:1px solid #4a3a55; border-radius:10px; padding:14px 18px; margin-bottom:10px; }
+  .ask b { color:#c9a0e8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>DropCat Studio <span class="v2">V2</span> -- Overnight Plan</h1>
+  <div class="sub">2026-08-05, night build. New folder <code>C:\DropCat-Studio-V2</code>, new desktop icon "DropCat Studio V2". Your current app is untouched and keeps working.</div>
+
+  <h2>Already fixed tonight (in the CURRENT app, before V2)</h2>
+  <div class="card"><b class="t"><span class="done">DONE</span> -- "Start a Quick Video from this Idea" dead-ending at an upload box</b>
+    The idea-to-video flow was actually fixed Aug 2-3, but a hand-maintained cache version string was never bumped, so your browser kept running July code that drops the idea and demands a photo. All 87 version strings bumped; on next server start + page load, typing an idea generates the image for you.</div>
+  <div class="card"><b class="t"><span class="done">DONE</span> -- "Code changes pending" toast that would not go away</b>
+    The night-close stopped the DCS server; the banner freezes forever on a dead page and Restart can do nothing. Now it hides itself when the server is unreachable. (Your current tab is dead -- close it; server comes back after tonight's v16 render finishes.)</div>
+  <div class="card"><b class="t"><span class="done">DONE</span> -- VS Code updater "Access is denied" error</b>
+    An unkillable leftover process from before this morning's VS Code update is pinning the old version folder. A one-shot cleanup runs at your next logon; if the dialog pops before then, just hit Cancel.</div>
+
+  <h2>What the review found (3 agents, whole app audited)</h2>
+  <div class="card"><b class="t">The big one: the GUI cannot reach your ratified recipe.</b>
+    Everything you ratified today -- recipe v3, multi-scene A-B-A, smart seams, judge v2 take selection, per-scene DOF -- lives in <code>engine/chain.py</code> and is command-line only. The Music Video tab drives a SEPARATE older pipeline with none of it and two known live bugs (clip start-time drift, arc-duration override). The GUI and the proven engine are two different programs.</div>
+  <div class="card"><b class="t">Status displays lie by omission.</b>
+    Forge (which Chat + Image Studio depend on entirely) is invisible to service monitoring, and the "GPU" pill reads idle while Forge renders. First sign of trouble is a failed generation.</div>
+  <div class="card"><b class="t">Stale front door.</b>
+    Studio Home links only 2 of 9 tools while claiming to cover "every creation type"; the Help modal, Home page, and breadcrumb each tell a different "pipeline" story; a complete Adobe tab + backend exists wired to nothing.</div>
+
+  <h2 class="teal">The V2 build (running overnight)</h2>
+  <div class="card"><b class="t"><span class="p0">P0</span> Quick Video becomes a real wizard -- the thing you asked for</b>
+    Type the idea, then: prompt is written -&gt; image GENERATES immediately (no upload, upload becomes optional) -&gt; you see it with <b>Approve / Regenerate / restyle</b> buttons -&gt; only then does animation + music spend GPU time. Every step visible, nothing silently requires a photo.</div>
+  <div class="card"><b class="t"><span class="p0">P0</span> Music Video tab drives the REAL engine</b>
+    The tab becomes a front-end for <code>chain.py</code> with the ratified v3 flags: song upload or ACE-Step generation, anchor image(s), scene prompts, smart seams + judge v2 on by default, live progress from the render log. The old parallel pipeline stays available but clearly marked legacy.</div>
+  <div class="card"><b class="t"><span class="p0">P0</span> Truthful status everywhere</b>
+    Forge joins service monitoring with its own dot; GPU pill covers all three GPU users; a dead server shows a full "Server offline -- relaunch from desktop icon" overlay instead of a frozen page.</div>
+  <div class="card"><b class="t"><span class="p1">P1</span> One coherent front door</b>
+    Studio Home gets a card for every tool, one consistent story about what leads to what, dead breadcrumb code and stale Help copy removed.</div>
+  <div class="card"><b class="t"><span class="p1">P1</span> Cache-busting that cannot rot</b>
+    Server sends no-store for all JS modules; the hand-maintained version strings (tonight's root cause) are deleted. This class of bug can never happen again.</div>
+  <div class="card"><b class="t"><span class="p2">P2</span> If time allows</b>
+    AI assistant depth from the old UX plan (explain/why/remix, vision auto-routing), ADetailer simple/advanced toggle, compare view in gallery. Rejected ideas (Forge Couple region editor etc.) stay dead.</div>
+
+  <h2>Safety rails</h2>
+  <ul>
+    <li>V2 lives on ports <b>7940-7959</b>, worker <b>7897</b> -- the code is stripped of every reference to v1's ports, so V2 is <i>incapable</i> of killing v1's server or worker.</li>
+    <li>Separate folder, separate git branch (<code>v2-gui</code>) -- v1 auto-pull can never ingest v2 changes.</li>
+    <li><b>GPU untouched all night</b>: your v16 render (and its 00:20 failsafe) owns the card; V2 work is code + mocked tests only. First live render test happens only after v16 is done.</li>
+    <li>Rule 6: adversarial red-team (code critic + live attacker against V2's own server) before I call anything done.</li>
+  </ul>
+
+  <h2>Decisions left for you (nothing blocks the build)</h2>
+  <div class="ask"><b>1. V2 accent color is teal</b> so you can always tell V2 tabs from the gold v1. Easy to change if you hate it.</div>
+  <div class="ask"><b>2. Adobe tab:</b> wire it up or delete it? (Building neither -- it stays stranded until you call it.)</div>
+  <div class="ask"><b>3. MuseTalk auto-lipsync:</b> currently defaults ON per your June order, but the ledger calls it "the wrong sync engine for creature subjects". V2 keeps your current default + a visible toggle; flip the default only on your word.</div>
+
+  <div class="dim" style="margin-top:26px">Morning delivery: working V2 behind the new desktop icon + a results page with what shipped, what the red team found, and the first live smoke test (post-v16). -- Claude (5080, Studio board sid d5b811c8)</div>
+</div>
+</body>
+</html>
