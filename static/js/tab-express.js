@@ -1,15 +1,17 @@
 /**
  * Drop Cat Go Studio -- Express mode.
- * Drop an image, describe your idea, click Create. Everything else is automatic.
+ * Describe your idea (or drop your own photo), approve the generated image,
+ * click Create. Everything else is automatic.
  */
 import { api, apiUpload, pollJob, stopJob } from './api.js';
 import { el, pathToUrl } from './components.js';
 import { toast, apiFetch } from './shell/toast.js';
 import { handoff } from './handoff.js';
 
-// Module-level so receiveHandoff can call _applyImageFn/_setIdeaFn even after init
+// Module-level so receiveHandoff can call _applyImageFn/_setIdeaFn/_startWizardFn even after init
 let _applyImageFn = null;
 let _setIdeaFn = null;
+let _startWizardFn = null;
 
 export function receiveHandoff(data) {
   if (data?.type === 'image' && data.path) {
@@ -19,7 +21,11 @@ export function receiveHandoff(data) {
     // only, no photo. Without this the idea text was dropped on the floor
     // (this handler only ever understood type:'image') and the tab landed
     // empty, so Create saw no image + no idea and asked the user to drop one.
+    // C3/wizard: also immediately kick off the visible generate-image step so
+    // the user sees a starting image being produced instead of an empty
+    // upload drop-zone that looks like a hard requirement.
     _setIdeaFn?.(data.text);
+    _startWizardFn?.(data.text);
   }
 }
 
@@ -161,7 +167,10 @@ export function init(panel) {
     const modelInfo = _allModels[q.model];
     const needs = modelInfo?.vram_min_gb || 0;
     if (needs && _gpuVramGb < needs) {
-      _qualVramWarnEl.textContent = `${q.label} needs ~${needs} GB -- your GPU has ${_gpuVramGb} GB. Generation may be slow or fail.`;
+      // C7: this used to say "needs ~X GB" / "may fail", which read as a hard
+      // requirement -- but Create proceeds anyway regardless (the hard gate
+      // was deliberately disabled 2026-08-01). Say what actually happens.
+      _qualVramWarnEl.textContent = `${q.label} usually wants ~${needs} GB VRAM -- you have ${_gpuVramGb} GB. It will proceed anyway; generation may be slow or run tight on memory.`;
       _qualVramWarnEl.style.display = '';
     } else {
       _qualVramWarnEl.style.display = 'none';
@@ -191,21 +200,42 @@ export function init(panel) {
     style: 'font-size:.78rem; color:var(--accent); text-decoration:underline; cursor:pointer; pointer-events:auto;',
     text: 'pick a folder of photos',
   });
+  // C3/wizard: photo upload is now the OPTIONAL path -- typing an idea and
+  // generating a starting image is the primary one (see wizardGenBtn near
+  // the idea field, and _wizardGenerate below).
   const dropHint = el('div', { style: 'display:flex; flex-direction:column; align-items:center; gap:8px; pointer-events:none;' }, [
-    el('div', { style: 'font-size:1rem; font-weight:600; color:var(--text-2);', text: 'Drop a photo here' }),
-    el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'or paste from clipboard (Ctrl+V) or click to browse a file' }),
+    el('div', { style: 'font-size:1rem; font-weight:600; color:var(--text-2);', text: 'Type an idea below and click Generate' }),
+    el('div', { style: 'font-size:.8rem; color:var(--text-3);', text: 'or drop your own photo (optional) -- paste from clipboard (Ctrl+V) or click to browse a file' }),
     el('div', { style: 'font-size:.78rem; color:var(--text-3); margin-top:2px;' }, [
       el('span', { text: 'Working on a batch? ' }),
       pickFolderLink,
       el('span', { text: ' to run one generation per image.' }),
     ]),
   ]);
+  // Wizard "Generating your image..." / error state -- lives in the SAME
+  // preview area as the photo so the generate step is visible instead of an
+  // invisible side effect of Create (C3).
+  const wizardStatusEl = el('div', {
+    style: 'display:none; font-size:.9rem; color:var(--text-3); text-align:center; padding:0 16px; line-height:1.5;',
+  });
   const clearImgBtn = el('button', {
     style: 'display:none; position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; z-index:2; padding:0;',
     title: 'Clear image', text: 'x',
   });
-  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:160px; display:flex; align-items:center; justify-content:center;' }, [preview, dropHint, clearImgBtn]);
+  const dropZone = el('div', { class: 'drop-zone', style: 'position:relative; min-height:160px; display:flex; align-items:center; justify-content:center;' }, [preview, dropHint, wizardStatusEl, clearImgBtn]);
   root.appendChild(dropZone);
+
+  // Wizard actions: Approve / Regenerate / restyle -- shown only while a
+  // generated (not-yet-approved) image is in the preview. stylePresetSel is
+  // appended into this row further down once it's built (it's the SAME
+  // element used elsewhere -- "the existing style-preset selector" -- not a
+  // duplicate).
+  const approveBtn = el('button', { class: 'btn btn-primary btn-sm', text: 'Approve' });
+  const regenerateBtn = el('button', { class: 'btn btn-sm', text: 'Regenerate', title: 'Same idea, new seed' });
+  const wizardActionsRow = el('div', {
+    style: 'display:none; align-items:center; gap:8px; flex-wrap:wrap; justify-content:center; padding-top:4px;',
+  }, [approveBtn, regenerateBtn]);
+  root.appendChild(wizardActionsRow);
 
   function _autoSelectRatio(imgW, imgH) {
     if (!imgW || !imgH) return;
@@ -250,8 +280,26 @@ export function init(panel) {
     dropZone.classList.add('drop-zone-loaded');
     clearImgBtn.style.display = '';
     preview.onload = () => _autoSelectRatio(preview.naturalWidth, preview.naturalHeight);
+    // An image arriving through this path (upload, or a handoff from another
+    // tab) is treated as already-decided -- no wizard approval gate. A
+    // wizard-generated image awaiting approval uses _showWizardPreview
+    // instead, which deliberately does NOT touch _imagePath.
+    _refreshWizardTrigger?.();
+    _refreshCreateBtn?.();
   }
   _applyImageFn = _applyImage;
+
+  // Shows a generated-but-not-yet-approved image in the SAME preview area
+  // without adopting it into _imagePath -- that only happens on Approve.
+  // Mirrors _applyImage's visual side effects minus the state adoption.
+  function _showWizardPreview(url) {
+    preview.src = url;
+    preview.style.display = '';
+    dropHint.style.display = 'none';
+    wizardStatusEl.style.display = 'none';
+    dropZone.classList.add('drop-zone-loaded');
+    clearImgBtn.style.display = '';
+  }
 
   // Idea-only start: every model this tab can pick (auto-pick's five buckets,
   // and the hardcoded Quick Preview model) is I2V-only -- none of them route to
@@ -297,17 +345,118 @@ export function init(panel) {
     }
   }
 
+  // -- Quick Video wizard: visible generate -> approve/regenerate step (C3) --
+  // Andrew's complaint was that the generate step was invisible (only ever
+  // fired as a side effect inside Create, via _ensureImage above), so users
+  // stared at what looked like a mandatory upload drop-zone. This makes it a
+  // real step with its own state: type an idea (or arrive from Studio Home's
+  // "Start a Quick Video from this Idea"), watch it generate in the SAME
+  // preview area, then explicitly Approve / Regenerate / restyle-and-
+  // regenerate before Create unlocks. Dropping/uploading your own photo still
+  // skips this entirely (auto-approved, unchanged from before).
+  //
+  // State lives in three variables:
+  //   _wizardBusy   -- a generate-image call is in flight (blocks re-entry)
+  //   _wizardPath/_wizardUrl/_wizardPrompt -- the pending, NOT-yet-approved
+  //     generated image. Deliberately kept separate from _imagePath so Create
+  //     (gated on _imagePath being set -- see _refreshCreateBtn) cannot fire
+  //     on an unapproved image.
+  // Approving simply promotes _wizardPath -> _imagePath.
+  let _wizardBusy   = false;
+  let _wizardPrompt = '';
+  let _wizardPath   = null;
+  let _wizardUrl    = null;
+
+  function _setWizardStatus(msg, isError) {
+    wizardStatusEl.textContent = msg || '';
+    wizardStatusEl.style.color = isError ? 'var(--red, #c41e3a)' : 'var(--text-3)';
+    wizardStatusEl.style.display = msg ? '' : 'none';
+  }
+  function _showWizardActions(show) {
+    wizardActionsRow.style.display = show ? 'flex' : 'none';
+  }
+
+  async function _wizardGenerate(idea) {
+    idea = (idea || '').trim();
+    if (!idea || _wizardBusy) return;
+    _wizardBusy = true;
+    _wizardPath = null; _wizardUrl = null;
+    _showWizardActions(false);
+    _refreshWizardTrigger();
+    _refreshCreateBtn();
+    preview.style.display = 'none';
+    dropHint.style.display = 'none';
+    _setWizardStatus('Generating your image...', false);
+    // Same GPU-busy retry pattern as _ensureImage: a live WanGP render blocks
+    // Forge's txt2img outright (409) rather than queuing, but that's usually
+    // done within a minute or two, so poll instead of failing on the first try.
+    const deadline = Date.now() + GPU_WAIT_MAX_MS;
+    for (;;) {
+      try {
+        const { image_path, image_url } = await api('/api/chat-studio/generate-image', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: idea, preset: stylePresetSel.value || undefined }),
+        });
+        _wizardPrompt = idea;
+        _wizardPath   = image_path;
+        _wizardUrl    = image_url || pathToUrl(image_path);
+        _showWizardPreview(_wizardUrl);
+        _setWizardStatus('');
+        _showWizardActions(true);
+        break;
+      } catch (e) {
+        if (e.status === 409 && Date.now() < deadline) {
+          _setWizardStatus('Video render in progress -- waiting for the GPU...', false);
+          await new Promise(r => setTimeout(r, GPU_WAIT_RETRY_MS));
+          continue;
+        }
+        // Forge down (503 "Forge is not running...") or any other Forge
+        // failure (502): show the real error and fall back to the upload
+        // path -- the drop zone stays fully usable, it just re-shows its hint.
+        dropHint.style.display = '';
+        _setWizardStatus(`Couldn't generate a starting image (${e.message}) -- drop your own photo above instead.`, true);
+        toast(`Couldn't generate a starting image (${e.message})`, 'error');
+        break;
+      }
+    }
+    _wizardBusy = false;
+    _refreshWizardTrigger();
+    _refreshCreateBtn();
+  }
+  _startWizardFn = _wizardGenerate;
+
+  approveBtn.addEventListener('click', () => {
+    if (!_wizardPath) return;
+    _imagePath = _wizardPath;   // promote pending -> approved; unlocks Create
+    _showWizardActions(false);
+    toast('Image approved', 'success');
+    _refreshWizardTrigger();
+    _refreshCreateBtn();
+  });
+  regenerateBtn.addEventListener('click', () => {
+    // Same prompt, new seed (generate-image defaults seed to -1/random when
+    // not passed) -- re-reads stylePresetSel.value at call time so a Restyle
+    // pick is honoured without a separate "Restyle" button.
+    _wizardGenerate(_wizardPrompt || ideaInput.value.trim());
+  });
+
   clearImgBtn.addEventListener('click', e => {
     e.stopPropagation();
     _imagePath = null;
+    _wizardPath = null; _wizardUrl = null; _wizardPrompt = '';
+    _showWizardActions(false);
+    _setWizardStatus('');
     preview.src = ''; preview.style.display = 'none';
     dropHint.style.display = '';
     dropZone.classList.remove('drop-zone-loaded', 'drag-over');
     clearImgBtn.style.display = 'none';
     _resetPromptsForNewImage();
+    _refreshWizardTrigger();
+    _refreshCreateBtn();
   });
 
   dropZone.addEventListener('click', e => {
+    if (_wizardBusy) return;  // don't open the file picker while a generation is in flight
     if (preview.contains(e.target) || e.target === preview) return;
     if (pickFolderLink.contains(e.target) || e.target === pickFolderLink) return;
     imgInput.click();
@@ -323,6 +472,12 @@ export function init(panel) {
   let _uploadInFlight = null;
 
   async function _handleFile(file) {
+    // Dropping/uploading your own photo bypasses the wizard entirely --
+    // clear any pending, not-yet-approved generated image so its Approve/
+    // Regenerate row doesn't linger over the new upload.
+    _wizardPath = null; _wizardUrl = null; _wizardPrompt = '';
+    _showWizardActions(false);
+    _setWizardStatus('');
     const blobUrl = URL.createObjectURL(file);
     _applyImage(blobUrl, blobUrl);  // visual preview only; _imagePath stays null
     _uploadInFlight = (async () => {
@@ -334,6 +489,8 @@ export function init(panel) {
         toast(err.message, 'error');
       } finally {
         _uploadInFlight = null;
+        _refreshWizardTrigger();
+        _refreshCreateBtn();
       }
     })();
     return _uploadInFlight;
@@ -378,10 +535,30 @@ export function init(panel) {
   });
   _setIdeaFn = (text) => { ideaInput.value = text; };
 
-  // Style preset for the idea-only starting image (same catalog + NSFW gate as
-  // Image Studio / Chat). Was previously missing here entirely, so a text-only
-  // idea always generated with whatever checkpoint happened to be loaded in
-  // Forge instead of the preset the rest of the app uses.
+  // Wizard trigger: visible when there's an idea to work from and no image
+  // yet (generated pending, approved, or uploaded). Manual equivalent of the
+  // auto-fire that happens on a Studio Home concept handoff -- typing here
+  // doesn't auto-generate on every keystroke, it needs an explicit click.
+  const wizardGenBtn = el('button', {
+    class: 'btn btn-sm',
+    style: 'display:none; align-self:flex-start;',
+    title: 'Create a starting image from this idea using AI (Forge)',
+    text: '* Generate image from idea',
+  });
+  function _refreshWizardTrigger() {
+    const hasIdea  = !!ideaInput.value.trim();
+    const hasImage = !!(_imagePath || _wizardPath || _uploadInFlight);
+    wizardGenBtn.style.display = (hasIdea && !hasImage && !_wizardBusy) ? '' : 'none';
+  }
+  wizardGenBtn.addEventListener('click', () => _wizardGenerate(ideaInput.value.trim()));
+  ideaInput.addEventListener('input', () => _refreshWizardTrigger());
+
+  // Style preset for the wizard's generated starting image (same catalog +
+  // NSFW gate as Image Studio / Chat). Was previously missing here entirely,
+  // so a text-only idea always generated with whatever checkpoint happened to
+  // be loaded in Forge instead of the preset the rest of the app uses. Lives
+  // in the wizard actions row (appended there below) so it doubles as the
+  // Restyle control -- pick a different style, click Regenerate.
   const STYLE_KEY = 'dropcat_express_style';
   const stylePresetSel = el('select', { style: 'font-size:.78rem; max-width:220px;' });
   const styleDesc = el('div', { style: 'font-size:.7rem; color:var(--text-3);' });
@@ -408,13 +585,14 @@ export function init(panel) {
     _updateStyleDesc();
   });
   _loadStylePresets();
-  const stylePresetRow = el('div', { style: 'display:flex; flex-direction:column; gap:2px;' }, [
+  const stylePresetRow = el('div', { style: 'display:flex; flex-direction:column; gap:2px; align-items:center;' }, [
     el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
-      el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: 'Style (used only when starting from text, no photo)' }),
+      el('span', { style: 'font-size:.72rem; color:var(--text-3);', text: 'Style (restyle before Regenerate)' }),
       stylePresetSel,
     ]),
     styleDesc,
   ]);
+  wizardActionsRow.appendChild(stylePresetRow);
 
   // Shared brainstorm call -- updates fields, returns {idea, lyric_direction, reply}
   let _chatHistory = [];
@@ -623,8 +801,8 @@ export function init(panel) {
     ]),
     ideaInput,
     ideaHint,
+    wizardGenBtn,
     qualityConflictWarn,
-    stylePresetRow,
     musicVibeBlock,
     talkReplyEl,
   ]));
@@ -991,23 +1169,10 @@ export function init(panel) {
     }),
   ]));
 
-  // Off by default -- native audio conditioning deterministically deadlocks
-  // WanGP on the make-it-multi path (no MuseTalk fallback here).
-  let _lipSync = false;
-  const lipSyncChk = el('input', {
-    type: 'checkbox', id: 'express-lip-sync',
-    style: 'cursor:pointer; width:13px; height:13px; flex-shrink:0;',
-  });
-  lipSyncChk.checked = _lipSync;
-  lipSyncChk.addEventListener('change', () => { _lipSync = lipSyncChk.checked; });
-  multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
-    lipSyncChk,
-    el('label', {
-      for: 'express-lip-sync',
-      style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;',
-      text: 'Lip Sync (audio drives mouth/face motion -- experimental, may hang)',
-    }),
-  ]));
+  // M29 + MuseTalk removal (Andrew's ruling 2026-08-05): the Lip Sync
+  // checkbox and its _lipSync state are gone. MuseTalk is being removed from
+  // V2 entirely; native audio-conditioned sync in chain.py is the only sync
+  // mechanism now, and it isn't part of this tab.
   multiSettings.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
     upscaleChk,
     el('label', { for: 'express-upscale', style: 'font-size:.78rem; color:var(--text-3); cursor:pointer;', text: 'Upscale output' }),
@@ -1070,7 +1235,12 @@ export function init(panel) {
   // -- Queue-depth tracking for Create button --------------------------------
   let _pendingCount = 0;
   function _refreshCreateBtn() {
-    createBtn.disabled = false;
+    // C3/wizard: Create stays disabled until there's an approved image --
+    // _imagePath is only ever set by a real upload landing, or by Approve
+    // promoting a wizard-generated image (see approveBtn's handler above).
+    // A pending, not-yet-approved generated image lives in _wizardPath and
+    // deliberately does NOT count.
+    createBtn.disabled = !_imagePath;
     if (_multiVideo) {
       createBtn.textContent = 'Create Extended Video';
     } else {
@@ -1088,12 +1258,8 @@ export function init(panel) {
     text: 'Create Extended Video',
     style: 'flex:1; font-size:1.1rem; padding:14px; font-weight:700; letter-spacing:.04em;',
   });
-  const loopBtn = el('button', {
-    class: 'btn',
-    text: '∞  Loop',
-    title: 'Generate continuously until stopped',
-    style: 'display:none; font-size:.95rem; padding:14px 18px; white-space:nowrap;',
-  });
+  // L30: loopBtn ("Loop", continuous-generate) was created display:none and
+  // never wired to anything -- dead code, removed.
   const loopFolderBtn = el('button', {
     class: 'btn',
     text: 'Loop Folder',
@@ -1108,7 +1274,7 @@ export function init(panel) {
     title: 'Fast 30-45s preview -- validates composition and atmosphere, not motion',
     style: 'font-size:.9rem; padding:14px 16px; white-space:nowrap;',
   });
-  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, quickBtn, loopBtn, loopFolderBtn]));
+  root.appendChild(el('div', { style: 'display:flex; gap:8px;' }, [createBtn, quickBtn, loopFolderBtn]));
 
   // Folder path input -- replaces window.prompt() so the user has a proper
   // labelled text box to paste into. Shown/hidden by _startLoopFolder().
@@ -1285,7 +1451,13 @@ export function init(panel) {
           'Avoid generic upbeat pop. Real sung lyrics with something to say, never instrumental.'
         );
         motionPrompt = ideaInput.value.trim();
-      } catch (_) {}
+      } catch (e) {
+        // H14: this used to fail silently, leaving both fields blank and
+        // submitting an empty idea with no explanation.
+        toast(`AI couldn't read the photo (${e.message}) -- using a generic idea instead`, 'error');
+        if (!motionPrompt) { motionPrompt = 'Subject erupts into motion, energy bursts through the frame'; ideaInput.value = motionPrompt; }
+        if (!lyricInput.value.trim()) lyricInput.value = 'dreamy indie, wistful';
+      }
     } else {
       if (needIdea) {
         _showProgress(3, 'AI is writing your video idea...');
@@ -1299,7 +1471,9 @@ export function init(panel) {
           });
           const p = data.prompts?.[0];
           motionPrompt = (typeof p === 'string' ? p : p?.prompt) || '';
-        } catch (_) {}
+        } catch (e) {
+          toast(`AI couldn't write an idea (${e.message}) -- using a generic one instead`, 'error');
+        }
         if (!motionPrompt) motionPrompt = 'Subject erupts into motion, energy bursts through the frame';
         ideaInput.value = motionPrompt;
       } else {
@@ -1315,7 +1489,12 @@ export function init(panel) {
             'or whatever has a distinctive voice. Avoid generic pop. Real sung lyrics with something to say, never instrumental.',
             { lyricOnly: true }
           );
-        } catch (_) {}
+        } catch (e) {
+          // H14: was a bare catch -- lyricInput stayed blank with no sign
+          // anything went wrong.
+          toast(`AI couldn't pick a music vibe (${e.message}) -- using a generic one instead`, 'error');
+          if (!lyricInput.value.trim()) lyricInput.value = 'dreamy indie, wistful';
+        }
       }
     }
 
@@ -1327,7 +1506,7 @@ export function init(panel) {
           lyric_direction: lyricInput.value.trim(), user_direction: 'character-driven, specific energy, not generic',
           audio_from_image: _audioFromImage, custom_lyrics: customLyricsTA.value.trim(),
           model: _model, duration: _duration,
-          steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false, lip_sync: _lipSync,
+          steps: _steps, guidance: _guidance, seed: -1, skip_audio: !_addMusic, instrumental: false,
           output_width: _outW, output_height: _outH,
           auto_pick_model: _autoPick,
           // LTX Distilled (Photo Mood) defaults calm; Wan chips are dynamic.
@@ -1335,7 +1514,11 @@ export function init(panel) {
           // For LTX: 'calm' (subject still) or 'gentle' (subject moves subtly).
           // For Wan I2V: always 'dynamic' (kinetic) -- it's the only mode Wan
           // does well.
-          motion_style: _model.toLowerCase().includes('dev13') ? 'dynamic' : 'calm',
+          // C5: was `.includes('dev13')`, which never matches any Express
+          // model name (fast=Distilled, quality/hd=Wan I2V) so this always
+          // fell to 'calm' and silently forced Action/Action HD motionless.
+          // Same isLtx test _collectFolderLoopSettings() already gets right.
+          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
         }),
       });
       _jobId = job_id;
@@ -1487,7 +1670,6 @@ export function init(panel) {
       seed:                -1,
       skip_audio:          !_addMusic,
       instrumental:        false,
-      lip_sync:            _lipSync,
       output_width:        _outW,
       output_height:       _outH,
       auto_pick_model:     _autoPick,
@@ -1612,7 +1794,12 @@ export function init(panel) {
           'Write a lyric direction for a song that spans a multi-clip cinematic story: ' + motionPrompt,
           { lyricOnly: true }
         );
-      } catch (_) {}
+      } catch (e) {
+        // H14: was a bare catch -- lyricInput stayed blank with no sign
+        // anything went wrong.
+        toast(`AI couldn't pick a music vibe (${e.message}) -- using a generic one instead`, 'error');
+        if (!lyricInput.value.trim()) lyricInput.value = 'dreamy indie, wistful';
+      }
     }
 
     try {
@@ -1643,13 +1830,14 @@ export function init(panel) {
           seed:            -1,
           skip_audio:      !_addMusic,
           instrumental:    false,
-          lip_sync:        _lipSync,
           output_width:    _outW,
           output_height:   _outH,
           auto_pick_model: _autoPick,
           // LTX uses the Motion chip (calm | gentle); Wan is always dynamic.
           // auto_pick_model overrides this server-side when ON.
-          motion_style: _model.toLowerCase().includes('dev13') ? 'dynamic' : 'calm',
+          // C5: was `.includes('dev13')` -- never matches, always fell to
+          // 'calm'. Same isLtx test as _collectFolderLoopSettings().
+          motion_style: _model.toLowerCase().includes('ltx') ? 'calm' : 'dynamic',
         }),
       });
       _jobId = job_id;
@@ -1720,4 +1908,9 @@ export function init(panel) {
       _showError(e.message);
     }
   });
+
+  // Set the initial Create button state (disabled -- no approved image yet)
+  // and wizard-trigger visibility (hidden -- no idea typed yet).
+  _refreshCreateBtn();
+  _refreshWizardTrigger();
 }
