@@ -6,9 +6,12 @@ import { api } from './api.js';
 import { toast } from './shell/toast.js';
 import { el, pathToUrl } from './components.js';
 import { VideoStretchTool } from './components/video-stretch.js';
+import { captureServerBaseline, pollUntilRestarted } from './shell/server-restart.js';
+import { checkServiceWarning } from './shell/service-check.js';
 
 let _root        = null;
 let _pollTimer   = null;
+let _advisoryTimer = null;  // M18 cold-service advisory, separate/slower cadence than _pollTimer
 let _knownIds    = new Set();
 let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from render until server confirms deletion
 let _paused      = false;
@@ -76,6 +79,7 @@ function _injectStyles() {
 
 export function pause()  {
   _stopPoll();
+  _stopAdvisoryPoll();
   // Leaving the Queue tab doesn't destroy its DOM (app.js inits each tab
   // once and just hides the panel), so a job detail page left open behind
   // us would otherwise keep its 1.5s refresh poll + 1s ETA ticker running
@@ -83,7 +87,10 @@ export function pause()  {
   // way Escape/Back would.
   _closeDetailPage?.();
 }
-export function resume() { _startPoll(); }
+export function resume() {
+  _startPoll();
+  _startAdvisoryPoll();
+}
 export function openJobModal(job) { _showDetailPage(job); }
 
 // -- Shell (toolbar + list area, built once) -----------------------------------
@@ -192,6 +199,13 @@ const saveRestartBtn = el('button', {
 
     saveRestartBtn.disabled = true;
     saveRestartBtn.textContent = 'Saving...';
+
+    // H13: this button used to POST /api/jobs/save-and-restart and then just
+    // stop -- no poll, no reload, permanently disabled on "Restarting...".
+    // Capture the pre-restart identity BEFORE the POST (needed to tell "came
+    // back" apart from "never left"), then reuse the same poll-then-reload
+    // helper the header Restart button and the restart banner use.
+    const baseline = await captureServerBaseline();
     try {
       const r = await api('/api/jobs/save-and-restart', { method: 'POST' });
       toast(`Saved ${r.saved} job${r.saved !== 1 ? 's' : ''} -- restarting server...`, 'info');
@@ -200,12 +214,36 @@ const saveRestartBtn = el('button', {
       toast('Save & Restart failed: ' + e.message, 'error');
       saveRestartBtn.disabled = false;
       saveRestartBtn.textContent = 'Save & Restart';
+      return;
     }
+
+    // reload:true (default) -- the saved queue is auto-restored server-side
+    // on the next boot; a full reload picks it back up cleanly.
+    await pollUntilRestarted(baseline, {
+      onPollFail: (n) => { if (n === 2) saveRestartBtn.textContent = 'Waiting for server...'; },
+      onTimeout: () => {
+        saveRestartBtn.disabled = false;
+        saveRestartBtn.textContent = 'Save & Restart';
+        toast('Restart did not come back within 90s -- relaunch DropCat Studio V2 from the desktop icon.', 'error');
+      },
+    });
   });
 
   toolbar.append(pauseBtn, cancelAllBtn, clearBtn, saveBtn, saveRestartBtn);
   _root.appendChild(toolbar);
 
+  // M18: cold-service advisory. Queue jobs can sit at 0% for minutes with no
+  // explanation if the service that would run them (WanGP/ACE-Step) is cold
+  // -- this tells the user why instead of leaving them guessing. Hidden when
+  // both services are warm.
+  const coldAdvisory = el('div', {
+    id: 'queue-cold-advisory',
+    style: 'display:none; flex-direction:column; gap:2px; padding:8px 16px; '
+         + 'font-size:.78rem; color:var(--text-2); background:var(--surface-1); '
+         + 'border-bottom:1px solid var(--border-2);',
+  });
+  _root.appendChild(coldAdvisory);
+  _startAdvisoryPoll();
 
   // -- Scrollable list --
   const list = el('div', {
@@ -249,6 +287,38 @@ function _startPoll() {
 }
 function _stopPoll() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+function _startAdvisoryPoll() {
+  if (_advisoryTimer) return;
+  _updateColdAdvisory();
+  _advisoryTimer = setInterval(_updateColdAdvisory, 8000);
+}
+function _stopAdvisoryPoll() {
+  if (_advisoryTimer) { clearInterval(_advisoryTimer); _advisoryTimer = null; }
+}
+
+// M18: shows a short "why is nothing moving" line when a service jobs in
+// this queue depend on (WanGP for video, ACE-Step for music) is cold. Checks
+// both -- either being cold is worth surfacing. 'ready' is excluded from
+// warnings for both: it means "configured, starts on first use", which is
+// normal steady-state, not something to alarm the user about.
+async function _updateColdAdvisory() {
+  const el2 = document.getElementById('queue-cold-advisory');
+  if (!el2) return;
+  const [wangpWarn, acestepWarn] = await Promise.all([
+    checkServiceWarning('wangp',   { okStates: ['running', 'ready'] }),
+    checkServiceWarning('acestep', { okStates: ['running', 'ready'] }),
+  ]);
+  const lines = [wangpWarn, acestepWarn].filter(Boolean);
+  if (!lines.length) {
+    el2.style.display = 'none';
+    el2.textContent = '';
+    return;
+  }
+  el2.innerHTML = '';
+  for (const line of lines) el2.appendChild(el('div', { text: line }));
+  el2.style.display = 'flex';
 }
 
 async function _poll() {

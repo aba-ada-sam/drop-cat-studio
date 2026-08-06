@@ -1,10 +1,18 @@
 /**
  * Drop Cat Go Studio -- Studio Home
- * The front door: concept input + numbered pipeline walkthrough + recent work.
+ * The front door: concept input + a card for every real tool + recent work.
  * Routes the user's raw idea to the Quick Video (express) tab via handoff.
+ *
+ * M27/M28: this used to list 2 of 9 tools ("Create Videos", "Video Tools")
+ * while claiming to be the entry point for every creation type. Every real
+ * tool now has a card here, and the Help modal (index.html) was rewritten to
+ * match this list instead of its own separate (and stale) 2-step narrative.
+ * There is no fixed pipeline -- these are independent entry points.
  */
 import { el } from './components.js';
 import { handoff } from './handoff.js';
+import { checkServiceWarning } from './shell/service-check.js';
+import { toast } from './shell/toast.js';
 
 // -- Module state (reset on each init) --------------------------------------
 let _svcInterval = null;
@@ -12,31 +20,82 @@ let _stepCards   = [];   // [{step, dot, msg}]
 let _recentGrid  = null; // the "Recent Work" grid element, kept for refresh
 let _listenersBound = false; // init() only runs once per app.js's TAB_INIT guard, but guard anyway
 
-// -- Pipeline step definitions ---------------------------------------------
+// Per-service state -> short status text, shared across every card that
+// depends on that service (was duplicated per-card before M27).
+const SVC_LABELS = {
+  wangp: {
+    running:        'WanGP ready',
+    ready:          'WanGP configured',
+    starting:       'WanGP loading...',
+    not_running:    'WanGP offline',
+    not_configured: 'Set path in Settings',
+    error:          'WanGP error',
+    unknown:        'Checking...',
+  },
+  acestep: {
+    running:        'ACE-Step ready',
+    ready:          'ACE-Step configured',
+    not_running:    'ACE-Step offline',
+    starting:       'ACE-Step starting...',
+    not_configured: 'Set path in Settings',
+    error:          'ACE-Step error',
+    unknown:        'Checking...',
+  },
+  // H9: Forge is not DCS-managed -- "not_running" is a normal state here
+  // (Andrew starts it by hand), not an error.
+  forge: {
+    running:     'Forge ready',
+    not_running: 'Forge not running -- start it from its own GUI',
+    unknown:     'Checking...',
+  },
+};
+
+// -- Tool cards --------------------------------------------------------------
+// Every real, reachable tool (rail tabs, minus Studio Home/Gallery). Copy
+// matches the rail-tab titles/hints in index.html and the Help modal's Quick
+// Start list -- one source of truth, restated in three places.
 const STEPS = [
   {
-    num: '01', icon: '', label: 'Create Videos',
-    hint: 'Animate your photos with AI motion. Add AI-generated music with a single prompt.',
-    tab: 'create-videos', svc: 'wangp',
-    svcLabels: {
-      running:        'WanGP ready',
-      ready:          'WanGP configured',
-      not_running:    'WanGP offline',
-      not_configured: 'Set path in Settings',
-      unknown:        'Checking...',
-    },
+    num: '01', label: 'Chat',
+    hint: 'Talk it through, review the prompt, generate, refine, animate.',
+    tab: 'chat', svc: 'forge',
   },
   {
-    num: '02', icon: '', label: 'Video Tools',
-    hint: 'Add AI-generated music to your videos. Batch reverse, speed-ramp, upscale.',
-    tab: 'video-tools', svc: 'acestep',
-    svcLabels: {
-      running:        'ACE-Step ready',
-      not_running:    'ACE-Step offline',
-      starting:       'ACE-Step starting...',
-      not_configured: 'Set path in Settings',
-      unknown:        'Checking...',
-    },
+    num: '02', label: 'Image Studio',
+    hint: 'Direct prompt controls, NSFW-capable presets, straight to Forge.',
+    tab: 'image-studio', svc: 'forge',
+  },
+  {
+    num: '03', label: 'Quick Video',
+    hint: 'Type an idea (or drop a photo), straight to a short AI clip.',
+    tab: 'express', svc: 'wangp',
+  },
+  {
+    num: '04', label: 'Create Videos',
+    hint: 'Animate your photos with AI motion and add AI-generated music.',
+    tab: 'create-videos', svc: 'wangp',
+  },
+  {
+    num: '05', label: 'Music Video',
+    hint: 'A song plus a folder of photos becomes a full-length music video.',
+    tab: 'music-video', svc: 'wangp',
+  },
+  {
+    num: '06', label: 'Video Bridges',
+    hint: 'Arrange 2+ clips and AI generates a transition between each pair.',
+    tab: 'bridges', svc: 'wangp',
+  },
+  {
+    num: '07', label: 'Video Tools',
+    hint: 'Add AI music, trim, reverse, speed-ramp, upscale, smooth frames.',
+    tab: 'video-tools', svc: null, // mostly ffmpeg -- no single GPU service gates it
+    staticStatus: 'ready',
+  },
+  {
+    num: '08', label: 'Queue',
+    hint: 'See what is running or waiting, pause, cancel, retry, or reorder.',
+    tab: 'queue', svc: null,
+    staticStatus: 'always available',
   },
 ];
 
@@ -144,10 +203,16 @@ function _buildHero(root) {
   });
 }
 
-function _launchConcept(text) {
+async function _launchConcept(text) {
   if (!text) return;
   handoff('express', { type: 'concept', text });
   document.querySelector('[data-tab="express"]')?.click();
+  // M18: Quick Video's first generate depends on WanGP, which is often cold
+  // (not started yet, or configured-but-unloaded). Warn up front instead of
+  // leaving the user watching fake progress with no explanation -- this is
+  // informational only, it never blocks the navigation above.
+  const warn = await checkServiceWarning('wangp', { okStates: ['running', 'ready'] });
+  if (warn) toast(warn, 'info');
 }
 
 // -- Pipeline steps --------------------------------------------------------
@@ -183,7 +248,6 @@ function _buildSteps(root) {
     row.appendChild(card);
 
     card.appendChild(el('div', { class: 'pipeline-step-num', text: step.num }));
-    card.appendChild(el('div', { class: 'pipeline-step-icon', text: step.icon, 'aria-hidden': 'true' }));
     card.appendChild(el('div', { class: 'pipeline-step-label', text: step.label }));
     card.appendChild(el('div', { class: 'pipeline-step-hint', text: step.hint }));
 
@@ -308,7 +372,7 @@ async function _pollServices() {
       const info  = data[step.svc] || {};
       const state = info.state || 'unknown';
       dot.className = `dot ${state}`;
-      msg.textContent = step.svcLabels[state] || info.message || state;
+      msg.textContent = (SVC_LABELS[step.svc] || {})[state] || info.message || state;
     }
   } catch (_) {}
 }

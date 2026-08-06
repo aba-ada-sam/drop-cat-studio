@@ -189,8 +189,13 @@ export async function apiFetch(path, opts = {}) {
         errMsg = d.detail || d.error || errMsg;
         details = JSON.stringify(d);
       } catch (_) {}
+      // M23 (shell half): `silent` used to skip _logError entirely, so a
+      // silent:true failure (e.g. Image Studio's) vanished with no trace --
+      // not even in the error log the user can open to see what happened.
+      // silent should only mean "don't pop a toast", never "don't record
+      // it". Always log; only the toast() call is gated on !opts.silent.
+      _logError(errMsg, context, details);
       if (!opts.silent) {
-        _logError(errMsg, context, details);
         toast(errMsg, 'error', {
           context,
           details,
@@ -203,8 +208,8 @@ export async function apiFetch(path, opts = {}) {
       return await res.json();
     } catch (_parseErr) {
       const errMsg = `Server returned non-JSON response (${res.status})`;
+      _logError(errMsg, context, '');
       if (!opts.silent) {
-        _logError(errMsg, context, '');
         toast(errMsg, 'error', { context });
       }
       throw new Error(errMsg);

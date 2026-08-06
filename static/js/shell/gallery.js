@@ -8,7 +8,10 @@ import { applySettingsToTab } from './ai-intent.js';
 import { handoff } from '../handoff.js';
 import { pathToUrl } from '../components.js';
 import { VideoStretchTool } from '../components/video-stretch.js';
-import { mountLipSyncTool } from '../components/lipsync-tool.js';
+// mountLipSyncTool / lipsync-tool.js removed 2026-08-05 -- Andrew ruled
+// MuseTalk out of V2 entirely; native chain.py audio-conditioning is the
+// only sync mechanism now. Leaving this import in place after the component
+// file is deleted would break the whole gallery module at load time.
 
 let _items = [];
 let _totalItems = 0;
@@ -18,22 +21,17 @@ let _filters = { tab: '', search: '' };
 let _containerEl = null;
 let _detailItem = null;
 let _preview = null; // { url, prompt, actions: [{label, onClick}] }
-// Detail-view tools (Stretch & Lock, Lip Sync) mounted fresh on every
-// _openDetail() call with no teardown of the previous mount -- leaked global
-// listeners/ResizeObservers per video reviewed, and a still-polling export
-// job from a previous item kept firing toasts/session-updated after the user
-// moved on. Track the live instances so they can be destroyed before the next
-// mount and on overlay close.
+// Detail-view tools (Stretch & Lock) mounted fresh on every _openDetail()
+// call with no teardown of the previous mount -- leaked global listeners/
+// ResizeObservers per video reviewed. Track the live instance so it can be
+// destroyed before the next mount and on overlay close.
 let _activeStretchTool = null;
-let _activeLipSyncTool = null;
 let _detailToolsGen = 0;
 
 function _destroyDetailTools() {
   _detailToolsGen++;  // invalidates any in-flight async mount from a prior open()
   try { _activeStretchTool?.destroy(); } catch (_) {}
-  try { _activeLipSyncTool?.destroy(); } catch (_) {}
   _activeStretchTool = null;
-  _activeLipSyncTool = null;
 }
 
 export function init(containerEl) {
@@ -149,7 +147,6 @@ function _render() {
           <option value="express">Quick Video</option>
           <option value="bridges">Video Bridges</option>
           <option value="video-tools">Video Tools</option>
-          <option value="lipsync">Lip Sync</option>
           <option value="retime">Stretch &amp; Lock</option>
           <option value="song-video">Song Video (legacy)</option>
           <option value="fun-videos">Create Videos (legacy)</option>
@@ -283,7 +280,7 @@ function _makeCard(item) {
 
   const TAB_LABELS = {
     'sd-prompts': 'SD', 'image-gen': 'IMG', 'create-videos': 'VID', 'bridges': 'BRG',
-    'music-video': 'MV', 'express': 'QV', 'video-tools': 'TOOL', 'lipsync': 'LIP',
+    'music-video': 'MV', 'express': 'QV', 'video-tools': 'TOOL',
     'retime': 'RTM', 'song-video': 'SV', 'fun-videos': 'FV', 'zoom': 'ZM',
   };
   const badge = TAB_LABELS[item.tab] || item.tab?.toUpperCase() || '?';
@@ -434,7 +431,6 @@ function _openDetail(item) {
           <button class="btn btn-sm btn-danger" id="gd-delete">Delete File</button>
         </div>
         ${isVideo ? `<div id="gd-stretch-slot" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-2)"></div>` : ''}
-        ${isVideo ? `<div id="gd-lipsync-slot" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-2)"></div>` : ''}
       </div>
     </div>`;
 
@@ -495,7 +491,6 @@ function _openDetail(item) {
   overlay.classList.add('open');
 
   // Manual Stretch & Lock tool for video items
-  const myToolsGen = _detailToolsGen;
   if (isVideo) {
     const slot = overlay.querySelector('#gd-stretch-slot');
     const vid  = overlay.querySelector('video');
@@ -507,18 +502,6 @@ function _openDetail(item) {
           videoEl: vid,
         });
       } catch (e) { console.error('VideoStretchTool init failed', e); }
-    }
-    const lipSlot = overlay.querySelector('#gd-lipsync-slot');
-    if (lipSlot) {
-      mountLipSyncTool(lipSlot, { videoPath: item.metadata?.path || item.url })
-        .then(handle => {
-          // A newer open()/close() already ran (and destroyed whatever this
-          // call would have produced) while the mount was still in flight --
-          // destroy this one too instead of leaking it into _activeLipSyncTool.
-          if (myToolsGen !== _detailToolsGen) { handle?.destroy(); return; }
-          _activeLipSyncTool = handle;
-        })
-        .catch(e => console.error('LipSync mount failed', e));
     }
   }
 }
