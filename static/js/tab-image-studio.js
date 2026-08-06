@@ -8,10 +8,23 @@
 import { pollJob } from './api.js';
 import { el, pathToUrl } from './components.js';
 import { toast, apiFetch } from './shell/toast.js';
+import { handoff } from './handoff.js';
 
 const GALLERY_KEY = 'dropcat_image_studio_gallery';
 const GALLERY_CAP = 200;
 const SETTINGS_KEY = 'dropcat_image_studio_settings';
+
+// Module-scoped so receiveHandoff() (called by app.js outside init()'s
+// closure, once TAB_HANDOFF wires it -- see tab-express.js's _applyImageFn
+// pattern) can reach into the live tab instance.
+let _recvApply = null;
+
+// M20: Chat -> Image Studio handoff. Populates the form with the incoming
+// prompt/seed/preset so the user can keep tuning it here. See tab-chat.js's
+// "Send to Image Studio" button.
+export function receiveHandoff(data) {
+  _recvApply?.(data);
+}
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -34,6 +47,7 @@ export function init(panel) {
   // job's result, and could reset _animateJobActive to false while the
   // real current job was still running.
   let _latestVideoJobId = null;
+  let _currentItem = null; // M20: the gallery item currently shown in resultCard
 
   const root = el('div', {
     style: 'max-width:900px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; gap:14px;',
@@ -69,6 +83,13 @@ export function init(panel) {
       el('span', { text: 'Anthropomorphic creature' }),
     ]),
   ]);
+  // M34: these controls were display:none until an NSFW preset was chosen,
+  // with zero hint they existed at all. This stays visible always so a user
+  // on a non-NSFW preset still knows to look for them.
+  const subjectHint = el('div', {
+    style: 'font-size:.68rem; color:var(--text-3); font-style:italic; margin-top:4px;',
+    text: 'NSFW presets add Subject / Creature controls here.',
+  });
 
   const widthIn  = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
   const heightIn = el('input', { type: 'number', min: '256', max: '2048', step: '64', value: '1024', style: 'width:80px; font-size:.8rem;' });
@@ -96,6 +117,7 @@ export function init(panel) {
       presetSel,
     ]),
     presetDesc,
+    subjectHint,
     subjectRow,
     controlsRow,
     el('div', { style: 'margin-top:10px;' }, [genBtn]),
@@ -110,7 +132,10 @@ export function init(panel) {
 
   const videoInput = el('input', { type: 'text', style: 'flex:1; font-size:.82rem;', placeholder: 'Describe the motion...' });
   const animateBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Animate this', style: 'flex-shrink:0;' });
-  const animateRow = el('div', { style: 'display:none; gap:6px; margin-top:10px;' }, [videoInput, animateBtn]);
+  // M20: carries prompt/seed/preset over to Chat via handoff.js, the same
+  // mechanism Express/Bridges use to hand off to other tabs.
+  const sendToChatBtn = el('button', { class: 'btn btn-sm', text: 'Send to Chat' });
+  const animateRow = el('div', { style: 'display:none; gap:6px; margin-top:10px; flex-wrap:wrap;' }, [videoInput, animateBtn, sendToChatBtn]);
 
   const jobArea = el('div', { style: 'margin-top:10px;' });
 
@@ -119,6 +144,17 @@ export function init(panel) {
     resultImg, resultMeta, animateRow, jobArea,
   ]);
   root.appendChild(resultCard);
+
+  sendToChatBtn.addEventListener('click', () => {
+    if (!_currentItem) return;
+    const item = _currentItem;
+    handoff('chat', {
+      type: 'image-prompt', prompt: item.prompt, negative: item.negative,
+      width: item.width, height: item.height, steps: item.steps, cfg: item.cfg,
+      seed: item.seed, preset: item.preset, subject: item.subject_used || item.subject, creature: item.creature,
+    });
+    document.querySelector('.rail-tab[data-tab="chat"]')?.click();
+  });
 
   // -- Gallery ---------------------------------------------------------------
   const galleryGrid = el('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' });
@@ -199,6 +235,7 @@ export function init(panel) {
   }
 
   function _showResult(data) {
+    _currentItem = data; // M20: what "Send to Chat" actually hands off
     if (_animateJobActive) {
       // The job is still running server-side (and will still show up in the
       // Queue tab) -- clearing jobArea here would just make it look like it
@@ -288,8 +325,13 @@ export function init(panel) {
     const origText = genBtn.textContent;
     genBtn.textContent = 'Generating...';
     try {
+      // M23: this used to pass silent:true, which (per shell/toast.js
+      // apiFetch()) suppresses BOTH the toast AND the central error log --
+      // failures here were invisible outside this tab's own errBox, unlike
+      // every other silent:false caller. Keep the inline errBox below but
+      // let it also toast + log centrally like Chat's equivalent calls do.
       const data = await apiFetch('/api/image-studio/generate', {
-        method: 'POST', body: JSON.stringify(body), context: 'image-studio.generate', silent: true,
+        method: 'POST', body: JSON.stringify(body), context: 'image-studio.generate',
       });
       const item = {
         url: data.image_url, image_path: data.image_path, seed: data.seed,
@@ -371,6 +413,25 @@ export function init(panel) {
     );
     _activePollers.push(poller);
   }
+
+  // M20: receive side of the Chat -> Image Studio handoff. Fills the form
+  // fields directly (this tab's controls are always visible, no card to
+  // build) so the user can review/tweak before generating.
+  _recvApply = (data) => {
+    if (data?.type !== 'image-prompt' || !data.prompt) return;
+    promptTa.value = data.prompt;
+    negTa.value = data.negative || '';
+    if (data.width)  widthIn.value  = data.width;
+    if (data.height) heightIn.value = data.height;
+    if (data.steps)  stepsIn.value  = data.steps;
+    if (data.cfg)     cfgIn.value   = data.cfg;
+    if (data.seed != null) seedIn.value = data.seed;
+    if (data.preset && presetSel.querySelector(`option[value="${data.preset}"]`)) presetSel.value = data.preset;
+    if (data.subject && subjectSel.querySelector(`option[value="${data.subject}"]`)) subjectSel.value = data.subject;
+    creatureCb.checked = !!data.creature;
+    _updatePresetDesc();
+    toast('Picked up from Chat -- review and Generate', 'info');
+  };
 
   // -- Init ---------------------------------------------------------------
   _loadPresets();
