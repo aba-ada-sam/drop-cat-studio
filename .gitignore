@@ -122,3 +122,6 @@ dcs-laptop-setup.zip
 /tools/review_frames/
 /tools/slop*/
 engine/
+review/assets/
+review/*.png
+review/v16_render_log.txt

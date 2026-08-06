@@ -126,3 +126,25 @@ crunch. Also pending: his v15 verdict (phone page /decide/v15).
 'oon/oom' residual span (one span stays split even at HP80), seam-planner
 ratification, judge-selector ratification, plan-time crop optimization,
 scene-C anchor production (director builds it, SCENE_PREP_SPEC).
+
+
+## FINAL CLOSE (~23:05) -- resume here
+
+Andrew closed the instance for the night. Resume = Desktop icon "Resume
+Studio Brains" (claude --resume a085855e-...). FIRST ACTIONS ON RESUME:
+1. v16: check C:\DropCat-Studioeviewssets\chain60_v16.mp4. A tracked
+   render was ~25min in at close (may have died with the session); a
+   SCHEDULED FAILSAFE (schtasks DCS_v16_failsafe, 00:20) re-renders it
+   detached if missing (log: review16_render_log.txt). Delete the task
+   after confirming (schtasks /delete /tn DCS_v16_failsafe /f).
+2. Finish v16: mask-video DOF (frame-exact -- segment masks from ITS OWN
+   seam plan in the render log; trim+concat DOF is BANNED), sync-burst
+   check at a vocal onset vs raw, THEN page in C:\DropCat-Studioeview
+   + open for Andrew. Judge scores in the log tell which clips to eyeball.
+3. Desktop: Andrew hand-placed icons; if he says "lock it in", do the
+   graceful-exit Explorer restart to persist. "retry DCG" moves Desktop\DCG
+   -> C:\DropCat-Studio\content\signloop (was blocked by a directory
+   handle). Dumpster icon = Trash (NOT recycle bin, his ruling).
+4. Open Andrew calls: v16 verdict; cloud path (per-job pods w/ 48GB survey
+   vs Novita vs wait); Buddy token rotation (exposed since 07-10).
+5. v15's oon-era 30s recipe remains fully ratified; 60s awaits v16.
