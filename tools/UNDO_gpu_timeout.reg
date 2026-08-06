@@ -1,0 +1,12 @@
+Windows Registry Editor Version 5.00
+
+; UNDO for FIX_gpu_timeout.reg -- restores Windows' default GPU timeout behavior.
+; Double-click this file, approve the prompts, then reboot.
+;
+; Removing these two values does NOT set them to zero -- it deletes the override
+; entirely, so Windows falls back to its built-in defaults (2 second TdrDelay,
+; 5 second TdrDdiDelay), which is exactly how this box was configured before.
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers]
+"TdrDelay"=-
+"TdrDdiDelay"=-

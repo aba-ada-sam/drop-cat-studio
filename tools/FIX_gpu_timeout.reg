@@ -1,0 +1,32 @@
+Windows Registry Editor Version 5.00
+
+; RTX 5080 GPU timeout fix -- double-click this file, then approve the prompts.
+; A reboot is required before it takes effect.
+;
+; WHAT IT FIXES
+; Windows kills and resets the graphics driver if a single GPU operation takes
+; longer than 2 seconds (TdrDelay) or 5 seconds (TdrDdiDelay). Those defaults are
+; tuned for games and desktop drawing, not for AI video generation, where one
+; denoising step on a 19-billion-parameter model can legitimately run longer.
+;
+; On 2026-08-05 at 23:58:08 exactly that happened: the driver reset mid-render,
+; which invalidated the CUDA context underneath the running job. WanGP never
+; noticed the context was gone and hung waiting on it, so a 60-second video that
+; was 6 of 7 clips complete sat frozen for 29 minutes and then died with nothing
+; written. The Windows log shows the same driver-reset event firing every 5-6
+; minutes throughout render sessions -- each one recoverable, until it wasn't.
+;
+; This raises both limits to 60 seconds. This box currently has NO override set
+; at all, so it is running the 2-second default.
+;
+; THE TRADEOFF
+; If the GPU ever hangs for real, Windows now waits up to 60 seconds before
+; resetting it instead of 2. During that window the screen can be black or
+; frozen. That is the accepted tradeoff on a machine used for GPU compute; it is
+; the standard recommendation for this workload.
+;
+; TO UNDO: double-click UNDO_gpu_timeout.reg in this same folder, then reboot.
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers]
+"TdrDelay"=dword:0000003c
+"TdrDdiDelay"=dword:0000003c
