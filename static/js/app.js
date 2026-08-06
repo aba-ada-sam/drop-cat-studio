@@ -360,14 +360,20 @@ let _restartDismissed = false;
 let _lastRestartNeeded = false;
 
 async function _checkRestartNeeded() {
+  const banner = document.getElementById('restart-banner');
   try {
     const data = await fetch('/api/system').then(r => r.json());
     const needed = !!data.restart_needed;
     if (needed && !_lastRestartNeeded) _restartDismissed = false;
     _lastRestartNeeded = needed;
-    const banner = document.getElementById('restart-banner');
     if (banner) banner.style.display = (needed && !_restartDismissed) ? 'flex' : 'none';
-  } catch (_) {}
+  } catch (_) {
+    // Server unreachable (stopped/crashed): a "restart to pick up new code"
+    // banner is meaningless with no server to restart -- without this, the
+    // banner freezes on screen forever on a dead tab. It reappears within one
+    // 15s poll once the server is back and still reports restart_needed.
+    if (banner) banner.style.display = 'none';
+  }
 }
 
 async function pollServices() {
