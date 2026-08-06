@@ -130,8 +130,7 @@ scene-C anchor production (director builds it, SCENE_PREP_SPEC).
 
 ## FINAL CLOSE (~23:05) -- resume here
 
-Andrew closed the instance for the night. Resume = Desktop icon 'Resume
-Studio Brains' (claude --resume a085855e-...). FIRST ACTIONS ON RESUME:
+Andrew closed the instance for the night. Resume = Desktop icon 'Studio Brains' (claude --resume a085855e-...). FIRST ACTIONS ON RESUME:
 1. v16: check C:\DropCat-Studio\review\assets\chain60_v16.mp4. A tracked
    render was ~25min in at close (may have died with the session); a
    SCHEDULED FAILSAFE (schtasks DCS_v16_failsafe, 00:20) re-renders it
