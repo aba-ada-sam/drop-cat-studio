@@ -291,12 +291,16 @@ async def folder_loop_start(request: Request):
         _vram_needed = _model_info.get("vram_min_gb", 0)
         _vram_avail = (_app_g.get("gpu_vram_gb") or 0)
         if _vram_needed and _vram_avail and _vram_avail < _vram_needed:
+            # C7: this used to hardcode "Create Videos settings", but this
+            # endpoint is shared by BOTH Quick Video (Express) and Create
+            # Videos' own Loop Folder buttons -- naming one tab was wrong for
+            # whichever one didn't call it. Stay tab-agnostic.
             raise HTTPException(
                 400,
                 f"Model '{_req_model}' needs {_vram_needed} GB VRAM but "
                 f"{_vram_avail} GB detected. Folder loop would queue "
-                f"{len(images)} deadlocked jobs. Change the model in "
-                f"Create Videos settings before starting the loop."
+                f"{len(images)} deadlocked jobs. Change the model/quality "
+                f"setting on this tab before starting the loop."
             )
     except HTTPException:
         raise
