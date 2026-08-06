@@ -49,7 +49,7 @@ def probe_duration(path):
 
 def voiced_intervals_for(stem, repo_root):
     sys.path.insert(0, str(repo_root))
-    from features.lipsync.vocal_activity import voiced_intervals
+    from features.song_video.vocal_activity import voiced_intervals
     return voiced_intervals(str(stem))
 
 
