@@ -166,6 +166,17 @@ async def generate(request: Request):
     out_path = out_dir / fname
     out_path.write_bytes(img_bytes)
 
+    # H10 fix (2026-08-05): still images from Chat/Image Studio never got
+    # registered with the session, so they never appeared anywhere the
+    # session picker feeds (e.g. "From Session" in other tabs) even though
+    # their animated-video outputs do (via the shared fun_videos pipeline).
+    # Mirrors the call fun_videos/pipeline.py:624-627 already makes.
+    try:
+        from core.session import get_current as get_session
+        get_session().add_file(fname, "image", "image_studio", path=str(out_path))
+    except Exception as e:
+        log.warning("[image-studio] session add_file failed: %s", e)
+
     log.info("[image-studio] generated image (preset=%s, subject=%s, creature=%s/%s, checkpoint=%s) -> %s (seed=%s)",
               preset_key, resolved_subject, creature, creature_applied, preset["checkpoint"], out_path, actual_seed)
     return {

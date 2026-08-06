@@ -26,10 +26,6 @@ DEFAULTS: dict = {
     "resolution": "480p",
     "acestep_root": "",
     "acestep_host": "localhost",    # set to remote IP/hostname to use ACE-Step on another machine
-    # MuseTalk lip-sync (dedicated isolated venv, never shares Forge/DCS env).
-    "musetalk_dir": "",             # repo dir; blank -> C:\MuseTalk
-    "musetalk_python": "",          # venv python; blank -> <musetalk_dir>\venv\Scripts\python.exe
-    "lipsync_isolate_vocals": True, # Demucs vocal stem drives the mouth; full song re-muxed for the final
     "satellite_host": "",           # IP of the 3060 relay (port 9999); blank = no satellite
     # Auto-discovery for satellite-hosted services (ACE-Step, Ollama, Forge):
     # when the configured host is remote (not localhost) and unreachable, try
@@ -240,7 +236,7 @@ def get(key: str, default=None):
 
     Resolution order: live config file -> built-in DEFAULTS -> caller `default`.
     The trailing `default` lets callers use dict.get-style two-arg calls
-    (e.g. cfg.get("lipsync_isolate_vocals", True)) without crashing.
+    (e.g. cfg.get("allow_uncensored_fallback", False)) without crashing.
     """
     cfg = load()
     if key in cfg:

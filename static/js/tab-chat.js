@@ -6,10 +6,29 @@
 import { pollJob } from './api.js';
 import { el, pathToUrl } from './components.js';
 import { toast, apiFetch } from './shell/toast.js';
+import { handoff } from './handoff.js';
 
 const HISTORY_KEY = 'dropcat_chat_history';
-const STYLE_KEY = 'dropcat_chat_style';
+const STYLE_KEY = 'dropcat_chat_preset';
 const SEND_CAP = 40;
+
+// M21: providers that silently degrade from the configured cloud/paid LLM to
+// an uncensored fallback (core/llm_router.py UNCENSORED_PROVIDERS is the
+// canonical list) -- flagged with a distinct color so the degrade is visible
+// instead of discarded client-side.
+const _UNCENSORED_PROVIDERS = ['featherless', 'kobold'];
+
+// Module-scoped so receiveHandoff() (called by app.js outside init()'s
+// closure, once TAB_HANDOFF wires it -- see tab-express.js's _applyImageFn
+// pattern) can reach into the live tab instance.
+let _recvApply = null;
+
+// M20: Image Studio -> Chat handoff. Populates a prompt card with the
+// incoming prompt/seed/preset so the user can keep iterating in
+// conversation. See tab-image-studio.js's "Send to Chat" button.
+export function receiveHandoff(data) {
+  _recvApply?.(data);
+}
 
 export function init(panel) {
   panel.innerHTML = '';
@@ -40,13 +59,44 @@ export function init(panel) {
     clearBtn,
   ]));
 
+  // M22: was labeled "Style" here vs "Preset" in Image Studio for the exact
+  // same catalog (core/image_presets.py) -- unified on "Preset".
   const styleSel = el('select', { style: 'font-size:.8rem;' });
   const styleDesc = el('span', { style: 'font-size:.72rem; color:var(--text-3);' });
   root.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
-    el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Style' }),
+    el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Preset' }),
     styleSel,
     styleDesc,
   ]));
+
+  // C6 + M34: Chat used to hardcode subject="auto"/creature=false server-side
+  // with no UI to override it at all. Mirrors Image Studio's Subject row
+  // (tab-image-studio.js), shown only for NSFW presets, plus M34's
+  // always-visible hint so the controls aren't a total surprise when they
+  // do appear.
+  const subjectHint = el('div', {
+    style: 'font-size:.68rem; color:var(--text-3); font-style:italic;',
+    text: 'NSFW presets add Subject / Creature controls here.',
+  });
+  const subjectSel = el('select', { style: 'font-size:.8rem; display:none;' }, [
+    el('option', { value: 'auto', text: 'Auto (detect from prompt)' }),
+    el('option', { value: 'male', text: 'Male' }),
+    el('option', { value: 'female', text: 'Female' }),
+    el('option', { value: 'multi', text: 'Multi: man + woman (regional)' }),
+    el('option', { value: 'multi_male', text: 'Multi: two+ men (regional)' }),
+    el('option', { value: 'multi_female', text: 'Multi: two+ women (regional)' }),
+  ]);
+  const creatureCb = el('input', { type: 'checkbox', id: 'chat-is-creature-cb' });
+  const subjectRow = el('div', { style: 'display:none; align-items:center; gap:14px; flex-wrap:wrap;' }, [
+    el('span', { style: 'font-size:.72rem; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em;', text: 'Subject' }),
+    subjectSel,
+    el('label', { for: 'chat-is-creature-cb', style: 'display:flex; align-items:center; gap:5px; font-size:.8rem; color:var(--text); cursor:pointer;' }, [
+      creatureCb,
+      el('span', { text: 'Anthropomorphic creature' }),
+    ]),
+  ]);
+  root.appendChild(subjectHint);
+  root.appendChild(subjectRow);
 
   const transcript = el('div', {
     style: 'display:flex; flex-direction:column; gap:10px; min-height:320px; max-height:60vh; overflow-y:auto; padding:4px 2px;',
@@ -100,7 +150,11 @@ export function init(panel) {
       _presetsCache = [];
     }
     styleSel.innerHTML = '';
-    styleSel.appendChild(el('option', { value: '', text: 'Current (no style override)' }));
+    // M22: this option used to just say "Current (no style override)", which
+    // didn't explain what "current" meant. Spell out the actual behavior --
+    // it renders on whatever checkpoint Forge already has loaded, unlike a
+    // real preset which actively switches Forge to a specific checkpoint.
+    styleSel.appendChild(el('option', { value: '', text: 'No preset (render on whatever Forge already has loaded)' }));
     for (const p of _presetsCache) {
       styleSel.appendChild(el('option', { value: p.id, text: p.label }));
     }
@@ -113,6 +167,9 @@ export function init(panel) {
   function _updateStyleDesc() {
     const p = _presetsCache.find(p => p.id === styleSel.value);
     styleDesc.textContent = p ? p.description : '';
+    // C6/M34: same gating Image Studio uses -- Subject/Creature only matter
+    // once an NSFW preset is actively steering Forge's checkpoint.
+    subjectRow.style.display = (p && p.nsfw) ? 'flex' : 'none';
   }
 
   styleSel.addEventListener('change', () => {
@@ -135,7 +192,10 @@ export function init(panel) {
 
   // -- Image bubble (generated result + actions) ------------------------------
   function _addImageBubble(opts) {
-    const { url, path, seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed } = opts;
+    const {
+      url, path, seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed,
+      subject, creature, subjectUsed, creatureApplied,
+    } = opts;
 
     const img = el('img', {
       src: url,
@@ -144,15 +204,25 @@ export function init(panel) {
     });
     img.addEventListener('click', () => window.open(url, '_blank'));
 
+    // C6: echo the resolved subject/creature the same way Image Studio's
+    // resultMeta does, instead of leaving them invisible after the fact.
+    const metaBits = [checkpointUsed ? `seed ${seed}  --  ${checkpointUsed}` : `seed ${seed}`];
+    if (subjectUsed && subjectUsed !== 'n/a') metaBits.push(`subject: ${subjectUsed}`);
+    if (creature && creatureApplied) metaBits.push('creature');
+    if (creature && !creatureApplied) metaBits.push('creature NOT applied (multi-subject not yet supported)');
     const seedNote = el('div', {
       style: 'font-size:.7rem; color:var(--text-3); margin-top:4px;',
-      text: checkpointUsed ? `seed ${seed}  --  ${checkpointUsed}` : `seed ${seed}`,
+      text: metaBits.join('  --  '),
     });
 
     const refineBtn  = el('button', { class: 'btn btn-sm', text: 'Refine' });
     const reseedBtn  = el('button', { class: 'btn btn-sm', text: 'Same prompt, new seed' });
     const animateBtn = el('button', { class: 'btn btn-sm', text: 'Animate this' });
-    const actions = el('div', { style: 'display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;' }, [refineBtn, reseedBtn, animateBtn]);
+    // M20: carries prompt/seed/preset over to Image Studio via handoff.js,
+    // the same mechanism Express/Bridges use to hand off to other tabs.
+    const sendBtn = el('button', { class: 'btn btn-sm', text: 'Send to Image Studio' });
+    const actions = el('div', { style: 'display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;' }, [refineBtn, reseedBtn, animateBtn, sendBtn]);
+    const reseedErr = el('div', { style: 'display:none; font-size:.72rem; color:#e88; margin-top:6px;' });
 
     const videoInput = el('input', { type: 'text', style: 'flex:1; font-size:.82rem;', placeholder: 'Describe the motion...' });
     const goBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Go', style: 'flex-shrink:0;' });
@@ -160,19 +230,35 @@ export function init(panel) {
 
     refineBtn.addEventListener('click', () => { inputTa.focus(); });
 
+    sendBtn.addEventListener('click', () => {
+      handoff('image-studio', {
+        type: 'image-prompt', prompt, negative, width, height, steps, cfg: cfgVal, seed, preset,
+        subject: subjectUsed && subjectUsed !== 'n/a' ? subjectUsed : subject, creature,
+      });
+      document.querySelector('.rail-tab[data-tab="image-studio"]')?.click();
+    });
+
     reseedBtn.addEventListener('click', async () => {
       reseedBtn.disabled = true;
+      reseedErr.style.display = 'none';
       try {
         const data = await apiFetch('/api/chat-studio/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset }),
+          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset, subject, creature }),
           context: 'chat.generate-image',
         });
         _currentPromptText = prompt;
         _currentImagePath = data.image_path;
-        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used });
+        _addImageBubble({
+          url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used,
+          subject, creature, subjectUsed: data.subject_used, creatureApplied: data.creature_applied,
+        });
       } catch (e) {
-        // apiFetch already toasted the server error string
+        // M23: apiFetch already toasted + logged the server error centrally --
+        // this adds the inline message Image Studio shows (errBox), which
+        // Chat was missing (it only ever toasted).
+        reseedErr.textContent = e.message || 'Generation failed';
+        reseedErr.style.display = '';
       } finally {
         reseedBtn.disabled = false;
       }
@@ -203,7 +289,7 @@ export function init(panel) {
       }
     });
 
-    const bubble = _bubble('assistant', [img, seedNote, actions, videoRow]);
+    const bubble = _bubble('assistant', [img, seedNote, actions, reseedErr, videoRow]);
     transcript.appendChild(bubble);
     _scrollToBottom();
     return bubble;
@@ -282,6 +368,7 @@ export function init(panel) {
     ]);
 
     const genBtn = el('button', { class: 'btn btn-primary btn-sm', text: 'Generate image' });
+    const genErr = el('div', { style: 'display:none; font-size:.72rem; color:#e88; margin-top:6px;' });
     genBtn.addEventListener('click', async () => {
       const prompt = promptTa.value.trim();
       if (!prompt) { toast('Prompt is empty', 'error'); return; }
@@ -292,20 +379,32 @@ export function init(panel) {
       const cfgVal = parseFloat(cfgIn.value)      || 5.0;
 
       genBtn.disabled = true;
+      genErr.style.display = 'none';
       const origText = genBtn.textContent;
       genBtn.textContent = 'Generating...';
       const preset = styleSel.value || '';
+      // C6: subject/creature now travel with the request instead of being
+      // silently hardcoded to auto/false server-side.
+      const subject = subjectSel.value || 'auto';
+      const creature = creatureCb.checked === true;
       try {
         const data = await apiFetch('/api/chat-studio/generate-image', {
           method: 'POST',
-          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset }),
+          body: JSON.stringify({ prompt, negative_prompt: negative, width, height, steps, cfg: cfgVal, seed: -1, preset, subject, creature }),
           context: 'chat.generate-image',
         });
         _currentPromptText = prompt;
         _currentImagePath = data.image_path;
-        _addImageBubble({ url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used });
+        _addImageBubble({
+          url: data.image_url, path: data.image_path, seed: data.seed, prompt, negative, width, height, steps, cfgVal, preset, checkpointUsed: data.checkpoint_used,
+          subject, creature, subjectUsed: data.subject_used, creatureApplied: data.creature_applied,
+        });
       } catch (e) {
-        // apiFetch already toasted the server error string (409/503/etc.)
+        // M23: apiFetch already toasted + logged the server error centrally --
+        // this adds the inline message (matching Image Studio's errBox),
+        // which Chat was missing before (it only ever toasted).
+        genErr.textContent = e.message || 'Generation failed';
+        genErr.style.display = '';
       } finally {
         genBtn.disabled = false;
         genBtn.textContent = origText;
@@ -319,6 +418,7 @@ export function init(panel) {
       dimsRow,
       advanced,
       el('div', { style: 'margin-top:8px;' }, [genBtn]),
+      genErr,
     ]);
     transcript.appendChild(card);
     _scrollToBottom();
@@ -360,7 +460,17 @@ export function init(panel) {
       thinking.remove();
       if (myGen !== _chatGen) return; // chat was cleared while this was in flight
 
-      _addTextBubble('assistant', data.reply || '...');
+      const replyBubble = _addTextBubble('assistant', data.reply || '...');
+      // M21: provider_used was computed server-side and discarded here --
+      // a silent degrade (cloud LLM down -> uncensored fallback answered
+      // instead) was invisible. Surface it, calling out the fallback case.
+      if (data.provider_used) {
+        const isFallback = _UNCENSORED_PROVIDERS.includes(data.provider_used);
+        replyBubble.appendChild(el('div', {
+          style: `font-size:.68rem; margin-top:4px; ${isFallback ? 'color:#e0a030;' : 'color:var(--text-3);'}`,
+          text: isFallback ? `via ${data.provider_used} (uncensored fallback)` : `via ${data.provider_used}`,
+        }));
+      }
       history.push({ role: 'assistant', content: data.reply || '' });
       _saveHistory();
 
@@ -408,6 +518,25 @@ export function init(panel) {
   for (const h of history) {
     _addTextBubble(h.role === 'assistant' ? 'assistant' : 'user', h.content);
   }
+
+  // M20: receive side of the Image Studio -> Chat handoff. Drops a prompt
+  // card pre-filled with the incoming prompt/preset/subject/creature (seed
+  // is not carried into the card -- Chat's card has no seed field by design,
+  // it always generates fresh; use "Same prompt, new seed" after generating
+  // once here if a specific seed matters).
+  _recvApply = (data) => {
+    if (data?.type === 'image-prompt' && data.prompt) {
+      if (data.preset && styleSel.querySelector(`option[value="${data.preset}"]`)) {
+        styleSel.value = data.preset;
+        try { localStorage.setItem(STYLE_KEY, styleSel.value); } catch (e) { /* non-fatal */ }
+        _updateStyleDesc();
+      }
+      if (data.subject && subjectSel.querySelector(`option[value="${data.subject}"]`)) subjectSel.value = data.subject;
+      creatureCb.checked = !!data.creature;
+      _addTextBubble('assistant', 'Picked up from Image Studio -- review the prompt below.');
+      _addPromptCard({ prompt: data.prompt, negative: data.negative || '', width: data.width, height: data.height });
+    }
+  };
 
   _loadStyles();
 }

@@ -1400,9 +1400,7 @@ from features.video_bridges.routes import router as bridges_router
 from features.video_tools.routes import router as tools_router
 from features.song_video.routes import router as song_router
 from features.song_video.chain_routes import router as song_chain_router
-from features.adobe_agent.routes import router as adobe_router
 from features.retime.routes import router as retime_router
-from features.lipsync.routes import router as lipsync_router
 from features.manager.routes import router as manager_router
 from features.chat_studio.routes import router as chat_studio_router
 from features.image_studio.routes import router as image_studio_router
@@ -1414,9 +1412,7 @@ app.include_router(bridges_router, prefix="/api/bridges", tags=["Video Bridges"]
 app.include_router(tools_router, prefix="/api/tools", tags=["Video Tools"])
 app.include_router(song_router, prefix="/api/song-video", tags=["Song Video"])
 app.include_router(song_chain_router, prefix="/api/song-video/chain", tags=["Song Video -- Ratified Engine"])
-app.include_router(adobe_router, prefix="/api/adobe", tags=["Adobe Agent"])
 app.include_router(retime_router, prefix="/api/retime", tags=["Retime"])
-app.include_router(lipsync_router, prefix="/api/lipsync", tags=["Lip Sync"])
 app.include_router(manager_router, prefix="/api/manager", tags=["AI Manager"])
 app.include_router(chat_studio_router, prefix="/api/chat-studio", tags=["Chat Studio"])
 app.include_router(image_studio_router, prefix="/api/image-studio", tags=["Image Studio"])

@@ -209,8 +209,9 @@ def _do_generate(params: dict) -> dict:
     # recipe above the audio+video tokens fit and the model lip-syncs natively;
     # callers that overflow the budget fall back to no-audio (see the empty-queue
     # retry on line ~270 below). Re-enabled 2026-05-29 once the satellite proof
-    # arrived; the MuseTalk post-pass (features/lipsync/) remains available for
-    # content where audio conditioning isn't a good fit.
+    # arrived. MuseTalk (features/lipsync/) was REMOVED 2026-08-05 (Andrew's
+    # ruling -- native audio conditioning is the only sync mechanism now); this
+    # native path is what carries lip-sync going forward, full stop.
     # CRITICAL: WanGP "Audio Source" mode (audio_prompt_type="A") reads the
     # conditioning audio from "audio_guide", NOT "audio_source". The UI label is
     # misleading -- audio_source is a different field controlling the OUTPUT
