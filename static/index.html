@@ -43,6 +43,7 @@
         <div class="splash-check loading" id="chk-featherless"><span class="chk-dot"></span><span class="chk-text">Checking uncensored AI...</span></div>
         <div class="splash-check loading" id="chk-wangp"><span class="chk-dot"></span><span class="chk-text">Checking WanGP...</span></div>
         <div class="splash-check loading" id="chk-acestep"><span class="chk-dot"></span><span class="chk-text">Checking ACE-Step...</span></div>
+        <div class="splash-check loading" id="chk-forge"><span class="chk-dot"></span><span class="chk-text">Checking Forge...</span></div>
       </div>
       <div id="splash-load-anyway" class="hidden" style="text-align:center;margin-top:20px">
         <button class="btn btn-primary splash-skip-btn" id="btn-load-anyway">Load without waiting</button>
@@ -443,17 +444,22 @@
         <h3 style="margin-bottom:12px;font-size:.85rem">Shortcuts</h3>
         <div class="shortcuts-grid" id="shortcuts-display"></div>
 
+        <!-- M28: this list is the single source of truth for "what tools
+             exist", restated (not re-invented) on Studio Home (tab-pipeline.js
+             STEPS) and in the rail-tab titles/hints (index.html #app-rail).
+             There is no fixed pipeline -- each tool is an independent entry
+             point, not a forced A-then-B chain. -->
         <h3 style="margin:18px 0 10px;font-size:.85rem">Quick Start</h3>
         <div class="help-flow">
-          <div class="help-step">
-            <img src="/static/icon-fun-videos.png" alt="" class="help-icon">
-            <div><strong>Make Videos</strong> -- Drop a photo, let AI create a video with matching music.</div>
-          </div>
-          <div class="help-arrow">&#8595; clips flow to Video Bridges</div>
-          <div class="help-step">
-            <img src="/static/icon-bridges.png" alt="" class="help-icon">
-            <div><strong>Video Bridges</strong> -- Got 2+ clips? AI generates smooth cinematic transitions between them.</div>
-          </div>
+          <div class="help-step"><div><strong>Studio Home</strong> -- pick the tool for what you want to create. Start wherever fits; nothing here is a required first step.</div></div>
+          <div class="help-step"><div><strong>Chat</strong> -- talk it through, review the prompt, generate, refine, animate.</div></div>
+          <div class="help-step"><div><strong>Image Studio</strong> -- direct prompt controls, NSFW-capable presets, straight to Forge.</div></div>
+          <div class="help-step"><div><strong>Quick Video</strong> -- type an idea (or drop a photo), straight to a short AI clip.</div></div>
+          <div class="help-step"><div><strong>Create Videos</strong> -- animate your images into video and add AI music.</div></div>
+          <div class="help-step"><div><strong>Music Video</strong> -- a song plus a folder of photos becomes a full-length music video.</div></div>
+          <div class="help-step"><div><strong>Video Bridges</strong> -- arrange 2+ clips and AI generates a transition between each pair.</div></div>
+          <div class="help-step"><div><strong>Video Tools</strong> -- add AI music, trim, reverse, speed-ramp, upscale, smooth frames.</div></div>
+          <div class="help-step"><div><strong>Queue</strong> -- see what's running or waiting, pause, cancel, retry.</div></div>
         </div>
         <div style="text-align:center;margin-top:16px">
           <button class="btn btn-primary modal-close" style="padding:10px 32px">Let's Go!</button>
@@ -465,11 +471,13 @@
   <!-- Toast region -->
   <div id="toast-wrap" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- Server offline reconnect overlay -->
+  <!-- Server offline reconnect overlay (C4) -->
   <div id="offline-overlay" hidden aria-live="assertive" role="alert">
     <div class="offline-card">
       <span class="spinner"></span>
-      <p>Server offline &mdash; reconnecting&hellip;</p>
+      <p>Server offline -- relaunch from the DropCat Studio V2 desktop icon.</p>
+      <p class="offline-card-sub">This page reloads automatically once it's back.</p>
+      <button id="offline-overlay-dismiss" class="btn btn-sm" type="button">Dismiss</button>
     </div>
   </div>
 

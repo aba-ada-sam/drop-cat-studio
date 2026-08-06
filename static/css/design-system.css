@@ -981,7 +981,9 @@ select option { background: var(--surface-2); }
   height: 28px;
   border-width: 3px;
 }
-.offline-card p { margin: 0; }
+.offline-card p { margin: 0; text-align: center; }
+.offline-card-sub { font-size: .78rem; color: var(--text-3); }
+.offline-card #offline-overlay-dismiss { margin-top: 4px; }
 
 /* -- Toast ------------------------------------------------------------------ */
 
@@ -1584,8 +1586,6 @@ textarea:focus { border-color: var(--accent); }
   line-height: 1.5;
 }
 .help-step strong { color: var(--text); }
-.help-icon { width: 34px; height: 34px; border-radius: var(--r-sm); flex-shrink: 0; }
-.help-arrow { text-align: center; font-size: .72rem; color: var(--text-3); padding: 1px 0; }
 .help-tips { background: var(--surface); border-radius: var(--r-md); padding: 12px; }
 .help-tips h4 { color: var(--accent); font-size: .82rem; margin-bottom: 7px; }
 .help-tips ul { padding-left: 16px; }
@@ -2258,89 +2258,10 @@ textarea:focus { border-color: var(--accent); }
 }
 .rail-collapse-btn:hover { color: var(--text-2); }
 
-/* -- Pipeline breadcrumb bar ----------------------------------------------- */
-.pipeline-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 4px 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-
-.pipeline-bar-home {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: .8rem;
-  color: var(--text-3);
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-.pipeline-bar-home:hover { color: var(--accent); border-color: var(--accent-border); }
-
-.pipeline-bar-pills {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  flex-wrap: wrap;
-}
-
-.pipeline-bar-sep {
-  color: var(--text-3);
-  opacity: .5;
-  font-size: .75rem;
-  padding: 0 2px;
-  pointer-events: none;
-}
-
-.pipeline-bar-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  border: 1px solid var(--border-2);
-  background: var(--bg-raised);
-  color: var(--text-3);
-  font-size: .78rem;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
-}
-.pipeline-bar-pill:hover { color: var(--text); border-color: var(--accent-border); }
-.pipeline-bar-pill.active {
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.pipeline-bar-num {
-  font-size: .65rem;
-  font-weight: 700;
-  opacity: .55;
-  letter-spacing: .04em;
-}
-.pipeline-bar-pill.active .pipeline-bar-num { opacity: .8; }
-
-.pipeline-bar-next {
-  margin-left: auto;
-  white-space: nowrap;
-  font-size: .78rem;
-}
-
-.pipeline-bar-done {
-  margin-left: auto;
-  font-size: .75rem;
-  color: var(--green, #4caf50);
-  opacity: .75;
-  white-space: nowrap;
-}
+/* Pipeline breadcrumb bar (.pipeline-bar*) removed 2026-08-05 (M27/M28) --
+   it only ever rendered one dead pill for 'create-videos' with no real
+   pipeline behind it. Studio Home (tab-pipeline.js) + the Help modal are
+   the single source of truth for "what tools exist" now. */
 
 /* Split pane */
 #app-main {
@@ -3552,7 +3473,6 @@ input, textarea, select {
   color: var(--accent);
   opacity: .85;
 }
-.pipeline-step-icon { font-size: 1.4rem; line-height: 1; }
 .pipeline-step-label {
   font-size: 1.05rem;
   font-weight: 700;

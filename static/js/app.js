@@ -22,6 +22,7 @@ import './shell/ai-intent.js';
 import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js';
 import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js';
 import { initManager } from './shell/manager.js';
+import { restartAndReconnect } from './shell/server-restart.js';
 
 // -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {
@@ -44,54 +45,16 @@ const TAB_HANDOFF = {
 };
 const _tabInitialized = new Set();
 
-// -- Pipeline breadcrumb -------------------------------------------------------
-const PIPELINE_STEPS = [
-  { id: 'create-videos', num: '01', label: 'Create Videos'   },
-];
-
-function _buildPipelineBar(activeTabId) {
-  const bar = document.createElement('div');
-  bar.className = 'pipeline-bar';
-
-  // Step pills
-  const pills = document.createElement('div');
-  pills.className = 'pipeline-bar-pills';
-  PIPELINE_STEPS.forEach((step, i) => {
-    if (i > 0) {
-      const sep = document.createElement('span');
-      sep.className = 'pipeline-bar-sep';
-      sep.textContent = '\u2192';
-      pills.appendChild(sep);
-    }
-    const pill = document.createElement('button');
-    pill.className = 'pipeline-bar-pill' + (step.id === activeTabId ? ' active' : '');
-    pill.title = `Go to Step ${step.num}: ${step.label}`;
-    pill.innerHTML = `<span class="pipeline-bar-num">${step.num}</span><span class="pipeline-bar-pill-label">${step.label}</span>`;
-    pill.addEventListener('click', () => switchTab(step.id));
-    pills.appendChild(pill);
-  });
-  bar.appendChild(pills);
-
-  // Next-step shortcut (only shown if there's a next step)
-  const curIdx = PIPELINE_STEPS.findIndex(s => s.id === activeTabId);
-  const next = PIPELINE_STEPS[curIdx + 1];
-  if (next) {
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'pipeline-bar-next btn btn-sm';
-    nextBtn.title = `Go to Step ${next.num}: ${next.label}`;
-    nextBtn.textContent = `${next.num} ${next.label} \u2192`;
-    nextBtn.addEventListener('click', () => switchTab(next.id));
-    bar.appendChild(nextBtn);
-  } else {
-    // On the last step, show a subtle "done" indicator
-    const done = document.createElement('span');
-    done.className = 'pipeline-bar-done';
-    done.textContent = '\u2713 Final step';
-    bar.appendChild(done);
-  }
-
-  return bar;
-}
+// NOTE (M27/M28): a "pipeline breadcrumb" (PIPELINE_STEPS + _buildPipelineBar)
+// used to live here. It only ever listed one step ('create-videos'), so it
+// rendered a single dead pill with no "next step" and quietly implied a
+// forced Create Videos -> ??? order that doesn't exist -- one of three
+// inconsistent pipeline narratives (the others were the Help modal and
+// Studio Home's STEPS list). There is no fixed pipeline: Chat, Image Studio,
+// Quick Video, Create Videos, Music Video, Video Bridges, and Video Tools are
+// independent entry points. Studio Home (tab-pipeline.js) and the Help modal
+// are now the single source of truth for "what tools exist"; this breadcrumb
+// and its dead CSS (.pipeline-bar*) were removed rather than fixed.
 
 // -- Splash ------------------------------------------------------------------
 const SPLASH_BLOCKING_STATES = new Set(['unknown', 'starting']);
@@ -108,6 +71,10 @@ function svcStateToCheck(state) {
 const SVC_SPLASH_TEXT = {
   wangp:   { running: 'WanGP ready', starting: 'WanGP loading model...', ready: 'WanGP configured', not_configured: 'WanGP not configured', not_running: 'WanGP not running', error: 'WanGP error', unknown: 'Checking WanGP...' },
   acestep: { running: 'ACE-Step running', ready: 'ACE-Step ready', starting: 'ACE-Step starting...', not_configured: 'ACE-Step not configured', not_running: 'ACE-Step not running', error: 'ACE-Step error', unknown: 'Checking ACE-Step...' },
+  // H9: Forge is not DCS-managed (Andrew starts it from its own GUI), so
+  // "not_running" here is a normal, expected state -- not an error. Worded
+  // to say so, and to name the two tabs that actually need it.
+  forge:   { running: 'Forge ready', not_running: 'Forge not running -- start it from its own GUI for Chat/Image Studio', unknown: 'Checking Forge...' },
 };
 
 function safeStorage(fn, fallback = undefined) {
@@ -151,6 +118,10 @@ async function runSplash() {
   let settled = false;
 
   const _hatAdvanced = new Set();
+  // 6 real checks now advance this: server, ffmpeg, featherless, wangp,
+  // acestep, forge (added H9). Previously 5 advanced against a total of 6 --
+  // the hat never reached 100% on its own and relied on doExit() forcing it;
+  // fixed as a side effect of adding forge's advanceHatOnce() call.
   const HAT_TOTAL = 6;
   function advanceHatOnce(key) {
     if (_hatAdvanced.has(key)) return;
@@ -187,7 +158,7 @@ async function runSplash() {
   setTimeout(() => { if (!settled) doExit(); }, 90000);
 
   try {
-    ['chk-server','chk-ffmpeg','chk-featherless','chk-wangp','chk-acestep'].forEach(id => {
+    ['chk-server','chk-ffmpeg','chk-featherless','chk-wangp','chk-acestep','chk-forge'].forEach(id => {
       const el = document.getElementById(id);
       const current = el?.querySelector('.chk-text')?.textContent || '';
       setCheck(id, 'loading', current);
@@ -214,7 +185,7 @@ async function runSplash() {
     advanceHatOnce('featherless');
 
     function updateServiceChecks(svcs) {
-      const map = { wangp: 'chk-wangp', acestep: 'chk-acestep' };
+      const map = { wangp: 'chk-wangp', acestep: 'chk-acestep', forge: 'chk-forge' };
       for (const [name, id] of Object.entries(map)) {
         const info  = svcs[name] || {};
         const state = info.state || 'unknown';
@@ -224,6 +195,11 @@ async function runSplash() {
       }
     }
 
+    // Forge deliberately excluded here: it is not a DCS-managed service, so
+    // waiting on it to leave 'unknown'/'starting' before letting the splash
+    // exit would stall app startup on a process Andrew starts by hand and
+    // may not have running yet. Its check still runs and updates the hat
+    // fill + dot/text (H9) -- it just never blocks the exit.
     function allSettled(svcs) {
       return ['wangp','acestep'].every(n => !SPLASH_BLOCKING_STATES.has((svcs[n] || {}).state || 'unknown'));
     }
@@ -315,10 +291,6 @@ function switchTab(tabId) {
       try {
         TAB_INIT[tabId](panel);
         _tabInitialized.add(tabId);
-        // Inject pipeline position bar into the 4 main pipeline steps
-        if (PIPELINE_STEPS.some(s => s.id === tabId)) {
-          panel.prepend(_buildPipelineBar(tabId));
-        }
       } catch (err) {
         console.error(`[${tabId}] Init failed:`, err);
         panel.innerHTML = `<div class="error-banner">Tab failed to load. Refresh.<br><small>${escHtml(err.message)}</small></div>`;
@@ -339,7 +311,20 @@ function switchTab(tabId) {
 
   // Dispatch handoff
   const handoffData = consumeHandoff(tabId);
-  if (handoffData && TAB_HANDOFF[tabId]) TAB_HANDOFF[tabId](handoffData);
+  if (handoffData) {
+    if (TAB_HANDOFF[tabId]) {
+      TAB_HANDOFF[tabId](handoffData);
+    } else {
+      // Some tabs are valid handoff TARGETS (e.g. video-tools, from Bridges/
+      // Image-to-Video) but have no receiver wired -- consumeHandoff() still
+      // removes the pending payload from storage regardless, so without this
+      // the data just vanished with no trace. Surface it instead of dropping
+      // it silently: the sender's action should never look like it worked
+      // when the destination can't actually receive anything yet.
+      console.warn(`[handoff] '${tabId}' has no registered receiver -- dropped:`, handoffData);
+      toast(`Sent to ${tabId}, but this tab can't receive it yet -- nothing was applied.`, 'error');
+    }
+  }
 }
 
 // -- Service polling ---------------------------------------------------------
@@ -359,10 +344,20 @@ const _SVC_TO_TYPE = { wangp: 'video', acestep: 'sound' };
 let _restartDismissed = false;
 let _lastRestartNeeded = false;
 
+// C4: consecutive-failure counter for the same 15s /api/system poll this
+// function already runs. A single failed poll is a normal blip (Wi-Fi hiccup,
+// GC pause); OFFLINE_FAIL_THRESHOLD consecutive failures (~45s) means the
+// server is actually down, not just slow -- that's when _enterOfflineMode()
+// puts up the full-screen overlay instead of just hiding the restart banner.
+let _consecutiveSystemFails = 0;
+const OFFLINE_FAIL_THRESHOLD = 3;
+
 async function _checkRestartNeeded() {
   const banner = document.getElementById('restart-banner');
   try {
     const data = await fetch('/api/system').then(r => r.json());
+    if (_consecutiveSystemFails > 0) _exitOfflineMode();
+    _consecutiveSystemFails = 0;
     const needed = !!data.restart_needed;
     if (needed && !_lastRestartNeeded) _restartDismissed = false;
     _lastRestartNeeded = needed;
@@ -373,7 +368,53 @@ async function _checkRestartNeeded() {
     // banner freezes on screen forever on a dead tab. It reappears within one
     // 15s poll once the server is back and still reports restart_needed.
     if (banner) banner.style.display = 'none';
+    _consecutiveSystemFails += 1;
+    if (_consecutiveSystemFails >= OFFLINE_FAIL_THRESHOLD) _enterOfflineMode();
   }
+}
+
+// -- Offline overlay -----------------------------------------------------------
+// Single controller for "server unreachable" state. Two triggers converge
+// here: (1) the very first post-splash fetch fails (_runStartupFetches'
+// catch, below -- an immediate connectivity problem), (2) the ongoing 15s
+// health poll above sees OFFLINE_FAIL_THRESHOLD consecutive failures during
+// a session that was previously working (server crashed/killed underneath
+// the user). Both funnel through here so there is one reconnect loop and one
+// overlay, not two competing copies (the old code only had trigger #1 and
+// froze mid-session -- C4).
+let _offlineReconnecting = false;   // the background reconnect loop is running
+let _offlineDismissed    = false;   // user hid the overlay; loop keeps running
+
+function _showOfflineOverlay() {
+  const overlay = document.getElementById('offline-overlay');
+  if (overlay && !_offlineDismissed) overlay.hidden = false;
+}
+
+function _exitOfflineMode() {
+  _offlineReconnecting = false;
+  _offlineDismissed = false;
+  const overlay = document.getElementById('offline-overlay');
+  if (overlay) overlay.hidden = true;
+}
+
+function _enterOfflineMode() {
+  _showOfflineOverlay();
+  if (_offlineReconnecting) return;  // reconnect loop already running
+  _offlineReconnecting = true;
+  (async () => {
+    while (_offlineReconnecting) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        await apiFetch('/api/version', { context: 'reconnect', silent: true });
+        _offlineReconnecting = false;
+        // Full reload is intentional: page state (job queue, dismissed-ids,
+        // PAGE_LOAD_TIME) is stale after any real restart -- a reload gives
+        // a clean slate identical to the user manually refreshing the tab.
+        window.location.reload();
+        return;
+      } catch (_) { /* keep polling */ }
+    }
+  })();
 }
 
 async function pollServices() {
@@ -458,12 +499,19 @@ function renderServicePanel() {
     wangp:       'WanGP',
     acestep:     'ACE-Step',
     featherless: 'Uncensored AI',
+    forge:       'Forge (image gen)',
   };
   const SVC_HINTS = {
     wangp:       'AI video generation',
     acestep:     'AI music generation',
     featherless: 'Uncensored LLM + vision (Featherless cloud / local KoboldCpp)',
+    forge:       'AI image generation -- Chat and Image Studio depend on it',
   };
+  // Only these two are actually started/stopped/restarted by DCS -- Featherless
+  // is cloud/an external local server, and Forge (H9) is Andrew's own GUI.
+  // POST /api/services/{start,stop,restart}/<name> 404s for anything else, so
+  // those two cards are status-only (no dead buttons that silently fail).
+  const SVC_CONTROLLABLE = new Set(['wangp', 'acestep']);
 
   for (const [name, label] of Object.entries(SVC_NAMES)) {
     const info = _svcState[name] || {};
@@ -477,6 +525,7 @@ function renderServicePanel() {
     const model = info.model || info.loaded_model || '--';
     const vram = info.vram_mb ? `${Math.round(info.vram_mb / 1024 * 10) / 10} GB` : '--';
     const logLines = (info.recent_logs || []).join('\n') || '(no recent logs)';
+    const controllable = SVC_CONTROLLABLE.has(name);
 
     card.innerHTML = `
       <div class="svc-detail-header">
@@ -493,9 +542,10 @@ function renderServicePanel() {
         <div class="svc-log-lines">${escHtml(logLines)}</div>
       </div>
       <div class="svc-detail-actions">
+        ${controllable ? `
         <button class="btn btn-sm svc-start" data-svc="${name}">Start</button>
         <button class="btn btn-sm svc-stop"  data-svc="${name}">Stop</button>
-        <button class="btn btn-sm svc-restart" data-svc="${name}">Restart</button>
+        <button class="btn btn-sm svc-restart" data-svc="${name}">Restart</button>` : ''}
         ${info.url ? `<a href="${escHtml(info.url)}" target="_blank" class="btn btn-sm">Open UI</a>` : ''}
       </div>`;
 
@@ -974,22 +1024,6 @@ async function _runStartupFetches() {
   _applySoundPillState(cfg.audio_provider || 'acestep');
 }
 
-// Show the offline overlay and poll until the server responds, then reload.
-// A full reload is intentional: after a server restart the page state (job
-// queue, dismissed-ids, PAGE_LOAD_TIME) is stale. A reload gives a clean
-// slate identical to the user manually refreshing the tab.
-async function _startReconnectLoop() {
-  const overlay = document.getElementById('offline-overlay');
-  if (overlay) overlay.hidden = false;
-  while (true) {
-    await new Promise(r => setTimeout(r, 3000));
-    try {
-      await apiFetch('/api/version', { context: 'reconnect', silent: true });
-      window.location.reload();
-      return;
-    } catch (_) { /* keep polling */ }
-  }
-}
 
 document.addEventListener('DOMContentLoaded', () => {
   // Hide startup spinner when app is ready
@@ -1000,9 +1034,19 @@ document.addEventListener('DOMContentLoaded', () => {
       // Only show the offline overlay for actual network failures (server not
       // reachable). If the server is up but an endpoint returned an HTTP error,
       // the error is already logged/toasted -- don't reload in a loop.
-      if (e.name === 'TypeError') _startReconnectLoop();
+      if (e.name === 'TypeError') _enterOfflineMode();
     });
   }, { once: true });
+
+  // C4: dismiss only hides the overlay -- the background reconnect loop (if
+  // one is running) keeps polling and still reloads automatically once the
+  // server answers again. This mirrors the restart-banner's dismiss (hides
+  // until the underlying condition changes, doesn't cancel the recovery).
+  document.getElementById('offline-overlay-dismiss')?.addEventListener('click', () => {
+    _offlineDismissed = true;
+    const overlay = document.getElementById('offline-overlay');
+    if (overlay) overlay.hidden = true;
+  });
 
   runSplash();
 
@@ -1102,127 +1146,74 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // ai-badge removed from header; its role is now the Text pill dropdown
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
-  document.getElementById('btn-restart-app')?.addEventListener('click', async () => {
+  // H13/C4: both restart flows go through the shared restartAndReconnect()
+  // helper (static/js/shell/server-restart.js) instead of two hand-rolled
+  // poll loops. It also now surfaces failure FAST via onPollFail (a few
+  // seconds in) instead of sitting silent until the 90s deadline.
+  document.getElementById('btn-restart-app')?.addEventListener('click', () => {
     const btn = document.getElementById('btn-restart-app');
-
-    // Guard: /api/app/restart itself does not check for an active GPU job --
-    // it will happily kill a render in progress. Warn before doing that (same
-    // guard as btn-restart-banner -- this button was missing it).
-    try {
-      const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
-      if (gpu.rendering) {
-        const proceed = confirm(
-          'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
-        );
-        if (!proceed) return;
-      }
-    } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
-
-    btn.disabled = true;
-    btn.textContent = 'Restarting...';
-    try {
-      await apiFetch('/api/app/restart', { method: 'POST' });
-      btn.textContent = 'Reconnecting...';
-      // Poll until the server comes back
-      const poll = setInterval(async () => {
+    restartAndReconnect({
+      reload: false, // Settings-modal restart stays on the current page/tab
+      onBeforePost: async () => {
+        // /api/app/restart itself does not check for an active GPU job -- it
+        // will happily kill a render in progress. Warn before doing that.
         try {
-          await fetch('/api/services');
-          clearInterval(poll);
-          btn.textContent = 'Restart Server';
-          btn.disabled = false;
-          toast('Server restarted -- all code changes are now live', 'success');
-        } catch (_) { /* still down */ }
-      }, 1500);
-    } catch (_) {
-      btn.textContent = 'Restart Server';
-      btn.disabled = false;
-    }
+          const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
+          if (gpu.rendering && !confirm(
+            'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
+          )) return false;
+        } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
+        btn.disabled = true;
+        btn.textContent = 'Restarting...';
+        return true;
+      },
+      onPosted: () => { btn.textContent = 'Reconnecting...'; },
+      onPollFail: (n) => { if (n === 2) btn.textContent = 'Waiting for server...'; },
+      onTimeout: () => {
+        btn.textContent = 'Restart Server';
+        btn.disabled = false;
+        toast('Restart did not come back within 90s -- relaunch DropCat Studio V2 from the desktop icon.', 'error');
+      },
+      onRestarted: () => {
+        btn.textContent = 'Restart Server';
+        btn.disabled = false;
+        toast('Server restarted -- all code changes are now live', 'success');
+      },
+    });
   });
   document.getElementById('btn-restart-banner-dismiss')?.addEventListener('click', () => {
     _restartDismissed = true;
     const banner = document.getElementById('restart-banner');
     if (banner) banner.style.display = 'none';
   });
-  document.getElementById('btn-restart-banner')?.addEventListener('click', async () => {
+  document.getElementById('btn-restart-banner')?.addEventListener('click', () => {
     const btn    = document.getElementById('btn-restart-banner');
     const textEl = document.getElementById('restart-banner-text');
-
-    // Guard: /api/app/restart itself does not check for an active GPU job --
-    // it will happily kill a render in progress. Warn before doing that.
-    try {
-      const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
-      if (gpu.rendering) {
-        const proceed = confirm(
-          'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
-        );
-        if (!proceed) return;
-      }
-    } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
-
-    btn.disabled = true;
-    btn.textContent = 'Restarting...';
-
-    let preHash = null, prePid = null, sawDown = false;
-    // Baseline identity read, retried once: a single blip here must NOT count
-    // as "server was down" -- combined with a no-op restart it would fake a
-    // down-then-up success and reload with nothing restarted.
-    let baselineOk = false;
-    for (let attempt = 0; attempt < 2 && !baselineOk; attempt++) {
-      try {
-        const sys = await fetch('/api/system', { cache: 'no-store' }).then(r => r.json());
-        preHash = sys.boot_git_hash || null;
-        prePid  = sys.pid || null;
-        baselineOk = true;
-      } catch (_) { /* retry once, then treat as already dead below */ }
-    }
-    if (!baselineOk) {
-      // Server already dead (e.g. clicked after a crash) -- any successful
-      // poll below means it came back.
-      sawDown = true;
-    }
-
-    try {
-      await apiFetch('/api/app/restart', { method: 'POST' });
-    } catch (_) {
-      // The connection can drop mid-response while app.py is exiting -- that's
-      // expected, not a failure. Keep polling regardless.
-    }
-
-    const deadline = Date.now() + 90000;
-    let pollFails = 0;
-    const poll = setInterval(async () => {
-      if (Date.now() > deadline) {
-        clearInterval(poll);
-        if (textEl) textEl.textContent = 'Restart did not come back -- relaunch Drop Cat Go Studio from the desktop shortcut.';
+    restartAndReconnect({
+      onBeforePost: async () => {
+        try {
+          const gpu = await fetch('/api/gpu/status', { cache: 'no-store' }).then(r => r.json());
+          if (gpu.rendering && !confirm(
+            'A render is in progress on the GPU. Restarting now will kill it. Restart anyway?'
+          )) return false;
+        } catch (_) { /* can't tell -- fall through, same as the server-side behavior */ }
+        btn.disabled = true;
+        btn.textContent = 'Restarting...';
+        return true;
+      },
+      // C4: surface failure fast instead of a silent 90s wait -- the text
+      // updates at ~4s and ~16s if the server still hasn't answered.
+      onPollFail: (n) => {
+        if (textEl && n === 2) textEl.textContent = 'Waiting for the server to come back...';
+        if (textEl && n === 8) textEl.textContent = 'Still waiting -- this is taking longer than usual...';
+      },
+      onTimeout: () => {
+        if (textEl) textEl.textContent = 'Restart did not come back -- relaunch DropCat Studio V2 from the desktop icon.';
         btn.textContent = 'Restart now';
         btn.disabled = false;
-        return;
-      }
-      try {
-        const ctrl = new AbortController();
-        const tid  = setTimeout(() => ctrl.abort(), 1500);
-        const sys  = await fetch('/api/system', { cache: 'no-store', signal: ctrl.signal }).then(r => r.json());
-        clearTimeout(tid);
-        // Restart confirmed by ANY of: new git hash, new server PID, or the
-        // server was observed down and answers again. Hash alone missed the
-        // same-code reboot (stale banner) and reported failure on success.
-        const restarted =
-          (sys.boot_git_hash && preHash !== null && sys.boot_git_hash !== preHash) ||
-          (sys.pid && prePid !== null && sys.pid !== prePid) ||
-          sawDown;
-        if (restarted) {
-          clearInterval(poll);
-          location.reload();
-          return;
-        }
-        pollFails = 0;
-      } catch (_) {
-        // A real restart is down for many consecutive 2s ticks; require two
-        // in a row so one slow/aborted response can't fake a down-then-up.
-        pollFails += 1;
-        if (pollFails >= 2) sawDown = true;
-      }
-    }, 2000);
+      },
+      // onRestarted not needed -- default reload:true wipes this state anyway.
+    });
   });
   document.getElementById('btn-validate-wan')?.addEventListener('click', () => validatePath('wan'));
   document.getElementById('btn-validate-ace')?.addEventListener('click', () => validatePath('ace'));
@@ -1239,6 +1230,17 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(_checkRestartNeeded, 15000);
 
   // -- GPU indicator pill: which service currently owns the GPU --------------
+  // H15: this used to only know wangp/acestep (from /api/gpu/status, which
+  // the orchestrator only tracks for services IT manages -- Forge is
+  // deliberately not one of them, see core/gpu_orchestrator.py). That made
+  // the pill read "GPU: idle" while Forge was actively rendering an image,
+  // which is exactly the false signal a user watching this pill relies on
+  // NOT to see. Forge's busy flag (H9, services/manager.py:forge_status())
+  // is layered on top here instead of taught to the orchestrator, because
+  // the orchestrator's job is eviction policy for services it starts/stops
+  // -- Forge isn't one, and never should be (see H9 build note: status
+  // only, never a start/stop button). _svcState.forge is kept fresh by the
+  // existing pollServices() 5s loop above, so this reads it for free.
   const _gpuLabelMap = {
     wangp:   { label: 'GPU: Video',  color: '#14a8c9' },
     acestep: { label: 'GPU: Sound',  color: '#c41e3a' },
@@ -1252,6 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const lbl = document.getElementById('gpu-indicator-label');
       if (!dot || !lbl) return;
       const meta = data.current ? _gpuLabelMap[data.current] : null;
+      const forgeBusy = !!_svcState.forge?.busy;
       if (data.rendering) {
         // Active WanGP video render -- make it unmistakable so the user doesn't
         // open an image tab and interrupt it.
@@ -1261,6 +1264,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('gpu-indicator').title =
           'A video is rendering on the GPU. Opening the image tabs would interrupt it -- '
           + 'wait for it to finish (or cancel it in the Queue).';
+      } else if (forgeBusy) {
+        // Forge is not managed by the orchestrator (own GUI, own lifecycle),
+        // so this is inferred from its own /sdapi/v1/progress, not a real
+        // eviction-aware "holds the GPU" signal -- still true and worth
+        // showing instead of a false "idle".
+        dot.style.animation  = 'gpuPulse 1s ease-in-out infinite';
+        dot.style.background = '#e0a000';
+        lbl.textContent      = 'GPU: Forge rendering';
+        document.getElementById('gpu-indicator').title =
+          'Forge (image generation) reports an active render. DCS does not manage Forge, '
+          + 'so this is inferred from its own progress endpoint, not tracked like WanGP/ACE-Step.';
       } else if (meta) {
         dot.style.animation  = '';
         dot.style.background = meta.color;
@@ -1272,8 +1286,13 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         dot.style.animation  = '';
         dot.style.background = '#555';
-        lbl.textContent = 'GPU: idle';
-        document.getElementById('gpu-indicator').title = 'No service is holding the GPU right now.';
+        // Honest scope: this pill (and /api/gpu/status behind it) only ever
+        // tracked WanGP/ACE-Step -- say so instead of a bare "idle" that
+        // reads as "nothing is using the GPU" (H15).
+        lbl.textContent = 'GPU: idle (WanGP/ACE-Step)';
+        document.getElementById('gpu-indicator').title =
+          'No DCS-managed service (WanGP/ACE-Step) is holding the GPU right now. '
+          + 'Forge is checked separately and shown here when it reports a render.';
       }
     } catch (_) { /* silent -- indicator is read-only diagnostic */ }
   }
