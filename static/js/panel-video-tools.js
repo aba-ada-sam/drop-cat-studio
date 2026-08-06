@@ -166,6 +166,21 @@ function _buildPipeline(root, source) {
   const stepsWrap = el('div', { style: 'display:flex; flex-direction:column; gap:10px;' });
   root.appendChild(stepsWrap);
 
+  // M26: this pipeline mixes instant CPU (ffmpeg) steps with GPU steps (AI
+  // Upscale, RIFE Smooth) that run immediately and can compete with an
+  // active WanGP render for VRAM (Pause does not hold these back -- C8).
+  // Say which kind the current stack is before the user hits Run.
+  const runHint = el('div', { style: 'font-size:.72rem; color:var(--text-3); text-align:center; margin:-6px 0 4px;' });
+
+  function _updateRunHint() {
+    if (!steps.length) { runHint.style.display = 'none'; return; }
+    const gpuHeavy = steps.some(s => typeof s.usesGpu === 'function' && s.usesGpu());
+    runHint.style.display = '';
+    runHint.textContent = gpuHeavy
+      ? 'Runs now -- includes a GPU step (AI Upscale / RIFE Smooth) that may compete with an active render for VRAM'
+      : 'Runs now -- CPU only (ffmpeg), no GPU wait';
+  }
+
   function _addStep(op) {
     if (op === 'crop' && !source.get()) { toast('Choose a source video first', 'error'); return; }
     steps.push(_makeStep(op, source));
@@ -177,6 +192,7 @@ function _buildPipeline(root, source) {
     if (!steps.length) {
       stepsWrap.appendChild(el('div', { class: 'card', style: 'padding:18px; text-align:center; font-size:.82rem; color:var(--text-3);',
         text: 'No steps yet -- add one above (e.g. Upscale, then Sharpen).' }));
+      _updateRunHint();
       return;
     }
     steps.forEach((s, i) => {
@@ -195,9 +211,15 @@ function _buildPipeline(root, source) {
       body.appendChild(s.el);
       wrap.appendChild(body);
       stepsWrap.appendChild(wrap);
+      // Steps like Upscale/Smooth swap their GPU-use state on their own
+      // engine/mode <select> without going through _addStep/_render -- re-check
+      // the run hint whenever any control inside this step changes.
+      body.addEventListener('change', _updateRunHint);
     });
+    _updateRunHint();
   }
   _render();
+  root.appendChild(runHint);
 
   // Run
   const runBtn = el('button', {
@@ -299,21 +321,33 @@ function _stepUpscale(body) {
     options: [{ label: 'AI (rebuilds detail)', value: 'ai' }, { label: 'Fast (Lanczos)', value: 'ffmpeg' }],
     value: 'ai',
   });
+  // M26: name which mode is instant (CPU, no GPU wait) vs which one touches
+  // the GPU right now and can compete with an active WanGP render for VRAM
+  // (see C8 -- AI Upscale is not queued behind WanGP, it starts immediately).
   const note = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:6px; line-height:1.5;',
-    text: 'AI rebuilds real detail (slower); Fast just stretches pixels (instant).' });
+    text: 'AI rebuilds real detail -- runs now on the GPU, may compete with an active render. Fast (Lanczos) is CPU only, instant, no GPU use.' });
   body.appendChild(note);
-  // Adapt silently if the AI engine isn't present on this machine.
+  function _disableAiUpscale(reason) {
+    const sel = engineSel.el?.querySelector('select');
+    sel?.querySelector('option[value="ai"]')?.remove();
+    engineSel.value = 'ffmpeg';
+    note.textContent = reason;
+  }
   api('/api/tools/upscale').then(d => {
     if (d && d.ai_available === false) {
-      const sel = engineSel.el?.querySelector('select');
-      sel?.querySelector('option[value="ai"]')?.remove();
-      engineSel.value = 'ffmpeg';
-      note.textContent = 'Fast (Lanczos) resize -- stretches pixels, no added detail.';
+      _disableAiUpscale('Fast (Lanczos) resize -- stretches pixels, no added detail. CPU only, instant.');
     }
-  }).catch(() => {});
+  }).catch(() => {
+    // L33: fail CLOSED, not open. A probe that couldn't be reached is not
+    // proof AI upscaling is installed -- offering it anyway means the
+    // failure only surfaces later, mid-job, instead of here where it's
+    // explainable.
+    _disableAiUpscale('Could not confirm AI upscaling is installed -- using Fast (Lanczos) resize (CPU only, instant).');
+  });
   return {
     op: 'upscale', el: body, title: 'Upscale',
     getParams: () => ({ op: 'upscale', scale: parseFloat(scaleSel.value), engine: engineSel.value }),
+    usesGpu: () => engineSel.value === 'ai',
   };
 }
 
@@ -353,25 +387,39 @@ function _stepSmooth(body) {
   const modeSel = createSelect(body, { label: 'Mode', options: ['auto', 'blend', 'mci', 'rife'], value: 'auto' });
   const desc = el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-top:4px; line-height:1.5;' });
   body.appendChild(desc);
+  // M26: blend/mci are CPU-only ffmpeg, run instantly; RIFE runs on the GPU
+  // now (not queued behind an active WanGP render -- see C8) and can compete
+  // for VRAM. auto may pick RIFE for short clips, so it inherits the same caveat.
   const descriptions = {
-    auto: 'Recommended. Picks the best method for this clip automatically -- RIFE (GPU AI) for short clips, motion-compensated for long or high-res ones.',
-    blend: 'Fast. Softens mild jitter by blending neighboring frames.',
-    mci: 'Higher quality. Follows real motion between frames -- better for fast action, slower to render.',
-    rife: 'Best quality. GPU-accelerated AI that generates true in-between frames. Extracts every frame first (CPU/disk), then interpolates on the GPU.',
+    auto: 'Recommended. Picks the best method automatically -- RIFE (GPU, runs now) for short clips, motion-compensated (CPU, instant) for long or high-res ones.',
+    blend: 'Fast. Softens mild jitter by blending neighboring frames. CPU only, instant, no GPU use.',
+    mci: 'Higher quality. Follows real motion between frames -- better for fast action, slower to render. CPU only, no GPU use.',
+    rife: 'Best quality. GPU-accelerated AI that generates true in-between frames -- runs now and may compete with an active render for VRAM. Extracts every frame first (CPU/disk), then interpolates on the GPU.',
   };
   const updateDesc = () => { desc.textContent = descriptions[modeSel.value] || ''; };
   modeSel.el?.querySelector('select')?.addEventListener('change', updateDesc);
   updateDesc();
+  let _rifeAvailable = true;
+  function _disableRife(reason) {
+    _rifeAvailable = false;
+    const sel = modeSel.el?.querySelector('select');
+    sel?.querySelector('option[value="rife"]')?.remove();
+    if (modeSel.value === 'rife') { modeSel.value = 'mci'; }
+    updateDesc();
+    if (reason) desc.textContent = reason;
+  }
   api('/api/tools/interpolate').then(d => {
-    if (d && d.rife_available === false) {
-      const sel = modeSel.el?.querySelector('select');
-      sel?.querySelector('option[value="rife"]')?.remove();
-      if (modeSel.value === 'rife') { modeSel.value = 'mci'; updateDesc(); }
-    }
-  }).catch(() => {});
+    if (d && d.rife_available === false) _disableRife();
+  }).catch(() => {
+    // L33: fail CLOSED -- an unreachable probe is not proof RIFE is
+    // installed. Remove it and say why instead of offering an engine that
+    // fails mid-job.
+    _disableRife('Could not confirm GPU interpolation (RIFE) is available -- offering CPU-only methods.');
+  });
   return {
     op: 'smooth', el: body, title: 'Smooth',
     getParams: () => ({ op: 'smooth', target_fps: fps.value, mode: modeSel.value }),
+    usesGpu: () => modeSel.value === 'rife' || (modeSel.value === 'auto' && _rifeAvailable),
   };
 }
 
@@ -709,7 +757,17 @@ function _buildAudioSection(root, source) {
   // -- Music options --------------------------------------------------------
   const optionsCard = el('div', { class: 'card', style: 'padding:14px;' });
   root.appendChild(optionsCard);
-  optionsCard.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; margin-bottom:12px;', text: 'Music Options' }));
+  const optionsHeaderRow = el('div', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:12px;' });
+  optionsHeaderRow.appendChild(el('div', { style: 'font-size:.85rem; font-weight:600; flex:1;', text: 'Music Options' }));
+  // M26: unlike the ffmpeg pipeline above (runs now, instant), this goes
+  // through job_manager's shared GPU queue (JOB_FUN_VIDEO) -- it waits if a
+  // Create Videos / Video Bridges render is already using the GPU, and Pause
+  // does hold it back (unlike Upscale/RIFE above -- see C8).
+  optionsHeaderRow.appendChild(el('span', {
+    style: 'font-size:.66rem; font-weight:700; padding:2px 7px; border-radius:10px; color:var(--text-3); background:var(--bg-raised); border:1px solid var(--border-2); white-space:nowrap;',
+    text: 'Waits in the GPU queue', title: 'Uses ACE-Step on the shared GPU -- waits if a Create Videos / Video Bridges render is already running',
+  }));
+  optionsCard.appendChild(optionsHeaderRow);
 
   optionsCard.appendChild(el('div', { style: 'font-size:.82rem; color:var(--text-3); margin-bottom:4px;', text: 'Music Prompt' }));
   optionsCard.appendChild(el('div', { style: 'font-size:.72rem; color:var(--text-3); margin-bottom:6px; line-height:1.5;',
