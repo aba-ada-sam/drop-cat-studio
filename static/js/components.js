@@ -51,7 +51,7 @@ export function formatDuration(sec) {
 }
 
 // -- Toast re-export (convenience for panels that only import components.js) --
-export { toast } from './shell/toast.js?v=20260806a';
+export { toast } from './shell/toast.js';
 
 // -- DropZone -----------------------------------------------------------------
 

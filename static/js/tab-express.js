@@ -2,10 +2,10 @@
  * Drop Cat Go Studio -- Express mode.
  * Drop an image, describe your idea, click Create. Everything else is automatic.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260806a';
-import { el, pathToUrl } from './components.js?v=20260806a';
-import { toast, apiFetch } from './shell/toast.js?v=20260806a';
-import { handoff } from './handoff.js?v=20260806a';
+import { api, apiUpload, pollJob, stopJob } from './api.js';
+import { el, pathToUrl } from './components.js';
+import { toast, apiFetch } from './shell/toast.js';
+import { handoff } from './handoff.js';
 
 // Module-level so receiveHandoff can call _applyImageFn/_setIdeaFn even after init
 let _applyImageFn = null;

@@ -3,9 +3,9 @@
  * Talk with an LLM, ask for an image, review/adjust the proposed prompt,
  * generate via Forge, refine through conversation, animate the result.
  */
-import { pollJob } from './api.js?v=20260806a';
-import { el, pathToUrl } from './components.js?v=20260806a';
-import { toast, apiFetch } from './shell/toast.js?v=20260806a';
+import { pollJob } from './api.js';
+import { el, pathToUrl } from './components.js';
+import { toast, apiFetch } from './shell/toast.js';
 
 const HISTORY_KEY = 'dropcat_chat_history';
 const STYLE_KEY = 'dropcat_chat_style';

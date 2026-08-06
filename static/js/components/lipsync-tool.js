@@ -10,8 +10,8 @@
  *
  *   mountLipSyncTool(container, { videoPath, audioPath, onApplied })
  */
-import { el } from '../components.js?v=20260806a';
-import { apiFetch, toast } from '../shell/toast.js?v=20260806a';
+import { el } from '../components.js';
+import { apiFetch, toast } from '../shell/toast.js';
 
 export async function mountLipSyncTool(container, opts = {}) {
   const videoPath = opts.videoPath || '';

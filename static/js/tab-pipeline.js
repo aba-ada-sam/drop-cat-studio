@@ -3,8 +3,8 @@
  * The front door: concept input + numbered pipeline walkthrough + recent work.
  * Routes the user's raw idea to the Quick Video (express) tab via handoff.
  */
-import { el } from './components.js?v=20260806a';
-import { handoff } from './handoff.js?v=20260806a';
+import { el } from './components.js';
+import { handoff } from './handoff.js';
 
 // -- Module state (reset on each init) --------------------------------------
 let _svcInterval = null;

@@ -2,10 +2,10 @@
  * Drop Cat Go Studio -- Image to Video panel.
  * Ken Burns slideshow generator with drag-to-reorder images.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260806a';
-import { createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js?v=20260806a';
-import { toast } from './shell/toast.js?v=20260806a';
-import { handoff } from './handoff.js?v=20260806a';
+import { api, apiUpload, pollJob, stopJob } from './api.js';
+import { createDropZone, createProgressCard, createVideoPlayer, createSlider, createSelect, el } from './components.js';
+import { toast } from './shell/toast.js';
+import { handoff } from './handoff.js';
 
 let images = [];
 

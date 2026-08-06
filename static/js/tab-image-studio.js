@@ -5,9 +5,9 @@
  * loaded checkpoint, and an Animate button into the same video pipeline
  * Chat Studio uses.
  */
-import { pollJob } from './api.js?v=20260806a';
-import { el, pathToUrl } from './components.js?v=20260806a';
-import { toast, apiFetch } from './shell/toast.js?v=20260806a';
+import { pollJob } from './api.js';
+import { el, pathToUrl } from './components.js';
+import { toast, apiFetch } from './shell/toast.js';
 
 const GALLERY_KEY = 'dropcat_image_studio_gallery';
 const GALLERY_CAP = 200;

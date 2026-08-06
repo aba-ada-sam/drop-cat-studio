@@ -11,7 +11,7 @@
  * the brain says done (or the user hits Stop). All DOM control is client-side so
  * the user can literally watch it work.
  */
-import { apiFetch } from './toast.js?v=20260806a';
+import { apiFetch } from './toast.js';
 
 const MAX_STEPS = 48;          // hard cap per task -- prevents runaway loops
 const SETTLE_MS = 700;         // wait for lazy tab init / async renders after a UI change

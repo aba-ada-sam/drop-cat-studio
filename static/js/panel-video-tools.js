@@ -4,10 +4,10 @@
  * (Upscale, Sharpen, Crop, Transform, Smooth) and run them in a single pass.
  * Plus a separate AI Music section (generate + mix a soundtrack).
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260806a';
-import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js?v=20260806a';
-import { toast } from './shell/toast.js?v=20260806a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260806a';
+import { api, apiUpload, pollJob, stopJob } from './api.js';
+import { createProgressCard, createVideoPlayer, createSlider, createCheckbox, createSelect, el, formatDuration, pathToUrl } from './components.js';
+import { toast } from './shell/toast.js';
+import { pushFromTab as pushToGallery } from './shell/gallery.js';
 
 let _sessionListener = null;
 let _pollHandle = null;   // module-level so panel re-mounts don't stack pollers

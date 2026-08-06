@@ -2,11 +2,11 @@
  * Drop Cat Go Studio -- Create Videos
  * Pick a generated image, write a motion prompt, get a video.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260806a';
-import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js?v=20260806a';
-import { toast, apiFetch } from './shell/toast.js?v=20260806a';
-import { handoff } from './handoff.js?v=20260806a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260806a';
+import { api, apiUpload, pollJob, stopJob } from './api.js';
+import { createProgressCard, createVideoPlayer, createSlider, el, pathToUrl } from './components.js';
+import { toast, apiFetch } from './shell/toast.js';
+import { handoff } from './handoff.js';
+import { pushFromTab as pushToGallery } from './shell/gallery.js';
 
 // Concurrency limiter for thumbnail extraction -- caps parallel <video> preloads.
 const _thumbQueue = { running: 0, max: 4, pending: [] };
@@ -1871,7 +1871,7 @@ export function init(panel) {
   });
 
   // -- Palette AI intent -----------------------------------------------------
-  import('./shell/ai-intent.js?v=20260806a').then(({ registerTabAI }) => {
+  import('./shell/ai-intent.js').then(({ registerTabAI }) => {
     registerTabAI('create-videos', {
       getContext: () => ({
         prompt:       promptTA.value,

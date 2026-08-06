@@ -2,11 +2,11 @@
  * Drop Cat Go Studio -- Add Transitions (Video Bridges)
  * Pick session videos -> arrange sequence -> AI generates bridge clips between each pair.
  */
-import { api, apiUpload, pollJob, stopJob } from './api.js?v=20260806a';
-import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js?v=20260806a';
-import { toast } from './shell/toast.js?v=20260806a';
-import { handoff } from './handoff.js?v=20260806a';
-import { pushFromTab as pushToGallery } from './shell/gallery.js?v=20260806a';
+import { api, apiUpload, pollJob, stopJob } from './api.js';
+import { createProgressCard, createVideoPlayer, createSlider, el, formatDuration, pathToUrl } from './components.js';
+import { toast } from './shell/toast.js';
+import { handoff } from './handoff.js';
+import { pushFromTab as pushToGallery } from './shell/gallery.js';
 
 let _items      = [];   // { path, name, kind, duration, analysis, prompt }
 let _activeMode = 'cinematic';
@@ -437,7 +437,7 @@ export function init(panel) {
   player.onStartOver(() => { player.hide(); sendCard.style.display = 'none'; _lastOutput = null; });
 
   // -- Palette AI intent -----------------------------------------------------
-  import('./shell/ai-intent.js?v=20260806a').then(({ registerTabAI }) => {
+  import('./shell/ai-intent.js').then(({ registerTabAI }) => {
     registerTabAI('bridges', {
       getContext: () => ({
         transition_mode: _activeMode,
