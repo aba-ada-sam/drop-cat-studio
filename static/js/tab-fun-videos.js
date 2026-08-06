@@ -1054,15 +1054,12 @@ export function init(panel) {
     el('label', { for: 'fv-instr', text: 'Instrumental (no vocals)', style: 'cursor:pointer; font-size:.85rem;' }),
   ]));
 
-  // Lip sync -- off by default. This is LTX-2 native audio conditioning during
-  // diffusion, which deterministically deadlocks WanGP (no MuseTalk fallback
-  // exists on this pipeline, unlike the Music Video tab). Leave off unless
-  // testing; a hung job here needs a manual WanGP restart to clear.
-  const lipSyncChk = el('input', { type: 'checkbox', id: 'fv-lip-sync' });
-  audioBody.appendChild(el('div', { style: 'display:flex; gap:6px; align-items:center; margin-bottom:8px;' }, [
-    lipSyncChk,
-    el('label', { for: 'fv-lip-sync', text: 'Lip Sync (audio drives subject mouth/face motion -- experimental, may hang)', style: 'cursor:pointer; font-size:.85rem;' }),
-  ]));
+  // M16 / Andrew's 2026-08-05 ruling: MuseTalk is being removed from V2
+  // entirely, and this checkbox was a no-op in single-clip mode anyway
+  // (pipeline.py never read settings.lip_sync). Deleted rather than fixed --
+  // see REVIEW_FINDINGS_2026-08-05.md M16/M29 and the MuseTalk LANDMINE note.
+  // _buildFvPayload() no longer sends a lip_sync field; the server defaults
+  // it to False when absent (routes.py _build_single_settings/_build_multi_settings).
 
   // Lyric direction (visible when not instrumental)
   const lyricGuideWrap = el('div');
@@ -1106,12 +1103,26 @@ export function init(panel) {
           current_lyric: '',
         }),
       });
-      // brainstorm returns reply field; parse JSON from it
+      // brainstorm returns reply field; parse JSON from it. H14: this used to
+      // be a bare `catch (_) {}` -- a reply that didn't parse as JSON left
+      // parsed=null with no toast and no fallback, so the fields just stayed
+      // blank with zero feedback that the AI even responded.
       let parsed = null;
-      try { parsed = JSON.parse((data.reply || '').replace(/```json|```/g, '').trim()); } catch (_) {}
+      try { parsed = JSON.parse((data.reply || '').replace(/```json|```/g, '').trim()); } catch (_) { parsed = null; }
       if (parsed?.music_prompt) musicIn.value = parsed.music_prompt;
       if (parsed?.lyric_direction && !instrChk.checked) lyricGuideTA.value = parsed.lyric_direction;
-      else if (!parsed && data.lyric_direction) lyricGuideTA.value = data.lyric_direction;
+      if (!parsed) {
+        if (data.lyric_direction) {
+          lyricGuideTA.value = data.lyric_direction;
+        } else if ((data.reply || '').trim()) {
+          // AI replied but not in the requested JSON shape -- use the raw
+          // reply as the music prompt rather than leaving fields blank.
+          musicIn.value = data.reply.trim();
+          toast('AI reply was not structured JSON -- used the raw text as the music prompt', 'warning');
+        } else {
+          toast('AI suggestion came back empty -- try again or fill in manually', 'warning');
+        }
+      }
     } catch (e) { toast(e.message || 'Suggestion failed', 'error'); }
     finally { musicSuggestBtn.disabled = false; musicSuggestBtn.textContent = '* Suggest'; }
   });
@@ -1237,23 +1248,38 @@ export function init(panel) {
   const clipsLabel  = el('span', { style: 'min-width:1.8rem; text-align:right; font-size:.85rem; color:var(--accent);', text: '4' });
   const totalLabel  = el('span', { style: 'font-size:.78rem; color:var(--text-3);', text: '' });
 
+  // M17: the server clamps per-clip duration to 4-6s for multi-video stories
+  // (routes.py/folder_loop.py: clip_dur = max(4.0, min(6.0, ...))) regardless
+  // of what the Duration slider (2-20s, tuned for single-clip mode) says.
+  // These readouts used to multiply the raw slider value, so e.g. 15s x 4
+  // clips showed "~60s total" but actually rendered 16-24s. Reflect the
+  // clamped value that will actually render.
+  function _clampedMultiClipDur() {
+    const rawDur = parseFloat(durSlider.value) || 6;
+    return Math.max(4, Math.min(6, rawDur));
+  }
   function _refreshMultiTotal() {
     _multiClips = parseInt(clipsSlider.value);
     clipsLabel.textContent = String(_multiClips);
-    const dur = parseFloat(durSlider.value) || 8;
-    totalLabel.textContent = `~${_multiClips * dur}s total`;
+    const rawDur = parseFloat(durSlider.value) || 8;
+    const clipDur = _clampedMultiClipDur();
+    const total = _multiClips * clipDur;
+    totalLabel.textContent = (rawDur === clipDur)
+      ? `~${total}s total`
+      : `~${total}s total (${clipDur}s/clip -- server clamps clips to 4-6s)`;
     _refreshAudioLenInfo();
   }
   // Live readout of how long the generated audio will be. Length itself is set
-  // by the Duration slider (x Clips for stories) -- audio is sized to match the
-  // video, with ACE-Step's hard 120s ceiling surfaced here.
+  // by the Duration slider (x Clips for stories, clamped 4-6s/clip -- see
+  // _clampedMultiClipDur) -- audio is sized to match the video, with ACE-Step's
+  // hard 120s ceiling surfaced here.
   function _refreshAudioLenInfo() {
-    const dur = parseFloat(durSlider.value) || 0;
+    const dur = _multiVideo ? _clampedMultiClipDur() : (parseFloat(durSlider.value) || 0);
     const total = _multiVideo ? dur * _multiClips : dur;
     if (!total) { audioLenInfo.textContent = 'Audio length: set by the Duration slider above'; return; }
     audioLenInfo.textContent = total > 120
-      ? `Audio length ≈ ${Math.round(total)}s → capped to 120s (ACE-Step max). Lower Duration${_multiVideo ? '/Clips' : ''} to fit.`
-      : `Audio length ≈ ${Math.round(total)}s (matches the video; max 120s).`;
+      ? `Audio length ~${Math.round(total)}s -- capped to 120s (ACE-Step max). Lower Duration${_multiVideo ? '/Clips' : ''} to fit.`
+      : `Audio length ~${Math.round(total)}s (matches the video; max 120s).`;
   }
   clipsSlider.addEventListener('input', _refreshMultiTotal);
   // durSlider is a createSlider() wrapper -- listen on the inner <input>
@@ -1336,10 +1362,22 @@ export function init(panel) {
     _fvFolderActive = true;
     loopFolderBtn.textContent = 'Stop Loop Folder';
     loopFolderBtn.style.borderColor = 'var(--red)';
-    const msg = state.current_file
+    let msg = state.current_file
       ? `Looping: ${state.current_file.split(/[/\\]/).pop()}`
       : 'Loop Folder running...';
+    // M19: the server already tracks per-image failures (state.failed) and
+    // keeps a ring buffer of recent errors (state.errors) -- previously
+    // neither was ever shown, so a loop silently failing every image looked
+    // identical to one succeeding. Surface both here.
+    if (state.succeeded || state.failed) {
+      msg += `  (${state.succeeded || 0} ok, ${state.failed || 0} failed)`;
+    }
+    const lastErr = Array.isArray(state.errors) && state.errors.length
+      ? state.errors[state.errors.length - 1]
+      : null;
+    if (lastErr?.msg) msg += `  -- last error: ${lastErr.msg}`;
     loopFolderStatus.textContent = msg;
+    loopFolderStatus.style.color = state.failed ? 'var(--red)' : 'var(--accent)';
     loopFolderStatus.style.display = '';
   }
 
@@ -1356,38 +1394,50 @@ export function init(panel) {
     } catch (_) { picked = null; }
     if (!picked) return;
 
-    const base = _buildFvPayload();
-    const settings = {
-      video_prompt:     base.video_prompt,
-      music_prompt:     base.music_prompt,
-      model:            base.model,
-      duration:         base.duration,
-      steps:            base.steps,
-      guidance:         base.guidance,
-      seed:             base.seed,
-      skip_audio:       base.skip_audio,
-      instrumental:     base.instrumental,
-      lyric_direction:  base.lyric_direction,
-      output_width:     base.output_width,
-      output_height:    base.output_height,
-      auto_pick_model:  base.auto_pick_model,
-      motion_style:     base.motion_style,
-    };
+    // C1: send the SAME field set /api/fun/make-it and /api/fun/make-it-multi
+    // accept (everything _buildFvPayload() produces except photo_path, which
+    // the loop supplies per-image) plus an explicit multi_video flag, instead
+    // of a hand-picked subset under the old raw JS key names. The server maps
+    // these into pipeline.py/multi_pipeline.py's internal settings shape --
+    // see routes.py's _build_single_settings/_build_multi_settings, shared
+    // with /make-it and /make-it-multi so a field that reaches one reaches all.
+    const { photo_path: _fvUnusedPhotoPath, ...settings } = _buildFvPayload();
+    if (_multiVideo) {
+      settings.clip_duration  = settings.duration;
+      settings.num_clips      = _multiClips;
+      settings.user_direction = 'cinematic narrative, story continuity';
+    }
 
     try {
       await api('/api/fun/folder-loop/start', {
         method: 'POST',
-        body: JSON.stringify({ folder: picked, repeat: true, settings }),
+        body: JSON.stringify({ folder: picked, repeat: true, multi_video: _multiVideo, settings }),
       });
       toast('Loop Folder started', 'success');
       _fvFolderActive = true;
       _fvUpdateLoopStatus({ active: true, current_file: null });
       if (_fvFolderPoll) clearInterval(_fvFolderPoll);
+      // M19: previously a bare `catch (_) {}` -- a poll failure (server
+      // restarting, network blip) left the status card frozen on its last
+      // good message with no indication anything was wrong. Now it shows the
+      // failure and gives up after repeated consecutive failures instead of
+      // polling forever against a server that may no longer be there.
+      let _fvPollFails = 0;
       _fvFolderPoll = setInterval(async () => {
         try {
           const s = await api('/api/fun/folder-loop/status');
+          _fvPollFails = 0;
           _fvUpdateLoopStatus(s);
-        } catch (_) {}
+        } catch (e) {
+          _fvPollFails++;
+          loopFolderStatus.textContent = `Loop Folder: status check failed (${e.message || 'network error'}) -- retrying...`;
+          loopFolderStatus.style.color = 'var(--red)';
+          loopFolderStatus.style.display = '';
+          if (_fvPollFails >= 5) {
+            toast('Loop Folder: lost contact with the server -- stopping status updates (the loop may still be running server-side)', 'error');
+            clearInterval(_fvFolderPoll); _fvFolderPoll = null;
+          }
+        }
       }, 3000);
     } catch (e) {
       toast(e.message || 'Failed to start loop', 'error');
@@ -1449,9 +1499,11 @@ export function init(panel) {
       duration,
       steps:            parseInt(stepsSlider.value)     || 40,
       guidance:         parseFloat(guidanceSlider.value) || 8.5,
-      seed:             parseInt(seedIn.value)           || -1,
+      // H12: parseInt(v) || -1 turned seed 0 (a legitimate, reproducible seed)
+      // into -1 (random) because 0 is falsy in JS. Number.isFinite distinguishes
+      // "parsed to a real number" from "didn't parse" without that trap.
+      seed:             (() => { const n = parseInt(seedIn.value, 10); return Number.isFinite(n) ? n : -1; })(),
       skip_audio:       !audioChk.checked,
-      lip_sync:         lipSyncChk.checked,
       instrumental:     instrChk.checked,
       lyric_direction:  instrChk.checked ? '' : lyricGuideTA.value.trim(),
       audio_from_image: audioFromImgChk.checked,
@@ -1470,12 +1522,26 @@ export function init(panel) {
     };
   }
 
+  // H11: single source of truth for the endpoint + payload branching (single-clip
+  // vs Multi-video Story). "+ Add to Queue" used to always POST to /api/fun/make-it
+  // even with Multi-video Story on, silently queuing a single clip instead of a
+  // story. Both submit buttons now call this.
+  function _buildSubmitEndpointAndPayload() {
+    const base = _buildFvPayload();
+    const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
+    const payload  = _multiVideo
+      ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity', motion_style: _motionStyle, start_video_path: _startVideoPath || null, video_mode: _videoMode }
+      : base;
+    return { endpoint, payload };
+  }
+
   fvQueueBtn.addEventListener('click', async () => {
     if (!_startImagePath && !_startVideoPath) { toast('Select an image first', 'error'); return; }
     try {
-      const resp = await api('/api/fun/make-it', {
+      const { endpoint, payload } = _buildSubmitEndpointAndPayload();
+      const resp = await api(endpoint, {
         method: 'POST',
-        body: JSON.stringify(_buildFvPayload()),
+        body: JSON.stringify(payload),
       });
       document.dispatchEvent(new CustomEvent('job-queued', { detail: { job_id: resp.job_id } }));
       toast('Added to queue!', 'success');
@@ -1517,11 +1583,7 @@ export function init(panel) {
     resultTabBar.style.display = 'none';
 
     try {
-      const base = _buildFvPayload();
-      const endpoint = _multiVideo ? '/api/fun/make-it-multi' : '/api/fun/make-it';
-      const payload  = _multiVideo
-        ? { ...base, clip_duration: base.duration, num_clips: _multiClips, user_direction: 'cinematic narrative, story continuity', motion_style: _motionStyle, start_video_path: _startVideoPath || null, video_mode: _videoMode }
-        : base;
+      const { endpoint, payload } = _buildSubmitEndpointAndPayload();
       const { job_id } = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
