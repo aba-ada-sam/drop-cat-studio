@@ -514,35 +514,6 @@ def _merge_video_audio_trim(
     return None
 
 
-def _should_run_musetalk_postpass(auto_lipsync: bool, native_conditioned: bool) -> bool:
-    """Whether the MuseTalk post-pass should run after the native-path merge.
-
-    REVERSED 2026-08-05 (Andrew, ROLLBACK_MAP_2026-08-05.md finding d): native
-    conditioning and MuseTalk must NOT stack, reversing the 2026-06-19 standing
-    instruction ("Native + MuseTalk both", routes.py abb7583) that was correct
-    only while native lip_sync usually could not run at all (the step-0
-    deadlock). Evidence for the reversal: (1) the native-only chain.py render
-    Andrew approved THIS MORNING carried no MuseTalk pass; (2) the 23:27 crash
-    landed INSIDE this exact post-pass; (3) c134c63 (2026-08-03) found MuseTalk
-    is the wrong sync engine for creature faces regardless of stacking --
-    "fundamental paste-box". So: a job that already ran native audio
-    conditioning skips this post-pass even if auto_lipsync=true was explicitly
-    passed -- the explicit flag meant "I want lip sync", which native
-    conditioning already delivered, never "run BOTH engines on the same clip".
-    MuseTalk stays reachable for any job that did NOT run native conditioning
-    (lip_sync=false, or an implicit degrade to unconditioned -- see the
-    explicit-vs-implicit gating around _lip_sync in _do_song_gpu_phase).
-    """
-    if auto_lipsync and native_conditioned:
-        log.info("[song-video] MuseTalk post-pass SKIPPED -- native audio conditioning "
-                 "already drove this job's mouth motion and the two must not stack "
-                 "(Andrew's 2026-08-05 ruling; see routes.py auto_lipsync comment for "
-                 "the evidence). auto_lipsync stays reachable for jobs with no native "
-                 "conditioning.")
-        return False
-    return bool(auto_lipsync)
-
-
 def _song_clip_start_times(clip_durations: list, pad_before: float,
                            xfade_s: float = 0.12) -> list:
     """Where each clip's conditioning slice should be cut from the song.
@@ -872,10 +843,9 @@ def run_song_pipeline(job, photo_path, settings):
                      guidance, _reg_g)
             guidance = float(_reg_g)
     log.info("[song-video] effective render params: %dx%d model=%s steps=%s "
-             "guidance=%s lip_sync=%s auto_lipsync=%s best_of_n=%s",
+             "guidance=%s lip_sync=%s best_of_n=%s",
              tw, th, model_name, steps, guidance,
              bool(settings.get("lip_sync", False)),
-             bool(settings.get("auto_lipsync", False)),
              settings.get("best_of_n", 1))
 
     if photo_path and os.path.isfile(photo_path):
@@ -1159,14 +1129,14 @@ def _isolate_guide_vocals(audio_wav, job_dir):
     A job that cannot isolate vocals must fail loudly and early, before spending
     GPU minutes producing a video whose defect is invisible to every metric.
     """
-    from features.lipsync.runner import _paths, _separate_vocals
+    from features.song_video.vocal_isolation import _paths, _separate_vocals
     _d, _py = _paths()
     if not _py.is_file():
         raise GuideIsolationError(
-            "MuseTalk venv not found, so vocals cannot be isolated. Refusing to "
-            "condition on the full mix (that renders a mouth that follows the "
-            "beat instead of the words). Install/repair the venv, or run this "
-            "job with lip_sync off.")
+            "Demucs-capable venv not found, so vocals cannot be isolated. "
+            "Refusing to condition on the full mix (that renders a mouth that "
+            "follows the beat instead of the words). Install/repair the venv, "
+            "or run this job with lip_sync off.")
     _voc = str(job_dir / "guide_vocals.wav")
     try:
         _ok = _separate_vocals(_py, audio_wav, _voc)
@@ -1196,7 +1166,7 @@ def _isolate_guide_vocals(audio_wav, job_dir):
     # every instrumental bar, and the conditioning turns that bleed into mouth
     # movement. Silence everything outside the sung phrases so an instrumental
     # clip conditions on real silence and the mouth rests.
-    from features.lipsync.vocal_activity import gate_audio, voiced_intervals
+    from features.song_video.vocal_activity import gate_audio, voiced_intervals
     _iv = voiced_intervals(out)
     if _iv:
         _gated = str(job_dir / "guide_vocals_gated.wav")
@@ -1357,7 +1327,7 @@ def _do_song_gpu_phase(
         # THE FALLBACK IS "NO CONDITIONING", NEVER "THE RAW MIX" -- but whether
         # that is an error or a graceful degrade depends on who asked.
         # `lip_sync` DEFAULTS TO TRUE (above), so an ordinary song-video job on
-        # a box without the MuseTalk venv reaches this line without anyone
+        # a box without the demucs-capable venv reaches this line without anyone
         # having requested lip sync at all. Hard-failing those would break
         # working jobs, which is a worse regression than the bug being fixed.
         # So: an EXPLICIT request fails loudly (the user asked for lip sync and
@@ -1369,8 +1339,8 @@ def _do_song_gpu_phase(
         try:
             _guide_audio, _guide_intervals = _isolate_guide_vocals(audio_wav, job_dir)
         # Catch Exception, not just GuideIsolationError: isolation reaches into
-        # the MuseTalk venv and soundfile, and a plain ImportError or a CUDA OOM
-        # inside Demucs is exactly as fatal to an implicit-default job as a
+        # the demucs-capable venv and soundfile, and a plain ImportError or a
+        # CUDA OOM inside Demucs is exactly as fatal to an implicit-default job as a
         # clean GuideIsolationError. Catching only our own type left those
         # escaping uncaught and killing the very jobs this branch protects.
         except Exception as e:
@@ -1994,58 +1964,10 @@ def _do_song_gpu_phase(
             except Exception as _ue:
                 log.warning("[song-video] Upscale exception: %s -- keeping 360p", _ue)
 
-        # -- Lip sync post-pass (MuseTalk) ------------------------------------
-        # MuseTalk is human-face-trained: on real human/humanoid faces it works,
-        # on stylized cartoon-animal faces (e.g. propaganda-poster cats) it
-        # places a smeared inpaint blob across the mouth region -- worse than
-        # no lip sync. Gated behind an EXPLICIT opt-in (`auto_lipsync`,
-        # default False) so the human-face case can be enabled per-job, while
-        # the default music-video output stays clean. The manual "Lip-sync to
-        # audio" button on the Queue/Gallery detail still works case-by-case.
-        # AND, as of 2026-08-05, gated OFF outright whenever native audio
-        # conditioning already ran on this job -- see
-        # _should_run_musetalk_postpass for the ruling and its evidence.
-        _native_conditioned = bool(_lip_sync) and bool(_guide_audio)
-        if _should_run_musetalk_postpass(bool(settings.get("auto_lipsync", False)),
-                                         _native_conditioned) and not _stopped():
-            try:
-                from features.lipsync.runner import NoVocalsError, lipsync_available, lipsync_video
-                if lipsync_available():
-                    job.meta["stage"] = "lip-sync"
-                    job.update(progress=96, message="Lip-syncing to the words (MuseTalk)...")
-                    ls_out = merged.replace(".mp4", "_ls.mp4")
-                    try:
-                        synced = lipsync_video(job, merged, audio_path, ls_out, isolate_vocals=True)
-                    except NoVocalsError as _nv:
-                        # Not a failure: an instrumental track has nothing to sync.
-                        synced = None
-                        job.meta["lipsync_skipped"] = str(_nv)
-                        log.info("[song-video] Lip sync skipped -- %s", _nv)
-                    if synced and os.path.isfile(synced):
-                        if synced != merged:
-                            try:
-                                os.remove(merged)
-                            except Exception:
-                                pass
-                        merged = synced
-                        log.info("[song-video] Lip sync applied: %s", Path(synced).name)
-                else:
-                    job.meta["lipsync_error"] = "MuseTalk is not installed"
-                    log.info("[song-video] Lip sync requested but MuseTalk not installed -- skipping")
-            except Exception as _ls:
-                # The video is still usable, but it has NO word-level sync -- say so
-                # rather than shipping a beat-synced video that looks like a bug.
-                job.meta["lipsync_error"] = str(_ls)
-                log.warning("[song-video] Lip sync post-pass failed (keeping un-synced video): %s", _ls)
-
         job.output = merged
         from core.inbox import copy_to_inbox; copy_to_inbox(job.output)
         job.meta.update({"final_path": merged, "audio_path": audio_path})
         job.message = f"Music video complete! ({len(clip_paths)} clips)"
-        if job.meta.get("lipsync_error"):
-            job.message += " -- but lip sync failed, so the mouth is not synced to the words"
-        elif job.meta.get("lipsync_skipped"):
-            job.message += " -- instrumental track, so no lip sync"
         if job.meta.get("subject_warning"):
             job.message += (" -- WARNING: the source image had no face or figure, "
                             "so expect drifting scenery instead of a performance")
