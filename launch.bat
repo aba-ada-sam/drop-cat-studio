@@ -6,10 +6,10 @@ chcp 65001 >nul
 :: pythonw suppresses the console window; splash closes when .dcs-port appears.
 where pythonw >nul 2>&1 && start "" pythonw "%~dp0pre_splash.py"
 
-title Drop Cat Go Studio
+title DropCat Studio V2
 
 echo ============================================
-echo   Drop Cat Go Studio  -  AI Video Production
+echo   DropCat Studio V2  -  AI Video Production
 echo ============================================
 
 :: -- Python check -------------------------------------------------------
@@ -31,7 +31,12 @@ if exist "%_STARTUP%" (
 :: -- Create / refresh the desktop shortcut pointing to manager.pyw ------
 :: manager.pyw owns git pull, splash, server start, tray, and single-instance mutex.
 :: The shortcut is also self-healed by manager.pyw on each run.
-set "_DESKTOP_LNK=%USERPROFILE%\Desktop\Drop Cat Go Studio.lnk"
+:: Self-locating via %~dp0 (this script's own folder) -- NEVER hardcode
+:: C:\DropCat-Studio here, or running this from V2 silently repoints the
+:: "DropCat Studio V2.lnk" desktop shortcut at v1's install instead.
+set "_ROOT=%~dp0"
+if "%_ROOT:~-1%"=="\" set "_ROOT=%_ROOT:~0,-1%"
+set "_DESKTOP_LNK=%USERPROFILE%\Desktop\DropCat Studio V2.lnk"
 for /f "delims=" %%i in ('where pythonw 2^>nul') do set "_PYTHONW=%%i" & goto :have_pythonw
 :have_pythonw
 if not defined _PYTHONW (
@@ -42,7 +47,7 @@ if not defined _PYTHONW (
 :have_pythonw2
 if defined _PYTHONW (
     powershell -NoProfile -Command ^
-        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='C:\Windows\System32\wscript.exe'; $sc.Arguments='\"\"\"C:\DropCat-Studio\launch-silent.vbs\"\"\"'; $sc.WorkingDirectory='C:\DropCat-Studio'; $sc.IconLocation='C:\DropCat-Studio\dropcat.ico,0'; $sc.Description='Drop Cat Go Studio'; $sc.Save()" >nul 2>&1
+        "$ws=New-Object -ComObject WScript.Shell; $sc=$ws.CreateShortcut('%_DESKTOP_LNK%'); $sc.TargetPath='C:\Windows\System32\wscript.exe'; $sc.Arguments='\"\"\"%_ROOT%\launch-silent.vbs\"\"\"'; $sc.WorkingDirectory='%_ROOT%'; $sc.IconLocation='%_ROOT%\dropcat_output.ico,0'; $sc.Description='DropCat Studio V2'; $sc.Save()" >nul 2>&1
 )
 
 :: -- Auto-update from GitHub --------------------------------------------
