@@ -9,9 +9,9 @@
  *  5. Results summary at the bottom
  */
 
-import { apiFetch, toast }          from './shell/toast.js?v=20260620a';
-import { el }                       from './components.js?v=20260801b';
-import { pollJob }                  from './api.js?v=20260620a';
+import { apiFetch, toast }          from './shell/toast.js?v=20260806a';
+import { el }                       from './components.js?v=20260806a';
+import { pollJob }                  from './api.js?v=20260806a';
 
 let _panel    = null;
 let _tasks    = [];      // current planned task list

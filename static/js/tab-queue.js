@@ -2,11 +2,11 @@
  * Queue tab -- GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
-import { api } from './api.js?v=20260620a';
-import { toast } from './shell/toast.js?v=20260620a';
-import { el, pathToUrl } from './components.js?v=20260801b';
-import { VideoStretchTool } from './components/video-stretch.js?v=20260620a';
-import { mountLipSyncTool } from './components/lipsync-tool.js?v=20260620a';
+import { api } from './api.js?v=20260806a';
+import { toast } from './shell/toast.js?v=20260806a';
+import { el, pathToUrl } from './components.js?v=20260806a';
+import { VideoStretchTool } from './components/video-stretch.js?v=20260806a';
+import { mountLipSyncTool } from './components/lipsync-tool.js?v=20260806a';
 
 let _root        = null;
 let _pollTimer   = null;
@@ -965,7 +965,7 @@ async function _doContinuation(job, closeFn) {
   const tabBtn = document.querySelector(`.rail-tab[data-tab="${tabId}"]`);
   if (tabBtn) tabBtn.click();
 
-  const { applySettingsToTab } = await import('./shell/ai-intent.js?v=20260620a');
+  const { applySettingsToTab } = await import('./shell/ai-intent.js?v=20260806a');
   setTimeout(() => {
     const merged = { ...settings, photo_path: frameData.path };
     const ok = applySettingsToTab(tabId, merged);
@@ -996,7 +996,7 @@ async function _doBranch(job, feedback, closeFn) {
 
   // Apply the original settings, then optionally run the feedback through askAI
   // so the AI mutates them per the user's note before they hit Generate.
-  const { applySettingsToTab, askAI } = await import('./shell/ai-intent.js?v=20260620a');
+  const { applySettingsToTab, askAI } = await import('./shell/ai-intent.js?v=20260806a');
   setTimeout(async () => {
     const ok = applySettingsToTab(tabId, settings);
     if (!ok) {

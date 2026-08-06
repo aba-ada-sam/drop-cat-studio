@@ -5,23 +5,23 @@
  */
 
 // tab-imports.js removed -- import is handled per-tab
-import { init as initChat } from './tab-chat.js?v=20260802a';
-import { init as initImageStudio } from './tab-image-studio.js?v=20260801a';
-import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260730b';
-import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260801c';
-import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260728a';
-import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260805a';
-import { init as initPipeline  } from './tab-pipeline.js?v=20260620a';
-import { init as initVideoTools } from './panel-video-tools.js?v=20260705a';
-import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260621a';
-import { consumeHandoff } from './handoff.js?v=20260620a';
-import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260620a';
-import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260620a';
-import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260620a';
-import './shell/ai-intent.js?v=20260620a';
-import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260620a';
-import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260620a';
-import { initManager } from './shell/manager.js?v=20260728c';
+import { init as initChat } from './tab-chat.js?v=20260806a';
+import { init as initImageStudio } from './tab-image-studio.js?v=20260806a';
+import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js?v=20260806a';
+import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js?v=20260806a';
+import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js?v=20260806a';
+import { init as initMusicVideo, receiveHandoff as musicVideoHandoff } from './tab-music-video.js?v=20260806a';
+import { init as initPipeline  } from './tab-pipeline.js?v=20260806a';
+import { init as initVideoTools } from './panel-video-tools.js?v=20260806a';
+import { init as initBridges, receiveHandoff as bridgesHandoff } from './tab-bridges.js?v=20260806a';
+import { consumeHandoff } from './handoff.js?v=20260806a';
+import { toast, apiFetch, openErrorLog } from './shell/toast.js?v=20260806a';
+import { init as initGallery, refresh as refreshGallery } from './shell/gallery.js?v=20260806a';
+import { open as openPalette, close as closePalette, registerItems } from './shell/command-palette.js?v=20260806a';
+import './shell/ai-intent.js?v=20260806a';
+import { register as registerShortcut, getShortcuts } from './shell/shortcuts.js?v=20260806a';
+import { init as initPresets, promptAndSave as savePreset } from './shell/presets.js?v=20260806a';
+import { initManager } from './shell/manager.js?v=20260806a';
 
 // -- Tab module map ----------------------------------------------------------
 const TAB_INIT = {

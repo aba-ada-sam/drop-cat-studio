@@ -7,10 +7,10 @@
  * On tab open, the tab auto-resumes any in-progress batch.
  */
 
-import { el }                    from './components.js?v=20260801b';
-import { apiFetch }              from './shell/toast.js?v=20260620a';
-import { toast }                 from './shell/toast.js?v=20260620a';
-import { apiUpload }             from './api.js?v=20260620a';
+import { el }                    from './components.js?v=20260806a';
+import { apiFetch }              from './shell/toast.js?v=20260806a';
+import { toast }                 from './shell/toast.js?v=20260806a';
+import { apiUpload }             from './api.js?v=20260806a';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
