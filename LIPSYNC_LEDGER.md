@@ -58,6 +58,22 @@ CURRENT RECIPE (the one true set -- change only with a ledger entry + evidence)
 ================================================================================
 2026-08-05 -- THE MORNING THE RECIPE GOT RATIFIED (newest first)
 ================================================================================
+- ACTIVE (night ~21:30, ANDREW'S CATCH) | THE DOF PASS WAS DESYNCING DELIVERIES
+  -- the June assembly-drift class, reproduced by the MANAGER in the finishing
+  step: the per-scene blur cut video into segments with SECOND-based trims;
+  each boundary rounded to a frame and the error accumulated (~0.25s late
+  video by 50s). Andrew: 'v15 and v13 both stopped lip syncing at 50-55s' --
+  frame-burst proof at the 52.58s vocal onset: RAW v15 opens ON the beat,
+  segmented-DOF copy opens 2-3 frames late, so the RENDER STACK WAS INNOCENT
+  (v15's takes were synced all along; v13's tail additionally had the real
+  frozen clip). FIX (ratified into RECIPE dof_finish): single-pass maskedmerge
+  against a FRAME-EXACT MASK VIDEO (segment mask stills rendered to integer
+  frame counts summing to the video's total, concat, one filter application,
+  zero re-timing). Verified: fixed copy matches raw frame-for-frame at the
+  onset; per-scene gating intact both scenes. Segmented trim+concat DOF is
+  BANNED for delivery. Meta-lesson #2 tonight: validate the FINISHING pass
+  against the raw artifact at a known onset, every delivery -- the pixel rule
+  now includes a SYNC-burst check, not just mouth-motion frames.
 - ACTIVE (evening ~20:15) | V15 SHIPPED -- the full new stack in one cut: judge
   v2 selection (all 7 clips judge-kept; scores 0.85-6.75; the two low winners
   had thin pools, frame-checked alive), SMART seams live (7 variable clips at
