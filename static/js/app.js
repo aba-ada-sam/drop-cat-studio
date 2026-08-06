@@ -5,8 +5,8 @@
  */
 
 // tab-imports.js removed -- import is handled per-tab
-import { init as initChat } from './tab-chat.js';
-import { init as initImageStudio } from './tab-image-studio.js';
+import { init as initChat, receiveHandoff as chatHandoff } from './tab-chat.js';
+import { init as initImageStudio, receiveHandoff as imageStudioHandoff } from './tab-image-studio.js';
 import { init as initExpress, receiveHandoff as expressHandoff } from './tab-express.js';
 import { init as initQueue, pause as pauseQueue, resume as resumeQueue } from './tab-queue.js';
 import { init as initFunVideos, receiveHandoff as funHandoff } from './tab-fun-videos.js';
@@ -37,6 +37,8 @@ const TAB_INIT = {
   'queue':             initQueue,
 };
 const TAB_HANDOFF = {
+  'chat':              chatHandoff,
+  'image-studio':      imageStudioHandoff,
   'express':           expressHandoff,
   'create-videos':     funHandoff,
   'music-video':       musicVideoHandoff,
