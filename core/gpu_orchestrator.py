@@ -132,7 +132,7 @@ class GPUOrchestrator:
         caller already handles -- never a stuck/hung state.
         """
         try:
-            with urllib.request.urlopen("http://127.0.0.1:7899/status", timeout=2) as r:
+            with urllib.request.urlopen("http://127.0.0.1:7897/status", timeout=2) as r:
                 return json.loads(r.read()).get("busy", False)
         except Exception:
             return True  # can't confirm idle -- assume busy, never assume safe-to-kill

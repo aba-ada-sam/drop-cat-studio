@@ -550,7 +550,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Persistent WanGP worker")
     parser.add_argument("--wangp-app", required=True, help="WanGP root directory")
-    parser.add_argument("--port", type=int, default=7899, help="Worker HTTP port")
+    parser.add_argument("--port", type=int, default=7897, help="Worker HTTP port")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (use 0.0.0.0 for LAN access)")
     parser.add_argument("--model", default="i2v", help="Initial model type to load")
     args = parser.parse_args()

@@ -530,7 +530,7 @@ def run_pipeline(job, photo_path, settings):
                 time.sleep(2)
                 try:
                     import urllib.request as _ur
-                    with _ur.urlopen("http://127.0.0.1:7899/health", timeout=3) as _r:
+                    with _ur.urlopen("http://127.0.0.1:7897/health", timeout=3) as _r:
                         if __import__("json").loads(_r.read()).get("ok"):
                             break
                 except Exception:

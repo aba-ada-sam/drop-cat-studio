@@ -2,7 +2,7 @@
 
 At startup the server picks the first free port in PORT_RANGE and writes
 the chosen port to PORT_FILE. Launchers and the tray read that file so
-they don't need to assume 7860 is available (it often isn't on a machine
+they don't need to assume 7940 is available (it often isn't on a machine
 that also runs Forge, WanGP, Gradio, etc.).
 
 The file is gitignored and best-effort removed on graceful shutdown.
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # launchers can locate the right server instance without collision.
 PORT_FILE = Path(_os.environ.get("DCS_PORT_FILE") or (ROOT / ".dcs-port"))
 
-PORT_START = int(_os.environ.get("DCS_PORT_START") or 7860)
+PORT_START = int(_os.environ.get("DCS_PORT_START") or 7940)
 PORT_TRIES = 20  # 20-port window from PORT_START
 
 
@@ -62,12 +62,12 @@ def write_port_file(port: int) -> None:
         tmp.write_text(json.dumps(data), encoding="utf-8")
         os.replace(tmp, PORT_FILE)
     except Exception as e:
-        log.warning("port_lock: couldn't write %s (%s) -- launchers may default to 7860", PORT_FILE, e)
+        log.warning("port_lock: couldn't write %s (%s) -- launchers may default to 7940", PORT_FILE, e)
 
 
 def read_port_file() -> int | None:
     """Return the port written by the running server, or None if the file is
-    missing or malformed. Callers should fall back to 7860."""
+    missing or malformed. Callers should fall back to 7940."""
     try:
         raw = PORT_FILE.read_text(encoding="utf-8").strip()
         data = json.loads(raw)

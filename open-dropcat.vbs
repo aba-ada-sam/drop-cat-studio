@@ -1,6 +1,6 @@
 ' Drop Cat Go Studio -- Launcher
 ' Always routes through manager.pyw which handles:
-'   - finding any running server (port scan 7860-7879)
+'   - finding any running server (port scan 7940-7959)
 '   - opening Chrome with proper close-detection
 '   - shutting down the server when Chrome closes
 '   - starting the server fresh if nothing is running

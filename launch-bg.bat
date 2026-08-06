@@ -5,10 +5,11 @@
 :: Do NOT run this directly; use launch.bat for debugging.
 ::
 :: Port flexibility: the python server picks the first free port from
-:: 7860..7879 and writes it to .dcs-port. We no longer kill arbitrary
-:: processes on port 7860 -- that used to stomp on unrelated apps.
-:: The server can coexist with Forge (7861), WanGP (7899), and anything
-:: else that happened to grab 7860 before us.
+:: 7940..7959 and writes it to .dcs-port. We no longer kill arbitrary
+:: processes on port 7940 -- that used to stomp on unrelated apps.
+:: The server can coexist with Forge (7861), WanGP (7897, this app's own
+:: worker -- v1's WanGP worker is 7899), and anything else that happened
+:: to grab 7940 before us.
 
 cd /d "%~dp0"
 if not exist logs mkdir logs

@@ -1,5 +1,5 @@
 """
-manager.pyw -- Drop Cat Go Studio window manager
+manager.pyw -- DropCat Studio V2 window manager
 Run with:  pythonw.exe manager.pyw
 
 - Shows tkinter loading splash instantly while server starts
@@ -121,7 +121,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("manager")
 
-PORT_START = 7860
+PORT_START = 7940
 PORT_TRIES = 20
 _MUTEX_HANDLE = None  # held at module level so GC never releases it
 
@@ -170,9 +170,10 @@ def server_responds(port: int, timeout: float = 0.3) -> bool:
 def is_dcs_server(port: int, timeout: float = 1.5) -> bool:
     """Return True only if port has a live DCS server (checks /api/version).
 
-    A plain TCP connect is not enough -- Forge SD also listens in the 7860-7879
-    range. Without this check, manager opens Chrome pointing at Forge and the
-    user sees Forge's 404 instead of DCS.
+    A plain TCP connect is not enough -- Forge SD also listens nearby (7861) and
+    v1 DCS may be running its own scan in the 7860-7879 range. Without this
+    check, manager opens Chrome pointing at the wrong server and the user sees
+    a 404 (or someone else's UI) instead of DCS V2.
     """
     import urllib.request as _ur
     try:
@@ -184,12 +185,12 @@ def is_dcs_server(port: int, timeout: float = 1.5) -> bool:
 
 
 def find_running_server() -> int | None:
-    """Find a live DCS server: check .dcs-port first, then scan 7860-7879."""
+    """Find a live DCS server: check .dcs-port first, then scan 7940-7959."""
     port, _ = read_port_file()
     if port and server_responds(port) and is_dcs_server(port):
         return port
     # Port file missing or stale -- scan the full range
-    for p in range(7860, 7880):
+    for p in range(7940, 7960):
         if p == port:
             continue  # already checked above
         if server_responds(p) and is_dcs_server(p):
@@ -299,9 +300,9 @@ def _do_git_pull(on_status=None) -> None:
 def _ensure_shortcut() -> None:
     """Keep the desktop shortcut pointing at launch-silent.vbs via wscript.exe."""
     try:
-        desktop_lnk = Path(os.environ["USERPROFILE"]) / "Desktop" / "Drop Cat Go Studio.lnk"
+        desktop_lnk = Path(os.environ["USERPROFILE"]) / "Desktop" / "DropCat Studio V2.lnk"
         vbs = ROOT / "launch-silent.vbs"
-        ico = ROOT / "dropcat.ico"
+        ico = ROOT / "dropcat_output.ico"
         if not vbs.exists():
             return
         ico_str = f"{ico},0" if ico.exists() else ""
@@ -313,7 +314,7 @@ def _ensure_shortcut() -> None:
             f'$sc.Arguments=\'"{vbs}"\';'
             f'$sc.WorkingDirectory="{ROOT}";'
             f'$sc.IconLocation="{ico_str}";'
-            f'$sc.Description="Drop Cat Go Studio";'
+            f'$sc.Description="DropCat Studio V2";'
             f'$sc.Save()'
         )
         subprocess.run(
@@ -328,7 +329,7 @@ def _ensure_shortcut() -> None:
 # -- Open app window -----------------------------------------------------------
 
 def _focus_existing_dcs_window() -> bool:
-    """Bring an already-open Drop Cat Go Studio Chrome window to the front.
+    """Bring an already-open DropCat Studio V2 Chrome window to the front.
 
     Returns True if a window was found and focused, False if none exists.
     Called before launching a new Chrome window to avoid duplicates.
@@ -356,7 +357,7 @@ def _focus_existing_dcs_window() -> bool:
             "var sb = new StringBuilder(256); GetWindowText(h, sb, 256); "
             "if (sb.ToString().Contains(t)) r.Add(h); return true; }, IntPtr.Zero); return r; } "
             "}'; "
-            "$ws = [WF]::Find('Drop Cat Go Studio'); "
+            "$ws = [WF]::Find('DropCat Studio V2'); "
             "if ($ws.Count -eq 0) { exit 1 } "
             "[WF]::ShowWindow($ws[0], 9); [WF]::SetForegroundWindow($ws[0]) | Out-Null; "
             "for ($i = 1; $i -lt $ws.Count; $i++) { "
@@ -368,7 +369,7 @@ def _focus_existing_dcs_window() -> bool:
             capture_output=True, timeout=8, **_NW,
         )
         if r.returncode == 0:
-            log.info("Focused existing Drop Cat Go Studio window")
+            log.info("Focused existing DropCat Studio V2 window")
             return True
     except Exception as exc:
         log.debug("_focus_existing_dcs_window failed: %s", exc)
@@ -378,7 +379,7 @@ def _focus_existing_dcs_window() -> bool:
 def open_app_window(port: int, is_owner: bool = False) -> "subprocess.Popen | None":
     """Open the app in Chrome --app mode using a dedicated profile.
 
-    Checks for an existing Drop Cat Go Studio window first -- if one is found
+    Checks for an existing DropCat Studio V2 window first -- if one is found
     it is focused and this function returns None (no new process to track).
     This prevents duplicate windows when the shortcut is clicked while the app
     is already open.
@@ -549,8 +550,9 @@ class ServerManager:
             for offset in range(PORT_TRIES):
                 p = PORT_START + offset
                 # A bare TCP connect is not proof of DCS -- Forge SD sits on 7861
-                # and answers instantly while app.py is still binding. Confirm via
-                # /api/version before latching, or we open Chrome pointing at Forge.
+                # (and v1 DCS may be scanning 7860-7879) and can answer instantly
+                # while app.py is still binding. Confirm via /api/version before
+                # latching, or we open Chrome pointing at the wrong server.
                 if server_responds(p, timeout=0.5) and is_dcs_server(p):
                     self._port = p
                     self._ready_event.set()
@@ -669,7 +671,7 @@ def _show_crash_ui(srv: "ServerManager", exit_code: int) -> None:
         root.destroy()
         # Kill GPU workers before restarting -- without this, the old WanGP process
         # survives and a second one gets spawned by the new app.py, causing dual workers.
-        _kill_procs_on_port(7899, "WanGP")
+        _kill_procs_on_port(7897, "WanGP")
         _kill_procs_on_port(8020, "ACE-Step")
         _kill_by_cmdline("wangp_worker.py", "WanGP")
         # show_splash drives the same startup sequence as initial launch
@@ -984,7 +986,8 @@ def _shutdown(srv: "ServerManager") -> None:
     # 1. Kill GPU workers by port (fast -- catches LISTENING processes).
     #    Forge (7861) is NOT ours to kill: in-app image gen was removed 2026-07-05
     #    and Forge is now a standalone app the user runs from its own GUI.
-    _kill_procs_on_port(7899, "WanGP")
+    #    V2 uses 7897 (v1 uses 7899) so this can never touch v1's worker.
+    _kill_procs_on_port(7897, "WanGP")
     _kill_procs_on_port(8020, "ACE-Step")
 
     # 2. Kill GPU workers by command-line scan (backstop -- catches non-LISTENING
@@ -1035,7 +1038,7 @@ def main() -> None:
     global _MUTEX_HANDLE
     import ctypes as _ct
     _k32 = _ct.WinDLL("kernel32", use_last_error=True)
-    _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
+    _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudioV2_Manager")
     if _ct.get_last_error() == 183:  # ERROR_ALREADY_EXISTS -- another manager owns it
         # Find the other manager's PID and check if its server is still alive.
         # If the server is dead the old manager is a zombie -- kill it and take over.
@@ -1076,7 +1079,7 @@ def main() -> None:
             clear_port_file()
             # Release and re-acquire the mutex under our PID
             _k32.ReleaseMutex(_MUTEX_HANDLE)
-            _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudio_Manager_v2")
+            _MUTEX_HANDLE = _k32.CreateMutexW(None, True, "Local\\DropCatGoStudioV2_Manager")
             # Fall through to normal startup
 
     # A respawn marker left on disk is stale by definition here: we have no

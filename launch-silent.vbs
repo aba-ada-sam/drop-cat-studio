@@ -1,6 +1,6 @@
 ' Drop Cat Go Studio — Launcher
 ' Just starts manager.pyw. The manager handles everything:
-'   - single-instance lock (socket on 127.0.0.1:17860)
+'   - single-instance lock (Windows named mutex, held by manager.pyw)
 '   - if already running: opens Chrome and exits immediately
 '   - if not running: shows splash, starts server, opens Chrome
 

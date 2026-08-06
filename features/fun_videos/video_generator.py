@@ -1,6 +1,6 @@
 """WanGP video generation client for Create Videos.
 
-Supports two modes: persistent worker (port 7899) and subprocess fallback.
+Supports two modes: persistent worker (port 7897) and subprocess fallback.
 Ported from DropCatGo-Fun-Videos_w_Audio/video_generator.py.
 """
 import json
@@ -17,10 +17,11 @@ from core.ffmpeg_utils import parse_resolution
 
 log = logging.getLogger(__name__)
 
-WANGP_WORKER_PORT     = 7899
+WANGP_WORKER_PORT     = 7897  # v1 uses 7899 -- must stay disjoint so V2 can never kill v1's worker
 WANGP_LOCAL_URL       = f"http://127.0.0.1:{WANGP_WORKER_PORT}"
 # Satellite WanGP is proxied through the relay on the 3060.
-# /wangp/* on the relay forwards to the local worker at 127.0.0.1:7899 there.
+# /wangp/* on the relay forwards to the local worker at 127.0.0.1:7899 there
+# (the 3060's own worker port -- unrelated to this machine's v1/v2 split).
 WANGP_SATELLITE_RELAY = "http://192.168.86.49:9999"
 WANGP_SATELLITE_URL   = f"{WANGP_SATELLITE_RELAY}/wangp"
 # Satellite (second-box) generation is a FUTURE-DEV feature, NOT current ops.

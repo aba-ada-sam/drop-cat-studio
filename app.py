@@ -1,4 +1,4 @@
-"""Drop Cat Go Studio -- Unified Video Production App.
+"""DropCat Studio V2 -- Unified Video Production App.
 
 Single FastAPI server combining Create Videos, Video Bridges, SD Prompts,
 Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
@@ -11,18 +11,20 @@ Image-to-Video, Video Tools, and WanGP/ACE-Step service management.
 import sys as _sys
 _sys.modules.setdefault("app", _sys.modules.get("__main__"))
 
-# Single-instance guard -- socket lock on 127.0.0.1:7849.
+# Single-instance guard -- socket lock on 127.0.0.1:7947.
 # Reliable on all privilege levels; OS auto-releases when the process dies.
 # Only runs when launched as the server entry point, not when imported by tests.
+# NOTE: v1 DCS uses 7849 for this same guard -- 7947 must stay disjoint or V2
+# would refuse to start (or vice versa) whenever the other app is already up.
 if _sys.modules.get("__main__") is _sys.modules.get("app"):
     import socket as _sock_mod, os as _os
     _lock_socket = _sock_mod.socket(_sock_mod.AF_INET, _sock_mod.SOCK_STREAM)
     _lock_socket.setsockopt(_sock_mod.SOL_SOCKET, _sock_mod.SO_REUSEADDR, 0)
     try:
-        _lock_socket.bind(("127.0.0.1", 7849))
+        _lock_socket.bind(("127.0.0.1", 7947))
         _lock_socket.listen(1)
     except OSError:
-        _sys.stderr.write("Drop Cat Go Studio is already running -- exiting.\n")
+        _sys.stderr.write("DropCat Studio V2 is already running -- exiting.\n")
         _os._exit(0)
 
 import asyncio
@@ -148,7 +150,7 @@ MANAGER_RESPAWN_MARKER = APP_DIR / ".dcs-manager-respawn"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Drop Cat Go Studio starting up...")
+    log.info("DropCat Studio V2 starting up...")
 
     # Background git pull -- keeps the app current without manual steps.
     # Runs in a daemon thread so startup is never delayed by network.
@@ -314,8 +316,8 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_cleanup_jobs, daemon=True).start()
 
 
-    _port = _g.get("port", 7860)
-    log.info("Drop Cat Go Studio ready on http://127.0.0.1:%d", _port)
+    _port = _g.get("port", 7940)
+    log.info("DropCat Studio V2 ready on http://127.0.0.1:%d", _port)
 
     yield
 
@@ -327,7 +329,7 @@ async def lifespan(app: FastAPI):
 
 # -- App ----------------------------------------------------------------------
 
-app = FastAPI(title="Drop Cat Go Studio", lifespan=lifespan)
+app = FastAPI(title="DropCat Studio V2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -391,10 +393,17 @@ async def index():
     if index_path.exists():
         html = index_path.read_text(encoding="utf-8")
         # Stamp app.js URL with server-start time so Chrome's ES module map
-        # sees a new URL on every restart and never serves stale JS.
-        html = html.replace('src="/static/js/app.js?', f'src="/static/js/app.js?b={_BUILD_TS}&')
+        # sees a new URL on every restart and never serves stale JS. The
+        # no_cache_static middleware below already sends Cache-Control:
+        # no-store on every /static/js/ response, so this is defense in
+        # depth, not the primary freshness mechanism -- the hand-maintained
+        # ?v= query strings that used to live on every import/script URL
+        # were removed for that reason (mismatched versions across files
+        # caused a module to load twice under two different URLs, which is
+        # what actually broke the Quick Video handoff).
+        html = html.replace('src="/static/js/app.js"', f'src="/static/js/app.js?b={_BUILD_TS}"')
         return HTMLResponse(content=html, headers=_NO_CACHE)
-    return JSONResponse({"status": "Drop Cat Go Studio is running", "ui": "not built yet"})
+    return JSONResponse({"status": "DropCat Studio V2 is running", "ui": "not built yet"})
 
 
 @app.get("/admin")
@@ -1751,8 +1760,8 @@ logging.getLogger("asyncio").addFilter(_noise_filter)
 
 if __name__ == "__main__":
     import uvicorn
-    # Pick the first free port from 7860..7879 so we don't collide with Forge,
-    # WanGP, another DCS instance, or any unrelated app that grabbed 7860.
+    # Pick the first free port from 7940..7959 so we don't collide with Forge,
+    # WanGP, v1 DCS (7860-7879), or any unrelated app that grabbed 7940.
     try:
         _port = port_lock.find_free_port()
     except RuntimeError as e:

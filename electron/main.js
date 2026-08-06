@@ -1,5 +1,5 @@
 /**
- * Drop Cat Go Studio -- Electron main process.
+ * DropCat Studio V2 -- Electron main process.
  * Opens a transparent acrylic window on Windows 11 and loads the local server.
  */
 const { app, BrowserWindow, shell, nativeTheme } = require('electron');
@@ -16,9 +16,9 @@ nativeTheme.themeSource = 'dark';
 function readPort() {
   try {
     const data = JSON.parse(fs.readFileSync(PORT_FILE, 'utf8'));
-    return data.port || 7860;
+    return data.port || 7940;
   } catch {
-    return 7860;
+    return 7940;
   }
 }
 
@@ -82,7 +82,7 @@ async function createWindow() {
     },
 
     icon: path.join(__dirname, '..', 'static', 'logo-512.png'),
-    title: 'Drop Cat Go Studio',
+    title: 'DropCat Studio V2',
     show: false,
   });
 

@@ -411,8 +411,8 @@ def start_acestep() -> tuple[bool, str | None]:
 
 # -- WanGP --------------------------------------------------------------------
 
-WANGP_GRADIO_PORTS = [7862, 7863, 7864]  # 7860=DropCat, 7861=Forge
-WANGP_WORKER_PORT = 7899
+WANGP_GRADIO_PORTS = [7862, 7863, 7864]  # 7940-7959=DropCat V2, 7861=Forge
+WANGP_WORKER_PORT = 7897  # v1 uses 7899 -- must stay disjoint so V2 can never kill v1's worker
 
 
 def _detect_wangp_gradio() -> int | None:
@@ -488,7 +488,7 @@ def start_wangp_worker() -> tuple[bool, str | None]:
 
         # Kill any lingering worker processes before starting a new one so we
         # don't leak orphan GPU processes across restarts. Use both strategies:
-        # port kill catches anything holding 7899 (including Pinokio-spawned
+        # port kill catches anything holding our port (including Pinokio-spawned
         # miniconda workers that survive the wmic process-name scan).
         _kill_by_port(WANGP_WORKER_PORT, "WanGP", wait_release=True)
         _kill_stale_gpu_processes()
@@ -792,7 +792,7 @@ def kill_orphans_at_startup() -> None:
     GPU subprocesses (which the OS has not yet finished tearing down) can't
     keep VRAM hostage and force the user to wait for the old job to complete.
 
-    Fast path: netstat + taskkill /F /T on ports 7899 and 8020 (~1s).
+    Fast path: netstat + taskkill /F /T on ports 7897 and 8020 (~1s).
     Backstop: WMIC command-line scan for orphans on different ports (~10s).
 
     "Orphan" means LEFT OVER, not "someone else's". Two guards, both added
@@ -964,18 +964,18 @@ def _watchdog_loop():
                 # manager.py process never re-adopts a still-running orphan
                 # worker's Popen handle, so both branches silently no-opped
                 # and the 120s deadlock timer never even started. Found by
-                # manually querying :7899/status and finding "step": 0 stuck
+                # manually querying :7897/status and finding "step": 0 stuck
                 # indefinitely; had to kill it by hand. The query below is
                 # already port/HTTP-based (not process-handle-based) and
                 # already fails closed (caught by the try/except), so simply
                 # running it unconditionally -- instead of only when a
                 # tracked process object says it's alive -- closes the gap
                 # without weakening anything: if nothing is listening on
-                # 7899, the request raises and we fall through to `pass`,
+                # our port, the request raises and we fall through to `pass`,
                 # exactly like the old code path did when wangp_proc was None.
                 try:
                     with urllib.request.urlopen(
-                        "http://127.0.0.1:7899/status"
+                        f"http://127.0.0.1:{WANGP_WORKER_PORT}/status"
                     ) as _r:
                         _ws = json.loads(_r.read())
                     if _ws.get("busy"):
@@ -996,7 +996,7 @@ def _watchdog_loop():
                             # reference may point to a newer process started by a
                             # previous recovery attempt, leaving the original stuck
                             # process still alive and holding VRAM. Port-kill catches
-                            # ALL processes on 7899 regardless of which one we spawned.
+                            # ALL processes on our port regardless of which one we spawned.
                             _kill_by_port(WANGP_WORKER_PORT, "WanGP (deadlock)", wait_release=True)
                             try:
                                 from core.gpu_orchestrator import gpu

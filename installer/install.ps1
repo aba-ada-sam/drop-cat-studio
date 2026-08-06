@@ -290,7 +290,7 @@ Write-Host "   1. Open a NEW terminal window (leave this one open)" -ForegroundC
 Write-Host "   2. Run these two commands:" -ForegroundColor White
 Write-Host "        cd C:\WanGP" -ForegroundColor Cyan
 Write-Host "        venv\Scripts\python.exe wgp.py" -ForegroundColor Cyan
-Write-Host "   3. Wait ~30 seconds, then open: http://127.0.0.1:7899" -ForegroundColor White
+Write-Host "   3. Wait ~30 seconds, then open: http://127.0.0.1:7897" -ForegroundColor White
 Write-Host "   4. In WanGP, find the Models/Download section" -ForegroundColor White
 Write-Host "   5. Download one of these (pick the first available):" -ForegroundColor White
 Write-Host "        LTX-Video 2.0 or 2.1     <-- BEST for RTX 4070" -ForegroundColor Green

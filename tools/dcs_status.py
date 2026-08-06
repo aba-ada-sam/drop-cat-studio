@@ -20,9 +20,9 @@ import subprocess
 import sys
 import urllib.request
 
-PORT = 7860
+PORT = 7940
 BASE = f"http://127.0.0.1:{PORT}"
-REPO = r"C:\DropCat-Studio"
+REPO = r"C:\DropCat-Studio-V2"
 
 
 def _get(path, timeout=3):
