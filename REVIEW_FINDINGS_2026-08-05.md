@@ -118,6 +118,32 @@ NOT audited. Music Video is being replaced by the chain.py wrapper anyway.
   (not in TAB_INIT, no rail button). RULED BY ANDREW 2026-08-05: he does not
   know what it is -> DELETE both in V2.
 
+## INCIDENT 2026-08-05 23:19 -- V2 test killed V1's live render
+
+A build agent constructed FastAPI TestClient(app) to smoke-test new routes.
+The context-manager form runs the REAL lifespan -> kill_orphans_at_startup ->
+_kill_stale_gpu_processes, which matched ANY wangp_worker.py process on the
+machine and killed V1's worker mid-render. chain.py hung on SYN_SENT to the
+dead socket; ~7 minutes of GPU work lost. The DCS_NO_GPU_EVICT /
+PYTEST_CURRENT_TEST guard did not fire -- it lives in the CALLER, and a bare
+TestClient sets neither variable.
+
+FIXED (v2-gui 3ff0b78): _kill_stale_gpu_processes now honors the env guard in
+the function itself AND only matches this checkout's own absolute worker path
+(ACE-Step scoped to its configured root). V2 can only evict V2's workers.
+STILL OPEN: the same unscoped function exists in V1's tree (v1 is frozen; if
+Andrew wants, port the same 20-line fix). Standing rule issued to all build
+agents: never construct TestClient against app.py; static validation only.
+
+## OPEN ITEM -- cross-install GPU visibility (found by the chain builder)
+
+core/gpu_orchestrator sees only ITS OWN install's worker. V2's chain start
+endpoint refuses when V2 is rendering but CANNOT see a V1 render in flight, so
+starting a V2 render while V1 renders would put two jobs on one 16GB card.
+Needs a cross-install signal (a lock file both installs honor, or probing both
+worker ports) before V2 is used alongside a live V1 render. Red team should
+attack this.
+
 ## VERIFIED POSITIVES (do not regress)
 
 - Forge-down handling in Chat/Image Studio: clean 503 "Forge is not running
