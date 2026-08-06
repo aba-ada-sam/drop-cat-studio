@@ -181,6 +181,12 @@ def _popen_flags() -> dict:
 
 # -- Status tracking ----------------------------------------------------------
 
+# Forge (image generation, :7861). NOT a DCS-managed service -- Andrew starts
+# and stops it from its own GUI (see core/gpu_orchestrator.py's docstring).
+# Defined here (not down with WanGP/ACE-Step) because get_status() needs it
+# before those sections are parsed.
+FORGE_PORT = 7861
+
 _status_lock = threading.Lock()
 _service_status: dict = {
     "wangp":   {"state": "unknown", "message": "", "port": None, "pid": None},
@@ -189,6 +195,8 @@ _service_status: dict = {
     # no local process/port -- this is a reachability/config pill, not a service
     # we start or stop. (Ollama was removed 2026-07-05.)
     "featherless": {"state": "unknown", "message": "", "port": None, "pid": None},
+    # Forge -- reachability + best-effort busy flag only, see forge_status().
+    "forge": {"state": "unknown", "message": "", "port": FORGE_PORT, "pid": None},
 }
 
 _wangp_worker_proc: subprocess.Popen | None = None
@@ -203,7 +211,13 @@ _acestep_start_lock = threading.Lock()
 
 def get_status() -> dict:
     with _status_lock:
-        return {k: dict(v) for k, v in _service_status.items()}
+        snapshot = {k: dict(v) for k, v in _service_status.items()}
+    # Forge is refreshed here (not by the watchdog) because it's a cheap,
+    # independently-cached reachability check (see forge_status()) -- every
+    # /api/services / /api/system poll gets a fresh-enough answer without a
+    # dedicated background loop for a service we don't own the lifecycle of.
+    snapshot["forge"] = forge_status()
+    return snapshot
 
 
 def _set_status(service: str, **kwargs):
@@ -227,6 +241,69 @@ def http_get(url: str, timeout: int = 5) -> dict | None:
             return json.loads(r.read())
     except Exception:
         return None
+
+
+# -- Forge (image generation) --------------------------------------------------
+# Forge is NOT started, stopped, or restarted by DCS -- Andrew runs it from its
+# own GUI on :7861 (removed as a DCS-managed service 2026-07-05). Chat and
+# Image Studio both depend on it being up, but until now nothing surfaced that
+# to the shell (H9): the service panel, splash checklist, and GPU pill all
+# stayed silent about Forge, so a cold/down Forge only showed up as a request
+# failure deep inside a tab. This is status-only, cached so the 3-5s UI poll
+# loops don't hammer Forge's HTTP server for a value that barely changes.
+
+_forge_lock = threading.Lock()
+_forge_cache: dict = {"ts": 0.0, "result": None}
+_FORGE_CACHE_TTL = 12.0  # seconds
+
+
+def forge_status(force: bool = False) -> dict:
+    """Reachability + best-effort busy flag for Forge, cached ~12s.
+
+    Uses Forge's (sd-webui-compatible) /sdapi/v1/progress endpoint: a
+    successful response proves it's reachable, and job_count/progress give a
+    cheap (not authoritative -- Forge could be doing work outside the
+    txt2img/img2img queue) signal of whether it's mid-render, which is enough
+    for the GPU pill to stop claiming "idle" while Forge is obviously busy.
+    """
+    with _forge_lock:
+        now = time.time()
+        cached = _forge_cache["result"]
+        if not force and cached is not None and (now - _forge_cache["ts"]) < _FORGE_CACHE_TTL:
+            return cached
+
+    forge_url = f"http://127.0.0.1:{FORGE_PORT}"
+    result = {
+        "state": "not_running",
+        "message": "Forge not running -- start it from its own GUI; Chat and Image Studio need it",
+        "port": FORGE_PORT,
+        "busy": False,
+        # No "Start" button for Forge (not ours to launch) -- but once it's
+        # up, the service panel can link straight to its own GUI.
+        "url": None,
+    }
+    try:
+        data = http_get(
+            f"http://127.0.0.1:{FORGE_PORT}/sdapi/v1/progress?skip_current_image=true",
+            timeout=2,
+        )
+        if data is not None:
+            job_state = data.get("state") or {}
+            busy = bool(job_state.get("job_count") or 0) or (data.get("progress") or 0) > 0
+            result = {
+                "state": "running",
+                "message": "Forge rendering..." if busy else "Forge ready",
+                "port": FORGE_PORT,
+                "busy": busy,
+                "url": forge_url,
+            }
+    except Exception:
+        pass  # unreachable -- keep the not_running default above
+
+    with _forge_lock:
+        _forge_cache["ts"] = time.time()
+        _forge_cache["result"] = result
+    return result
 
 
 # -- ACE-Step -----------------------------------------------------------------
