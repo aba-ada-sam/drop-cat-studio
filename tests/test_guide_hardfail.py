@@ -43,7 +43,7 @@ from pathlib import Path  # noqa: E402
 
 
 class _FakePath:
-    """Stands in for the MuseTalk venv python that _paths() returns."""
+    """Stands in for the demucs-capable venv python that _paths() returns."""
     def __init__(self, exists):
         self._exists = exists
 
@@ -51,7 +51,7 @@ class _FakePath:
         return self._exists
 
 
-import features.lipsync.runner as _runner  # noqa: E402
+import features.song_video.vocal_isolation as _runner  # noqa: E402
 
 _orig_paths = _runner._paths
 _orig_sep = _runner._separate_vocals
@@ -60,7 +60,7 @@ try:
     _runner._paths = lambda: (Path(tmp), _FakePath(False))
     try:
         pipeline._isolate_guide_vocals("whatever.wav", Path(tmp))
-        ok(False, "missing MuseTalk venv should raise, not fall back")
+        ok(False, "missing demucs-capable venv should raise, not fall back")
     except GuideIsolationError as e:
         ok("full mix" in str(e).lower() or "isolat" in str(e).lower(),
            "missing venv RAISES and explains why the full mix is not acceptable")
@@ -90,7 +90,7 @@ finally:
 
 print("\n-- A2: EXPLICIT request hard-fails; the mere DEFAULT degrades --")
 # lip_sync DEFAULTS TO TRUE in _do_song_gpu_phase, so an ordinary song-video job
-# on a box with no MuseTalk venv reaches the isolation call without anyone
+# on a box with no demucs-capable venv reaches the isolation call without anyone
 # having asked for lip sync. Hard-failing those would break working jobs -- a
 # worse regression than the bug being fixed. Caught while wiring, before ship.
 psrc = open(os.path.join(os.path.dirname(__file__), "..", "features", "song_video",
