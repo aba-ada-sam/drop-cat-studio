@@ -137,14 +137,35 @@ def _kill_stale_gpu_processes() -> None:
     Python process in its own Job Object), GPU workers survive as orphans that
     consume VRAM without serving requests.  We scan by command-line pattern and
     kill any matches before starting fresh workers.
+
+    INCIDENT 2026-08-05 23:19 -- this used to match ANY process whose command
+    line contained "wangp_worker.py", machine-wide, with no port or install
+    scoping. A V2 agent merely constructing a FastAPI TestClient (which runs
+    the real lifespan) evicted the V1 worker out from under a live 60-second
+    render, hanging chain.py against a dead socket and losing GPU work. The
+    DCS_NO_GPU_EVICT / PYTEST_CURRENT_TEST guard did not help: it lives in the
+    caller (kill_orphans_at_startup), and a bare TestClient sets neither var.
+
+    Two scopings now apply: the env guard is honored HERE too, and a match must
+    carry THIS install's own absolute path -- so V2 can only ever evict V2's
+    workers, and V1 only V1's.
     """
     if sys.platform != "win32":
         return
+    if os.environ.get("DCS_NO_GPU_EVICT") or os.environ.get("PYTEST_CURRENT_TEST"):
+        log.info("GPU orphan eviction skipped (DCS_NO_GPU_EVICT / test env)")
+        return
     own_pid = os.getpid()
-    patterns = [
-        ("wangp_worker.py", "WanGP worker"),
-        ("api_server.py", "ACE-Step"),
-    ]
+    own_worker = str((Path(__file__).parent / "wangp_worker.py").resolve())
+    patterns = [(own_worker, "WanGP worker")]
+    _ace_root = cfg.get("acestep_root")
+    if _ace_root:
+        # ACE-Step is a shared external install -- scope by its configured root
+        # instead of matching api_server.py anywhere on the machine.
+        patterns.append((str(Path(_ace_root).resolve()), "ACE-Step"))
+    else:
+        log.debug("ACE-Step root not configured -- skipping its orphan scan "
+                  "rather than matching api_server.py machine-wide")
     for pattern, label in patterns:
         try:
             ps_cmd = (
