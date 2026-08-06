@@ -276,9 +276,17 @@ async def folder_loop_start(request: Request):
     if not images:
         raise HTTPException(400, f"No images found in {folder_path}")
 
-    settings = body.get("settings") or {}
-    if not isinstance(settings, dict):
+    raw_settings = body.get("settings") or {}
+    if not isinstance(raw_settings, dict):
         raise HTTPException(400, "'settings' must be an object")
+
+    multi_video = bool(body.get("multi_video", True))
+    repeat = bool(body.get("repeat", False))
+    endpoint = "/api/fun/make-it-multi" if multi_video else "/api/fun/make-it"
+
+    config = cfg.load()
+    requested_model = (raw_settings.get("model") or raw_settings.get("model_name")
+                        or config.get("wan_model") or "LTX-2 Dev19B Distilled")
 
     # Warn if the selected model is known to deadlock on low-VRAM cards.
     # Wan I2V 14B needs 20 GB; submitting a folder loop of 15 images with
@@ -286,8 +294,7 @@ async def folder_loop_start(request: Request):
     try:
         from features.fun_videos.video_generator import MODELS
         from app import _g as _app_g
-        _req_model = settings.get("model") or settings.get("model_name") or ""
-        _model_info = MODELS.get(_req_model, {})
+        _model_info = MODELS.get(requested_model, {})
         _vram_needed = _model_info.get("vram_min_gb", 0)
         _vram_avail = (_app_g.get("gpu_vram_gb") or 0)
         if _vram_needed and _vram_avail and _vram_avail < _vram_needed:
@@ -297,7 +304,7 @@ async def folder_loop_start(request: Request):
             # whichever one didn't call it. Stay tab-agnostic.
             raise HTTPException(
                 400,
-                f"Model '{_req_model}' needs {_vram_needed} GB VRAM but "
+                f"Model '{requested_model}' needs {_vram_needed} GB VRAM but "
                 f"{_vram_avail} GB detected. Folder loop would queue "
                 f"{len(images)} deadlocked jobs. Change the model/quality "
                 f"setting on this tab before starting the loop."
@@ -307,9 +314,33 @@ async def folder_loop_start(request: Request):
     except Exception:
         pass  # VRAM check is best-effort; don't block if it fails
 
-    multi_video = bool(body.get("multi_video", True))
-    repeat = bool(body.get("repeat", False))
-    endpoint = "/api/fun/make-it-multi" if multi_video else "/api/fun/make-it"
+    # C1 fix: map the raw JS-shaped settings (model/duration/steps/...) into
+    # the exact pipeline.py / multi_pipeline.py settings shape (model_name/
+    # video_duration or clip_duration/video_steps/video_guidance/video_seed/
+    # ...) using the SAME builder functions /make-it and /make-it-multi use,
+    # instead of forwarding the raw dict verbatim. Previously every mapped
+    # field silently fell back to the pipeline's hardcoded default because
+    # the key names didn't match what run_prep/run_pipeline (or
+    # run_multi_prep/run_multi_pipeline) actually read.
+    resolved_motion = raw_settings.get("motion_style") or None
+    _ui_steps_fl = int(raw_settings.get("steps", config.get("fun_video_steps", 30)))
+    _final_steps_fl = _step_floor(requested_model, _ui_steps_fl)
+    if _final_steps_fl != _ui_steps_fl:
+        log.info("[folder-loop] step floor: ui=%d -> %d for %s",
+                 _ui_steps_fl, _final_steps_fl, requested_model)
+
+    if multi_video:
+        clip_dur = max(4.0, min(6.0, _safe_float(
+            raw_settings.get("clip_duration"), config.get("fun_multi_clip_duration", 6.0))))
+        n_clips = max(2, min(10, int(raw_settings.get("num_clips", config.get("fun_multi_num_clips", 2)))))
+        settings = _build_multi_settings(
+            raw_settings, config, requested_model, resolved_motion,
+            _final_steps_fl, clip_dur, n_clips, target_secs=None,
+        )
+    else:
+        settings = _build_single_settings(
+            raw_settings, config, requested_model, resolved_motion, _final_steps_fl,
+        )
 
     snap = folder_loop.start(str(folder_path), images, settings, endpoint, repeat)
     return snap
@@ -764,6 +795,129 @@ def _auto_pick_model(
     return (fallback_model, fallback_motion, "classifier failed -- using best model for available VRAM")
 
 
+# -- Shared body -> pipeline-settings mapping (C1) -----------------------------
+#
+# /make-it, /make-it-multi, and Loop Folder all accept the SAME request-body
+# shape (video_prompt/model/duration/steps/guidance/seed/...) but pipeline.py
+# and multi_pipeline.py read a DIFFERENT internal key set (model_name/
+# video_duration or clip_duration/video_steps/video_guidance/video_seed/...).
+# Before this fix, /make-it and /make-it-multi each did their own inline
+# body->settings mapping, and Loop Folder (folder_loop.py's _submit_one)
+# skipped the mapping entirely -- it called run_prep/run_pipeline or
+# run_multi_prep/run_multi_pipeline directly with the raw JS-key settings
+# dict, so every mapped field (model, duration, steps, guidance, seed, ...)
+# silently fell back to the pipeline's hardcoded defaults. These two
+# functions are now the single source of truth for that mapping; all three
+# call sites use them so a field that reaches one reaches all three.
+
+# Per-model step floor -- auto-pick (or a hand-picked model) can differ from
+# whatever the UI slider was tuned for, so always floor to the model's actual
+# minimum rather than trusting the raw slider value. Shared by /make-it,
+# /make-it-multi, and Loop Folder (both single- and multi-clip).
+_MODEL_MIN_STEPS = {
+    "LTX-2 Dev19B Distilled": 4,
+    "LTX-2 Dev13B":            20,
+    "LTX-2 Dev13B 360P":       20,
+    "Wan2.1-I2V-14B-480P":     20,
+    "Wan2.1-I2V-14B-720P":     20,
+    "Wan2.1-T2V-14B":          20,
+    "Wan2.1-T2V-1.3B":         15,
+}
+
+
+def _step_floor(requested_model: str, ui_steps: int) -> int:
+    return max(ui_steps, _MODEL_MIN_STEPS.get(requested_model, 20))
+
+
+def _build_single_settings(body: dict, config: dict, requested_model: str,
+                            resolved_motion, final_steps: int) -> dict:
+    """Map a /make-it-shaped request body into pipeline.py's settings shape."""
+    return {
+        "video_prompt": body.get("video_prompt", ""),
+        "music_prompt": body.get("music_prompt", ""),
+        "lyric_direction": body.get("lyric_direction", ""),
+        # Image-driven audio toggle + user-supplied lyrics (both optional).
+        "audio_from_image": bool(body.get("audio_from_image", False)),
+        "custom_lyrics": body.get("custom_lyrics", ""),
+        "user_direction": body.get("user_direction", ""),
+        "use_wildcards": body.get("use_wildcards", False),
+        "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
+        "model_name": requested_model,
+        "motion_style": resolved_motion,
+        "resolution": body.get("resolution", config.get("resolution", "580p")),
+        "override_width":  body.get("output_width"),
+        "override_height": body.get("output_height"),
+        "video_steps": final_steps,
+        "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
+        "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
+        # 27 steps is the floor for clearly-sung vocals from ACE-Step. Below
+        # ~20 the model produces music beds without intelligible singing.
+        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 27)),
+        "audio_guidance": body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
+        "instrumental": body.get("instrumental", config.get("fun_audio_instrumental", True)),
+        "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
+        "bpm": body.get("bpm"),
+        "skip_audio": body.get("skip_audio", False),
+        # Unused by this single-clip path today (pipeline.py never reads it), but
+        # kept consistent with the fixed default in make-it-multi/song_video in
+        # case a future call site starts honoring it.
+        "lip_sync": bool(body.get("lip_sync", False)),
+        "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
+        "end_photo_path": body.get("end_photo_path"),
+        "start_video_path":          _resolve_path(body.get("start_video_path", "")),
+        "video_mode":                body.get("video_mode", "continuation"),
+        "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
+        "loras":          body.get("loras", []),
+        "upscale":        body.get("upscale", True),
+        "upscale_scale":  max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0))),
+        "upscale_method": "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
+    }
+
+
+def _build_multi_settings(body: dict, config: dict, requested_model: str, requested_motion,
+                           final_steps: int, clip_dur: float, n_clips: int, target_secs) -> dict:
+    """Map a /make-it-multi-shaped request body into multi_pipeline.py's settings shape."""
+    return {
+        "video_prompt":    body.get("video_prompt", ""),
+        "music_prompt":    body.get("music_prompt", ""),
+        "lyric_direction": body.get("lyric_direction", ""),
+        # Image-driven audio toggle + user-supplied lyrics (both optional).
+        "audio_from_image": bool(body.get("audio_from_image", False)),
+        "custom_lyrics":    body.get("custom_lyrics", ""),
+        "user_direction":  body.get("user_direction", ""),
+        "num_clips":       n_clips,
+        "clip_duration":   clip_dur,
+        "model_name":      requested_model,
+        "resolution":      body.get("resolution", config.get("resolution",       "580p")),
+        "override_width":  body.get("output_width"),
+        "override_height": body.get("output_height"),
+        "video_steps":     final_steps,
+        "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
+        "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
+        # 27 steps is the floor for intelligible sung vocals from ACE-Step.
+        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    27)),
+        "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
+        "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
+        "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
+        "skip_audio":           body.get("skip_audio", False),
+        # LTX-2 native audio conditioning during diffusion (multi_pipeline.py's
+        # audio_source= param) deterministically deadlocks WanGP's sliding-window
+        # denoising at step 0 -- same root cause fixed in song_video/routes.py on
+        # 2026-08-02. Defaulted off here too.
+        "lip_sync":             bool(body.get("lip_sync", False)),
+        "bpm":                  body.get("bpm"),
+        "target_story_length":  target_secs,
+        "upscale":              body.get("upscale", True),
+        "upscale_scale":        max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0))),
+        "upscale_method":       "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
+        "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
+        "motion_style":         requested_motion,
+        "start_video_path":          _resolve_path(body.get("start_video_path", "")),
+        "video_mode":                body.get("video_mode", "continuation"),
+        "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
+    }
+
+
 @router.post("/make-it")
 async def make_it(request: Request):
     from app import get_job_manager; job_manager = get_job_manager()
@@ -834,62 +988,13 @@ async def make_it(request: Request):
 
     # Apply per-model step floor (auto-pick may have changed the model since
     # the UI rendered the steps slider).
-    _MODEL_MIN_STEPS_SINGLE = {
-        "LTX-2 Dev19B Distilled": 4,
-        "LTX-2 Dev13B":            20,
-        "LTX-2 Dev13B 360P":       20,
-        "Wan2.1-I2V-14B-480P":     20,
-        "Wan2.1-I2V-14B-720P":     20,
-        "Wan2.1-T2V-14B":          20,
-        "Wan2.1-T2V-1.3B":         15,
-    }
     _ui_steps_s = int(body.get("steps", config.get("fun_video_steps", 30)))
-    _min_s = _MODEL_MIN_STEPS_SINGLE.get(requested_model, 20)
-    _final_steps_s = max(_ui_steps_s, _min_s)
+    _final_steps_s = _step_floor(requested_model, _ui_steps_s)
     if _final_steps_s != _ui_steps_s:
         log.info("[make-it] step floor: ui=%d -> %d for %s",
                  _ui_steps_s, _final_steps_s, requested_model)
 
-    settings = {
-        "video_prompt": body.get("video_prompt", ""),
-        "music_prompt": body.get("music_prompt", ""),
-        "lyric_direction": body.get("lyric_direction", ""),
-        # Image-driven audio toggle + user-supplied lyrics (both optional).
-        "audio_from_image": bool(body.get("audio_from_image", False)),
-        "custom_lyrics": body.get("custom_lyrics", ""),
-        "user_direction": body.get("user_direction", ""),
-        "use_wildcards": body.get("use_wildcards", False),
-        "video_duration": body.get("duration", config.get("fun_video_duration", 14.0)),
-        "model_name": requested_model,
-        "motion_style": resolved_motion,
-        "resolution": body.get("resolution", config.get("resolution", "580p")),
-        "override_width":  body.get("output_width"),
-        "override_height": body.get("output_height"),
-        "video_steps": _final_steps_s,
-        "video_guidance": body.get("guidance", config.get("fun_video_guidance", 7.5)),
-        "video_seed": body.get("seed", config.get("fun_video_seed", -1)),
-        # 27 steps is the floor for clearly-sung vocals from ACE-Step. Below
-        # ~20 the model produces music beds without intelligible singing.
-        "audio_steps": body.get("audio_steps", config.get("fun_audio_steps", 27)),
-        "audio_guidance": body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
-        "instrumental": body.get("instrumental", config.get("fun_audio_instrumental", True)),
-        "audio_format": body.get("audio_format", config.get("fun_audio_format", "mp3")),
-        "bpm": body.get("bpm"),
-        "skip_audio": body.get("skip_audio", False),
-        # Unused by this single-clip path today (pipeline.py never reads it), but
-        # kept consistent with the fixed default in make-it-multi/song_video in
-        # case a future call site starts honoring it.
-        "lip_sync": bool(body.get("lip_sync", False)),
-        "audio_provider": body.get("audio_provider", config.get("audio_provider", "acestep")),
-        "end_photo_path": body.get("end_photo_path"),
-        "start_video_path":          _resolve_path(body.get("start_video_path", "")),
-        "video_mode":                body.get("video_mode", "continuation"),
-        "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
-        "loras":          body.get("loras", []),
-        "upscale":        body.get("upscale", True),
-        "upscale_scale":  max(0.5, min(4.0, _safe_float(body.get("upscale_scale"), 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0))),
-        "upscale_method": "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
-    }
+    settings = _build_single_settings(body, config, requested_model, resolved_motion, _final_steps_s)
 
     if photo_path:
         label = f"Create Video: {Path(photo_path).stem[:20]}"
@@ -1003,61 +1108,16 @@ async def make_it_multi(request: Request):
     # actual sweet spot rather than blindly trusting the slider value (which
     # was tuned for whatever model the user had selected manually). LTX
     # Distilled needs 4-8; Wan I2V needs 20-25 minimum or output is a blob.
-    _MODEL_MIN_STEPS = {
-        "LTX-2 Dev19B Distilled": 4,
-        "LTX-2 Dev13B":            20,
-        "LTX-2 Dev13B 360P":       20,
-        "Wan2.1-I2V-14B-480P":     20,
-        "Wan2.1-I2V-14B-720P":     20,
-        "Wan2.1-T2V-14B":          20,
-        "Wan2.1-T2V-1.3B":         15,
-    }
     _ui_steps = int(body.get("steps", config.get("fun_video_steps", 30)))
-    _min_for_model = _MODEL_MIN_STEPS.get(requested_model, 20)
-    _final_steps = max(_ui_steps, _min_for_model)
+    _final_steps = _step_floor(requested_model, _ui_steps)
     if _final_steps != _ui_steps:
         log.info("[make-it-multi] step floor: ui=%d -> %d for %s",
                  _ui_steps, _final_steps, requested_model)
 
-    settings = {
-        "video_prompt":    body.get("video_prompt", ""),
-        "music_prompt":    body.get("music_prompt", ""),
-        "lyric_direction": body.get("lyric_direction", ""),
-        # Image-driven audio toggle + user-supplied lyrics (both optional).
-        "audio_from_image": bool(body.get("audio_from_image", False)),
-        "custom_lyrics":    body.get("custom_lyrics", ""),
-        "user_direction":  body.get("user_direction", ""),
-        "num_clips":       n_clips,
-        "clip_duration":   clip_dur,
-        "model_name":      requested_model,
-        "resolution":      body.get("resolution", config.get("resolution",       "580p")),
-        "override_width":  body.get("output_width"),
-        "override_height": body.get("output_height"),
-        "video_steps":     _final_steps,
-        "video_guidance":  body.get("guidance",       config.get("fun_video_guidance", 7.5)),
-        "video_seed":      body.get("seed",           config.get("fun_video_seed",     -1)),
-        # 27 steps is the floor for intelligible sung vocals from ACE-Step.
-        "audio_steps":     body.get("audio_steps",    config.get("fun_audio_steps",    27)),
-        "audio_guidance":  body.get("audio_guidance", config.get("fun_audio_guidance", 7.0)),
-        "instrumental":    body.get("instrumental",   config.get("fun_audio_instrumental", False)),
-        "audio_format":    body.get("audio_format",   config.get("fun_audio_format",   "mp3")),
-        "skip_audio":           body.get("skip_audio", False),
-        # LTX-2 native audio conditioning during diffusion (multi_pipeline.py's
-        # audio_source= param) deterministically deadlocks WanGP's sliding-window
-        # denoising at step 0 -- same root cause fixed in song_video/routes.py on
-        # 2026-08-02. Defaulted off here too.
-        "lip_sync":             bool(body.get("lip_sync", False)),
-        "bpm":                  body.get("bpm"),
-        "target_story_length":  target_secs,
-        "upscale":              body.get("upscale", True),
-        "upscale_scale":        max(0.5, min(4.0, float(body.get("upscale_scale", 4.0 if requested_model in _LOW_RES_AI_MODELS else 2.0)))),
-        "upscale_method":       "ai" if requested_model in _LOW_RES_AI_MODELS else (body.get("upscale_method", "ffmpeg") if body.get("upscale_method") in ("ffmpeg", "ai") else "ffmpeg"),
-        "director_passes":      max(0, min(2, int(body.get("director_passes", config.get("fun_director_passes", 0))))),
-        "motion_style":         requested_motion,
-        "start_video_path":          _resolve_path(body.get("start_video_path", "")),
-        "video_mode":                body.get("video_mode", "continuation"),
-        "start_video_seek_seconds":  body.get("start_video_seek_seconds"),
-    }
+    settings = _build_multi_settings(
+        body, config, requested_model, requested_motion,
+        _final_steps, clip_dur, n_clips, target_secs,
+    )
 
     # Surface the chosen model + expected pace in the label so users see what
     # they're getting before sitting through a 20-minute Wan I2V run unaware.

@@ -31,6 +31,21 @@ JOB_SD_PROMPT = "sd_prompt"
 # Types that require exclusive LOCAL GPU access
 # Satellite jobs (JOB_FUN_MULTI_VIDEO_SAT) use the 3060 remote GPU so they
 # run immediately without queuing alongside local GPU jobs.
+#
+# C8 landmine: JOB_VIDEO_TOOL is NOT in this set, so it always runs
+# immediately in its own thread (submit()'s non-GPU branch below) -- Pause
+# never holds it back. Most video_tool work (Sharpen/Crop/Transform, and
+# Upscale/Smooth's ffmpeg-only modes) is pure CPU and that's correct. But
+# Upscale's "ai" engine (Real-ESRGAN) and Smooth's "rife" mode run on the
+# SAME physical GPU as WanGP and can fight it for VRAM while a render is in
+# flight -- job_manager has no way to tell those apart from the CPU-only
+# video_tool ops (the distinction lives in the request body the video_tools
+# router builds, not in the job type), so adding JOB_VIDEO_TOOL wholesale to
+# GPU_JOB_TYPES would wrongly serialize the common CPU-only case behind
+# WanGP too. Fixing this for real needs the video_tools submission call site
+# to route GPU-heavy steps through a distinct (queued) job type; until then,
+# the Queue tab labels running/paused video_tool jobs honestly instead of
+# implying Pause covers them (static/js/tab-queue.js, see "C8" there).
 GPU_JOB_TYPES = {JOB_FUN_VIDEO, JOB_FUN_MULTI_VIDEO, JOB_BRIDGE}
 
 

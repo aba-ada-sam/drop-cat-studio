@@ -6,7 +6,6 @@ import { api } from './api.js';
 import { toast } from './shell/toast.js';
 import { el, pathToUrl } from './components.js';
 import { VideoStretchTool } from './components/video-stretch.js';
-import { mountLipSyncTool } from './components/lipsync-tool.js';
 
 let _root        = null;
 let _pollTimer   = null;
@@ -14,6 +13,14 @@ let _knownIds    = new Set();
 let _dismissedIds = new Set();  // jobs the user dismissed; suppressed from render until server confirms deletion
 let _paused      = false;
 let _lastData    = { running: [], queued: [], completed: [] };
+
+// C8: mirrors core/job_manager.py's GPU_JOB_TYPES -- the only job types Pause
+// actually holds back. video_tool (AI Upscale, RIFE Smooth), sd_prompt, and
+// i2v jobs run in their own threads outside the sequential GPU queue and
+// start/keep running regardless of Pause. Used only to decide what the
+// Running-header label and per-job hints honestly say; job_manager.py is the
+// source of truth for the real routing.
+const _GPU_QUEUE_TYPES = new Set(['fun_video', 'fun_multi_video', 'bridge']);
 
 // Jobs that finished before the Queue tab was first opened this session are old
 // history -- hide them automatically so opening the Queue gives a clean view.
@@ -222,9 +229,14 @@ function _syncPauseBtn() {
   const btn = document.getElementById('queue-pause-btn');
   if (!btn) return;
   btn.textContent = _paused ? '▶ Resume' : '⏸ Pause';
+  // C8: Pause only holds back the GPU_JOB_TYPES queue (fun_video, fun_multi_video,
+  // bridge) in job_manager.py -- Video Tools jobs (video_tool: AI Upscale, RIFE
+  // Smooth) and SD Prompt jobs run in their own threads outside that queue and
+  // ignore Pause entirely. "no new jobs will start" overstated that; say what
+  // Pause actually covers.
   btn.title = _paused
     ? 'Resume -- start processing queued jobs again'
-    : 'Finish current job then hold -- no new jobs will start';
+    : 'Finish the current GPU video job then hold -- Video Tools (AI Upscale, RIFE) and other non-GPU jobs still start immediately';
   btn.style.background = _paused ? 'var(--accent)' : '';
   btn.style.color      = _paused ? 'var(--bg-base)' : '';
 }
@@ -327,10 +339,31 @@ function _render(data) {
   list.querySelectorAll('[data-job-id]').forEach(n => existing.set(n.dataset.jobId, n));
 
   const ordered = [];
-  if (running.length)         ordered.push({ head: _paused ? '▶  Running (last before pause)' : '▶  Now Generating', jobs: running, active: true });
+  if (running.length) {
+    // C8: "(last before pause)" only means something for the GPU-queued job
+    // types Pause actually holds back. Video Tools' AI Upscale/RIFE (and
+    // sd_prompt/i2v) jobs run in their own thread outside that queue and keep
+    // starting during Pause -- label honestly instead of implying Pause
+    // covers everything currently running.
+    const pauseHeld = running.filter(j => _GPU_QUEUE_TYPES.has(j.type));
+    let head = '>  Now Generating';
+    if (_paused) {
+      if (pauseHeld.length === running.length) {
+        head = '>  Running (last before pause)';
+      } else if (pauseHeld.length > 0) {
+        head = '>  Running (GPU video job: last before pause -- Video Tools jobs ignore Pause)';
+      } else {
+        head = '>  Now Generating (Pause does not hold back Video Tools / non-GPU jobs)';
+      }
+    }
+    ordered.push({ head, jobs: running, active: true });
+  }
   if (queued.length)          ordered.push({ head: `...  Waiting . ${queued.length}${_paused ? '  --  PAUSED' : ''}`, jobs: queued, active: true });
   if (visibleCompleted.length) {
-    const nFailed = visibleCompleted.filter(j => j.status !== 'done').length;
+    // L31: only 'error' is a real failure -- 'stopped'/'cancelled' both
+    // render as a "Cancelled" chip on the card (see _statusChip below), so
+    // counting them as "failed" here contradicted the per-card label.
+    const nFailed = visibleCompleted.filter(j => j.status === 'error').length;
     const head = nFailed > 0 ? `Finished . ${nFailed} failed` : 'Finished';
     ordered.push({ head, jobs: visibleCompleted, active: false });
   }
@@ -870,16 +903,49 @@ function _renderModal(job, els) {
       vid.src = pathToUrl(out);
       els.videoSlot.appendChild(vid);
       // Manual Stretch & Lock tool for finished videos
+      // M24 / MuseTalk removal (Andrew's 2026-08-05 ruling): a Lip Sync tool
+      // mount used to sit here unconditionally -- when MuseTalk wasn't
+      // installed, mountLipSyncTool() silently no-op'd and left an empty
+      // bordered divider with nothing in it. MuseTalk is being removed from
+      // V2 entirely, so the mount is deleted rather than gated on availability.
       if (/\.(mp4|mov|mkv|webm)$/i.test(out)) {
         const stretchSlot = el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px solid var(--border-2);' });
         els.videoSlot.appendChild(stretchSlot);
         try {
           new VideoStretchTool(stretchSlot, { videoUrl: pathToUrl(out), videoPath: out, videoEl: vid });
         } catch (e) { console.error('VideoStretchTool init failed', e); }
-        const lipSlot = el('div', { style: 'margin-top:12px; padding-top:12px; border-top:1px solid var(--border-2);' });
-        els.videoSlot.appendChild(lipSlot);
-        mountLipSyncTool(lipSlot, { videoPath: out }).catch(e => console.error('LipSync mount failed', e));
       }
+      // L32: Reveal-in-Explorer + Delete for the finished output, matching the
+      // Gallery's existing /api/reveal + /api/output/delete wiring (which
+      // already handles the 423 "file in use" / 403 "forbidden" cases) --
+      // the Queue detail view had neither even though the backend supports
+      // both and Gallery already proves the pattern out.
+      const fileActions = el('div', { style: 'display:flex; gap:8px; margin-top:12px;' });
+      const revealBtn = el('button', { class: 'btn btn-sm', text: 'Reveal in Explorer' });
+      const deleteBtn = el('button', { class: 'btn btn-sm btn-danger', text: 'Delete file' });
+      revealBtn.addEventListener('click', async () => {
+        try {
+          await api('/api/reveal', { method: 'POST', body: JSON.stringify({ path: out, action: 'explorer' }) });
+        } catch (e) { toast(e.message || 'Could not open Explorer', 'error'); }
+      });
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Delete this file permanently? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        try {
+          await api('/api/output/delete', { method: 'POST', body: JSON.stringify({ path: out }) });
+          toast('File deleted', 'success');
+          vid.remove();
+          fileActions.remove();
+        } catch (e) {
+          // api() throws with the server's message on non-2xx, including the
+          // 423 "file is in use" case -- surface it rather than silently
+          // leaving the button re-enabled with no explanation.
+          toast(e.message || 'Delete failed', 'error');
+          deleteBtn.disabled = false;
+        }
+      });
+      fileActions.append(revealBtn, deleteBtn);
+      els.videoSlot.appendChild(fileActions);
     }
   } else if (!isDone && els.videoSlot.querySelector('video')) {
     els.videoSlot.innerHTML = '';
