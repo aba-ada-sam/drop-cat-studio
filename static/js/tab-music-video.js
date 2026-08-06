@@ -1,10 +1,25 @@
 /**
  * Music Video Tab
- * Upload a song + folder of images -> generate beat-synced music videos continuously.
- * Also supports single-image generation for one-off videos.
  *
- * Batch runner is SERVER-SIDE: state persists across DCS restarts.
- * On tab open, the tab auto-resumes any in-progress batch.
+ * PRIMARY surface: the RATIFIED ENGINE (chain.py, wrapped as a subprocess by
+ * features/song_video/chain_runner.py -- see REVIEW_FINDINGS_2026-08-05.md).
+ * Song (upload or AI-generate) + 1+ anchor images (each with an optional
+ * per-scene prompt) -> one continuous-performance video via chain.py's
+ * ratified recipe v3 defaults (241f/clip, 0.15 crossfade, smart-seams,
+ * judge-select). Progress polls GET /api/song-video/chain/status.
+ *
+ * Everything below the "Legacy pipeline" collapsible is the OLDER
+ * features/song_video/pipeline.py implementation (batch folder + single
+ * image) -- kept working exactly as before, just demoted out of the primary
+ * spot. No MuseTalk/Lip Sync control anywhere in this file (removed per
+ * Andrew, 2026-08-05 night -- native audio-conditioned sync in chain.py is
+ * the proven mechanism; MuseTalk is gone from V2).
+ *
+ * Batch runner (legacy) is SERVER-SIDE: state persists across DCS restarts.
+ * On tab open, the tab auto-resumes any in-progress LEGACY batch. The
+ * ratified engine is NOT wired into that batch runner or into
+ * core/job_manager.py's queue (chain.py talks to the WanGP worker directly
+ * over HTTP, bypassing the queue) -- its progress only shows in this panel.
  */
 
 import { el }                    from './components.js';
@@ -12,7 +27,7 @@ import { apiFetch }              from './shell/toast.js';
 import { toast }                 from './shell/toast.js';
 import { apiUpload }             from './api.js';
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// --- shared helpers ----------------------------------------------------------
 
 function LABEL(text) {
   return el('div', {
@@ -29,9 +44,403 @@ function _card(children, extraStyle = '') {
   return c;
 }
 
-// ─── init ────────────────────────────────────────────────────────────────────
+function _toggle(label, checked = false) {
+  const wrap  = el('label', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;' });
+  const input = el('input', { type: 'checkbox' });
+  input.checked = checked;
+  input.style.accentColor = 'var(--accent)';
+  wrap.append(input, label);
+  return { wrap, input };
+}
+
+function _numRow(labelText, min, max, step, def, unit) {
+  const lbl   = el('div', { style: 'font-size:12px; color:var(--text-3);', text: labelText });
+  const input = el('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(def) });
+  input.style.cssText = 'flex:1; accent-color:var(--accent);';
+  const val   = el('span', { style: 'font-size:11px; color:var(--text-2); min-width:32px; text-align:right;', text: def + unit });
+  input.addEventListener('input', () => { val.textContent = input.value + unit; });
+  const row   = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [input, val]);
+  const wrap  = el('div', { style: 'display:flex; flex-direction:column; gap:3px; padding:4px 0;' }, [lbl, row]);
+  return { wrap, input, val };
+}
+
+// Converts an absolute filesystem output path to a servable URL, mirroring
+// the pattern used everywhere else in this app (e.g. tab-fun-videos.js).
+function _outputPathToUrl(p) {
+  if (!p) return '';
+  const norm = p.replace(/\\/g, '/').toLowerCase();
+  const idx = norm.indexOf('/output/');
+  return idx !== -1 ? p.replace(/\\/g, '/').slice(idx) : '';
+}
+
+// --- init ---------------------------------------------------------------------
 
 export function init(panel) {
+  // ==========================================================================
+  // RATIFIED ENGINE (primary surface)
+  // ==========================================================================
+
+  let _rSongPath   = null;
+  let _rSongDur    = 0;
+  let _rImages     = [];   // [{ path, url, name, promptInput }]
+  let _rRunning    = false;
+  let _rPollTimer  = null;
+
+  // -- Song (upload or generate) ----------------------------------------------
+
+  const rSongHint    = el('div', { style: 'font-size:13px; color:var(--text-3);', text: 'Drop your song here or click to browse' });
+  const rSongHintSub = el('div', { style: 'font-size:11px; color:var(--text-4); margin-top:4px;', text: 'mp3 / wav / flac / m4a / aac -- optional: skip this and generate one with AI below' });
+  const rSongHintArea = el('div', { style: 'display:flex; flex-direction:column; align-items:center; padding:20px 0; gap:2px;' }, [rSongHint, rSongHintSub]);
+  const rSongPreview = el('audio', { style: 'display:none; width:100%; margin:8px 0;' });
+  rSongPreview.controls = true;
+  const rSongClearBtn = el('button', { style: 'display:none; align-self:flex-end; background:none; border:none; color:var(--red); cursor:pointer; font-size:11px; padding:0;', text: 'remove song' });
+
+  const rSongDrop = el('div', {
+    style: 'border:1px dashed var(--border-2); border-radius:var(--r-md); cursor:pointer; display:flex; flex-direction:column; align-items:center; transition:border-color .12s, background .12s; background:var(--surface-2);',
+  });
+  rSongDrop.append(rSongHintArea, rSongPreview, rSongClearBtn);
+
+  const rSongFileInput = el('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.opus,.mpeg' });
+  rSongFileInput.style.display = 'none';
+  panel.appendChild(rSongFileInput);
+
+  rSongDrop.addEventListener('dragover', e => { e.preventDefault(); rSongDrop.style.borderColor = 'var(--accent)'; rSongDrop.style.background = 'var(--accent-bg)'; });
+  rSongDrop.addEventListener('dragleave', () => { rSongDrop.style.borderColor = 'var(--border-2)'; rSongDrop.style.background = 'var(--surface-2)'; });
+  rSongDrop.addEventListener('drop', e => {
+    e.preventDefault(); rSongDrop.style.borderColor = 'var(--border-2)'; rSongDrop.style.background = 'var(--surface-2)';
+    const f = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('audio/') || /\.(mp3|wav|flac|ogg|m4a|aac|opus|mpeg|mpg)$/i.test(f.name));
+    if (f) _rUploadSong(f);
+  });
+  rSongDrop.addEventListener('click', e => {
+    if (e.target === rSongPreview || e.target === rSongClearBtn || rSongPreview.contains(e.target)) return;
+    rSongFileInput.click();
+  });
+  rSongFileInput.addEventListener('change', () => { if (rSongFileInput.files[0]) _rUploadSong(rSongFileInput.files[0]); rSongFileInput.value = ''; });
+  rSongClearBtn.addEventListener('click', e => { e.stopPropagation(); _rClearSong(); });
+
+  async function _rUploadSong(file) {
+    rSongHint.textContent = 'Uploading...';
+    try {
+      const resp = await apiUpload('/api/song-video/upload-audio', [file]);
+      const f = resp?.files?.[0];
+      if (!f?.path) throw new Error('No path returned');
+      rSongPreview.src = f.url;
+      rSongPreview.style.display = 'block';
+      rSongHintArea.style.display = 'none';
+      rSongClearBtn.style.display = 'block';
+      _rSongPath = f.path;
+      _rSongDur  = f.duration || 0;
+      _rUpdateGenerateVisibility();
+      _rUpdateStartBtn();
+    } catch (err) {
+      toast('Song upload failed: ' + err.message, 'error');
+      rSongHint.textContent = 'Drop your song here or click to browse';
+    }
+  }
+
+  function _rClearSong() {
+    _rSongPath = null; _rSongDur = 0;
+    rSongPreview.src = ''; rSongPreview.style.display = 'none';
+    rSongHintArea.style.display = 'flex';
+    rSongClearBtn.style.display = 'none';
+    rSongDrop.style.borderColor = 'var(--border-2)';
+    _rUpdateGenerateVisibility();
+    _rUpdateStartBtn();
+  }
+
+  // Generate-with-AI fields -- only relevant/shown when no song is uploaded.
+  const { wrap: rLengthWrap, input: rLengthSlider } = _numRow('Video length (AI-written song)', 5, 120, 1, 30, 's');
+  const rLyricsInput = el('textarea', {
+    placeholder: 'Lyrics (optional -- blank = instrumental)',
+    style: 'width:100%; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-md); color:var(--text); padding:8px 10px; font-family:inherit; font-size:12px; resize:vertical; min-height:44px; outline:none;',
+  });
+  const rMusicPromptInput = el('input', {
+    type: 'text', placeholder: 'Music vibe (e.g. "warm acoustic ballad")',
+    style: 'width:100%; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-md); color:var(--text); padding:8px 10px; font-family:inherit; font-size:12px; outline:none;',
+  });
+  const rGenerateWrap = el('div', { style: 'display:flex; flex-direction:column; gap:6px; padding-top:6px; border-top:1px solid var(--border-2);' },
+    [LABEL('No song -- generate one (ACE-Step)'), rLengthWrap, rLyricsInput, rMusicPromptInput]);
+
+  function _rUpdateGenerateVisibility() {
+    rGenerateWrap.style.display = _rSongPath ? 'none' : 'flex';
+  }
+  _rUpdateGenerateVisibility();
+
+  // -- Anchor images (1+, each with an optional scene prompt) -----------------
+
+  const rImgDrop = el('div', {
+    style: 'border:1px dashed var(--border-2); border-radius:var(--r-md); padding:16px; text-align:center; cursor:pointer; font-size:13px; color:var(--text-3); background:var(--surface-2); transition:border-color .12s, background .12s;',
+    text: 'Drop anchor image(s) here or click to browse -- 1 required, more = A/B/... scene cycling',
+  });
+  const rImgInput = el('input', { type: 'file', accept: 'image/*' });
+  rImgInput.multiple = true;
+  rImgInput.style.display = 'none';
+  panel.appendChild(rImgInput);
+
+  rImgDrop.addEventListener('dragover', e => { e.preventDefault(); rImgDrop.style.borderColor = 'var(--accent)'; rImgDrop.style.background = 'var(--accent-bg)'; });
+  rImgDrop.addEventListener('dragleave', () => { rImgDrop.style.borderColor = 'var(--border-2)'; rImgDrop.style.background = 'var(--surface-2)'; });
+  rImgDrop.addEventListener('drop', e => {
+    e.preventDefault(); rImgDrop.style.borderColor = 'var(--border-2)'; rImgDrop.style.background = 'var(--surface-2)';
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    if (files.length) _rUploadImages(files);
+  });
+  rImgDrop.addEventListener('click', () => rImgInput.click());
+  rImgInput.addEventListener('change', () => {
+    const files = Array.from(rImgInput.files);
+    if (files.length) _rUploadImages(files);
+    rImgInput.value = '';
+  });
+
+  const rImgList = el('div', { style: 'display:flex; flex-direction:column; gap:8px;' });
+  const rScenePromptHint = el('div', {
+    style: 'display:none; font-size:11px; color:#e8b820;',
+    text: 'Fill a scene prompt for every anchor image, or leave them ALL blank to use the default prompt -- a partial mix would misalign scenes to the wrong prompt.',
+  });
+
+  async function _rUploadImages(files) {
+    try {
+      const resp = await apiUpload('/api/song-video/upload-image', files);
+      const added = (resp?.files || []).filter(f => f?.path);
+      if (!added.length) throw new Error('No usable images in that selection');
+      for (const f of added) {
+        const promptInput = el('textarea', {
+          placeholder: 'Scene prompt for this image (optional)',
+          style: 'flex:1; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-md); color:var(--text); padding:6px 8px; font-family:inherit; font-size:12px; resize:vertical; min-height:36px; outline:none;',
+        });
+        promptInput.addEventListener('input', _rValidateScenePrompts);
+        _rImages.push({ path: f.path, url: f.url, name: f.name, promptInput });
+      }
+      _rRenderImages();
+    } catch (e) {
+      toast('Image upload failed: ' + e.message, 'error');
+    }
+  }
+
+  function _rRenderImages() {
+    rImgList.textContent = '';
+    _rImages.forEach((im, i) => {
+      const thumb = el('img', {
+        title: im.name,
+        style: 'height:52px; width:52px; object-fit:cover; border-radius:4px; flex:0 0 auto;',
+      });
+      thumb.src = im.url;
+      const tag = el('div', { style: 'font-size:11px; color:var(--text-3); min-width:16px;', text: String.fromCharCode(65 + i) }); // A, B, C...
+      const removeBtn = el('button', {
+        text: 'x', title: 'Remove',
+        style: 'background:none; border:none; color:var(--red); cursor:pointer; font-size:14px; font-weight:700; line-height:1; padding:4px 6px; flex:0 0 auto;',
+      });
+      removeBtn.addEventListener('click', () => { _rImages.splice(i, 1); _rRenderImages(); _rUpdateStartBtn(); });
+      const row = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [tag, thumb, im.promptInput, removeBtn]);
+      rImgList.appendChild(row);
+    });
+    _rValidateScenePrompts();
+    _rUpdateStartBtn();
+  }
+
+  function _rValidateScenePrompts() {
+    const filled = _rImages.filter(im => im.promptInput.value.trim()).length;
+    rScenePromptHint.style.display = (filled > 0 && filled < _rImages.length) ? 'block' : 'none';
+  }
+
+  // -- Options: seeds-per-clip, judge-select, DOF finish (stub, disabled) -----
+
+  const { wrap: rSeedsWrap, input: rSeedsSlider } = _numRow('Seeds per clip (best-of-N)', 1, 10, 1, 4, '');
+  const { wrap: rJudgeWrap, input: rJudgeToggle } = _toggle('Judge-select (vision-judge take selection)', true);
+  const { wrap: rDofWrap, input: rDofToggle } = _toggle(
+    el('span', {}, [
+      'Apply DOF finish (post-step) ',
+      el('span', { style: 'color:var(--text-4); font-size:11px;', text: '-- not implemented yet, see features/song_video/dof_finish.py' }),
+    ]),
+    false,
+  );
+  rDofToggle.disabled = true;
+  rDofToggle.title = 'The ratified per-scene DOF pass has no recovered script -- see dof_finish.py. Disabled until one exists.';
+
+  // -- Start / progress / cancel -----------------------------------------------
+
+  const rStartBtn = el('button', {
+    text: 'Start Ratified Render',
+    disabled: true,
+    style: 'padding:12px; border-radius:var(--r-lg); border:none; cursor:not-allowed; font-size:15px; font-weight:700; background:var(--gold); color:#000; opacity:.45; width:100%;',
+  });
+  const rCancelBtn = el('button', {
+    text: 'Cancel',
+    style: 'display:none; padding:8px 14px; border-radius:var(--r-md); border:1px solid var(--red); background:none; color:var(--red); cursor:pointer; font-size:13px; font-weight:600;',
+  });
+
+  const rPhaseLabel = el('div', { style: 'font-size:13px; color:var(--text-2); min-height:16px;' });
+  const rClipLabel  = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:14px;' });
+  const rProgress   = el('progress', { style: 'display:none; width:100%; height:6px;' });
+  rProgress.max = 100; rProgress.value = 0;
+  const rLogTail = el('pre', {
+    style: 'display:none; max-height:160px; overflow-y:auto; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-md); padding:8px; font-size:10.5px; line-height:1.4; color:var(--text-3); white-space:pre-wrap; word-break:break-word; margin:0;',
+  });
+  const rResult = el('video', { style: 'display:none; width:100%; border-radius:var(--r-md); margin-top:6px; max-height:280px;' });
+  rResult.controls = true;
+
+  function _rUpdateStartBtn() {
+    const ready = _rImages.length > 0 && !_rRunning;
+    rStartBtn.disabled = !ready;
+    rStartBtn.style.opacity = ready ? '1' : '.45';
+    rStartBtn.style.cursor  = ready ? 'pointer' : 'not-allowed';
+  }
+
+  async function _rStart() {
+    if (!_rImages.length) { toast('Add at least one anchor image first', 'error'); return; }
+    const filled = _rImages.filter(im => im.promptInput.value.trim()).length;
+    if (filled > 0 && filled < _rImages.length) {
+      toast('Fill a scene prompt for every image, or clear them all', 'error');
+      return;
+    }
+
+    _rRunning = true;
+    _rUpdateStartBtn();
+    rCancelBtn.style.display = 'inline-block';
+    rProgress.style.display = 'block'; rProgress.value = 2;
+    rLogTail.style.display = 'block'; rLogTail.textContent = '';
+    rResult.style.display = 'none';
+    rPhaseLabel.textContent = 'Starting...';
+    rClipLabel.textContent = '';
+
+    const body = {
+      song_path:      _rSongPath || '',
+      target_length:  parseInt(rLengthSlider.value, 10),
+      lyrics_text:    rLyricsInput.value.trim(),
+      music_prompt:   rMusicPromptInput.value.trim(),
+      images:         _rImages.map(im => im.path),
+      scene_prompts:  filled ? _rImages.map(im => im.promptInput.value.trim()) : [],
+      seeds_per_clip: parseInt(rSeedsSlider.value, 10),
+      judge_select:   rJudgeToggle.checked,
+      dof_finish:     false,  // checkbox is disabled -- always off tonight
+    };
+
+    try {
+      await apiFetch('/api/song-video/chain/start', { method: 'POST', body: JSON.stringify(body) });
+      _rStartPoll();
+    } catch (e) {
+      _rRunning = false;
+      _rUpdateStartBtn();
+      rCancelBtn.style.display = 'none';
+      rPhaseLabel.textContent = 'Failed to start: ' + e.message;
+      toast('Start failed: ' + e.message, 'error');
+    }
+  }
+
+  function _rStartPoll() {
+    if (_rPollTimer) return;
+    _rPollTimer = setInterval(_rPollStatus, 1200);
+    _rPollStatus();
+  }
+
+  function _rStopPoll() {
+    if (_rPollTimer) { clearInterval(_rPollTimer); _rPollTimer = null; }
+  }
+
+  async function _rPollStatus() {
+    let s;
+    try {
+      s = await apiFetch('/api/song-video/chain/status');
+    } catch {
+      return;
+    }
+    rProgress.value = s.pct || 0;
+    rPhaseLabel.textContent = s.message || s.phase || s.status;
+    rClipLabel.textContent = s.clip_i && s.clip_n
+      ? `Clip ${s.clip_i}/${s.clip_n} [${s.clip_kind || ''}]` + (s.take_n ? `  --  take ${Math.min(s.take_i || 0, s.take_n)}/${s.take_n}` : '')
+      : '';
+    if (s.log_tail && s.log_tail.length) {
+      rLogTail.textContent = s.log_tail.slice(-60).join('\n');
+      rLogTail.scrollTop = rLogTail.scrollHeight;
+    }
+
+    if (s.status === 'done') {
+      _rStopPoll();
+      _rRunning = false;
+      _rUpdateStartBtn();
+      rCancelBtn.style.display = 'none';
+      rProgress.style.display = 'none';
+      rPhaseLabel.textContent = 'Done';
+      const url = _outputPathToUrl(s.output_path);
+      if (url) { rResult.src = url; rResult.style.display = 'block'; }
+      toast('Ratified render complete', 'success');
+      document.dispatchEvent(new Event('session-updated'));
+    } else if (s.status === 'error') {
+      _rStopPoll();
+      _rRunning = false;
+      _rUpdateStartBtn();
+      rCancelBtn.style.display = 'none';
+      rProgress.style.display = 'none';
+      rPhaseLabel.textContent = 'Failed: ' + (s.error || 'unknown error');
+      toast('Ratified render failed: ' + (s.error || 'unknown error'), 'error');
+    } else if (s.status === 'cancelled') {
+      _rStopPoll();
+      _rRunning = false;
+      _rUpdateStartBtn();
+      rCancelBtn.style.display = 'none';
+      rProgress.style.display = 'none';
+      rPhaseLabel.textContent = 'Cancelled';
+    }
+  }
+
+  rStartBtn.addEventListener('click', _rStart);
+  rCancelBtn.addEventListener('click', async () => {
+    rCancelBtn.disabled = true;
+    rPhaseLabel.textContent = 'Cancelling...';
+    try {
+      await apiFetch('/api/song-video/chain/cancel', { method: 'POST', body: '{}' });
+    } catch (e) {
+      toast('Cancel failed: ' + e.message, 'error');
+    }
+    rCancelBtn.disabled = false;
+  });
+
+  // On tab open: if a chain job is already running (e.g. left mid-render on
+  // a previous visit), reconnect the progress panel -- never auto-START one.
+  (async () => {
+    try {
+      const s = await apiFetch('/api/song-video/chain/status');
+      if (s.status === 'starting' || s.status === 'running') {
+        _rRunning = true;
+        _rUpdateStartBtn();
+        rCancelBtn.style.display = 'inline-block';
+        rProgress.style.display = 'block';
+        rLogTail.style.display = 'block';
+        _rStartPoll();
+      }
+    } catch {}
+  })();
+
+  const ratifiedSection = _card([
+    LABEL('Song'),
+    rSongDrop,
+    rGenerateWrap,
+  ]);
+  const ratifiedImages = _card([
+    LABEL('Anchor Image(s) + Scene Prompts'),
+    rImgDrop,
+    rImgList,
+    rScenePromptHint,
+  ]);
+  const ratifiedOptions = _card([
+    LABEL('Ratified Recipe Options'),
+    el('div', { style: 'font-size:11px; color:var(--text-4);', text: 'Fixed by the ratified recipe: 241 frames/clip, 0.15s crossfade, smart-seams, min-clip-frames 169 (RECIPE.json + review/render_v16_detached.ps1).' }),
+    rSeedsWrap,
+    rJudgeWrap,
+    rDofWrap,
+  ]);
+  const ratifiedRun = _card([
+    el('div', { style: 'display:flex; align-items:center; gap:10px;' }, [rStartBtn, rCancelBtn]),
+    rPhaseLabel,
+    rClipLabel,
+    rProgress,
+    rLogTail,
+    rResult,
+  ]);
+
+  // ==========================================================================
+  // LEGACY PIPELINE (features/song_video/pipeline.py -- older engine)
+  // ==========================================================================
+
   let _songPath      = null;
   let _songDur       = 0;
   let _songAnalysis  = null;
@@ -40,7 +449,7 @@ export function init(panel) {
   let _pollTimer     = null;
   let _analyzeSeq    = 0;
 
-  // ── Song upload ────────────────────────────────────────────────────────────
+  // -- Song upload --------------------------------------------------------------
 
   const songHintText  = el('div', { style: 'font-size:13px; color:var(--text-3);', text: 'Drop your song here or click to browse' });
   const songHintSub   = el('div', { style: 'font-size:11px; color:var(--text-4); margin-top:4px;', text: 'mp3 / wav / flac / m4a / aac -- optional: skip this and AI writes one to your Video length below' });
@@ -133,17 +542,17 @@ export function init(panel) {
     analysisCard.innerHTML = '';
     analysisCard.style.display = 'flex';
     const chips = [
-      a.duration_display && { icon: '♪', text: a.duration_display },
-      a.bpm              && { icon: '♩', text: `${a.bpm} BPM` },
-      a.key              && { icon: '♭', text: `${a.key} ${a.mode || ''}`.trim() },
-      a.mood             && { icon: '◈', text: a.mood },
+      a.duration_display || null,
+      a.bpm ? `${a.bpm} BPM` : null,
+      a.key ? `${a.key} ${a.mode || ''}`.trim() : null,
+      a.mood || null,
     ].filter(Boolean);
     if (chips.length) {
       const row = el('div', { style: 'display:flex; flex-wrap:wrap; gap:6px;' });
-      chips.forEach(({ icon, text }) => {
+      chips.forEach(text => {
         row.appendChild(el('div', {
           style: 'font-size:11px; background:var(--surface-2); border:1px solid var(--border-2); border-radius:20px; padding:3px 10px; color:var(--text-2);',
-          text: `${icon} ${text}`,
+          text,
         }));
       });
       analysisCard.appendChild(row);
@@ -157,7 +566,7 @@ export function init(panel) {
     }
   }
 
-  // ── Model selector ─────────────────────────────────────────────────────────
+  // -- Model selector -------------------------------------------------------------
 
   const modelSel = el('select', {
     style: 'width:100%; background:var(--surface-2); border:1px solid var(--border-2); border-radius:var(--r-md); padding:8px 12px; color:var(--text); font-size:13px; cursor:pointer; outline:none;',
@@ -177,7 +586,7 @@ export function init(panel) {
     modelSel.appendChild(opt);
   });
 
-  // ── Folder picker ──────────────────────────────────────────────────────────
+  // -- Folder picker ----------------------------------------------------------------
 
   const folderNameEl  = el('div', { style: 'flex:1; font-size:13px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:4px 0;', text: 'No folder selected' });
   const browseFolderBtn = el('button', {
@@ -215,32 +624,11 @@ export function init(panel) {
     } catch (e) { folderStatus.textContent = 'Error: ' + e.message; }
   }
 
-  // ── Options ────────────────────────────────────────────────────────────────
+  // -- Options ------------------------------------------------------------------
 
-  function _toggle(label, checked = false) {
-    const wrap  = el('label', { style: 'display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text-2); user-select:none;' });
-    const input = el('input', { type: 'checkbox' });
-    input.checked = checked;
-    input.style.accentColor = 'var(--accent)';
-    wrap.append(input, label);
-    return { wrap, input };
-  }
-
-  const { wrap: loopWrap, input: loopCheck }    = _toggle('Loop continuously (repeat folder)', false);
-  const { wrap: lipSyncWrap, input: lipSyncCheck } = _toggle('Lip Sync  (word-level MuseTalk pass)', true);
+  const { wrap: loopWrap, input: loopCheck } = _toggle('Loop continuously (repeat folder)', false);
 
   // Clip duration slider
-  function _numRow(labelText, min, max, step, def, unit) {
-    const lbl   = el('div', { style: 'font-size:12px; color:var(--text-3);', text: labelText });
-    const input = el('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(def) });
-    input.style.cssText = 'flex:1; accent-color:var(--accent);';
-    const val   = el('span', { style: 'font-size:11px; color:var(--text-2); min-width:32px; text-align:right;', text: def + unit });
-    input.addEventListener('input', () => { val.textContent = input.value + unit; });
-    const row   = el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [input, val]);
-    const wrap  = el('div', { style: 'display:flex; flex-direction:column; gap:3px; padding:4px 0;' }, [lbl, row]);
-    return { wrap, input, val };
-  }
-
   const { wrap: clipDurWrap, input: clipDurSlider } = _numRow('Clip length', 4, 15, 1, 6, 's');
   // Shared by both Single Image and Folder Batch below -- but the server
   // floors Folder Batch clips at 8s regardless of this value (routes.py
@@ -306,7 +694,7 @@ export function init(panel) {
   padAfterSlider.addEventListener('input', _syncLengthControl);
   _syncLengthControl();
 
-  // ── Batch controls ─────────────────────────────────────────────────────────
+  // -- Batch controls -------------------------------------------------------------
 
   const batchStatus = el('div', { style: 'font-size:12px; color:var(--text-3); min-height:16px;' });
   const batchBtn = el('button', {
@@ -358,7 +746,7 @@ export function init(panel) {
       const clips = (s.clips_done != null && s.clips_total)
         ? `  [clip ${s.clips_done}/${s.clips_total}]` : '';
       batchBtn.textContent = `Stop  (${s.index}/${s.total}${lap}${cur})`;
-      batchStatus.textContent = `Running ${s.index}/${s.total}${lap}${cur}${clips}  —  ${s.succeeded} done, ${s.failed} failed`;
+      batchStatus.textContent = `Running ${s.index}/${s.total}${lap}${cur}${clips}  --  ${s.succeeded} done, ${s.failed} failed`;
       if (s.folder && !_folderPath) {
         _folderPath = s.folder;
         folderNameEl.textContent = s.folder.split(/[\\/]/).pop() || s.folder;
@@ -367,11 +755,11 @@ export function init(panel) {
         _startPoll();
       }
     } else if (s.status === 'done') {
-      batchStatus.textContent = `Done  —  ${s.succeeded} videos generated, ${s.failed} failed`;
+      batchStatus.textContent = `Done  --  ${s.succeeded} videos generated, ${s.failed} failed`;
       batchBtn.style.background = 'var(--circus-red)';
       _updateButtons();
     } else if (s.status === 'stopped') {
-      batchStatus.textContent = `Stopped at ${s.index}/${s.total}  —  ${s.succeeded} done`;
+      batchStatus.textContent = `Stopped at ${s.index}/${s.total}  --  ${s.succeeded} done`;
       batchBtn.style.background = 'var(--circus-red)';
       _updateButtons();
     } else if (s.status === 'error') {
@@ -407,11 +795,6 @@ export function init(panel) {
         folder:        _folderPath,
         images:        _folderFiles.map(f => ({ path: f.path, name: f.name })),
         repeat:        loopCheck.checked,
-        // lip_sync (LTX-2 native audio conditioning during diffusion) deadlocks
-        // WanGP -- always off. The "Lip Sync" toggle only drives auto_lipsync
-        // (MuseTalk word-level post-pass), which is the real, working mechanism.
-        auto_lipsync:  lipSyncCheck.checked,
-        lip_sync:      false,
         use_satellite: false,  // satellite hardware retired -- see project memory
         model:         modelSel.value,
         clip_duration: parseInt(clipDurSlider.value),
@@ -431,11 +814,11 @@ export function init(panel) {
     }
   };
 
-  // ── Single-image generation ────────────────────────────────────────────────
+  // -- Single-image generation --------------------------------------------------
 
-  const DROP_HINT = 'Drop images here (optional — one video queued per image)';
+  const DROP_HINT = 'Drop images here (optional -- one video queued per image)';
 
-  const singleImages = { list: [] };   // [{ path, url, name }] — one queued job each
+  const singleImages = { list: [] };   // [{ path, url, name }] -- one queued job each
   const singleDrop = el('div', {
     style: 'border:1px dashed var(--border-2); border-radius:var(--r-md); padding:16px; text-align:center; cursor:pointer; font-size:13px; color:var(--text-3); background:var(--surface-2); transition:border-color .12s, background .12s;',
     text: DROP_HINT,
@@ -471,7 +854,7 @@ export function init(panel) {
     }
     imgs.forEach((f, i) => {
       const thumb = el('img', {
-        title: `${f.name} — click to remove`,
+        title: `${f.name} -- click to remove`,
         style: 'height:44px; width:44px; object-fit:cover; border-radius:4px; cursor:pointer;',
       });
       thumb.src = f.url;
@@ -558,10 +941,6 @@ export function init(panel) {
         photo_path:     shot.path || '',
         video_prompt:   ideaInput.value.trim(),
         audio_analysis: _songAnalysis || undefined,
-        // lip_sync (LTX-2 native audio conditioning) deadlocks WanGP -- always
-        // off. The toggle only drives auto_lipsync (MuseTalk post-pass).
-        auto_lipsync:   lipSyncCheck.checked,
-        lip_sync:       false,
         model:          modelSel.value,
         clip_duration:  parseInt(clipDurSlider.value),
         steps:          8,
@@ -599,7 +978,7 @@ export function init(panel) {
     }
 
     if (queued > 1) {
-      singleStatus.textContent = `${queued} videos queued — watch the job feed in the rail.`;
+      singleStatus.textContent = `${queued} videos queued -- watch the job feed in the rail.`;
       toast(`${queued} videos queued from one song.`, 'success');
     } else {
       singleStatus.textContent = 'Generating...';
@@ -617,8 +996,7 @@ export function init(panel) {
         singleProgress.style.display = 'none';
         singleStatus.textContent = 'Done!';
         if (j.output) {
-          const idx = j.output.replace(/\\/g, '/').toLowerCase().indexOf('/output/');
-          singleResult.src = idx !== -1 ? j.output.replace(/\\/g, '/').slice(idx) : '';
+          singleResult.src = _outputPathToUrl(j.output);
           singleResult.style.display = 'block';
         }
         singleBtn.disabled = false; _updateSingleBtn();
@@ -632,7 +1010,7 @@ export function init(panel) {
     } catch {}
   }
 
-  // ── On tab open: check for already-running batch (do NOT auto-start) ─────────
+  // -- On tab open: check for already-running batch (do NOT auto-start) ---------
   // Only connect the poll to a batch that is ALREADY actively running on the
   // server. Never silently start or resume a saved batch without user input.
 
@@ -648,8 +1026,47 @@ export function init(panel) {
     } catch {}
   })();
 
+  const legacySection = el('details', { style: 'margin-top:4px;' }, [
+    el('summary', {
+      style: 'cursor:pointer; font-size:12px; color:var(--text-3); user-select:none; padding:6px 0; outline:none;',
+      text: 'Legacy pipeline -- older engine, not the ratified recipe',
+    }),
+    el('div', { style: 'display:flex; flex-direction:column; gap:14px; padding-top:10px;' }, [
+      _card([
+        LABEL('Song'),
+        songDrop,
+        analysisCard,
+        lengthWrap,
+      ]),
+      _card([
+        LABEL('Folder Batch'),
+        el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]),
+        folderStatus,
+        loopWrap,
+        clipDurWrap,
+        padBeforeWrap,
+        padAfterWrap,
+        batchStatus,
+        batchBtn,
+      ]),
+      _card([
+        LABEL('Single Image'),
+        el('div', { style: 'display:flex; gap:10px; align-items:flex-start;' }, [
+          el('div', { style: 'flex:0 0 auto;' }, [singleDrop, singleImgPreview]),
+          el('div', { style: 'flex:1; display:flex; flex-direction:column; gap:8px;' }, [ideaInput]),
+        ]),
+        singleProgress,
+        singleStatus,
+        singleResult,
+        singleBtn,
+      ]),
+      _card([LABEL('Video Model'), modelSel]),
+    ]),
+  ]);
 
-  // ── Assemble layout ────────────────────────────────────────────────────────
+  // ==========================================================================
+  // Assemble layout
+  // ==========================================================================
 
   // A style set directly on the shared `panel` element (rather than a child
   // wrapper, the pattern every other tab uses) is an inline style that
@@ -662,53 +1079,16 @@ export function init(panel) {
   panel.appendChild(root);
 
   root.append(
-    // Title
     el('div', { style: 'font-size:18px; font-weight:700; color:var(--gold); letter-spacing:-.01em;', text: 'Music Video' }),
-
-    // Song upload
-    _card([
-      LABEL('Song'),
-      songDrop,
-      analysisCard,
-      lengthWrap,
-    ]),
-
-    // Batch: folder of images
-    _card([
-      LABEL('Folder Batch'),
-      el('div', { style: 'display:flex; gap:8px; align-items:center;' }, [folderNameEl, browseFolderBtn]),
-      folderStatus,
-      loopWrap,
-      lipSyncWrap,
-      clipDurWrap,
-      padBeforeWrap,
-      padAfterWrap,
-      batchStatus,
-      batchBtn,
-    ]),
-
-    // Single image
-    _card([
-      LABEL('Single Image'),
-      el('div', { style: 'display:flex; gap:10px; align-items:flex-start;' }, [
-        el('div', { style: 'flex:0 0 auto;' }, [singleDrop, singleImgPreview]),
-        el('div', { style: 'flex:1; display:flex; flex-direction:column; gap:8px;' }, [ideaInput]),
-      ]),
-      singleProgress,
-      singleStatus,
-      singleResult,
-      singleBtn,
-    ]),
-
-    // Model
-    _card([LABEL('Video Model'), modelSel]),
-
+    el('div', { style: 'font-size:12px; color:var(--text-3); margin-top:-8px;', text: 'Ratified Engine -- chain.py, recipe v3 (2026-08-05)' }),
+    ratifiedSection,
+    ratifiedImages,
+    ratifiedOptions,
+    ratifiedRun,
+    legacySection,
   );
 
-  // Wire song-upload state to single-image button too
-  const _origUpdateButtons = _updateButtons;
-  function _updateAll() { _origUpdateButtons(); _updateSingleBtn(); }
-  panel.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', _updateAll));
+  _rUpdateStartBtn();
 }
 
 export function receiveHandoff(data) {
