@@ -122,11 +122,13 @@ body {
 :root {
   color-scheme: light dark;
 
-  /* -- Circus / Burlesque accent -- gold -- */
-  --accent:        #d4a017;
-  --accent-2:      #e8c040;
-  --accent-bg:     rgba(212,160,23,.13);
-  --accent-border: rgba(212,160,23,.35);
+  /* -- V2 accent -- teal/cyan (v1 is gold; shifted so Andrew can tell tabs
+     apart at a glance). Central token -- everything below reads var(--accent)
+     etc., so this is the one place that needs to change. -- */
+  --accent:        #14a8c9;
+  --accent-2:      #4fd8e8;
+  --accent-bg:     rgba(20,168,201,.13);
+  --accent-border: rgba(20,168,201,.35);
 
   /* -- Dark circus surfaces -- near-black with warm crimson undertone -- */
   --bg:          #0d0606;
@@ -346,10 +348,10 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 
 @keyframes logo-pulse {
   0%,100% {
-    box-shadow: 0 0 60px rgba(212,160,23,.35), 0 0 140px rgba(212,160,23,.15), 0 30px 80px rgba(0,0,0,.7);
+    box-shadow: 0 0 60px rgba(20,168,201,.35), 0 0 140px rgba(20,168,201,.15), 0 30px 80px rgba(0,0,0,.7);
   }
   50% {
-    box-shadow: 0 0 90px rgba(212,160,23,.60), 0 0 200px rgba(212,160,23,.28), 0 30px 80px rgba(0,0,0,.7);
+    box-shadow: 0 0 90px rgba(20,168,201,.60), 0 0 200px rgba(20,168,201,.28), 0 30px 80px rgba(0,0,0,.7);
   }
 }
 
@@ -396,8 +398,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   color: var(--text);
   text-shadow:
     2px 2px 0 var(--circus-crimson),
-    0 0 40px rgba(212,160,23,.4),
-    0 0 80px rgba(212,160,23,.12);
+    0 0 40px rgba(20,168,201,.4),
+    0 0 80px rgba(20,168,201,.12);
   line-height: 1.0;
   margin-bottom: 6px;
 }
@@ -507,8 +509,8 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 .header-logo {
   width: 42px; height: 42px;
   border-radius: var(--r-md);
-  border: 1px solid rgba(212,160,23,.30);
-  box-shadow: 0 0 14px rgba(212,160,23,.22);
+  border: 1px solid rgba(20,168,201,.30);
+  box-shadow: 0 0 14px rgba(20,168,201,.22);
 }
 
 /* The title block -- "Andrew's" arched over "DROP CAT GO STUDIO" */
@@ -534,7 +536,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   text-transform: none;
   letter-spacing: .02em;
   color: var(--text);
-  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 16px rgba(212,160,23,.20);
+  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 16px rgba(20,168,201,.20);
   line-height: 1.2;
   white-space: normal;
 }
@@ -566,7 +568,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   white-space: nowrap;
   letter-spacing: .02em;
 }
-.ai-pill-btn:hover { border-color: var(--accent); color: var(--text); background: rgba(212,160,23,.06); }
+.ai-pill-btn:hover { border-color: var(--accent); color: var(--text); background: rgba(20,168,201,.06); }
 .ai-pill.open .ai-pill-btn { border-color: var(--accent); color: var(--accent); }
 
 .ap-caret { font-size: .6rem; opacity: .6; }
@@ -663,7 +665,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   border-radius: var(--r-md);
   transition: background var(--dur-fast);
 }
-.service-pills:hover { background: rgba(212,160,23,.06); }
+.service-pills:hover { background: rgba(20,168,201,.06); }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -700,7 +702,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 /* Applied while AI is generating -- glowing border breathe */
 @keyframes dcs-border-breathe {
   0%,100% { border-color: var(--border-2); box-shadow: none; }
-  50%      { border-color: var(--accent);  box-shadow: 0 0 0 2px rgba(212,160,23,.18); }
+  50%      { border-color: var(--accent);  box-shadow: 0 0 0 2px rgba(20,168,201,.18); }
 }
 .ai-generating {
   animation: dcs-border-breathe 1.2s ease-in-out infinite !important;
@@ -752,16 +754,16 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
 }
 .btn:hover { background: var(--surface-3); border-color: var(--accent); }
 .btn-primary {
-  background: linear-gradient(135deg, #d4a017 0%, #a07010 100%);
+  background: linear-gradient(135deg, #14a8c9 0%, #0a6e82 100%);
   color: #0d0606;
-  border-color: rgba(212,160,23,.5);
+  border-color: rgba(20,168,201,.5);
   font-weight: 700;
   text-shadow: 0 1px 2px rgba(0,0,0,.2);
-  box-shadow: 0 2px 10px rgba(212,160,23,.35);
+  box-shadow: 0 2px 10px rgba(20,168,201,.35);
 }
 .btn-primary:hover {
   background: linear-gradient(135deg, #e8b820 0%, #b88010 100%);
-  box-shadow: 0 3px 16px rgba(212,160,23,.55);
+  box-shadow: 0 3px 16px rgba(20,168,201,.55);
 }
 .btn-sm { padding: 5px 11px; font-size: .85rem; }
 
@@ -774,7 +776,7 @@ code, .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; 
   padding: 18px 20px;
 }
 /* Subtle gold inner glow on cards */
-.card { box-shadow: inset 0 1px 0 rgba(212,160,23,.06); }
+.card { box-shadow: inset 0 1px 0 rgba(20,168,201,.06); }
 
 .placeholder-card {
   max-width: 580px;
@@ -868,7 +870,7 @@ select option { background: var(--surface-2); }
   max-width: 90vw;
   max-height: 82vh;
   overflow-y: auto;
-  box-shadow: var(--shadow-lg), 0 0 40px rgba(212,160,23,.12);
+  box-shadow: var(--shadow-lg), 0 0 40px rgba(20,168,201,.12);
 }
 .modal-header {
   display: flex;
@@ -1192,7 +1194,7 @@ select option { background: var(--surface-2); }
 .drop-zone:hover, .drop-zone.drag-over {
   border-color: var(--accent);
   background: var(--accent-bg);
-  box-shadow: inset 0 0 16px rgba(212,160,23,.06);
+  box-shadow: inset 0 0 16px rgba(20,168,201,.06);
 }
 .drop-zone-content { pointer-events: none; }
 .drop-zone-content svg { color: var(--text-3); margin-bottom: 7px; display: inline-block; }
@@ -1671,13 +1673,13 @@ textarea:focus { border-color: var(--accent); }
 .big-toggle-input:checked + .big-toggle-label {
   background: linear-gradient(135deg, #3a1f00, #5a3200);
   border-color: #c4850a;
-  box-shadow: inset 0 2px 8px rgba(0,0,0,.4), 0 0 24px rgba(212,160,23,.28);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.4), 0 0 24px rgba(20,168,201,.28);
 }
 
 .big-toggle-input:checked + .big-toggle-label .big-toggle-thumb {
   transform: translateX(40px);
   background: radial-gradient(circle at 35% 35%, #f0c040, #c4820a);
-  box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 12px rgba(212,160,23,.45);
+  box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 12px rgba(20,168,201,.45);
 }
 
 
@@ -1754,7 +1756,7 @@ textarea:focus { border-color: var(--accent); }
 .genre-tile.on {
   background: var(--accent-bg);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(212,160,23,.20);
+  box-shadow: 0 0 10px rgba(20,168,201,.20);
 }
 .genre-icon { font-size: 1.4rem; line-height: 1; }
 .genre-name { font-size: .64rem; font-weight: 700; color: var(--text-2); letter-spacing: .04em; text-align: center; }
@@ -1818,7 +1820,7 @@ textarea:focus { border-color: var(--accent); }
   background: var(--accent-bg);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 12px rgba(212,160,23,.25);
+  box-shadow: 0 0 12px rgba(20,168,201,.25);
 }
 .vocals-icon { font-size: 1.5rem; line-height: 1; }
 .vocals-name { font-size: .68rem; font-weight: 700; letter-spacing: .05em; }
@@ -2093,7 +2095,7 @@ textarea:focus { border-color: var(--accent); }
 .mode-tile.on {
   background: var(--accent-bg);
   border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(212,160,23,.20);
+  box-shadow: 0 0 10px rgba(20,168,201,.20);
 }
 .mode-icon  { font-size: 1.3rem; line-height: 1; }
 .mode-label { font-size: .65rem; font-weight: 800; color: var(--text-2); letter-spacing: .04em; }
@@ -2186,8 +2188,8 @@ textarea:focus { border-color: var(--accent); }
   position: relative;
   white-space: normal;
 }
-.rail-tab:hover { color: var(--text-2); background: rgba(212,160,23,.06); }
-.rail-tab.active { color: var(--accent-2); background: rgba(212,160,23,.08); }
+.rail-tab:hover { color: var(--text-2); background: rgba(20,168,201,.06); }
+.rail-tab.active { color: var(--accent-2); background: rgba(20,168,201,.08); }
 .rail-tab.active::before {
   content: '';
   position: absolute;
@@ -3143,7 +3145,7 @@ input, textarea, select {
 .step1-panel {
   border: 1px solid var(--accent-border);
   border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(212,160,23,.07) 0%, var(--surface) 100%);
+  background: linear-gradient(180deg, rgba(20,168,201,.07) 0%, var(--surface) 100%);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -3289,8 +3291,8 @@ input, textarea, select {
 
 @keyframes step1-pulse {
   0%   { box-shadow: 0 0 0 0 var(--accent-bg); }
-  50%  { box-shadow: 0 0 0 10px rgba(212,160,23,0); }
-  100% { box-shadow: 0 0 0 0 rgba(212,160,23,0); }
+  50%  { box-shadow: 0 0 0 10px rgba(20,168,201,0); }
+  100% { box-shadow: 0 0 0 0 rgba(20,168,201,0); }
 }
 
 /* ==============================================================================
@@ -3333,12 +3335,12 @@ input, textarea, select {
               transform var(--dur-base) var(--ease-out);
 }
 .btn-primary.btn-generate:hover:not(:disabled) {
-  box-shadow: 0 4px 28px rgba(212,160,23,.65), 0 0 0 1px rgba(212,160,23,.45);
+  box-shadow: 0 4px 28px rgba(20,168,201,.65), 0 0 0 1px rgba(20,168,201,.45);
   transform: translateY(-1px);
 }
 .btn-primary.btn-generate:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 10px rgba(212,160,23,.35);
+  box-shadow: 0 2px 10px rgba(20,168,201,.35);
 }
 
 /* -- Gallery thumbnail strip ------------------------------------------------- */
@@ -3384,7 +3386,7 @@ input, textarea, select {
 }
 .card.interactive:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0,0,0,.5), inset 0 1px 0 rgba(212,160,23,.08);
+  box-shadow: 0 4px 16px rgba(0,0,0,.5), inset 0 1px 0 rgba(20,168,201,.08);
 }
 
 /* -- Input -- tighter label spacing in tab forms ------------------------------ */
@@ -3414,9 +3416,9 @@ input, textarea, select {
   border: 1px solid var(--border-2);
   border-radius: var(--r-xl);
   background:
-    radial-gradient(120% 140% at 50% -20%, rgba(212,160,23,.10), transparent 60%),
+    radial-gradient(120% 140% at 50% -20%, rgba(20,168,201,.10), transparent 60%),
     linear-gradient(180deg, var(--surface-2), var(--surface));
-  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(212,160,23,.08);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(20,168,201,.08);
   overflow: hidden;
 }
 .pipeline-hero::before {
@@ -3447,7 +3449,7 @@ input, textarea, select {
   font-weight: 800;
   letter-spacing: .01em;
   color: var(--text);
-  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 24px rgba(212,160,23,.18);
+  text-shadow: 1px 1px 0 var(--circus-crimson), 0 0 24px rgba(20,168,201,.18);
   line-height: 1.15;
   margin-bottom: 10px;
 }
@@ -3533,13 +3535,13 @@ input, textarea, select {
   border-radius: var(--r-lg);
   cursor: pointer;
   transition: transform var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), background var(--dur-fast);
-  box-shadow: inset 0 1px 0 rgba(212,160,23,.05);
+  box-shadow: inset 0 1px 0 rgba(20,168,201,.05);
 }
 .pipeline-step-card:hover {
   transform: translateY(-2px);
   border-color: var(--accent-border);
   background: var(--surface-2);
-  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(212,160,23,.10);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(20,168,201,.10);
 }
 .pipeline-step-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .pipeline-step-num {
@@ -3646,7 +3648,7 @@ input, textarea, select {
 }
 .mgr-bar:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(212,160,23,.25) inset, 0 0 14px rgba(212,160,23,.22);
+  box-shadow: 0 0 0 1px rgba(20,168,201,.25) inset, 0 0 14px rgba(20,168,201,.22);
 }
 
 .mgr-spark {
@@ -3661,7 +3663,7 @@ input, textarea, select {
   cursor: pointer;
   transition: transform .2s, color .2s, background .2s;
 }
-.mgr-spark:hover { color: var(--accent-2); background: rgba(212,160,23,.2); }
+.mgr-spark:hover { color: var(--accent-2); background: rgba(20,168,201,.2); }
 .manager.mgr-busy .mgr-spark { animation: mgr-spin 1.4s linear infinite; }
 @keyframes mgr-spin { to { transform: rotate(360deg); } }
 

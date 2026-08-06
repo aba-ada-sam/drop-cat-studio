@@ -1,4 +1,4 @@
-"""pre_splash.py -- Immediate startup indicator for Drop Cat Go Studio.
+"""pre_splash.py -- Immediate startup indicator for DropCat Studio V2.
 
 Launched by launch.bat before anything else (git pull, Python server start).
 Shows a branded borderless window in under a second so Andrew knows his
@@ -15,7 +15,7 @@ ROOT      = Path(__file__).resolve().parent
 PORT_FILE = ROOT / ".dcs-port"
 
 BG      = "#0d0606"
-GOLD    = "#d4a017"
+GOLD    = "#14a8c9"  # V2 accent -- teal/cyan (v1 splash is gold); name kept for diff size
 CRIMSON = "#c41e3a"
 CREAM   = "#f0e6d0"
 DIM     = "#7a6a4a"
@@ -74,7 +74,7 @@ def main() -> None:
     tk.Frame(root, bg=GOLD, height=3).pack(fill=tk.X, side=tk.TOP)
 
     # Title block
-    tk.Label(root, text="Drop Cat Go Studio",
+    tk.Label(root, text="DropCat Studio V2",
              bg=BG, fg=GOLD, font=("Segoe UI", 19, "bold")).pack(pady=(22, 2))
     tk.Label(root, text="Andrew's AI Video Production",
              bg=BG, fg=CREAM, font=("Segoe UI", 10)).pack()

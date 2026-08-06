@@ -2,11 +2,11 @@
  * Queue tab -- GPU job queue with full user control.
  * Pause/resume, cancel, retry, promote, dismiss, clear all.
  */
-import { api } from './api.js?v=20260806a';
-import { toast } from './shell/toast.js?v=20260806a';
-import { el, pathToUrl } from './components.js?v=20260806a';
-import { VideoStretchTool } from './components/video-stretch.js?v=20260806a';
-import { mountLipSyncTool } from './components/lipsync-tool.js?v=20260806a';
+import { api } from './api.js';
+import { toast } from './shell/toast.js';
+import { el, pathToUrl } from './components.js';
+import { VideoStretchTool } from './components/video-stretch.js';
+import { mountLipSyncTool } from './components/lipsync-tool.js';
 
 let _root        = null;
 let _pollTimer   = null;
@@ -428,7 +428,7 @@ function _jobCard(job, active, idx, total) {
   if (job.meta?.batch_loop) {
     const badge = el('div', {
       title: 'Part of a continuous batch loop',
-      style: 'position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; color:#d4a017; pointer-events:none;',
+      style: 'position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; font-size:10px; line-height:1; color:#14a8c9; pointer-events:none;',
       text: '↻',
     });
     thumb.appendChild(badge);
@@ -965,7 +965,7 @@ async function _doContinuation(job, closeFn) {
   const tabBtn = document.querySelector(`.rail-tab[data-tab="${tabId}"]`);
   if (tabBtn) tabBtn.click();
 
-  const { applySettingsToTab } = await import('./shell/ai-intent.js?v=20260806a');
+  const { applySettingsToTab } = await import('./shell/ai-intent.js');
   setTimeout(() => {
     const merged = { ...settings, photo_path: frameData.path };
     const ok = applySettingsToTab(tabId, merged);
@@ -996,7 +996,7 @@ async function _doBranch(job, feedback, closeFn) {
 
   // Apply the original settings, then optionally run the feedback through askAI
   // so the AI mutates them per the user's note before they hit Generate.
-  const { applySettingsToTab, askAI } = await import('./shell/ai-intent.js?v=20260806a');
+  const { applySettingsToTab, askAI } = await import('./shell/ai-intent.js');
   setTimeout(async () => {
     const ok = applySettingsToTab(tabId, settings);
     if (!ok) {

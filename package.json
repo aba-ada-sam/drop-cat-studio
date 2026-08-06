@@ -1,7 +1,7 @@
 {
-  "name": "drop-cat-go-studio",
+  "name": "dropcat-studio-v2",
   "version": "1.0.0",
-  "description": "Drop Cat Go Studio — unified AI video production",
+  "description": "DropCat Studio V2 -- unified AI video production",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron ."
